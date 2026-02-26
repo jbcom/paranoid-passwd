@@ -68,7 +68,7 @@ jobs:
         run: |
           # Install melange from Chainguard releases
           MELANGE_VERSION="0.43.3"
-          curl -sSL "https://github.com/chainguard-dev/melange/releases/download/v${MELANGE_VERSION}/melange_${MELANGE_VERSION}_linux_amd64.tar.gz" | tar -xz
+          curl -sSL "https://github.com/chainguard-dev/melange/releases/download/v${MELANGE_VERSION}/melange_${MELANGE_VERSION}_linux_amd64.tar.gz" | tar -xz --strip-components=1
           sudo mv melange /usr/local/bin/
           melange version
 
@@ -76,7 +76,7 @@ jobs:
         run: |
           # Install apko from Chainguard releases
           APKO_VERSION="1.1.11"
-          curl -sSL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_amd64.tar.gz" | tar -xz
+          curl -sSL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_amd64.tar.gz" | tar -xz --strip-components=1
           sudo mv apko /usr/local/bin/
           apko version
 
