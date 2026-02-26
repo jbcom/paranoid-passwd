@@ -28,33 +28,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned
 - NIST SP 800-22 statistical test suite integration
 - Dieharder test battery integration
-- Reproducible builds (deterministic WASM output)
 - Third-party security audit
 - Formal verification of rejection sampling
-- Unit test suite for C code
-- Integration tests for full audit pipeline
 
 ---
 
-## [2.0.0] - 2026-02-26
+## [3.0.0] - 2026-02-26
 
 ### 🎉 Major Rewrite — Complete Architectural Overhaul
 
-This is a complete rewrite from v1, treating `paranoid` as what it is: a C project that happens to render in a browser.
+This is a complete rewrite from v1, treating `paranoid-passwd` as what it is: a C project that happens to render in a browser.
 
 ### Added
 
 #### Core Architecture
-- **C-based implementation** (`src/paranoid.c`, 400 lines)
+- **C-based implementation** (`src/paranoid.c`)
   - ALL cryptographic logic moved from JavaScript to C
-  - OpenSSL CSPRNG (AES-256-CTR DRBG, NIST SP 800-90A)
+  - Platform abstraction: OpenSSL CSPRNG (native), WASI random_get (WASM)
+  - Compact FIPS 180-4 SHA-256 for WASM (no OpenSSL dependency)
   - Rejection sampling for uniform distribution
   - 7-layer statistical audit pipeline
-  
-- **WASM compilation** via Zig toolchain
+
+- **WASM compilation** via CMake + Zig toolchain
   - Compiled to `wasm32-wasi` target
-  - OpenSSL compiled from official source (`vendor/openssl/`, built from tag `openssl-3.4.0` with WASI patches)
-  - ~180KB binary size
+  - <100KB binary size (no OpenSSL in WASM)
   
 - **Proper file structure**
   - `include/paranoid.h` — Public C API (249 lines)
@@ -80,20 +77,21 @@ This is a complete rewrite from v1, treating `paranoid` as what it is: a C proje
 7. **NIST Conformance** — AAL1/AAL2/AAL3 entropy thresholds
 
 #### Build System
-- **Makefile** with comprehensive targets:
-  - `make build` — Compile WASM only
-  - `make site` — Assemble deployable site with SRI hashes
-  - `make verify` — Verify WASM exports/imports (requires wabt)
-  - `make hash` — Print SHA-256 and SRI hashes
-  - `make serve` — Local development server
-  - `make clean` — Remove build artifacts
-  - `make info` — Show toolchain configuration
+- **CMake** build system (replaces Makefile):
+  - Native build + CTest for unit testing
+  - WASM cross-compilation via `cmake/wasm32-wasi.cmake` Zig toolchain
+- **melange/apko** (Wolfi ecosystem, replaces Docker):
+  - `melange.yaml` — Declarative package recipe
+  - `apko.yaml` — OCI image assembly
+  - Bitwise-reproducible builds with SBOM
 
 #### CI/CD Pipeline
 - **Split workflows** (`.github/workflows/`):
-  - `ci.yml` — PR verification (Docker build + acutest C tests + E2E tests)
-  - `cd.yml` — Push to main (SBOM + Cosign signing + release-please)
-  - `release.yml` — Deploy from signed, attested releases
+  - `ci.yml` — PR verification (native CTest + WASM build + E2E tests + CodeQL + ShellCheck)
+  - `cd.yml` — Push to main (melange/apko build + Cosign signing + release-please + double compilation)
+  - `release.yml` — Deploy from signed, attested releases to GitHub Pages
+  - `codeql.yml` — CodeQL static analysis
+  - `scorecard.yml` — OpenSSF Scorecard
 - **SHA-pinned actions** — All third-party actions pinned to commit SHAs
 - **Build manifest** — `BUILD_MANIFEST.json` records all hashes, versions, commit SHA
 
@@ -126,9 +124,10 @@ This is a complete rewrite from v1, treating `paranoid` as what it is: a C proje
 ### Changed
 
 - **Language**: JavaScript → C (with minimal JS bridge)
-- **Crypto source**: JS `Math.random()` → OpenSSL CSPRNG
+- **Crypto source**: JS `Math.random()` → CSPRNG (OpenSSL native, WASI random_get WASM)
 - **Distribution**: Modulo bias → Rejection sampling
 - **Architecture**: Monolithic HTML → Separated concerns (C/JS/CSS/HTML)
+- **Build system**: Makefile → CMake; Docker → melange/apko (Wolfi)
 - **Audit**: 3 basic checks → 7-layer comprehensive audit
 - **Failure mode**: Silent fallback → Fail-closed (refuse to run)
 
@@ -146,41 +145,35 @@ This is a complete rewrite from v1, treating `paranoid` as what it is: a C proje
 - **Modulo bias** — Rejection sampling eliminates 50% character bias
 - **Memory retention** — Random bytes never in JS heap (WASM linear memory)
 - **Supply chain attacks** — SHA-pinned actions prevent mutable tag exploits
+- **WASM binary size** — <100KB (removed OpenSSL dependency from WASM)
 
 ### Security
 
 - **CVE-NONE-2025-001** (internal): Modulo bias in v1 reduced effective entropy by 1.75 bits
   - **Impact**: HIGH — 50% bias toward first 68 characters
-  - **Fixed in**: v2.0.0 via rejection sampling
-  - **Workaround**: Upgrade to v2.0.0 (no safe workaround for v1)
+  - **Fixed in**: v3.0.0 via rejection sampling
+  - **Workaround**: Upgrade to v3.0.0 (no safe workaround for v1)
 
 ### Breaking Changes
 
-- **v1 URLs deprecated** — v1 was a single HTML file; v2 requires WASM support
-- **No JavaScript fallback** — Browsers without WASM support cannot use v2
-- **Build system required** — Cannot be edited as a single file (must run `make`)
-- **Docker-first builds** — OpenSSL built from official source inside Docker; test dependencies cloned at SHA-pinned commits (no submodules)
+- **v1 URLs deprecated** — v1 was a single HTML file; v3 requires WASM support
+- **No JavaScript fallback** — Browsers without WASM support cannot use v3
+- **Build system required** — Cannot be edited as a single file (must use CMake)
+- **melange/apko builds** — Production builds use Wolfi ecosystem (no Docker required)
 
-### Migration Guide (v1 → v2)
+### Migration Guide (v1 → v3)
 
-**v1 users**:
-```html
-<!-- Old (v1) -->
-<script src="https://example.com/paranoid-v1.html"></script>
-```
-
-**v2 users**:
+**v3 users**:
 ```bash
-# Clone and build (Docker handles dependencies automatically)
+# Clone and build with CMake
 git clone https://github.com/jbcom/paranoid-passwd.git
 cd paranoid-passwd
-docker build -t paranoid-passwd .
-
-# Deploy build/site/ to your hosting
+cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build/wasm
 ```
 
-**Or use GitHub Pages**:
-https://jbcom.github.io/paranoid-passwd
+**Or use the live site**:
+https://paranoid-passwd.com
 
 ---
 
@@ -202,7 +195,7 @@ https://jbcom.github.io/paranoid-passwd
 - **Prototype pollution risk**: Crypto logic exposed to JS runtime attacks
 - **Memory retention**: Intermediate buffers retained by GC
 
-**v1 is deprecated. All users should upgrade to v2.**
+**v1 is deprecated. All users should upgrade to v3.**
 
 ---
 
@@ -210,7 +203,8 @@ https://jbcom.github.io/paranoid-passwd
 
 | Version | Date | Status | Key Feature |
 |---------|------|--------|-------------|
-| 2.0.0 | 2026-02-26 | ✅ **Current** | C/WASM rewrite, 7-layer audit, fail-closed |
+| 3.1.0 | 2026-02-26 | ✅ **Current** | CD pipeline fixes, first GitHub Pages deploy |
+| 3.0.0 | 2026-02-26 | ✅ **Stable** | Wolfi migration, platform abstraction, UX overhaul |
 | 1.0.0 | 2025-XX-XX | ❌ **Deprecated** | Monolithic HTML, modulo bias, silent fallback |
 
 ---
@@ -241,13 +235,13 @@ All security advisories are tracked in [SECURITY.md](SECURITY.md).
 ## Links
 
 - **GitHub Repository**: https://github.com/jbcom/paranoid-passwd
-- **Live Demo**: https://jbcom.github.io/paranoid-passwd
+- **Live Demo**: https://paranoid-passwd.com
 - **Documentation**: See [AGENTS.md](AGENTS.md)
 - **Security Policy**: See [SECURITY.md](SECURITY.md)
 - **Development Guide**: See [DEVELOPMENT.md](DEVELOPMENT.md)
 
 ---
 
-[Unreleased]: https://github.com/jbcom/paranoid-passwd/compare/v2.0.0...HEAD
-[2.0.0]: https://github.com/jbcom/paranoid-passwd/releases/tag/v2.0.0
+[Unreleased]: https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.1.0...HEAD
+[3.0.0]: https://github.com/jbcom/paranoid-passwd/releases/tag/paranoid-passwd-v3.1.0
 [1.0.0]: https://github.com/jbcom/paranoid-passwd/releases/tag/v1.0.0

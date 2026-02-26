@@ -214,7 +214,7 @@ docs/SUPPLY-CHAIN.md
 
 1. **Source verification**
    - Git commit must be signed
-   - Dependency SHAs must match expected (see Dockerfile ARGs)
+   - Dependency SHAs must match expected (see melange.yaml)
    - No uncommitted changes (`git diff --exit-code`)
 
 2. **Tool verification**
@@ -224,7 +224,7 @@ docs/SUPPLY-CHAIN.md
 
 3. **Reproducible builds**
    - `SOURCE_DATE_EPOCH` set to git commit time
-   - Containerized build (Docker) for deterministic environment
+   - Containerized build (melange/apko) for deterministic environment
    - 3-of-5 independent builders must produce identical hash
 
 4. **Attestation**
@@ -434,8 +434,7 @@ paranoid/
 │   ├── platform_native.c     # Native backend: OpenSSL RAND_bytes + EVP
 │   ├── platform_wasm.c       # WASM backend: WASI random_get
 │   ├── sha256_compact.c      # FIPS 180-4 SHA-256 (WASM only, no OpenSSL)
-│   ├── sha256_compact.h      # Compact SHA-256 interface
-│   └── wasm_entry.c          # Stub main() for WASI libc linker
+│   └── sha256_compact.h      # Compact SHA-256 interface
 ├── www/
 │   ├── index.html            # Structure only — no inline JS/CSS
 │   ├── style.css             # Visual state — wizard nav, stages
@@ -443,7 +442,7 @@ paranoid/
 ├── cmake/
 │   └── wasm32-wasi.cmake     # CMake toolchain file for Zig WASM
 ├── scripts/
-│   ├── build_openssl_wasm.sh # Build OpenSSL from official source
+│   ├── cleanup_legacy_build.sh # Remove old build artifacts
 │   ├── double_compile.sh     # Diverse double-compilation (Zig + Clang)
 │   ├── hallucination_check.sh # Automated LLM hallucination detection
 │   ├── integration_test.sh   # End-to-end integration tests

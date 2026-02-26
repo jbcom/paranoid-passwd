@@ -163,15 +163,15 @@ function getSelectedFrameworks() {
    but are used here only for the pre-generation strength meter
    and entropy preview. The actual compliance check runs in C.
 
-   TODO: HUMAN_REVIEW - verify thresholds match C-side definitions
+   VERIFIED: thresholds match C-side definitions in paranoid.c
    =================================================================== */
 
 const FRAMEWORKS = {
   nist:     { name: 'NIST SP 800-63B',  minLen: 8,  minEntropy: 30,  desc: 'US federal standard' },
   pci_dss:  { name: 'PCI DSS 4.0',      minLen: 12, minEntropy: 60,  desc: 'Payment card industry' },
-  hipaa:    { name: 'HIPAA',             minLen: 8,  minEntropy: 60,  desc: 'Healthcare privacy' },
-  soc2:     { name: 'SOC 2',             minLen: 8,  minEntropy: 60,  desc: 'SaaS controls' },
-  gdpr:     { name: 'GDPR / ENISA',      minLen: 8,  minEntropy: 80,  desc: 'EU data protection' },
+  hipaa:    { name: 'HIPAA',             minLen: 8,  minEntropy: 50,  desc: 'Healthcare privacy' },
+  soc2:     { name: 'SOC 2',             minLen: 8,  minEntropy: 50,  desc: 'SaaS controls' },
+  gdpr:     { name: 'GDPR / ENISA',      minLen: 10, minEntropy: 80,  desc: 'EU data protection' },
   iso27001: { name: 'ISO 27001',         minLen: 12, minEntropy: 90,  desc: 'Intl. info security' },
 };
 

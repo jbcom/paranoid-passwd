@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>paranoid-passwd — self-auditing cryptographic password generator</title>
-<meta name="description" content="A self-auditing cryptographic password generator that treats the LLM that built it as an adversary. OpenSSL CSPRNG + WASM sandbox + 7-layer statistical audit.">
+<meta name="description" content="A self-auditing cryptographic password generator that treats the LLM that built it as an adversary. CSPRNG + WASM sandbox + 7-layer statistical audit.">
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
                style-src 'self';
@@ -48,16 +48,16 @@
 
   <div class="global-progress"><div class="global-progress-fill"></div></div>
 
-  <nav class="wizard-nav" role="tablist" aria-label="Audit wizard steps">
-    <label for="step-configure" class="step-label" data-num="1" role="tab" aria-controls="panel-configure">Configure</label>
-    <label for="step-audit"     class="step-label" data-num="2" role="tab" aria-controls="panel-audit">Generate &amp; Audit</label>
-    <label for="step-results"   class="step-label" data-num="3" role="tab" aria-controls="panel-results">Results &amp; Password</label>
+  <nav class="wizard-nav" aria-label="Audit wizard steps">
+    <label for="step-configure" class="step-label" data-num="1">Configure</label>
+    <label for="step-audit"     class="step-label" data-num="2">Generate &amp; Audit</label>
+    <label for="step-results"   class="step-label" data-num="3">Results &amp; Password</label>
   </nav>
 
   <main class="wizard-content">
 
     <!-- === PANEL 1: CONFIGURE ======================================= -->
-    <section class="wizard-panel" id="panel-configure" role="tabpanel" aria-labelledby="step-configure">
+    <section class="wizard-panel" id="panel-configure">
       <div class="config-section">
 
         <!-- D1: Hero / Landing Section -->
@@ -173,7 +173,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>HIPAA</strong>
-                <span>US healthcare privacy &mdash; min 8 chars, 60+ bit entropy</span>
+                <span>US healthcare privacy &mdash; min 8 chars, 50+ bit entropy</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -181,7 +181,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>SOC 2</strong>
-                <span>SaaS org controls &mdash; min 8 chars, 60+ bit entropy</span>
+                <span>SaaS org controls &mdash; min 8 chars, 50+ bit entropy</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -189,7 +189,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>GDPR / ENISA</strong>
-                <span>EU data protection &mdash; min 8 chars, 80+ bit entropy</span>
+                <span>EU data protection &mdash; min 10 chars, 80+ bit entropy</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -271,10 +271,10 @@
               </div>
             </li>
             <li class="chain-link">
-              <div class="chain-icon">SSL</div>
+              <div class="chain-icon">RNG</div>
               <div class="chain-detail">
                 <strong>CSPRNG</strong>
-                <span>OpenSSL RAND_bytes via DRBG &mdash; WASI random_get bridges to Web Crypto</span>
+                <span>WASI random_get &rarr; Web Crypto getRandomValues &mdash; OS-level entropy</span>
               </div>
             </li>
             <li class="chain-link">
@@ -314,12 +314,12 @@
               <span>JS only reads a C struct from WASM memory and sets DOM textContent.</span>
             </div>
             <div class="guarantee">
-              <strong>Docker-attested builds</strong>
-              <span>SBOM + SLSA L3 provenance. All tests gate the Docker build.</span>
+              <strong>Wolfi-attested builds</strong>
+              <span>SBOM + SLSA provenance via melange/apko. Cosign-signed releases.</span>
             </div>
             <div class="guarantee">
               <strong>SHA-pinned supply chain</strong>
-              <span>Alpine base image, Zig compiler, OpenSSL WASM, acutest &mdash; all SHA-pinned.</span>
+              <span>Wolfi base, Zig compiler, acutest framework, all GitHub Actions &mdash; SHA-pinned.</span>
             </div>
           </div>
         </div>
@@ -332,7 +332,7 @@
     </section>
 
     <!-- === PANEL 2: GENERATE & AUDIT ================================ -->
-    <section class="wizard-panel" id="panel-audit" role="tabpanel" aria-labelledby="step-audit">
+    <section class="wizard-panel" id="panel-audit">
       <div class="audit-section" id="audit-runner" role="region" aria-live="polite" data-stage="idle">
         <h2>7-Layer Cryptographic Audit</h2>
         <p class="config-subtitle">Watching each verification stage in real-time.</p>
@@ -394,7 +394,7 @@
     </section>
 
     <!-- === PANEL 3: RESULTS & PASSWORD ============================== -->
-    <section class="wizard-panel" id="panel-results" role="tabpanel" aria-labelledby="step-results">
+    <section class="wizard-panel" id="panel-results">
       <div class="results-section">
         <h2>Results &amp; Password</h2>
 
@@ -452,7 +452,7 @@
 
         <div class="warning-footer">
           <strong>Honest Disclosure:</strong> This tool was built by an LLM. The CSPRNG
-          (OpenSSL RAND_bytes via WASM) and statistical tests (chi-squared, serial
+          (WASI random_get &rarr; Web Crypto) and statistical tests (chi-squared, serial
           correlation) run in C inside the WASM sandbox. The display-only JS bridge
           reads a result struct from WASM linear memory and sets DOM textContent.
           Have a human cryptographer verify <code>src/paranoid.c</code> before production use.
@@ -470,7 +470,7 @@
     <p class="footer-text">
       paranoid-passwd is open source (MIT). No data leaves your browser.
       <br>
-      Built with C, Zig, OpenSSL, WebAssembly. Zero runtime dependencies.
+      Built with C, Zig, WebAssembly, Wolfi. Zero runtime dependencies.
     </p>
   </footer>
 

@@ -10,10 +10,11 @@
 
 | Version | Supported          | Status |
 | ------- | ------------------ | ------ |
-| 2.x     | ✅ Yes             | Active development |
+| 3.x     | ✅ Yes             | Active development |
+| 2.x     | ❌ No              | Deprecated (OpenSSL WASM) |
 | 1.x     | ❌ No              | Deprecated (monolithic HTML) |
 
-**Note**: v1 is deprecated due to fundamental architectural issues (CodeQL classification failures, JavaScript crypto vulnerabilities, masked failures). All users should migrate to v2.
+**Note**: v1 is deprecated due to fundamental architectural issues (CodeQL classification failures, JavaScript crypto vulnerabilities, masked failures). v2 is deprecated — it required a 1.5MB OpenSSL WASM build. v3 replaces this with a platform abstraction layer (compact SHA-256 + WASI random_get for WASM, OpenSSL for native), producing a <100KB binary. All users should migrate to v3.
 
 ---
 
@@ -43,7 +44,7 @@ We follow **coordinated disclosure** practices:
 - WASM sandbox escape allowing JavaScript to access random bytes
 - Statistical audit implementation errors that cause false passes
 - Supply chain attacks (compromised dependencies, unpinned actions)
-- Cryptographic primitive misuse (OpenSSL API abuse)
+- Cryptographic primitive misuse (OpenSSL native, WASI random_get WASM)
 - SRI hash bypass or injection
 - Struct offset mismatch causing JS to read unintended memory
 
@@ -60,7 +61,7 @@ We follow **coordinated disclosure** practices:
 - `src/paranoid.c` — ALL computation logic
 - `include/paranoid.h` — API definitions and struct layout
 - `www/app.js` — WASI shim (3 lines), struct reading, offset verification
-- `Makefile` — Build system and SRI hash injection
+- `CMakeLists.txt` — Build system
 - `.github/workflows/ci.yml`, `cd.yml`, `release.yml` — CI/CD pipelines
 
 **Out of scope**:
@@ -80,7 +81,7 @@ We follow **coordinated disclosure** practices:
 
 | ID | Threat | Description | Severity | Status |
 |----|--------|-------------|----------|--------|
-| **T1** | **Training Data Leakage** | LLM's training includes password breach dumps; generated passwords biased toward common patterns | CRITICAL | ✅ **Mitigated** — Delegated to OpenSSL CSPRNG (no LLM involvement in RNG) |
+| **T1** | **Training Data Leakage** | LLM's training includes password breach dumps; generated passwords biased toward common patterns | CRITICAL | ✅ **Mitigated** — Delegated to CSPRNG (OpenSSL native, WASI random_get WASM) (no LLM involvement in RNG) |
 | **T2** | **Token Distribution Bias** | LLM generates text via softmax over vocabulary; character frequencies non-uniform | HIGH | ✅ **Mitigated** — Rejection sampling in C (max_valid boundary) |
 | **T3** | **Deterministic Reproduction** | Same prompt produces same output; passwords predictable across sessions | HIGH | ✅ **Mitigated** — Hardware entropy via WASI `random_get()` |
 | **T4** | **Prompt Injection Steering** | Attacker constrains LLM output space via adversarial prompts during code generation | MEDIUM | ⚠️ **Residual** — Code is LLM-authored; manual review required |
@@ -123,14 +124,15 @@ We follow **coordinated disclosure** practices:
 ### Test Coverage
 
 ```bash
-# Current test coverage (manual validation)
-make verify    # WASM exports/imports check
-make hash      # Binary integrity verification
+# Current test coverage (cmake/ctest)
+cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/native
+ctest --test-dir build/native --output-on-failure
 
-# Planned test coverage (not yet implemented)
+# Implemented test coverage (4 test suites, 77 tests)
 - Unit tests for rejection sampling (boundary cases, rejection rates)
 - Known-answer tests for chi-squared (NIST test vectors)
-- Fuzz testing for struct offset verification
+- NIST CAVP SHA-256 test vectors (12 vectors)
 - Integration tests for full audit pipeline
 ```
 
@@ -138,14 +140,15 @@ make hash      # Binary integrity verification
 
 | Dependency | Version | SHA-256 | Supply Chain Risk | Mitigation |
 |------------|---------|---------|-------------------|------------|
-| OpenSSL WASM | Docker-cloned | N/A | Upstream compromise | SHA-pinned commit in Dockerfile ARG, verified at clone time |
+| OpenSSL (native only) | System package | N/A | Upstream compromise | Used only for native builds, not WASM |
+| sha256_compact.c | In-tree | FIPS 180-4 | Supply chain N/A | Verified against 12 NIST CAVP vectors |
 | Zig | ≥ 0.13.0 | N/A | Compiler backdoor | SHA-pinned in CI, reproducible builds |
 | GitHub Actions | Various | Various | Action compromise | **ALL actions SHA-pinned** (see `.github/workflows/ci.yml`, `cd.yml`, `release.yml`) |
 
 **GitHub Actions SHA Pinning**:
 ```yaml
 # ✅ Correct (SHA-pinned)
-uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
 # ❌ Wrong (mutable tag)
 uses: actions/checkout@v4
@@ -160,7 +163,7 @@ After the `tj-actions/changed-files` supply chain attack (March 2025), **all act
 ### What We Guarantee
 
 ✅ **Uniform distribution** (subject to rejection sampling correctness)  
-✅ **Cryptographic randomness source** (OpenSSL DRBG, NIST SP 800-90A)  
+✅ **Cryptographic randomness source** (OpenSSL DRBG native, WASI random_get WASM)
 ✅ **WASM sandbox isolation** (browser cannot modify random bytes)  
 ✅ **Fail-closed design** (no silent fallback to weak alternatives)  
 ✅ **Transparent audit** (all tests visible, results displayed)  
@@ -210,7 +213,7 @@ Time = S / (rate × 60 × 60 × 24 × 365)
 max_valid = (256 / N) * N - 1;
 
 do {
-    RAND_bytes(&byte, 1);
+    paranoid_platform_random(&byte, 1);
 } while (byte > max_valid);
 
 char = charset[byte % N];
@@ -337,8 +340,7 @@ If WASM cannot load, the tool **refuses to generate passwords**. There is no sil
 
 **Alternatives shown**:
 - Deploy via GitHub Pages (CI compiles WASM)
-- Use the Python CLI (if implemented)
-- Build locally with `make`
+- Build locally with CMake
 
 ---
 
@@ -396,10 +398,10 @@ If WASM cannot load, the tool **refuses to generate passwords**. There is no sil
 ### Short-Term (Q1 2026)
 
 - [ ] Human cryptographer review of `src/paranoid.c`
-- [ ] Unit tests for rejection sampling (boundary cases)
-- [ ] Known-answer tests for chi-squared (NIST vectors)
+- [x] Unit tests for rejection sampling (boundary cases)
+- [x] Known-answer tests for chi-squared (NIST vectors)
 - [ ] Fuzz testing for struct offset verification
-- [ ] Dependency update automation (Dependabot)
+- [x] Dependency update automation (Dependabot)
 
 ### Medium-Term (Q2-Q3 2026)
 
@@ -455,5 +457,5 @@ We recognize security researchers who responsibly disclose vulnerabilities:
 ---
 
 **Last updated**: 2026-02-26  
-**Document version**: 2.0  
+**Document version**: 3.0
 **Threat model version**: 1.0

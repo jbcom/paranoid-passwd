@@ -1,6 +1,6 @@
 # Development Guide
 
-Welcome to the `paranoid` development guide! This document covers development setup, testing, contributing guidelines, and project conventions.
+Welcome to the `paranoid-passwd` development guide! This document covers development setup, testing, contributing guidelines, and project conventions.
 
 ---
 
@@ -21,23 +21,28 @@ Welcome to the `paranoid` development guide! This document covers development se
 ### Prerequisites
 
 **Required**:
-- **Zig ≥ 0.13.0** — C/C++ compiler with WebAssembly support
+- **Zig >= 0.13.0** -- C/C++ compiler with WebAssembly support
   - macOS: `brew install zig`
   - Ubuntu/Debian: `snap install zig --classic --beta`
   - Windows: Download from https://ziglang.org/download/
-  
-- **Git** — For cloning the repository
-  
-- **OpenSSL** — For SRI hash computation during build
+
+- **CMake >= 3.20** -- Build system
+  - macOS: `brew install cmake`
+  - Ubuntu/Debian: `apt-get install cmake`
+
+- **Git** -- For cloning the repository
+
+- **OpenSSL** (development libraries) -- For native builds only; not needed for WASM
   - macOS: `brew install openssl`
-  - Ubuntu/Debian: `apt-get install openssl`
+  - Ubuntu/Debian: `apt-get install libssl-dev`
 
 **Optional**:
-- **wabt** (WebAssembly Binary Toolkit) — For WASM verification
+- **wabt** (WebAssembly Binary Toolkit) -- For WASM verification
   - macOS: `brew install wabt`
   - Ubuntu/Debian: `apt-get install wabt`
-  
-- **Python 3** — For local development server (`make serve`)
+
+- **Python 3** -- For local development server
+- **melange + apko** -- For production container builds (Wolfi ecosystem)
 
 ### Clone the Repository
 
@@ -46,35 +51,25 @@ Welcome to the `paranoid` development guide! This document covers development se
 git clone https://github.com/jbcom/paranoid-passwd.git
 cd paranoid-passwd
 
-# For Docker builds (recommended): OpenSSL is built from official source automatically
-docker build -t paranoid-passwd .
+# For production builds (recommended): use melange/apko
+melange build melange.yaml --arch x86_64 --runner docker
 
-# For local development: build OpenSSL from source and clone test framework
-# OpenSSL is compiled from official source using the build script:
-./scripts/build_openssl_wasm.sh
-# This clones openssl/openssl at tag openssl-3.4.0, applies patches, and
-# compiles with Zig to produce vendor/openssl/lib/libcrypto.a
-
-# Clone test framework manually at the pinned commit:
-mkdir -p vendor
-git clone https://github.com/mity/acutest.git vendor/acutest
-cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
+# For local development: just build with CMake
+# CMake automatically fetches acutest via FetchContent -- no manual vendor setup needed
+cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/native
 ```
 
 ### Verify Toolchain
 
 ```bash
-make info
+zig version && cmake --version
 ```
 
 **Expected output**:
 ```
-=== Paranoid Build Info ===
-Zig version: 0.13.0
-OpenSSL version: OpenSSL 3.x.x
-Zig CC: /usr/local/bin/zig cc
-OpenSSL library: vendor/openssl/lib/libcrypto.a (built from source)
-wabt installed: yes
+0.13.0
+cmake version 3.x.x
 ```
 
 ---
@@ -84,87 +79,109 @@ wabt installed: yes
 ### Quick Build
 
 ```bash
-# Build everything (WASM + site with SRI hashes)
-make
+# Build WASM (release)
+cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm
 
-# Or explicitly:
-make site
+# Or build native (debug + tests)
+cmake -B build/native -DCMAKE_BUILD_TYPE=Debug && cmake --build build/native
 ```
 
 ### Build Targets
 
-| Target | Description |
-|--------|-------------|
-| `make` | Default target (same as `make site`) |
-| `make build` | Compile WASM only (`build/paranoid.wasm`) |
-| `make site` | Assemble deployable site with SRI hashes (`build/site/`) |
-| `make verify` | Verify WASM exports/imports (requires wabt) |
-| `make hash` | Print SHA-256 and SRI hashes of WASM binary |
-| `make serve` | Start local HTTP server on port 8080 |
-| `make clean` | Remove all build artifacts |
-| `make info` | Show toolchain configuration |
+| Target | Command |
+|--------|---------|
+| WASM build (release) | `cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm` |
+| Native build (debug) | `cmake -B build/native -DCMAKE_BUILD_TYPE=Debug && cmake --build build/native` |
+| Run native tests | `ctest --test-dir build/native --output-on-failure` |
+| Verify WASM exports | `wasm-objdump -x build/wasm/paranoid.wasm` |
+| Print WASM hash | `sha256sum build/wasm/paranoid.wasm` |
+| Local dev server | `cd www && python3 -m http.server 8080` |
+| Clean all artifacts | `rm -rf build/` |
+| Show toolchain info | `zig version && cmake --version` |
 
 ### Build Process
 
-When you run `make site`, the build system:
+When you run the CMake WASM build, the build system:
 
-1. **Compiles C → WASM**
+1. **Configures the WASM toolchain**
    ```bash
-   zig cc -target wasm32-wasi src/paranoid.c src/wasm_entry.c \
-     -I include \
-     -I vendor/openssl/include \
-     -L vendor/openssl/lib \
-     -l crypto \
-     -o build/paranoid.wasm
+   cmake -B build/wasm \
+     -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
+     -DCMAKE_BUILD_TYPE=Release
    ```
 
-2. **Computes SRI hashes**
-   - SHA-384 of `paranoid.wasm`
-   - SHA-384 of `app.js`
-   - SHA-384 of `style.css`
+2. **Compiles C -> WASM** (no OpenSSL in WASM)
+   ```bash
+   cmake --build build/wasm
+   # Compiles: src/paranoid.c + src/platform_wasm.c + src/sha256_compact.c
+   # Uses WASI random_get + compact FIPS 180-4 SHA-256
+   # Produces: build/wasm/paranoid.wasm (<100KB)
+   ```
 
-3. **Injects hashes into HTML**
-   - Replaces `__WASM_SRI__`, `__JS_SRI__`, `__CSS_SRI__` placeholders
-   - Uses `sed` for inline substitution
+3. **Post-processes the WASM binary**
+   - Runs `wasm-opt` and `wasm-strip` (if available)
+   - Validates with `wasm-validate` (hard gate in CI)
 
 4. **Creates build manifest**
-   - `build/site/BUILD_MANIFEST.json`
+   - `build/wasm/BUILD_MANIFEST.json`
    - Records hashes, compiler version, commit SHA, timestamp
+   - Loaded at runtime by `app.js` (no SRI placeholder injection)
 
-5. **Copies files to `build/site/`**
-   - `index.html` (with injected SRI hashes)
-   - `paranoid.wasm`
-   - `app.js`
-   - `style.css`
+5. **Artifacts are ready to serve from `www/`**
+   - Copy `build/wasm/paranoid.wasm` into `www/` for development
+   - Or use the CI pipeline which assembles the deployable site automatically
 
 ### Build Artifacts
 
 ```
 build/
-├── paranoid.wasm          # Compiled WASM binary (~180KB)
-├── site/                  # Deployable site
-│   ├── index.html         # HTML with SRI hashes
-│   ├── paranoid.wasm      # WASM binary
-│   ├── app.js             # JavaScript bridge
-│   ├── style.css          # Styles
-│   └── BUILD_MANIFEST.json  # Build metadata
+├── wasm/                     # WASM build output
+│   ├── paranoid.wasm         # Compiled WASM binary (<100KB)
+│   └── BUILD_MANIFEST.json   # Build metadata
+└── native/                   # Native build output
+    ├── test_native            # Acutest-based test runner
+    ├── test_sha256            # NIST CAVP SHA-256 tests
+    ├── test_statistics        # Chi-squared + serial correlation KATs
+    └── test_paranoid          # Standalone test framework
 ```
 
 ---
 
 ## Testing
 
+### Native C Tests (via CTest)
+
+```bash
+# Build and run all native C tests
+cmake -B build/native -DCMAKE_BUILD_TYPE=Debug && cmake --build build/native && ctest --test-dir build/native --output-on-failure
+```
+
+Test binaries produced:
+- `test_native` -- Comprehensive acutest-based C tests
+- `test_sha256` -- NIST CAVP SHA-256 test vectors
+- `test_statistics` -- Chi-squared + serial correlation known-answer tests
+- `test_paranoid` -- Standalone test framework
+
+### E2E Tests (via Playwright)
+
+```bash
+cd tests/e2e && npm install && npx playwright test
+```
+
 ### Manual Testing
 
 ```bash
-# 1. Build the site
-make site
+# 1. Build the WASM
+cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm
 
-# 2. Start local server
-make serve
+# 2. Copy WASM to www/ for development
+cp build/wasm/paranoid.wasm www/
+
+# 3. Start local server
+cd www && python3 -m http.server 8080
 # Opens http://localhost:8080
 
-# 3. Open in browser and test:
+# 4. Open in browser and test:
 #    - Click "Generate + Run 7-Layer Audit"
 #    - Verify all 7 stages complete with green checkmarks
 #    - Check console for errors
@@ -175,41 +192,19 @@ make serve
 
 ```bash
 # Verify WASM exports (requires wabt)
-make verify
+wasm-objdump -x build/wasm/paranoid.wasm
 
-# Expected output:
-# ✓ paranoid_run_audit found
-# ✓ paranoid_get_result_ptr found
-# ✓ paranoid_offset_* functions found
-# ✓ Only wasi_snapshot_preview1 imports found
+# Expected output includes:
+# - paranoid_run_audit
+# - paranoid_get_result_ptr
+# - paranoid_offset_* functions
+# - Only wasi_snapshot_preview1 imports
 ```
 
 ```bash
-# Print binary hashes
-make hash
-
-# Expected output:
-# SHA-256: <64-char hex>
-# SRI-384: sha384-<base64>
+# Print binary hash
+sha256sum build/wasm/paranoid.wasm
 ```
-
-### Automated Testing (Planned)
-
-**Unit tests** (not yet implemented):
-```bash
-# Planned test commands
-make test-c        # Unit tests for C code
-make test-js       # Unit tests for JavaScript
-make test-e2e      # End-to-end tests with Playwright
-```
-
-**Test coverage targets**:
-- [ ] Rejection sampling (boundary cases, rejection rates)
-- [ ] Chi-squared calculation (known test vectors)
-- [ ] Struct offset verification (fuzz testing)
-- [ ] Full audit pipeline (integration test)
-- [ ] WASM loading and error handling
-- [ ] UI state transitions
 
 ---
 
@@ -231,10 +226,12 @@ make test-e2e      # End-to-end tests with Playwright
 
 4. **Test your changes**
    ```bash
-   make clean
-   make site
-   make verify
-   make serve
+   rm -rf build/
+   cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm
+   wasm-objdump -x build/wasm/paranoid.wasm
+   cmake -B build/native -DCMAKE_BUILD_TYPE=Debug && cmake --build build/native && ctest --test-dir build/native --output-on-failure
+   cp build/wasm/paranoid.wasm www/
+   cd www && python3 -m http.server 8080
    # Test manually in browser
    ```
 
@@ -255,25 +252,26 @@ make test-e2e      # End-to-end tests with Playwright
 ### Contribution Guidelines
 
 **We welcome**:
-- ✅ Cryptographer review of `src/paranoid.c`
-- ✅ Statistical test improvements
-- ✅ Documentation improvements
-- ✅ Accessibility enhancements
-- ✅ Bug fixes
-- ✅ New threat vectors (LLM security)
+- Cryptographer review of `src/paranoid.c`
+- Statistical test improvements
+- Documentation improvements
+- Accessibility enhancements
+- Bug fixes
+- New threat vectors (LLM security)
 
 **We will reject**:
-- ❌ Changes that weaken security (removing fail-closed, adding JS fallback)
-- ❌ Unpinning GitHub Actions from SHAs
-- ❌ Inlining JS into HTML or CSS into HTML
-- ❌ Removing statistical tests
-- ❌ Suppressing threat model warnings
+- Changes that weaken security (removing fail-closed, adding JS fallback)
+- Unpinning GitHub Actions from SHAs
+- Inlining JS into HTML or CSS into HTML
+- Removing statistical tests
+- Suppressing threat model warnings
 
 ### Pull Request Checklist
 
 - [ ] Code follows style guidelines (see [Code Style](#code-style))
 - [ ] Documentation updated (README, AGENTS.md, inline comments)
-- [ ] Tests pass (`make verify`, manual browser testing)
+- [ ] Native tests pass (`ctest --test-dir build/native --output-on-failure`)
+- [ ] WASM builds successfully and passes `wasm-objdump` verification
 - [ ] No security regressions (review [SECURITY.md](SECURITY.md))
 - [ ] Commit messages are descriptive
 - [ ] PR description explains **why** (not just what)
@@ -284,7 +282,7 @@ make test-e2e      # End-to-end tests with Playwright
 
 ### C Code Style
 
-**File**: `src/paranoid.c`, `include/paranoid.h`
+**Files**: `src/paranoid.c`, `src/platform_native.c`, `src/platform_wasm.c`, `src/sha256_compact.c`, `include/paranoid.h`, `include/paranoid_platform.h`
 
 ```c
 // Use snake_case for functions
@@ -296,7 +294,7 @@ int max_valid = (256 / charset_len) * charset_len - 1;
 // Add comments for non-obvious logic
 // Rejection sampling: discard bytes > max_valid to avoid modulo bias
 while (byte > max_valid) {
-    RAND_bytes(&byte, 1);
+    paranoid_platform_random(&byte, 1);
 }
 
 // Use consistent indentation (4 spaces, no tabs)
@@ -388,53 +386,52 @@ if (condition) {
 ## Project Structure
 
 ```
-paranoid/
+paranoid-passwd/
 ├── .github/
 │   ├── copilot-instructions.md   # Copilot agent configuration
 │   └── workflows/
-│       ├── ci.yml                 # PR verification (Docker build + E2E tests)
+│       ├── ci.yml                 # PR verification (melange/apko build + E2E tests)
 │       ├── cd.yml                 # Push to main (SBOM + Cosign + release-please)
 │       └── release.yml            # Deploy from signed releases
+├── cmake/
+│   └── wasm32-wasi.cmake         # CMake toolchain file for Zig WASM cross-compilation
 ├── docs/
 │   ├── ARCHITECTURE.md            # System architecture
 │   ├── DESIGN.md                  # Design decisions
 │   ├── THREAT-MODEL.md            # Threat analysis
 │   ├── AUDIT.md                   # Statistical methodology
-│   └── BUILD.md                   # Build system internals
+│   ├── BUILD.md                   # Build system internals
+│   └── SUPPLY-CHAIN.md            # Supply chain security framework
 ├── include/
-│   └── paranoid.h                 # Public C API (249 lines)
+│   ├── paranoid.h                 # Public C API (every WASM export)
+│   └── paranoid_platform.h        # Platform abstraction interface
 ├── src/
-│   └── paranoid.c                 # All computation (400 lines)
-├── patches/
-│   ├── 01-wasi-config.patch       # WASI platform configuration
-│   ├── 02-rand-wasi.patch         # WASI random entropy source
-│   └── 03-ssl-cert-posix-io.patch # SSL cert POSIX I/O adjustments
-├── scripts/
-│   └── build_openssl_wasm.sh      # Build OpenSSL from official source
-├── vendor/
-│   └── openssl/                   # Built from official OpenSSL source (openssl-3.4.0)
-│       ├── include/openssl/       # OpenSSL headers (from build)
-│       ├── lib/libcrypto.a        # Compiled for wasm32-wasi
-│       └── BUILD_PROVENANCE.txt   # Records source tag, commit, compiler, patches
+│   ├── paranoid.c                 # ALL computation (uses platform abstraction)
+│   ├── platform_native.c          # Native backend: OpenSSL RAND_bytes + EVP SHA-256
+│   ├── platform_wasm.c            # WASM backend: WASI random_get
+│   └── sha256_compact.c           # FIPS 180-4 SHA-256 (WASM only, no OpenSSL)
+├── tests/
+│   ├── test_native.c              # Comprehensive acutest-based C tests
+│   ├── test_paranoid.c            # Standalone test framework
+│   ├── test_sha256.c              # NIST CAVP SHA-256 test vectors
+│   └── test_statistics.c          # Chi-squared + serial correlation KATs
 ├── www/
-│   ├── index.html                 # Structure only (213 lines)
-│   ├── style.css                  # CSS-only wizard (834 lines)
-│   └── app.js                     # Display-only bridge (436 lines)
-├── build/                         # Created by make (gitignored)
-│   ├── paranoid.wasm
-│   └── site/
-│       ├── index.html
-│       ├── paranoid.wasm
-│       ├── app.js
-│       ├── style.css
-│       └── BUILD_MANIFEST.json
+│   ├── index.html                 # Structure only (no inline JS/CSS)
+│   ├── style.css                  # CSS-only wizard (visual state mgmt)
+│   └── app.js                     # Display-only WASM bridge
+├── build/                         # Created by CMake (gitignored)
+│   ├── wasm/
+│   │   ├── paranoid.wasm          # <100KB (no OpenSSL)
+│   │   └── BUILD_MANIFEST.json    # Build metadata
+│   └── native/                    # Native test binaries
 ├── .gitignore
-├── Dockerfile                    # Multi-stage build (deps, test, build, verify)
 ├── AGENTS.md                      # Complete project documentation
+├── apko.yaml                      # Container image assembly (Wolfi ecosystem)
 ├── CHANGELOG.md                   # Version history
+├── CMakeLists.txt                 # Build system (replaces Makefile)
 ├── DEVELOPMENT.md                 # This file
 ├── LICENSE                        # MIT License
-├── Makefile                       # Build system
+├── melange.yaml                   # Package build definition (Wolfi ecosystem)
 ├── README.md                      # Project overview
 └── SECURITY.md                    # Security policy
 ```
@@ -443,20 +440,26 @@ paranoid/
 
 | Component | Role | Touches Crypto? |
 |-----------|------|:---------------:|
-| `src/paranoid.c` | **ALL** computation | ✅ YES |
-| `src/wasm_entry.c` | WASM entry point | No |
+| `src/paranoid.c` | **ALL** computation | YES |
+| `src/platform_native.c` | OpenSSL RAND_bytes + EVP SHA-256 backend | YES |
+| `src/platform_wasm.c` | WASI random_get backend | YES |
+| `src/sha256_compact.c` | FIPS 180-4 SHA-256 (WASM only) | YES |
 | `include/paranoid.h` | C API definitions | No |
-| `www/app.js` | WASM bridge (3-line shim + struct reader) | ⚠️ 3 lines |
+| `include/paranoid_platform.h` | Platform abstraction interface | No |
+| `www/app.js` | WASM bridge (3-line shim + struct reader) | 3 lines |
 | `www/index.html` | HTML structure | No |
 | `www/style.css` | Visual state management | No |
-| `Makefile` | Build orchestration | No |
+| `CMakeLists.txt` | Build orchestration | No |
 | `.github/workflows/ci.yml` | PR verification | No |
 | `.github/workflows/cd.yml` | Push to main | No |
 | `.github/workflows/release.yml` | Releases | No |
 
 **Security-critical code**:
-1. `src/paranoid.c` — Rejection sampling, chi-squared, SHA-256
-2. `www/app.js` (lines 15-17) — WASI shim calling `crypto.getRandomValues()`
+1. `src/paranoid.c` -- Rejection sampling, chi-squared, SHA-256
+2. `src/platform_wasm.c` -- WASI random_get delegation
+3. `src/platform_native.c` -- OpenSSL RAND_bytes delegation
+4. `src/sha256_compact.c` -- FIPS 180-4 SHA-256 implementation
+5. `www/app.js` (lines 15-17) -- WASI shim calling `crypto.getRandomValues()`
 
 ---
 
@@ -477,78 +480,83 @@ snap install zig --classic --beta
 # Or download from https://ziglang.org/download/
 ```
 
-### Dependencies Not Available
+### CMake Not Found
 
-**Error**: `vendor/openssl/lib/libcrypto.a: No such file`
+**Error**: `cmake: command not found`
 
-**Solution** (recommended): Use Docker — it builds OpenSSL from official source automatically:
+**Solution**:
 ```bash
-docker build -t paranoid-passwd .
+# macOS
+brew install cmake
+
+# Ubuntu/Debian
+apt-get install cmake
 ```
 
-**Solution** (local development): Build OpenSSL from source using the build script:
-```bash
-./scripts/build_openssl_wasm.sh
-# This clones official OpenSSL at tag openssl-3.4.0, applies patches,
-# and compiles with Zig to produce vendor/openssl/lib/libcrypto.a
+### WASM Compilation Fails
 
-# Clone test framework:
-mkdir -p vendor
-git clone https://github.com/mity/acutest.git vendor/acutest
-cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
+**Error**: CMake WASM build fails
+
+**Note**: The WASM build does NOT use OpenSSL. It uses `src/platform_wasm.c` (WASI random_get) and `src/sha256_compact.c` (compact FIPS 180-4 SHA-256). If you see OpenSSL-related errors, ensure you are using the correct toolchain file:
+
+```bash
+cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build/wasm
+```
+
+For native builds that DO use OpenSSL:
+```bash
+# macOS
+brew install openssl
+
+# Ubuntu/Debian
+apt-get install libssl-dev
 ```
 
 ### WASM Verification Fails
 
-**Error**: `make verify` reports missing exports
+**Error**: `wasm-objdump` reports missing exports
 
 **Solution**:
 1. Check if `wabt` is installed: `wasm-objdump --version`
 2. Install if missing: `brew install wabt` (macOS) or `apt-get install wabt` (Ubuntu)
-3. Rebuild: `make clean && make build`
-4. Verify again: `make verify`
-
-### SRI Hash Mismatch in Browser
-
-**Error**: Browser console shows "Subresource Integrity check failed"
-
-**Cause**: Cached old version of WASM/JS/CSS
-
-**Solution**:
-1. Hard refresh: Ctrl+Shift+R (Windows/Linux) or Cmd+Shift+R (macOS)
-2. Clear browser cache
-3. Rebuild: `make clean && make site`
+3. Rebuild:
+   ```bash
+   rm -rf build/wasm
+   cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release
+   cmake --build build/wasm
+   ```
+4. Verify again: `wasm-objdump -x build/wasm/paranoid.wasm`
 
 ### WASM Loading Fails in Browser
 
 **Error**: "WebAssembly failed to load"
 
 **Debugging**:
-1. Open browser DevTools → Console
+1. Open browser DevTools -> Console
 2. Look for specific error message
-3. Check Network tab — verify `paranoid.wasm` returns 200 status
+3. Check Network tab -- verify `paranoid.wasm` returns 200 status
 4. Verify MIME type: `application/wasm`
-5. Check file size: Should be ~180KB
+5. Check file size: Should be <100KB
 
 **Common causes**:
-- MIME type not set (use `make serve` or configure web server)
-- SRI hash mismatch (see above)
+- MIME type not set (use `cd www && python3 -m http.server 8080` or configure web server)
 - Browser doesn't support WASM (upgrade browser)
 - Mixed content (HTTPS page loading HTTP WASM)
 
 ### Build Artifacts Not Cleaned
 
-**Error**: `make` uses old files after changes
+**Error**: Build uses old files after changes
 
 **Solution**:
 ```bash
-make clean
-make site
+rm -rf build/
+cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm
 ```
 
 ### Port 8080 Already in Use
 
-**Error**: `make serve` fails with "Address already in use"
+**Error**: Dev server fails with "Address already in use"
 
 **Solution**:
 ```bash
@@ -559,7 +567,7 @@ lsof -i :8080
 kill -9 <PID>
 
 # Or use different port
-cd build/site && python3 -m http.server 8081
+cd www && python3 -m http.server 8081
 ```
 
 ---
@@ -570,16 +578,16 @@ cd build/site && python3 -m http.server 8081
 
 ```bash
 # Disassemble WASM to WAT (WebAssembly Text)
-wasm2wat build/paranoid.wasm > paranoid.wat
+wasm2wat build/wasm/paranoid.wasm > paranoid.wat
 
 # Inspect exports
-wasm-objdump -x build/paranoid.wasm | grep "export name"
+wasm-objdump -x build/wasm/paranoid.wasm | grep "export name"
 
 # Inspect imports
-wasm-objdump -x build/paranoid.wasm | grep "import module"
+wasm-objdump -x build/wasm/paranoid.wasm | grep "import module"
 
 # Check binary size
-ls -lh build/paranoid.wasm
+ls -lh build/wasm/paranoid.wasm
 ```
 
 ### Adding a New Export
@@ -599,13 +607,13 @@ ls -lh build/paranoid.wasm
 
 3. **Rebuild**:
    ```bash
-   make clean && make build
+   rm -rf build/wasm
+   cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm
    ```
 
 4. **Verify export exists**:
    ```bash
-   make verify
-   # Should show "✓ paranoid_new_function found"
+   wasm-objdump -x build/wasm/paranoid.wasm | grep paranoid_new_function
    ```
 
 5. **Call from JavaScript** (`www/app.js`):
@@ -615,7 +623,7 @@ ls -lh build/paranoid.wasm
 
 ### Modifying Struct Layout
 
-**⚠️ WARNING**: Changing `paranoid_audit_result_t` requires updating **both** C and JS.
+**WARNING**: Changing `paranoid_audit_result_t` requires updating **both** C and JS.
 
 1. **Update struct** (`include/paranoid.h`):
    ```c
@@ -648,18 +656,42 @@ ls -lh build/paranoid.wasm
 
 4. **Test**:
    ```bash
-   make clean && make site && make serve
+   rm -rf build/
+   cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm
+   cmake -B build/native -DCMAKE_BUILD_TYPE=Debug && cmake --build build/native && ctest --test-dir build/native --output-on-failure
+   cp build/wasm/paranoid.wasm www/
+   cd www && python3 -m http.server 8080
    # Offset verification will catch mismatches
    ```
+
+### melange/apko Builds (Production)
+
+Production container images use the Wolfi ecosystem instead of Docker multi-stage builds:
+
+```bash
+# Build the package with melange
+melange build melange.yaml --arch x86_64 --runner docker
+
+# Assemble the container image with apko
+apko build apko.yaml paranoid-passwd:latest paranoid-passwd.tar
+
+# Load and run
+docker load < paranoid-passwd.tar
+docker run --rm -p 8080:8080 paranoid-passwd:latest
+```
+
+Wolfi provides Zig from source via melange, producing bitwise-reproducible packages. This replaces the previous Docker multi-stage build approach.
 
 ---
 
 ## Resources
 
 - **Zig Documentation**: https://ziglang.org/documentation/
-- **OpenSSL**: https://github.com/openssl/openssl
+- **CMake Documentation**: https://cmake.org/documentation/
 - **WebAssembly Spec**: https://webassembly.github.io/spec/
 - **WASI Spec**: https://github.com/WebAssembly/WASI
+- **melange**: https://github.com/chainguard-dev/melange
+- **apko**: https://github.com/chainguard-dev/apko
 - **NIST SP 800-90A**: https://csrc.nist.gov/publications/detail/sp/800-90a/rev-1/final
 - **NIST SP 800-63B**: https://pages.nist.gov/800-63-3/sp800-63b.html
 
@@ -674,4 +706,4 @@ ls -lh build/paranoid.wasm
 
 ---
 
-**Happy hacking! 🔒**
+**Happy hacking!**

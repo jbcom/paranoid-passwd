@@ -37,7 +37,7 @@ Deployed assets      →  SRI hash verification       →  Tamper-proof site
 ### Threat Actors
 
 1. **LLM (this code's author)** — Primary adversary, may hallucinate or inject backdoors
-2. **Compromised dependencies** — OpenSSL, Zig, GitHub Actions
+2. **Compromised dependencies** — Zig, melange/apko, GitHub Actions (native: OpenSSL; WASM: sha256_compact.c)
 3. **Build environment** — GitHub-hosted runners, CI/CD pipeline
 4. **Deployment infrastructure** — GitHub Pages, CDN (Fastly)
 5. **Browser environment** — Extensions, DevTools, malicious scripts
@@ -82,35 +82,30 @@ Deployed assets      →  SRI hash verification       →  Tamper-proof site
   },
   
   "dependencies": {
-    "openssl": {
-      "type": "source_built",
-      "url": "https://github.com/openssl/openssl.git",
-      "tag": "openssl-3.4.0",
-      "commit_date": "2024-10-22T00:00:00Z",
-      "patches": [
-        "patches/01-wasi-config.patch",
-        "patches/02-rand-wasi.patch",
-        "patches/03-ssl-cert-posix-io.patch"
-      ],
-      "build_script": "scripts/build_openssl_wasm.sh",
-      "provenance": "vendor/openssl/BUILD_PROVENANCE.txt",
-      "sha256": {
-        "lib/libcrypto.a": "e5f6g7h8i9j0..."
-      }
-    }
+    "sha256_compact": {
+      "type": "bundled_source",
+      "path": "src/sha256_compact.c",
+      "description": "Minimal SHA-256 for WASM build (no OpenSSL dependency)",
+      "sha256": "a1b2c3d4e5f6...",
+      "verified_against": "NIST FIPS 180-4 test vectors (tests/test_sha256.c)"
+    },
+    "note": "OpenSSL is NOT used in the WASM build. WASM uses WASI random_get() + sha256_compact.c. Native CLI uses system OpenSSL."
   },
-  
+
   "tools": {
     "zig": {
       "version": "0.13.0",
       "binary_path": "/usr/bin/zig",
       "sha256": "f6g7h8i9j0k1...",
-      "verified_against": "https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz.sha256"
+      "source": "melange-built from Wolfi (not downloaded tarball)"
     },
-    "openssl": {
-      "version": "3.0.8",
-      "binary_path": "/usr/bin/openssl",
-      "sha256": "g7h8i9j0k1l2..."
+    "melange": {
+      "version": "latest",
+      "purpose": "Reproducible APK package builder"
+    },
+    "apko": {
+      "version": "latest",
+      "purpose": "Distroless OCI image assembler"
     }
   },
   
@@ -125,7 +120,7 @@ Deployed assets      →  SRI hash verification       →  Tamper-proof site
   },
   
   "compilation": {
-    "command": "zig cc -target wasm32-wasi -I include -I vendor/openssl/include -L vendor/openssl/lib -l crypto -O3 -flto -fno-stack-protector -o build/paranoid.wasm src/paranoid.c src/wasm_entry.c",
+    "command": "zig cc -target wasm32-wasi -I include -O3 -flto -fno-stack-protector -o build/paranoid.wasm src/paranoid.c src/sha256_compact.c src/wasm_entry.c",
     "flags": ["-target", "wasm32-wasi", "-O3", "-flto"],
     "duration_ms": 4523,
     "peak_memory_mb": 256,
@@ -182,18 +177,16 @@ Deployed assets      →  SRI hash verification       →  Tamper-proof site
       "result": "success"
     },
     {
-      "stage": "dependency_clone",
+      "stage": "dependency_verification",
       "timestamp": "2026-02-26T02:59:30Z",
-      "action": "Build OpenSSL from official source at pinned tag",
+      "action": "Verify sha256_compact.c against NIST test vectors",
       "result": "success"
     },
     {
-      "stage": "dependency_verification",
+      "stage": "melange_build",
       "timestamp": "2026-02-26T02:59:45Z",
-      "action": "verify OpenSSL source tag and commit SHA",
-      "result": "success",
-      "expected": "d4e5f6g7h8i9...",
-      "actual": "d4e5f6g7h8i9..."
+      "action": "melange build melange.yaml (reproducible APK)",
+      "result": "success"
     },
     {
       "stage": "compilation",
@@ -245,14 +238,16 @@ build/
 #### 1. Environment Setup
 
 ```bash
-# Use container for deterministic environment
-docker run --rm -v $(pwd):/build \
-  alpine:3.21 /bin/sh -c "
-    apk add --no-cache zig git openssl
-    cd /build
-    export SOURCE_DATE_EPOCH=\$(git log -1 --format=%ct)
-    make build
-  "
+# Use melange/apko for deterministic environment (replaces Docker)
+# melange builds APK packages from source in a reproducible manner
+melange build melange.yaml --arch x86_64 --signing-key melange.rsa
+
+# apko assembles a minimal OCI image from APK packages (distroless, no shell)
+apko build apko.yaml ghcr.io/jbcom/paranoid-passwd:latest output.tar
+
+# For local reproducibility verification:
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) \
+  melange build melange.yaml --arch x86_64 --signing-key melange.rsa
 ```
 
 **Key variables**:
@@ -269,37 +264,39 @@ git verify-commit HEAD
 # Verify no local modifications
 git diff --exit-code || { echo "Uncommitted changes!"; exit 1; }
 
-# Verify OpenSSL provenance (Docker builds record this automatically)
-# For local development, check vendor/openssl/BUILD_PROVENANCE.txt
-cat vendor/openssl/BUILD_PROVENANCE.txt
-# Should show: source tag openssl-3.4.0, applied patches, Zig compiler version
+# Verify melange package provenance
+# melange records build inputs, toolchain versions, and source hashes in APK metadata
+melange package-info output/packages/x86_64/paranoid-passwd-*.apk
+# Should show: pinned source commit, Zig compiler version, build timestamp
 ```
 
 #### 3. Tool Verification
 
 ```bash
-# Verify Zig compiler hash
+# Verify Zig compiler via melange-provided package
+# melange builds Zig from source as a Wolfi APK — no downloaded tarballs
+apk info -L zig | grep "usr/bin/zig"
 ZIG_HASH=$(sha256sum /usr/bin/zig | cut -d' ' -f1)
 EXPECTED_ZIG_HASH="f6g7h8i9j0k1..."
 [ "$ZIG_HASH" = "$EXPECTED_ZIG_HASH" ] || { echo "Zig compiler mismatch!"; exit 1; }
 
-# Verify OpenSSL library hash (built from source)
-CRYPTO_HASH=$(sha256sum vendor/openssl/lib/libcrypto.a | cut -d' ' -f1)
-EXPECTED_CRYPTO_HASH="e5f6g7h8i9j0..."
-[ "$CRYPTO_HASH" = "$EXPECTED_CRYPTO_HASH" ] || { echo "libcrypto.a mismatch!"; exit 1; }
+# Verify Zig APK provenance (melange records build inputs)
+melange package-info output/packages/x86_64/zig-*.apk
 ```
 
 #### 4. Build
 
 ```bash
-# Clean build
-make clean
+# Clean build with CMake
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+  -DSOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+cmake --build build --clean-first
 
-# Build with deterministic settings
+# Or via melange for fully reproducible package build
 SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) \
 LANG=C \
 TZ=UTC \
-make build
+melange build melange.yaml --arch x86_64 --signing-key melange.rsa
 ```
 
 #### 5. Verification
@@ -376,7 +373,7 @@ gpg --armor --detach-sign attestation.json
 ### Verification Dashboard
 
 ```
-https://paranoid-project.org/attestations/v2.0.0
+https://paranoid-project.org/attestations/v3.0.0
 
 Builder          Hash                               Status   Signature
 ─────────────────────────────────────────────────────────────────────────
@@ -393,49 +390,54 @@ Threshold: 3/5 required ✅ MET
 
 ## Dependency Verification
 
-### OpenSSL Dependency (Built from Official Source)
+### Cryptographic Primitives (Platform Abstraction)
 
-**Threat**: Upstream OpenSSL source compromised, or patches introduce vulnerabilities.
+**v3 Architecture Change**: OpenSSL is NO LONGER used in the WASM build.
+
+| Platform | RNG Source | Hash Function |
+|----------|-----------|---------------|
+| **Native (CLI)** | OpenSSL `RAND_bytes()` | OpenSSL `EVP_SHA256` |
+| **WASM (Web)** | WASI `random_get()` | `sha256_compact.c` (bundled, no deps) |
+
+**Threat**: `sha256_compact.c` is a minimal SHA-256 implementation bundled with the project.
+Unlike OpenSSL (25+ years of audit), this code has a smaller trust base.
 
 **Mitigation**:
 
-OpenSSL is compiled FROM OFFICIAL SOURCE inside Docker -- no precompiled binaries are used.
-
-The provenance chain is: Official OpenSSL source (pinned tag) -> Our patches -> Zig compiler -> WASM
-
-```dockerfile
-# In Dockerfile: clone official OpenSSL at pinned tag
-ARG OPENSSL_TAG=openssl-3.4.0
-RUN git clone --depth=1 --branch=${OPENSSL_TAG} https://github.com/openssl/openssl.git && \
-    cd openssl && \
-    git apply /build/patches/01-wasi-config.patch && \
-    git apply /build/patches/02-rand-wasi.patch && \
-    git apply /build/patches/03-ssl-cert-posix-io.patch
-# Then compile with Zig to produce vendor/openssl/lib/libcrypto.a
-# Build provenance recorded in vendor/openssl/BUILD_PROVENANCE.txt
+```
+WASM provenance chain (v3):
+  Source (sha256_compact.c + paranoid.c) -> Zig compiler -> WASM
+  RNG: WASI random_get() -> browser crypto.getRandomValues() -> OS CSPRNG
+  Hash: sha256_compact.c (verified against NIST test vectors)
 ```
 
 ```bash
-# Verify provenance after build
-cat vendor/openssl/BUILD_PROVENANCE.txt
-# Records: source tag, commit SHA, compiler version, patches applied
+# Verify sha256_compact.c against known-answer tests (NIST FIPS 180-4)
+cmake --build build --target test_sha256
+./build/test_sha256  # Runs NIST test vectors
 
-# Verify library hash
-EXPECTED_LIB_HASH="e5f6g7h8i9j0..."
-ACTUAL_LIB_HASH=$(sha256sum vendor/openssl/lib/libcrypto.a | cut -d' ' -f1)
-[ "$ACTUAL_LIB_HASH" = "$EXPECTED_LIB_HASH" ] || exit 1
+# Verify WASM imports — should ONLY import random_get (no OpenSSL)
+wasm-objdump -x build/paranoid.wasm | grep "import"
+# Expected: wasi_snapshot_preview1.random_get (and NOTHING else)
+
+# For native CLI builds, OpenSSL is still used:
+openssl version  # Verify OpenSSL is available for CLI builds
 ```
+
+**Note**: The native CLI build (`packages/cli`) still uses OpenSSL via
+`openssl rand` for CSPRNG. Only the WASM/web build has removed the
+OpenSSL dependency in favor of WASI `random_get()` + `sha256_compact.c`.
 
 ### Known-Good Hash Registry
 
 **File**: `known-good-hashes.txt`
 
 ```
-# OpenSSL libcrypto.a (built from official source at tag openssl-3.4.0)
-e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0  vendor/openssl/lib/libcrypto.a
-
-# Zig 0.13.0 (linux-x86_64)
+# Zig 0.13.0 (linux-x86_64, melange-built from Wolfi)
 f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0  /usr/bin/zig
+
+# sha256_compact.c (bundled SHA-256 for WASM build)
+a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5  src/sha256_compact.c
 
 # (Add all critical dependencies)
 ```
@@ -508,7 +510,7 @@ diff <(grep -E '^\s+(i32|f64|call)' zig.wat | sort) \
 Before making changes to `paranoid`, I (the LLM) must:
 
 - [ ] Acknowledge that I am the PRIMARY THREAT ACTOR
-- [ ] Confirm all crypto logic delegated to OpenSSL (no LLM-generated RNG)
+- [ ] Confirm all crypto logic delegated to platform CSPRNG (native: OpenSSL, WASM: WASI random_get)
 - [ ] Verify rejection sampling formula: max_valid = (256/N)*N - 1 (not -0)
 - [ ] Cross-check chi-squared formula against textbook (not LLM memory)
 - [ ] Flag ALL statistical formulas for human review
@@ -522,15 +524,15 @@ Before making changes to `paranoid`, I (the LLM) must:
 # LLM Code Generation Rules for Cryptographic Code
 
 NEVER:
-- [ ] Generate random numbers directly (use OpenSSL RAND_bytes)
-- [ ] Implement crypto primitives (use OpenSSL EVP_*)
+- [ ] Generate random numbers directly (use platform CSPRNG: OpenSSL RAND_bytes or WASI random_get)
+- [ ] Implement crypto primitives (use OpenSSL EVP_* or verified bundled implementations)
 - [ ] Use modulo without rejection sampling
 - [ ] Claim formulas are correct (flag for verification)
 - [ ] Suppress warnings or test failures
 - [ ] Add JavaScript fallbacks
 
 ALWAYS:
-- [ ] Delegate RNG to OpenSSL
+- [ ] Delegate RNG to platform CSPRNG (native: OpenSSL, WASM: WASI random_get)
 - [ ] Use rejection sampling for uniform distribution
 - [ ] Include human review markers: "TODO: HUMAN REVIEW"
 - [ ] Reference textbook page numbers for formulas
@@ -566,12 +568,14 @@ git grep "TODO.*HUMAN.*REVIEW" src/ include/ && echo "HALLUCINATION: Unreviewed 
 **Solution**: Never let LLM generate password patterns directly.
 
 ```c
-// ✅ CORRECT: LLM delegates to OpenSSL
+// ✅ CORRECT: LLM delegates to platform CSPRNG
 int paranoid_generate(...) {
     for (int i = 0; i < length; i++) {
         uint8_t byte;
         do {
-            RAND_bytes(&byte, 1);  // OpenSSL, not LLM
+            // Native: RAND_bytes(&byte, 1)  — OpenSSL
+            // WASM:   random_get(&byte, 1)   — WASI -> browser -> OS CSPRNG
+            platform_random(&byte, 1);
         } while (byte > max_valid);
         output[i] = charset[byte % charset_len];
     }
@@ -636,14 +640,18 @@ cosign verify ghcr.io/jbcom/paranoid-passwd:latest \
 
 **View SBOM:**
 ```bash
-docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
-  --format '{{ json .SBOM }}'
+cosign verify-attestation ghcr.io/jbcom/paranoid-passwd:latest \
+  --type spdxjson \
+  --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp="https://github.com/jbcom/paranoid-passwd/.*"
 ```
 
 **View SLSA Provenance:**
 ```bash
-docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
-  --format '{{ json .Provenance }}'
+cosign verify-attestation ghcr.io/jbcom/paranoid-passwd:latest \
+  --type slsaprovenance \
+  --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp="https://github.com/jbcom/paranoid-passwd/.*"
 ```
 
 **Check Rekor Transparency Log:**
@@ -675,7 +683,7 @@ rekor-cli search --email "github-actions@github.com" \
       "configSource": {
         "uri": "git+https://github.com/jbcom/paranoid-passwd@refs/heads/main",
         "digest": {"sha1": "<commit-sha>"},
-        "entryPoint": "Dockerfile"
+        "entryPoint": "melange.yaml"
       }
     },
     "metadata": {
@@ -694,12 +702,14 @@ rekor-cli search --email "github-actions@github.com" \
         "digest": {"sha1": "<commit-sha>"}
       },
       {
-        "uri": "git+https://github.com/openssl/openssl@openssl-3.4.0",
-        "digest": {"sha1": "<openssl-source-commit-sha>"}
+        "uri": "pkg:apk/wolfi/zig",
+        "digest": {"sha256": "<melange-zig-apk-hash>"},
+        "annotations": {"source": "melange-built from Wolfi"}
       },
       {
-        "uri": "docker://alpine:3.21",
-        "digest": {"sha256": "25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659"}
+        "uri": "cgr.dev/chainguard/wolfi-base:latest",
+        "digest": {"sha256": "<wolfi-base-image-hash>"},
+        "annotations": {"builder": "apko"}
       }
     ]
   }
@@ -737,13 +747,13 @@ Before ANY deployment:
 ### Source Verification
 - [ ] All commits GPG-signed by known developers
 - [ ] No uncommitted local changes
-- [ ] OpenSSL built from official source at pinned tag (openssl-3.4.0)
-- [ ] BUILD_PROVENANCE.txt records correct source tag, commit, and patches
-- [ ] Dependency library hashes match known-good registry
+- [ ] WASM build: `sha256_compact.c` passes NIST FIPS 180-4 test vectors
+- [ ] Native CLI: OpenSSL available at expected version
+- [ ] melange package provenance records correct source commit and toolchain
+- [ ] Dependency hashes match known-good registry
 
 ### Tool Verification
-- [ ] Zig compiler hash matches known-good
-- [ ] OpenSSL binary hash matches known-good
+- [ ] Zig compiler hash matches known-good (melange-built from Wolfi)
 - [ ] All GitHub Actions SHA-pinned (no tags)
 
 ### Build Verification

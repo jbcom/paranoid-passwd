@@ -145,7 +145,7 @@ jobs:
             fi
             if [ -f build/wasm/paranoid.wasm ]; then
               cp build/wasm/paranoid.wasm artifact/
-              cp www/index.html www/style.css www/app.js artifact/site/
+              cp www/index.html www/style.css www/app.js www/CNAME artifact/site/
               cp build/wasm/paranoid.wasm artifact/site/
             fi
           fi

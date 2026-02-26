@@ -139,7 +139,7 @@ jobs:
               mv build/wasm/paranoid build/wasm/paranoid.wasm
             fi
             cp build/wasm/paranoid.wasm artifact/
-            cp www/index.html www/style.css www/app.js artifact/site/
+            cp www/index.html www/style.css www/app.js www/CNAME artifact/site/
             cp build/wasm/paranoid.wasm artifact/site/
           fi
 

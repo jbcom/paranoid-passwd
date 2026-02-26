@@ -29,7 +29,7 @@
 
   /* Text hierarchy */
   --text:      #b8bdd0;
-  --text-dim:  #5c6380;
+  --text-dim:  #7a80a0;
   --text-hi:   #e4e7f2;
 
   /* Semantic colors */
@@ -1688,7 +1688,16 @@ input[type="range"]::-moz-range-thumb {
 /* Collapse dashboard to single column on tablets */
 @media (max-width: 960px) {
   .config-dashboard {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .config-sidebar {
+    order: -1;
+  }
+
+  .provenance {
+    order: 99;
   }
 
   .sidebar-sticky {
@@ -1778,5 +1787,17 @@ input[type="range"]::-moz-range-thumb {
 
   .config-grid-4 {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ── Reduced Motion ─────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
