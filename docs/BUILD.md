@@ -296,6 +296,51 @@ build/paranoid.wasm: src/paranoid.c
 
 The repository implements the supply chain security practices from [Liquibase's Docker Security Blog](https://www.liquibase.com/blog/docker-supply-chain-security):
 
+**Build Philosophy — All Testing Inside Docker:**
+
+The Dockerfile runs **all tests as a condition of successful build**. If ANY test fails, the Docker build fails — no artifacts are produced.
+
+```
+╔════════════════════════════════════════════════════════════════════════╗
+║                    DOCKER MULTI-STAGE BUILD PIPELINE                   ║
+╠════════════════════════════════════════════════════════════════════════╣
+║                                                                        ║
+║  STAGE 1: BASE                                                         ║
+║    └── Alpine 3.21 + build tools (gcc, make, git, wabt)               ║
+║                                                                        ║
+║  STAGE 2: DEPS                                                         ║
+║    ├── git clone openssl-wasm @ SHA-pinned commit                     ║
+║    └── git clone munit @ SHA-pinned commit                            ║
+║    (NO SUBMODULES NEEDED!)                                            ║
+║                                                                        ║
+║  STAGE 3: TEST-NATIVE                                                  ║
+║    └── Run munit C tests → MUST PASS or build fails                   ║
+║                                                                        ║
+║  STAGE 4: BUILD-ZIG                                                    ║
+║    └── Compile WASM with Zig                                          ║
+║                                                                        ║
+║  STAGE 5: VERIFY                                                       ║
+║    ├── WASM export/import verification                                ║
+║    ├── Hallucination detection                                        ║
+║    ├── Binary size verification                                       ║
+║    └── Site asset verification                                        ║
+║                                                                        ║
+║  STAGE 6: ARTIFACT                                                     ║
+║    └── Collect verified artifacts                                     ║
+║                                                                        ║
+║  FINAL: SCRATCH IMAGE (zero attack surface)                           ║
+║                                                                        ║
+╚════════════════════════════════════════════════════════════════════════╝
+```
+
+**No Submodules Required:**
+
+The Dockerfile clones dependencies directly at SHA-pinned commits:
+- **openssl-wasm**: `fe926b5006593ad2825243f97e363823cd56599f`
+- **munit**: `fbbdf1467eb0d04a6ee465def2e529e4c87f2118`
+
+This makes container builds **fully self-contained** and reproducible without any vendor/ directory or .gitmodules file.
+
 **Base Image Rationale — Alpine Linux:**
 
 We use **Alpine Linux** as the base image for minimal attack surface:
@@ -318,6 +363,8 @@ Note: The Liquibase container itself is Java-based for database migrations. We a
 **Features:**
 - **SHA256-pinned base image** — `alpine:3.21@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659`
 - **SHA-pinned openssl-wasm** — Commit `fe926b5006593ad2825243f97e363823cd56599f`
+- **SHA-pinned munit** — Commit `fbbdf1467eb0d04a6ee465def2e529e4c87f2118`
+- **All tests run inside Docker** — Build fails if any test fails
 - **SBOM generation** — Software Bill of Materials attached to every image (`--sbom=true`)
 - **SLSA Level 3 provenance** — Non-falsifiable build attestation (`--provenance=mode=max`)
 - **Cosign keyless signing** — Ephemeral certificates via GitHub OIDC, recorded in Sigstore's Rekor transparency log
@@ -415,17 +462,22 @@ diff zig.wat clang.wat
 
 ### Dependency Pinning
 
-**OpenSSL WASM** (git submodule):
-```bash
-# Pin to specific commit
-cd vendor/openssl-wasm
-git checkout <commit-sha>
+**OpenSSL WASM** (cloned directly in Dockerfile, no submodule):
+```dockerfile
+# In Dockerfile
+ARG OPENSSL_WASM_COMMIT=fe926b5006593ad2825243f97e363823cd56599f
+RUN git clone --filter=blob:none --no-checkout ${OPENSSL_WASM_REPO} openssl-wasm && \
+    cd openssl-wasm && \
+    git checkout ${OPENSSL_WASM_COMMIT}
+```
 
-# In .gitmodules:
-[submodule "vendor/openssl-wasm"]
-    path = vendor/openssl-wasm
-    url = https://github.com/jedisct1/openssl-wasm.git
-    # TODO: Add commit SHA pin
+**munit testing framework** (cloned directly in Dockerfile):
+```dockerfile
+# In Dockerfile
+ARG MUNIT_COMMIT=fbbdf1467eb0d04a6ee465def2e529e4c87f2118
+RUN git clone --filter=blob:none --no-checkout ${MUNIT_REPO} munit && \
+    cd munit && \
+    git checkout ${MUNIT_COMMIT}
 ```
 
 **Zig compiler** (CI):
@@ -435,6 +487,8 @@ git checkout <commit-sha>
   with:
     version: 0.14.0  # Exact version
 ```
+
+**Note**: The vendor/ directory and .gitmodules are **only for local development** convenience. Docker builds are fully self-contained and clone dependencies directly.
 
 ### Build Attestation (Planned)
 
@@ -643,11 +697,21 @@ make verify       # Job 2: Verify WASM structure
 
 ## Troubleshooting
 
-### Submodule Not Initialized
+### Local Development Setup (Optional)
+
+For local development without Docker, you may optionally set up the vendor directory:
 
 ```bash
-git submodule update --init --recursive --depth=1
+# Clone dependencies for local development
+mkdir -p vendor
+git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
+cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f
+cd ../..
+git clone https://github.com/nemequ/munit.git vendor/munit
+cd vendor/munit && git checkout fbbdf1467eb0d04a6ee465def2e529e4c87f2118
 ```
+
+**Note**: For production builds, always use Docker — it clones dependencies automatically at SHA-pinned commits.
 
 ### Zig Version Mismatch
 
@@ -686,14 +750,18 @@ error: undefined symbol: RAND_bytes
 
 **Cause**: OpenSSL library not found.
 
-**Fix**:
+**Fix** (local development):
 ```bash
 # Verify library exists
 ls -lh vendor/openssl-wasm/precompiled/lib/libcrypto.a
 
-# If missing, reinitialize submodule
-git submodule update --init --recursive --depth=1
+# If missing, clone the dependency
+mkdir -p vendor
+git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
+cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f
 ```
+
+**Fix** (production): Use Docker — it handles all dependencies automatically.
 
 ---
 

@@ -1,4 +1,0 @@
-[submodule "vendor/openssl-wasm"]
-	path = vendor/openssl-wasm
-	url = https://github.com/jedisct1/openssl-wasm.git
-	shallow = true
