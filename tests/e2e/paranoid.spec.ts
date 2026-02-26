@@ -65,10 +65,13 @@ test.describe('paranoid Password Generator E2E', () => {
 
     // Generate 3 passwords and verify uniqueness (fewer to save time)
     for (let i = 0; i < 3; i++) {
-      // Navigate back to configure panel if needed
+      // Full page reload to reset wizard state between generations
       if (i > 0) {
-        await page.locator('label[for="step-configure"]').click();
-        await page.waitForTimeout(200);
+        await page.goto('/');
+        await page.waitForFunction(() => {
+          const el = document.getElementById('status-text');
+          return el && el.textContent === 'ready';
+        }, { timeout: 15000 });
       }
 
       const launchBtn = page.locator('#btn-launch');
