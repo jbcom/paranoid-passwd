@@ -32,7 +32,7 @@
 [![OpenSSL](https://img.shields.io/badge/OpenSSL-721412?style=flat-square&logo=openssl&logoColor=white)](https://www.openssl.org/)
 [![Wolfi](https://img.shields.io/badge/Wolfi-4A4A55?style=flat-square&logo=linux&logoColor=white)](https://wolfi.dev/)
 
-[**Live Demo**](https://paranoid-passwd.com) · [**Documentation**](#-documentation) · [**Security**](SECURITY.md) · [**Report Bug**](https://github.com/jbcom/paranoid-passwd/issues)
+[**Live Demo**](https://paranoid-passwd.com) · [**Documentation**](#documentation) · [**Security**](SECURITY.md) · [**Report Bug**](https://github.com/jbcom/paranoid-passwd/issues)
 
 </div>
 
