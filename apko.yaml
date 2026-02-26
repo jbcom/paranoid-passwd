@@ -40,4 +40,3 @@ cmd: echo "paranoid-passwd artifacts at /usr/share/paranoid-passwd/site/"
 
 archs:
   - x86_64
-  - aarch64

@@ -29,7 +29,6 @@ package:
     - license: MIT
   target-architecture:
     - x86_64
-    - aarch64
 
 environment:
   contents:
