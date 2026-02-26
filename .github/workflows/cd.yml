@@ -125,11 +125,12 @@ jobs:
               mkdir -p /tmp/apk-extract
               tar -xzf "$APK_FILE" -C /tmp/apk-extract 2>/dev/null || true
               # Copy site files from the extracted package
-              if [ -d /tmp/apk-extract/usr/share/paranoid-passwd/www ]; then
-                cp -r /tmp/apk-extract/usr/share/paranoid-passwd/www/* artifact/site/
+              # melange installs to /usr/share/paranoid-passwd/site/
+              if [ -d /tmp/apk-extract/usr/share/paranoid-passwd/site ]; then
+                cp -r /tmp/apk-extract/usr/share/paranoid-passwd/site/* artifact/site/
               fi
-              if [ -f /tmp/apk-extract/usr/share/paranoid-passwd/paranoid.wasm ]; then
-                cp /tmp/apk-extract/usr/share/paranoid-passwd/paranoid.wasm artifact/
+              if [ -f /tmp/apk-extract/usr/share/paranoid-passwd/site/paranoid.wasm ]; then
+                cp /tmp/apk-extract/usr/share/paranoid-passwd/site/paranoid.wasm artifact/
               fi
             fi
           fi
@@ -137,6 +138,10 @@ jobs:
           # Fall back to build directory if package extraction didn't work
           if [ ! -f artifact/paranoid.wasm ]; then
             echo "Package extraction incomplete, checking build directory..."
+            # Normalize: -mexec-model=reactor may produce "paranoid" without .wasm
+            if [ -f build/wasm/paranoid ] && [ ! -f build/wasm/paranoid.wasm ]; then
+              mv build/wasm/paranoid build/wasm/paranoid.wasm
+            fi
             if [ -f build/wasm/paranoid.wasm ]; then
               cp build/wasm/paranoid.wasm artifact/
               cp www/index.html www/style.css www/app.js artifact/site/
