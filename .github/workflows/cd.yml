@@ -94,7 +94,8 @@ jobs:
           melange build melange.yaml \
             --signing-key melange.rsa \
             --arch x86_64 \
-            --out-dir packages/
+            --out-dir packages/ \
+            --runner docker
 
       - name: Build OCI image with apko
         id: apko-build
