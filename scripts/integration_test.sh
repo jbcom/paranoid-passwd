@@ -164,12 +164,12 @@ if command -v wasm-objdump &> /dev/null; then
     REQUIRED_EXPORTS="paranoid_version paranoid_generate paranoid_run_audit paranoid_get_result_ptr paranoid_get_result_size paranoid_offset_password_length paranoid_offset_all_pass malloc free"
 
     for EXPORT in $REQUIRED_EXPORTS; do
-        run_test "Export: $EXPORT" "wasm-objdump -x $WASM 2>/dev/null | grep -q '$EXPORT'"
+        run_test "Export: $EXPORT" "wasm-objdump -x $WASM 2>/dev/null | grep -q '<${EXPORT}>'"
     done
 
     # Check imports (should only be wasi_snapshot_preview1)
     echo -n "TEST: Only WASI imports... "
-    IMPORTS=$(wasm-objdump -x "$WASM" 2>/dev/null | grep " - func" | grep "import" | grep -v "wasi_snapshot_preview1" || true)
+    IMPORTS=$(wasm-objdump -x "$WASM" 2>/dev/null | grep " <- " | grep -v "wasi_snapshot_preview1" || true)
     if [ -z "$IMPORTS" ]; then
         echo -e "${GREEN}PASS${NC}"
         PASSED=$((PASSED + 1))

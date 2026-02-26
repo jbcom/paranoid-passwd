@@ -222,13 +222,13 @@ echo ""
 if [ "$HAS_OBJDUMP" -eq 1 ]; then
     echo "Comparing exports..."
 
-    ZIG_EXPORTS=$(wasm-objdump -x "$ZIG_OUT" 2>/dev/null | grep "export" | sort)
+    ZIG_EXPORTS=$(wasm-objdump -x "$ZIG_OUT" 2>/dev/null | grep " -> " | sort)
     ZIG_EXPORT_COUNT=$(echo "$ZIG_EXPORTS" | wc -l)
 
     echo "  Zig exports: $ZIG_EXPORT_COUNT functions"
 
     if [ "$HAS_CLANG" -eq 1 ] && [ -f "$CLANG_OUT" ]; then
-        CLANG_EXPORTS=$(wasm-objdump -x "$CLANG_OUT" 2>/dev/null | grep "export" | sort)
+        CLANG_EXPORTS=$(wasm-objdump -x "$CLANG_OUT" 2>/dev/null | grep " -> " | sort)
         CLANG_EXPORT_COUNT=$(echo "$CLANG_EXPORTS" | wc -l)
         echo "  Clang exports: $CLANG_EXPORT_COUNT functions"
 

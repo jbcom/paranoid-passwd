@@ -118,7 +118,7 @@ jobs:
                     paranoid_sha256 paranoid_sha256_hex \
                     paranoid_chi_squared paranoid_serial_correlation \
                     paranoid_count_collisions malloc free; do
-            if wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | grep -q "export.*${fn}"; then
+            if wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | grep -q "<${fn}>"; then
               echo "  OK: ${fn}"
             else
               echo "  MISSING: ${fn}"; exit 1
@@ -128,8 +128,8 @@ jobs:
           echo ""
           echo "=== Import namespaces ==="
           NAMESPACES=$(wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | \
-            grep " - func" | grep "import" | \
-            sed 's/.*<\([^.]*\)\..*/\1/' | sort -u)
+            grep " <- " | \
+            sed 's/.*<- \([^.]*\)\..*/\1/' | sort -u)
           for ns in $NAMESPACES; do
             if [ "$ns" = "wasi_snapshot_preview1" ]; then
               echo "  OK: $ns"
@@ -266,6 +266,7 @@ jobs:
         uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8 # v5.0.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true  # May conflict with SonarCloud automatic analysis
 
   # ---------------------------------------------------------------
   # JOB 6: ShellCheck
