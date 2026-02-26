@@ -103,10 +103,10 @@ RUN test -d .git || \
 # ═══════════════════════════════════════════════════════════════════════════════
 # This makes the container build fully self-contained and reproducible.
 # The commit is SHA-pinned above for supply chain security.
+# Using --filter=blob:none for efficient partial clone while getting specific commit.
 RUN mkdir -p vendor && \
-    git clone --depth 1 ${OPENSSL_WASM_REPO} vendor/openssl-wasm && \
+    git clone --filter=blob:none --no-checkout ${OPENSSL_WASM_REPO} vendor/openssl-wasm && \
     cd vendor/openssl-wasm && \
-    git fetch --depth 1 origin ${OPENSSL_WASM_COMMIT} && \
     git checkout ${OPENSSL_WASM_COMMIT} && \
     echo "✓ openssl-wasm pinned to ${OPENSSL_WASM_COMMIT}"
 
