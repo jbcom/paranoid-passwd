@@ -23,12 +23,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+env:
+  ZIG_VERSION: "0.13.0"
+  # acutest v1.7.5 (2024-01-14) — pinned by SHA for supply chain security
+  ACUTEST_SHA: "31751b4089c93b46a9fd8a8183a695f772de66de"
 
 jobs:
 
@@ -38,6 +42,9 @@ jobs:
   native-test:
     name: Native Build + Tests
     runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -54,7 +61,7 @@ jobs:
         run: |
           mkdir -p vendor
           git clone https://github.com/mity/acutest.git vendor/acutest
-          cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de
+          cd vendor/acutest && git checkout "$ACUTEST_SHA"
 
       - name: Configure (CMake native)
         run: cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
@@ -72,6 +79,9 @@ jobs:
     name: WASM Build + Validate
     runs-on: ubuntu-24.04
 
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -80,7 +90,6 @@ jobs:
 
       - name: Install Zig
         run: |
-          ZIG_VERSION="0.13.0"
           curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" | tar -xJ
           echo "$PWD/zig-linux-x86_64-${ZIG_VERSION}" >> "$GITHUB_PATH"
 
@@ -159,6 +168,9 @@ jobs:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-24.04
     needs: wasm-build
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -255,6 +267,9 @@ jobs:
     name: SonarCloud
     runs-on: ubuntu-24.04
 
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -273,6 +288,9 @@ jobs:
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -306,6 +324,9 @@ jobs:
     name: Hallucination Check
     runs-on: ubuntu-24.04
 
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -321,6 +342,9 @@ jobs:
   supply-chain-verify:
     name: Supply Chain Verify
     runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout

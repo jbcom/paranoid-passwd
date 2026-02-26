@@ -662,8 +662,8 @@ int paranoid_run_audit(
     /* ── Stage 2: Generate batch + chi-squared ── */
     result->current_stage = 2;
 
-    /* +1: paranoid_generate writes a NUL terminator at output[pw_length] */
-    char *batch = malloc(batch_size * pw_length + 1);
+    /* Each paranoid_generate call writes pw_length chars + 1 NUL terminator */
+    char *batch = malloc(batch_size * (pw_length + 1));
     if (!batch) return -1;
 
     for (int i = 0; i < batch_size; i++) {

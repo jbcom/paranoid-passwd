@@ -91,7 +91,7 @@ pipeline:
       WASM_SRI=$(openssl dgst -sha384 -binary build-wasm/paranoid.wasm | openssl base64 -A)
       CSS_SRI=$(openssl dgst -sha384 -binary www/style.css | openssl base64 -A)
       JS_SRI=$(openssl dgst -sha384 -binary www/app.js | openssl base64 -A)
-      BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      BUILD_TIME=${SOURCE_DATE_EPOCH:+$(date -u -d @${SOURCE_DATE_EPOCH} +%Y-%m-%dT%H:%M:%SZ)}; BUILD_TIME=${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
       cat > build-wasm/BUILD_MANIFEST.json <<MANIFEST
       {
         "project": "paranoid-passwd",

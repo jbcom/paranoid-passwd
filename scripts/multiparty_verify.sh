@@ -67,7 +67,14 @@ ensure_dir() {
 submit_hash() {
     local BUILDER="$1"
     local HASH="$2"
-    
+
+    # Sanitize builder name to prevent path traversal (allow only alphanumeric, hyphen, underscore)
+    if ! echo "$BUILDER" | grep -Eq '^[a-zA-Z0-9_-]+$'; then
+        echo -e "${RED}ERROR: Invalid builder name${NC}"
+        echo "Builder name must contain only alphanumeric characters, hyphens, and underscores"
+        exit 1
+    fi
+
     # Validate hash format (64 hex chars)
     if ! echo "$HASH" | grep -Eq '^[a-f0-9]{64}$'; then
         echo -e "${RED}ERROR: Invalid hash format${NC}"

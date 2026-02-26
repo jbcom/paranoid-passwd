@@ -22,8 +22,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: cd-${{ github.ref }}
@@ -179,7 +178,7 @@ jobs:
             crane push output.tar ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             crane push output.tar ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           else
-            echo "WARNING: output.tar not found, skipping push"
+            echo "ERROR: output.tar not found, cannot push OCI image" && exit 1
           fi
 
       - name: Sign container image with Cosign
@@ -227,6 +226,9 @@ jobs:
     name: Double Compilation
     runs-on: ubuntu-24.04
 
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -253,6 +255,9 @@ jobs:
     name: Multi-Party Verify
     runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/heads/release-')
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout

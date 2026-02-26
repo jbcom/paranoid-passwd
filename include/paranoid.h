@@ -135,7 +135,7 @@ typedef struct {
     int      all_pass;            /* 1 if every test passed */
 
     /* Stage tracking (JS polls this) */
-    int      current_stage;       /* 0=idle, 1=gen, 2=chi2, ... 7=done */
+    int      current_stage;       /* 0=idle, 1=gen, 2=chi2, ... 8=done */
 
     /* ── New v3.0 fields (F5) ── */
     /* VERIFIED: - new fields added at END of struct for

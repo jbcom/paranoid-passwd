@@ -161,7 +161,7 @@ fi
 
 # Check exports (if wabt available)
 if command -v wasm-objdump &> /dev/null; then
-    REQUIRED_EXPORTS="paranoid_version paranoid_generate paranoid_run_audit paranoid_get_result_ptr paranoid_get_result_size paranoid_offset_password_length paranoid_offset_all_pass malloc free"
+    REQUIRED_EXPORTS="paranoid_version paranoid_generate paranoid_run_audit paranoid_get_result_ptr paranoid_get_result_size paranoid_generate_multiple paranoid_generate_constrained paranoid_validate_charset paranoid_check_compliance paranoid_offset_password_length paranoid_offset_chi2_statistic paranoid_offset_current_stage paranoid_offset_all_pass malloc free"
 
     for EXPORT in $REQUIRED_EXPORTS; do
         run_test "Export: $EXPORT" "wasm-objdump -x $WASM 2>/dev/null | grep -q '<${EXPORT}>'"

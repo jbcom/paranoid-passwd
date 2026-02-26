@@ -163,10 +163,10 @@ if [ -f "$MELANGE_YAML" ] && [ -f "$APKO_YAML" ]; then
     echo -e "${GREEN}PASS${NC}"
     echo "    melange.yaml and apko.yaml present"
 else
-    echo -e "${YELLOW}WARN${NC}"
+    echo -e "${RED}FAIL${NC}"
     [ ! -f "$MELANGE_YAML" ] && echo "    Missing: melange.yaml (needed for CD pipeline)"
     [ ! -f "$APKO_YAML" ] && echo "    Missing: apko.yaml (needed for OCI image build)"
-    WARNINGS=$((WARNINGS + 1))
+    FAILED=$((FAILED + 1))
 fi
 
 # ─────────────────────────────────────────────────────────────
