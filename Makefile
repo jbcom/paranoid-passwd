@@ -38,7 +38,7 @@ CC           := zig cc
 TARGET       := wasm32-wasi
 CFLAGS       := -Ofast -I$(INC_DIR) -I$(OPENSSL_INC) \
                 -DPARANOID_VERSION_STRING=\"$(VERSION)\"
-LDFLAGS      := -lwasi-emulated-getpid -rdynamic
+LDFLAGS      := -lwasi-emulated-getpid -Wl,--no-entry
 
 # Hash tools (detect what's available)
 SHA256       := $(shell command -v sha256sum 2>/dev/null || \
@@ -69,7 +69,7 @@ EXPORTS := \
     malloc \
     free
 
-EXPORT_FLAGS := $(foreach fn,$(EXPORTS),--export=$(fn))
+EXPORT_FLAGS := $(foreach fn,$(EXPORTS),-Wl,--export=$(fn))
 
 # ── ANSI colors ────────────────────────────────────────────
 
@@ -121,7 +121,8 @@ build: $(WASM)
 $(BUILD_DIR):
 	@mkdir -p $@
 
-$(WASM): $(SRC) $(HDR) $(OPENSSL_LIB) | $(BUILD_DIR)
+$(WASM): $(SRC) $(HDR) $(OPENSSL_LIB)
+	@mkdir -p $(BUILD_DIR)
 	@printf "$(_G)▸$(_N) Compiling $(SRC) → $@\n"
 	$(CC) --target=$(TARGET) $(CFLAGS) \
 	    $(SRC) $(OPENSSL_LIB) \
