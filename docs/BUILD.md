@@ -296,8 +296,28 @@ build/paranoid.wasm: src/paranoid.c
 
 The repository implements the supply chain security practices from [Liquibase's Docker Security Blog](https://www.liquibase.com/blog/docker-supply-chain-security):
 
+**Base Image Rationale — Alpine Linux:**
+
+We use **Alpine Linux** as the base image for minimal attack surface:
+
+| Metric | Alpine | Debian slim |
+|--------|--------|-------------|
+| Compressed size | ~3.5MB | ~29MB |
+| Base libraries | musl + BusyBox | glibc |
+| Attack surface | Minimal | Larger |
+| Package manager | apk | apt |
+
+Why Alpine over Debian?
+- **~8x smaller** base image (3.5MB vs 29MB compressed)
+- **Minimal footprint** with musl-libc and BusyBox
+- **All required build dependencies available** via apk (make, git, curl, openssl, wabt)
+- **Zig static binary** works on musl-libc without glibc compatibility shims
+
+Note: The Liquibase container itself is Java-based for database migrations. We adopt Liquibase's **security practices** (SHA pinning, SBOM, Cosign signing, SLSA provenance) rather than their runtime image.
+
 **Features:**
-- **SHA256-pinned base image** — `debian:12-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421`
+- **SHA256-pinned base image** — `alpine:3.21@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659`
+- **SHA-pinned openssl-wasm** — Commit `fe926b5006593ad2825243f97e363823cd56599f`
 - **SBOM generation** — Software Bill of Materials attached to every image (`--sbom=true`)
 - **SLSA Level 3 provenance** — Non-falsifiable build attestation (`--provenance=mode=max`)
 - **Cosign keyless signing** — Ephemeral certificates via GitHub OIDC, recorded in Sigstore's Rekor transparency log
@@ -489,6 +509,97 @@ Anyone can:
 
 ---
 
+## Testing
+
+### Overview
+
+The project uses a comprehensive testing strategy:
+
+1. **Native C Unit Tests** (munit framework) — Run BEFORE WASM compilation
+2. **Integration Tests** — Verify complete WASM module in browser environment
+3. **Hallucination Detection** — Automated checks for LLM-introduced bugs
+4. **Supply Chain Verification** — Dependency and build integrity checks
+
+### µnit (munit) Testing Framework
+
+We use [µnit](https://nemequ.github.io/munit/) for native C unit testing:
+
+**Why munit?**
+- **Single file** — Just `munit.c` and `munit.h` (trivial to integrate)
+- **Portable** — Works on any C89+ compiler
+- **Powerful CLI** — Reproducible tests with `--seed`, iterations, filtering
+- **Rich assertions** — Type-specific assertions with value display on failure
+- **Nested suites** — Organize tests hierarchically
+
+**Test Coverage:**
+
+| Suite | Coverage |
+|-------|----------|
+| `/sha256` | NIST FIPS 180-4 known-answer vectors |
+| `/rejection` | Boundary verification: `(256/N)*N - 1` |
+| `/generate` | Length, charset, uniqueness, error handling |
+| `/chi_squared` | Uniform/biased distribution, df = N-1 |
+| `/serial` | Correlation tests (constant, alternating) |
+| `/collision` | Duplicate detection |
+| `/struct` | WASM/JS struct offset verification |
+| `/audit` | Full pipeline integration |
+| `/stress` | High-volume distribution verification |
+
+**Run Tests:**
+
+```bash
+# Run all native C tests
+make test-native
+
+# Run with munit options
+./build/test_munit --help
+./build/test_munit --seed 12345        # Reproducible PRNG seed
+./build/test_munit /paranoid/sha256    # Run only SHA-256 tests
+./build/test_munit --iterations 100    # Stress test (run each test 100x)
+```
+
+**Example Output:**
+
+```
+Running test suite with seed 0x1a2b3c4d...
+/paranoid/sha256/empty                         [ OK    ]
+/paranoid/sha256/abc                           [ OK    ]
+/paranoid/rejection/boundary_94                [ OK    ]
+/paranoid/stress/distribution                  [ OK    ]
+
+30 of 30 (100%) tests successful, 0 (0%) test skipped.
+```
+
+### Test Before WASM Compilation
+
+The testing strategy ensures correctness at the **native C level** before compiling to WASM:
+
+```
+                    TESTING STAGES
+┌──────────────────────────────────────────────────────┐
+│                                                      │
+│  src/paranoid.c  ──► [make test-native] ──► PASS?   │
+│       │                                     │        │
+│       │                                     ▼        │
+│       │                               [make build]  │
+│       │                                     │        │
+│       ▼                                     ▼        │
+│  paranoid.wasm  ◄────────────────────────────       │
+│       │                                              │
+│       ▼                                              │
+│  [make integration] ──► Browser/WASM tests          │
+│                                                      │
+└──────────────────────────────────────────────────────┘
+```
+
+This catches:
+- Rejection sampling bugs (`max_valid = (256/N)*N - 1`)
+- Statistical formula errors (df = N-1, p-value interpretation)
+- Memory safety issues (before they become WASM traps)
+- Entropy calculation errors
+
+---
+
 ## Build Commands Reference
 
 ### Development
@@ -499,6 +610,16 @@ make build        # Compile WASM only
 make site         # Assemble site
 make serve        # Local server (http://localhost:8080)
 make clean        # Remove build artifacts
+```
+
+### Testing
+
+```bash
+make test         # Run ALL tests (native + integration + checks)
+make test-native  # Run native C unit tests (munit)
+make integration  # Run browser/WASM integration tests
+make hallucination # LLM hallucination detection
+make supply-chain # Supply chain verification
 ```
 
 ### Verification
@@ -513,6 +634,7 @@ make info         # Show toolchain configuration
 
 ```bash
 make site         # Job 1: Build
+make test-native  # Job 1.5: Native C tests
 make verify       # Job 2: Verify WASM structure
 # Job 3: Deploy build/site/ to GitHub Pages
 ```

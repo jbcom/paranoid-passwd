@@ -84,7 +84,7 @@ _N := \033[0m
 # ═══════════════════════════════════════════════════════════
 
 .PHONY: all build site clean verify hash deploy check \
-        submodule info help test integration hallucination supply-chain
+        submodule info help test test-native integration hallucination supply-chain
 
 ## Default: build everything
 all: site
@@ -222,9 +222,35 @@ serve: site
 
 # ── Testing ────────────────────────────────────────────────
 
-## Run all tests
-test: integration hallucination supply-chain
+# Native test binary configuration
+TEST_SRC        := tests/test_munit.c
+MUNIT_SRC       := vendor/munit/munit.c
+TEST_BIN        := $(BUILD_DIR)/test_munit
+
+# Native compiler (system CC for running tests locally)
+NATIVE_CC       := cc
+NATIVE_CFLAGS   := -O2 -Wall -Wextra -I$(INC_DIR) -I$(OPENSSL_INC) -Ivendor/munit \
+                   -DPARANOID_VERSION_STRING=\"$(VERSION)\"
+
+## Run all tests (native C tests first, then integration)
+test: test-native integration hallucination supply-chain
 	@printf "$(_G)✓$(_N) All tests passed\n"
+
+## Run native C unit tests (munit framework)
+test-native: $(TEST_BIN)
+	@printf "$(_G)▸$(_N) Running native C unit tests (munit)\n"
+	@$(TEST_BIN) --color always
+
+## Build native test binary
+$(TEST_BIN): $(TEST_SRC) $(SRC) $(MUNIT_SRC) $(OPENSSL_LIB)
+	@mkdir -p $(BUILD_DIR)
+	@printf "$(_G)▸$(_N) Compiling native test binary\n"
+	$(NATIVE_CC) $(NATIVE_CFLAGS) \
+	    $(TEST_SRC) $(SRC) $(MUNIT_SRC) \
+	    $(OPENSSL_LIB) \
+	    -lm -lpthread -ldl \
+	    -o $(TEST_BIN)
+	@printf "$(_G)✓$(_N) Native test binary ready: $(TEST_BIN)\n"
 
 ## Run integration tests
 integration: site
@@ -268,7 +294,8 @@ help:
 	@echo "  make submodule    Initialize OpenSSL submodule"
 	@echo ""
 	@echo "  Testing:"
-	@echo "  make test         Run all tests"
+	@echo "  make test         Run all tests (native + integration)"
+	@echo "  make test-native  Run native C unit tests (munit)"
 	@echo "  make integration  Run integration tests"
 	@echo "  make hallucination  Run LLM hallucination detection"
 	@echo "  make supply-chain Run supply chain verification"

@@ -7,11 +7,16 @@
 ## This Dockerfile implements the supply chain security practices from:
 ## https://www.liquibase.com/blog/docker-supply-chain-security
 ##
-## NOTE: We use debian:12-slim as the base image (not the Liquibase image itself)
-## because this is a C/WASM build environment requiring Zig, make, git, etc.
-## The Liquibase container is designed for Java-based database migrations.
-## We adopt Liquibase's SECURITY PRACTICES (SHA pinning, SBOM, Cosign, provenance)
-## rather than their runtime image.
+## BASE IMAGE RATIONALE:
+##   We use Alpine Linux as the base image for minimal attack surface:
+##   - Alpine (~3.5MB compressed) vs Debian slim (~29MB) = 8x smaller
+##   - musl libc + BusyBox = minimal, auditable footprint
+##   - All required packages available: make, git, xz, curl, openssl, wabt
+##   - Zig provides static binaries compatible with musl-libc
+##
+##   The Liquibase container itself is Java-based for database migrations.
+##   We adopt Liquibase's SECURITY PRACTICES (SHA pinning, SBOM, Cosign,
+##   provenance) rather than their runtime image.
 ##
 ## Features:
 ##   - SHA256-pinned base image (immutable, auditable)
@@ -40,13 +45,19 @@
 ##
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# BASE IMAGE — SHA256-pinned for immutability (Liquibase approach)
+# BASE IMAGE — Alpine Linux, SHA256-pinned for immutability
 # ═══════════════════════════════════════════════════════════════════════════════
-# Image: debian:12-slim (bookworm)
-# Digest verified: 2024-02-26 via `docker pull debian:12-slim && docker inspect`
+# Image: alpine:3.21 (latest stable)
+# Digest verified: 2026-02-26 via `docker pull alpine:3.21 && docker inspect`
 # To update: pull new image, verify signature, update digest below
+#
+# Why Alpine over Debian?
+#   - ~8x smaller base image (3.5MB vs 29MB compressed)
+#   - Minimal attack surface (musl + BusyBox)
+#   - All required build dependencies available via apk
+#   - Zig static binary works on musl-libc without glibc compat
 # ═══════════════════════════════════════════════════════════════════════════════
-FROM debian:12-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421 AS builder
+FROM alpine:3.21@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS builder
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # OPENSSL-WASM — SHA-pinned commit (no submodule dependency in container)
@@ -65,28 +76,23 @@ ARG ZIG_DIST=zig-linux-x86_64-${ZIG_VERSION}.tar.xz
 ARG ZIG_SHA256=473ec26806133cf4d1918caf1a410f8403a13d979726a9045b421b685031a982
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# BUILD ENVIRONMENT
+# BUILD ENVIRONMENT — Alpine packages (minimal, auditable)
 # ═══════════════════════════════════════════════════════════════════════════════
-ENV DEBIAN_FRONTEND=noninteractive
 
-# Install build dependencies (minimal set)
-RUN --mount=type=cache,target=/var/cache/apt \
-    --mount=type=cache,target=/var/lib/apt \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
+# Install build dependencies (minimal set for C/WASM compilation)
+RUN apk add --no-cache \
         ca-certificates \
         curl \
-        xz-utils \
+        xz \
         make \
         git \
         python3 \
         openssl \
-        wabt \
-    && rm -rf /var/lib/apt/lists/*
+    && apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing wabt
 
 # Verify architecture matches bundled Zig toolchain
-RUN dpkg --print-architecture | grep -q "^amd64$" || \
-    { echo "ERROR: Builder must be amd64/x86_64 to match bundled Zig toolchain"; exit 1; }
+RUN ARCH=$(uname -m) && [ "$ARCH" = "x86_64" ] || \
+    { echo "ERROR: Builder must be x86_64 to match bundled Zig toolchain"; exit 1; }
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SOURCE VERIFICATION
