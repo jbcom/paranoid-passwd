@@ -1,0 +1,237 @@
+# ─────────────────────────────────────────────────────────────────
+# paranoid — CD Pipeline (Push to Main)
+#
+# RUNS ON: Push to main branch
+# PURPOSE: Build verified artifacts with full attestation.
+#          E2E tests NOT needed here since PRs are fully verified.
+#          Artifacts are stored for release workflow.
+#
+# SUPPLY CHAIN SECURITY (Liquibase-style):
+#   - All builds run inside Docker with BuildKit
+#   - SBOM generation (--sbom=true)
+#   - SLSA Level 3 provenance (--provenance=mode=max)
+#   - Cosign keyless signing via GitHub OIDC
+#   - SHA-pinned base images and actions
+#
+# Reference: https://www.liquibase.com/blog/docker-supply-chain-security
+# ─────────────────────────────────────────────────────────────────
+
+name: CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'www/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'tests/**'
+      - 'scripts/**'
+      - '.github/workflows/cd.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+
+  # ───────────────────────────────────────────────────────────
+  # JOB 1: Docker Build with Full Supply Chain Security
+  # ───────────────────────────────────────────────────────────
+  build:
+    name: Build + Sign (SBOM + Provenance)
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # Required for Cosign keyless signing
+      attestations: write
+
+    outputs:
+      image-digest: ${{ steps.build-push.outputs.digest }}
+      wasm-sha256: ${{ steps.extract.outputs.wasm-sha256 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+
+      - name: Build and Push Container with SBOM + Provenance
+        id: build-push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          push: true
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract verified artifacts
+        id: extract
+        run: |
+          echo "═══════════════════════════════════════════════════════════"
+          echo "  Extracting verified artifacts from Docker image"
+          echo "═══════════════════════════════════════════════════════════"
+          
+          FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -1)
+          CONTAINER_ID=$(docker create "$FIRST_TAG")
+          echo "Container ID: $CONTAINER_ID"
+          
+          mkdir -p artifact
+          docker cp "$CONTAINER_ID":/artifact/. ./artifact/
+          docker rm "$CONTAINER_ID"
+          
+          echo "Extracted files:"
+          ls -la artifact/
+          ls -la artifact/site/
+          
+          WASM_SHA256=$(sha256sum artifact/paranoid.wasm | cut -d' ' -f1)
+          echo "wasm-sha256=${WASM_SHA256}" >> "$GITHUB_OUTPUT"
+          echo "WASM SHA-256: ${WASM_SHA256}"
+
+      - name: Sign Container Image with Cosign
+        env:
+          DIGEST: ${{ steps.build-push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "Signing image with Cosign (keyless via GitHub OIDC)..."
+          images=""
+          for tag in ${TAGS}; do
+            images+="${tag}@${DIGEST} "
+          done
+          cosign sign --yes ${images}
+          echo "✓ Image signed and recorded in Sigstore Rekor transparency log"
+
+      - name: Verify Container Signature
+        env:
+          DIGEST: ${{ steps.build-push.outputs.digest }}
+        run: |
+          echo "Verifying signature..."
+          cosign verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST} \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.*"
+          echo "✓ Signature verified"
+
+      - name: Upload site artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: paranoid-site
+          path: artifact/site/
+          retention-days: 90
+
+      - name: Upload WASM binary
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: paranoid-wasm
+          path: artifact/paranoid.wasm
+          retention-days: 90
+
+      - name: Output Supply Chain Summary
+        env:
+          DIGEST: ${{ steps.build-push.outputs.digest }}
+        run: |
+          echo ""
+          echo "═══════════════════════════════════════════════════════════"
+          echo "  SUPPLY CHAIN SECURITY SUMMARY (Liquibase-style)"
+          echo "═══════════════════════════════════════════════════════════"
+          echo ""
+          echo "Image:      ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          echo "Digest:     ${DIGEST}"
+          echo "WASM Hash:  ${{ steps.extract.outputs.wasm-sha256 }}"
+          echo ""
+          echo "Build Attestations:"
+          echo "  ✓ All tests passed inside Docker build"
+          echo "  ✓ SBOM attached (--sbom=true)"
+          echo "  ✓ SLSA Level 3 provenance (--provenance=mode=max)"
+          echo "  ✓ Cosign signature (keyless, GitHub OIDC)"
+          echo ""
+          echo "Verification:"
+          echo "  cosign verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST} \\"
+          echo "    --certificate-oidc-issuer=https://token.actions.githubusercontent.com \\"
+          echo "    --certificate-identity-regexp=\"https://github.com/${{ github.repository }}/.*\""
+
+  # ───────────────────────────────────────────────────────────
+  # JOB 2: Verify WASM in separate runner
+  # ───────────────────────────────────────────────────────────
+  verify:
+    name: Verify WASM
+    runs-on: ubuntu-24.04
+    needs: build
+
+    steps:
+      - name: Download WASM
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: paranoid-wasm
+
+      - name: Verify SHA-256
+        run: |
+          EXPECTED="${{ needs.build.outputs.wasm-sha256 }}"
+          ACTUAL=$(sha256sum paranoid.wasm | cut -d' ' -f1)
+          echo "Expected: ${EXPECTED}"
+          echo "Actual:   ${ACTUAL}"
+          [ "${EXPECTED}" = "${ACTUAL}" ] || { echo "::error::SHA-256 MISMATCH"; exit 1; }
+          echo "✓ SHA-256 verified in independent runner"
+
+  # ───────────────────────────────────────────────────────────
+  # JOB 3: Release-Please (creates release PR)
+  # ───────────────────────────────────────────────────────────
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-24.04
+    needs: [build, verify]
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+
+    steps:
+      - name: Release Please
+        id: release
+        uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        with:
+          release-type: simple

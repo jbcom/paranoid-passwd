@@ -1,0 +1,216 @@
+# ─────────────────────────────────────────────────────────────────
+# paranoid — CI Pipeline (Pull Requests)
+#
+# RUNS ON: All pull requests
+# PURPOSE: Full verification including Docker build, unit tests,
+#          E2E tests with Playwright, and WASM integrity checks.
+#          Merge blocked until ALL checks pass.
+#
+# SUPPLY CHAIN SECURITY (Liquibase-style):
+#   - All builds run inside Docker (no local make commands)
+#   - SHA-pinned base images and actions
+#   - All testing runs inside Docker build (munit C tests, WASM verification)
+#   - E2E tests run via docker-compose after artifact extraction
+#
+# Reference: https://www.liquibase.com/blog/docker-supply-chain-security
+# ─────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'www/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'tests/**'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ───────────────────────────────────────────────────────────
+  # JOB 1: Docker Build with Full Testing Inside
+  #        All tests run INSIDE Docker as build gates
+  # ───────────────────────────────────────────────────────────
+  build:
+    name: Docker Build + Unit Tests
+    runs-on: ubuntu-24.04
+
+    outputs:
+      wasm-sha256: ${{ steps.extract.outputs.wasm-sha256 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0  # Full history for SOURCE_DATE_EPOCH
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      # ─────────────────────────────────────────────────────────
+      # DOCKER BUILD: All tests run inside as build stages
+      #   - Native C unit tests (munit)
+      #   - WASM compilation with Zig
+      #   - Integration tests (exports, imports, size, SRI)
+      #   - Hallucination detection
+      # ─────────────────────────────────────────────────────────
+      - name: Build Container (all tests run inside)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          push: false
+          load: true
+          tags: paranoid-ci:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract artifacts from Docker image
+        id: extract
+        run: |
+          echo "═══════════════════════════════════════════════════════════"
+          echo "  Extracting verified artifacts from Docker image"
+          echo "═══════════════════════════════════════════════════════════"
+          
+          CONTAINER_ID=$(docker create paranoid-ci:${{ github.sha }})
+          echo "Container ID: $CONTAINER_ID"
+          
+          mkdir -p artifact
+          docker cp "$CONTAINER_ID":/artifact/. ./artifact/
+          docker rm "$CONTAINER_ID"
+          
+          echo "Extracted files:"
+          ls -la artifact/
+          ls -la artifact/site/ || echo "No site directory"
+          
+          WASM_SHA256=$(sha256sum artifact/paranoid.wasm | cut -d' ' -f1)
+          echo "wasm-sha256=${WASM_SHA256}" >> "$GITHUB_OUTPUT"
+          echo "WASM SHA-256: ${WASM_SHA256}"
+
+      - name: Upload site artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: paranoid-site
+          path: artifact/site/
+          retention-days: 7
+
+      - name: Upload WASM binary
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: paranoid-wasm
+          path: artifact/paranoid.wasm
+          retention-days: 7
+
+  # ───────────────────────────────────────────────────────────
+  # JOB 2: E2E Testing with Docker Compose + Playwright
+  # ───────────────────────────────────────────────────────────
+  e2e-tests:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-24.04
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download site artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: paranoid-site
+          path: artifact/site
+
+      - name: Run E2E Tests with Playwright
+        run: |
+          echo "═══════════════════════════════════════════════════════════"
+          echo "  Running E2E Tests with Docker Compose + Playwright"
+          echo "═══════════════════════════════════════════════════════════"
+          
+          echo "Artifact contents:"
+          ls -la artifact/site/
+          
+          docker compose -f docker-compose.yml up \
+            --abort-on-container-exit \
+            --exit-code-from playwright \
+            paranoid-server playwright || {
+              echo "E2E tests failed!"
+              exit 1
+            }
+          
+          echo "✓ All E2E tests passed"
+
+      - name: Upload E2E Test Results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  # ───────────────────────────────────────────────────────────
+  # JOB 3: Independent WASM Verification
+  # ───────────────────────────────────────────────────────────
+  verify:
+    name: Verify WASM integrity
+    runs-on: ubuntu-24.04
+    needs: build
+
+    steps:
+      - name: Download WASM
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: paranoid-wasm
+
+      - name: Verify SHA-256
+        run: |
+          EXPECTED="${{ needs.build.outputs.wasm-sha256 }}"
+          ACTUAL=$(sha256sum paranoid.wasm | cut -d' ' -f1)
+          echo "Expected: ${EXPECTED}"
+          echo "Actual:   ${ACTUAL}"
+          [ "${EXPECTED}" = "${ACTUAL}" ] || { echo "::error::SHA-256 MISMATCH"; exit 1; }
+          echo "✓ SHA-256 verified"
+
+      - name: Verify WASM structure
+        run: |
+          sudo apt-get update && sudo apt-get install -y wabt
+          echo "=== Required exports ==="
+          for fn in paranoid_version paranoid_generate paranoid_run_audit \
+                    paranoid_get_result_ptr paranoid_get_result_size \
+                    paranoid_sha256 paranoid_sha256_hex \
+                    paranoid_chi_squared paranoid_serial_correlation \
+                    paranoid_count_collisions malloc free; do
+            if wasm-objdump -x paranoid.wasm 2>/dev/null | grep -q "${fn}"; then
+              echo "  ✓ ${fn}"
+            else
+              echo "  ✗ ${fn} — MISSING"; exit 1
+            fi
+          done
+
+          echo ""
+          echo "=== Import namespaces ==="
+          NAMESPACES=$(wasm-objdump -x paranoid.wasm 2>/dev/null | \
+            grep " - func" | grep "import" | \
+            sed 's/.*<\([^.]*\)\..*/\1/' | sort -u)
+          for ns in $NAMESPACES; do
+            if [ "$ns" = "wasi_snapshot_preview1" ]; then
+              echo "  ✓ $ns"
+            else
+              echo "  ✗ $ns — UNEXPECTED"; exit 1
+            fi
+          done
