@@ -163,7 +163,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>NIST SP 800-63B</strong>
-                <span>US federal digital identity &mdash; min 8 chars, 30+ bit entropy</span>
+                <span>US federal &mdash; min 8 chars, 30+ bits; no composition rules</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -171,7 +171,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>PCI DSS 4.0</strong>
-                <span>Payment card industry &mdash; min 12 chars, 60+ bit entropy</span>
+                <span>Payment cards &mdash; min 12 chars, 60+ bits; mixed case + digits</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -179,7 +179,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>HIPAA</strong>
-                <span>US healthcare privacy &mdash; min 8 chars, 50+ bit entropy</span>
+                <span>Healthcare (HITRUST) &mdash; min 8 chars, 50+ bits; mixed case + digits + symbols</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -187,7 +187,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>SOC 2</strong>
-                <span>SaaS org controls &mdash; min 8 chars, 50+ bit entropy</span>
+                <span>SaaS controls (CC6.1) &mdash; min 8 chars, 50+ bits; mixed case + digits</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -195,7 +195,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>GDPR / ENISA</strong>
-                <span>EU data protection &mdash; min 10 chars, 80+ bit entropy</span>
+                <span>EU (CNIL/ENISA) &mdash; min 10 chars, 80+ bits; mixed case + digits + symbols</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -203,9 +203,14 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>ISO 27001</strong>
-                <span>Intl. info security &mdash; min 12 chars, 90+ bit entropy</span>
+                <span>Info security (A.5.17) &mdash; min 12 chars, 90+ bits; mixed case + digits + symbols</span>
               </span>
             </label>
+          </div>
+
+          <div class="compliance-applied" id="compliance-applied" hidden>
+            <strong class="compliance-applied-title">Applied Constraints</strong>
+            <span class="compliance-applied-body" id="compliance-applied-body"></span>
           </div>
         </fieldset>
 
