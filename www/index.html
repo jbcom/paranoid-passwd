@@ -7,13 +7,10 @@
 <meta name="description" content="A self-auditing cryptographic password generator that treats the LLM that built it as an adversary. OpenSSL CSPRNG + WASM sandbox + 7-layer statistical audit.">
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none';
-               style-src 'self' https://fonts.googleapis.com;
-               font-src https://fonts.gstatic.com;
+               style-src 'self';
                script-src 'self' 'wasm-unsafe-eval';
                connect-src 'self';
                img-src 'self' data:;">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css" integrity="__CSS_SRI__" crossorigin="anonymous">
 </head>
 <body>
@@ -32,8 +29,11 @@
 
   <header class="topbar">
     <div class="topbar-brand">
-      <span class="topbar-name">paranoid-passwd</span>
-      <span class="topbar-tag">v__VERSION__</span>
+      <span class="topbar-logo" aria-hidden="true"></span>
+      <div class="topbar-brand-text">
+        <span class="topbar-name">paranoid-passwd</span>
+        <span class="topbar-tagline">self-auditing cryptographic password generator</span>
+      </div>
     </div>
     <div class="topbar-meta">
       <code id="engine-badge">loading&hellip;</code>
@@ -41,12 +41,13 @@
         <span class="csprng-dot" id="status-dot"></span>
         <span id="status-text">init</span>
       </div>
+      <span class="topbar-tag">v__VERSION__</span>
     </div>
   </header>
 
   <div class="global-progress"><div class="global-progress-fill"></div></div>
 
-  <nav class="wizard-nav">
+  <nav class="wizard-nav" aria-label="Audit wizard steps">
     <label for="step-configure" class="step-label" data-num="1">Configure</label>
     <label for="step-audit"     class="step-label" data-num="2">Audit</label>
     <label for="step-results"   class="step-label" data-num="3">Results</label>
@@ -57,12 +58,12 @@
     <!-- ═══ PANEL 1: CONFIGURE ═══════════════════════════ -->
     <section class="wizard-panel" id="panel-configure">
       <div class="config-section">
-        <h2>configure <span>audit</span></h2>
+        <h2>Configure <span>Audit</span></h2>
         <p class="config-subtitle">All generation runs inside WASM linear memory. JavaScript never touches the random bytes.</p>
 
         <div class="config-grid">
           <div class="field">
-            <span class="field-label">Charset</span>
+            <label class="field-label" for="cfg-charset">Charset</label>
             <select id="cfg-charset">
               <option value="full">Full printable ASCII (94 chars)</option>
               <option value="alnum">Alphanumeric (62 chars)</option>
@@ -71,7 +72,7 @@
             </select>
           </div>
           <div class="field">
-            <span class="field-label">Audit Batch Size</span>
+            <label class="field-label" for="cfg-batch">Audit Batch Size</label>
             <select id="cfg-batch">
               <option value="200">200 passwords</option>
               <option value="500" selected>500 passwords</option>
@@ -79,7 +80,7 @@
             </select>
           </div>
           <div class="field field-full">
-            <span class="field-label">Password Length &mdash; <output id="cfg-length-val">32</output> characters</span>
+            <label class="field-label" for="cfg-length">Password Length &mdash; <output id="cfg-length-val">32</output> characters</label>
             <input type="range" id="cfg-length" min="8" max="128" value="32">
             <div class="range-labels"><span>8</span><span>128</span></div>
           </div>
@@ -87,12 +88,81 @@
 
         <button class="btn-launch" id="btn-launch">Generate + Run 7-Layer Audit</button>
 
-        <div class="info-note">
-          <strong>Build:</strong> WASM SHA-256: <code id="build-sha">__WASM_SHA256__</code><br>
-          <strong>SRI:</strong> <code id="build-sri">__WASM_SRI__</code><br>
-          Built <time>__BUILD_TIME__</time>.
-          <a href="BUILD_MANIFEST.json">Full manifest</a>.
+        <!-- ═══ PROVENANCE CHAIN ═══════════════════════════ -->
+        <div class="provenance">
+          <h3 class="provenance-title">Full Provenance Chain</h3>
+          <p class="provenance-subtitle">Every component in this tool is verifiable. Nothing is hidden.</p>
+
+          <div class="provenance-chain">
+            <div class="chain-link">
+              <div class="chain-icon">C</div>
+              <div class="chain-detail">
+                <strong>Source</strong>
+                <span>src/paranoid.c &mdash; all cryptographic logic in ~400 lines of C</span>
+              </div>
+            </div>
+            <div class="chain-arrow" aria-hidden="true"></div>
+            <div class="chain-link">
+              <div class="chain-icon">Zig</div>
+              <div class="chain-detail">
+                <strong>Compiler</strong>
+                <span>Zig 0.14.0 cross-compiles C to wasm32-wasi (SHA-256 verified tarball)</span>
+              </div>
+            </div>
+            <div class="chain-arrow" aria-hidden="true"></div>
+            <div class="chain-link">
+              <div class="chain-icon">SSL</div>
+              <div class="chain-detail">
+                <strong>CSPRNG</strong>
+                <span>OpenSSL RAND_bytes via DRBG &mdash; WASI random_get bridges to Web Crypto</span>
+              </div>
+            </div>
+            <div class="chain-arrow" aria-hidden="true"></div>
+            <div class="chain-link">
+              <div class="chain-icon">WASM</div>
+              <div class="chain-detail">
+                <strong>Sandbox</strong>
+                <span>WebAssembly linear memory &mdash; JS cannot access DRBG state</span>
+              </div>
+            </div>
+            <div class="chain-arrow" aria-hidden="true"></div>
+            <div class="chain-link">
+              <div class="chain-icon">SRI</div>
+              <div class="chain-detail">
+                <strong>Integrity</strong>
+                <span>SHA-384 Subresource Integrity on every asset. Tamper = fail.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="provenance-build">
+            <strong>Build attestation:</strong>
+            WASM SHA-256: <code id="build-sha">__WASM_SHA256__</code>
+            &middot; SRI: <code id="build-sri">__WASM_SRI__</code>
+            &middot; Built <time>__BUILD_TIME__</time>
+            &middot; <a href="BUILD_MANIFEST.json">Full manifest</a>
+          </div>
+
+          <div class="provenance-guarantees">
+            <div class="guarantee">
+              <strong>Zero external requests</strong>
+              <span>No CDNs, no analytics, no fonts loaded from third parties. CSP enforced.</span>
+            </div>
+            <div class="guarantee">
+              <strong>Zero JavaScript computation</strong>
+              <span>JS only reads a C struct from WASM memory and sets DOM textContent.</span>
+            </div>
+            <div class="guarantee">
+              <strong>Docker-attested builds</strong>
+              <span>SBOM + SLSA L3 provenance. All tests gate the Docker build.</span>
+            </div>
+            <div class="guarantee">
+              <strong>SHA-pinned supply chain</strong>
+              <span>Alpine base image, Zig compiler, OpenSSL WASM, acutest &mdash; all SHA-pinned.</span>
+            </div>
+          </div>
         </div>
+
       </div>
     </section>
 
@@ -206,6 +276,19 @@
     </section>
 
   </div>
+
+  <footer class="site-footer">
+    <div class="footer-links">
+      <a href="https://github.com/jbcom/paranoid-passwd">Source Code</a>
+      <a href="BUILD_MANIFEST.json">Build Manifest</a>
+    </div>
+    <p class="footer-text">
+      paranoid-passwd is open source (MIT). No data leaves your browser.
+      <br>
+      Built with C, Zig, OpenSSL, WebAssembly. Zero runtime dependencies.
+    </p>
+  </footer>
+
 </div>
 
 <script src="app.js" integrity="__JS_SRI__" crossorigin="anonymous"></script>

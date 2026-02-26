@@ -37,7 +37,7 @@ This is a complete rewrite from v1, treating `paranoid` as what it is: a C proje
   
 - **WASM compilation** via Zig toolchain
   - Compiled to `wasm32-wasi` target
-  - OpenSSL precompiled library (`vendor/openssl-wasm` submodule)
+  - OpenSSL precompiled library (`vendor/openssl-wasm`, Docker-cloned at SHA-pinned commit)
   - ~180KB binary size
   
 - **Proper file structure**
@@ -74,10 +74,10 @@ This is a complete rewrite from v1, treating `paranoid` as what it is: a C proje
   - `make info` — Show toolchain configuration
 
 #### CI/CD Pipeline
-- **3-job workflow** (`.github/workflows/deploy.yml`):
-  1. **Build** — Compile WASM, inject SRI hashes, upload artifacts
-  2. **Verify** — Independent validation of WASM binary (SHA-256, exports check)
-  3. **Deploy** — Deploy to GitHub Pages (only after build + verify pass)
+- **Split workflows** (`.github/workflows/`):
+  - `ci.yml` — PR verification (Docker build + acutest C tests + E2E tests)
+  - `cd.yml` — Push to main (SBOM + Cosign signing + release-please)
+  - `release.yml` — Deploy from signed, attested releases
 - **SHA-pinned actions** — All third-party actions pinned to commit SHAs
 - **Build manifest** — `BUILD_MANIFEST.json` records all hashes, versions, commit SHA
 
@@ -143,7 +143,7 @@ This is a complete rewrite from v1, treating `paranoid` as what it is: a C proje
 - **v1 URLs deprecated** — v1 was a single HTML file; v2 requires WASM support
 - **No JavaScript fallback** — Browsers without WASM support cannot use v2
 - **Build system required** — Cannot be edited as a single file (must run `make`)
-- **Submodule dependency** — Must clone with `--recursive` flag
+- **Docker-first builds** — Dependencies cloned inside Docker at SHA-pinned commits (no submodules)
 
 ### Migration Guide (v1 → v2)
 
@@ -155,10 +155,10 @@ This is a complete rewrite from v1, treating `paranoid` as what it is: a C proje
 
 **v2 users**:
 ```bash
-# Clone and build
-git clone --recursive https://github.com/jbcom/paranoid-passwd.git
+# Clone and build (Docker handles dependencies automatically)
+git clone https://github.com/jbcom/paranoid-passwd.git
 cd paranoid-passwd
-make site
+docker build -t paranoid-passwd .
 
 # Deploy build/site/ to your hosting
 ```

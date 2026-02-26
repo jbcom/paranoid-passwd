@@ -98,7 +98,6 @@ jobs:
         with:
           context: .
           push: true
-          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           sbom: true
@@ -112,8 +111,10 @@ jobs:
           echo "═══════════════════════════════════════════════════════════"
           echo "  Extracting verified artifacts from Docker image"
           echo "═══════════════════════════════════════════════════════════"
-          
+
+          # Pull the pushed image (load: true is incompatible with SBOM/provenance)
           FIRST_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -1)
+          docker pull "$FIRST_TAG"
           CONTAINER_ID=$(docker create "$FIRST_TAG")
           echo "Container ID: $CONTAINER_ID"
           

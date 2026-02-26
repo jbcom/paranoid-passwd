@@ -223,11 +223,13 @@ int paranoid_count_collisions(
     if (!hashes) return -1;
 
     for (int i = 0; i < num_passwords; i++) {
-        paranoid_sha256(
-            (const unsigned char*)(passwords + i * pw_length),
-            pw_length,
-            hashes[i]
-        );
+        if (paranoid_sha256(
+                (const unsigned char*)(passwords + i * pw_length),
+                pw_length,
+                hashes[i]) != 0) {
+            free(hashes);
+            return -1;
+        }
     }
 
     for (int i = 1; i < num_passwords; i++) {
@@ -312,12 +314,14 @@ int paranoid_run_audit(
     int rc = paranoid_generate(charset, charset_len, pw_length, result->password);
     if (rc != 0) return rc;
 
-    paranoid_sha256_hex(result->password, result->sha256_hex);
+    if (paranoid_sha256_hex(result->password, result->sha256_hex) != 0)
+        return -1;
 
     /* ── Stage 2: Generate batch + chi-squared ── */
     result->current_stage = 2;
 
-    char *batch = malloc(batch_size * pw_length);
+    /* +1: paranoid_generate writes a NUL terminator at output[pw_length] */
+    char *batch = malloc(batch_size * pw_length + 1);
     if (!batch) return -1;
 
     for (int i = 0; i < batch_size; i++) {
@@ -345,6 +349,7 @@ int paranoid_run_audit(
     result->current_stage = 4;
 
     result->duplicates = paranoid_count_collisions(batch, batch_size, pw_length);
+    if (result->duplicates < 0) { free(batch); return -1; }
     result->collision_pass = (result->duplicates == 0) ? 1 : 0;
 
     free(batch);

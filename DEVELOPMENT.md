@@ -26,7 +26,7 @@ Welcome to the `paranoid` development guide! This document covers development se
   - Ubuntu/Debian: `snap install zig --classic --beta`
   - Windows: Download from https://ziglang.org/download/
   
-- **Git** — For cloning and submodule management
+- **Git** — For cloning the repository
   
 - **OpenSSL** — For SRI hash computation during build
   - macOS: `brew install openssl`
@@ -42,12 +42,19 @@ Welcome to the `paranoid` development guide! This document covers development se
 ### Clone the Repository
 
 ```bash
-# Clone with submodules (required for OpenSSL WASM)
-git clone --recursive https://github.com/jbcom/paranoid-passwd.git
+# Clone the repository
+git clone https://github.com/jbcom/paranoid-passwd.git
 cd paranoid-passwd
 
-# If you already cloned without --recursive:
-git submodule update --init --recursive --depth=1
+# For Docker builds (recommended): dependencies are cloned automatically
+docker build -t paranoid-passwd .
+
+# For local development: clone dependencies manually
+mkdir -p vendor
+git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
+cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f && cd ../..
+git clone https://github.com/mity/acutest.git vendor/acutest
+cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
 ```
 
 ### Verify Toolchain
@@ -381,7 +388,9 @@ paranoid/
 ├── .github/
 │   ├── copilot-instructions.md   # Copilot agent configuration
 │   └── workflows/
-│       └── deploy.yml             # CI/CD pipeline (SHA-pinned)
+│       ├── ci.yml                 # PR verification (Docker build + E2E tests)
+│       ├── cd.yml                 # Push to main (SBOM + Cosign + release-please)
+│       └── release.yml            # Deploy from signed releases
 ├── docs/
 │   ├── ARCHITECTURE.md            # System architecture
 │   ├── DESIGN.md                  # Design decisions
@@ -393,7 +402,7 @@ paranoid/
 ├── src/
 │   └── paranoid.c                 # All computation (400 lines)
 ├── vendor/
-│   └── openssl-wasm/              # Git submodule (jedisct1)
+│   └── openssl-wasm/              # Docker-cloned (jedisct1)
 │       └── precompiled/
 │           ├── include/openssl/   # OpenSSL headers
 │           └── lib/libcrypto.a    # Precompiled for wasm32-wasi
@@ -410,7 +419,7 @@ paranoid/
 │       ├── style.css
 │       └── BUILD_MANIFEST.json
 ├── .gitignore
-├── .gitmodules
+├── Dockerfile                    # Multi-stage build (deps, test, build, verify)
 ├── AGENTS.md                      # Complete project documentation
 ├── CHANGELOG.md                   # Version history
 ├── DEVELOPMENT.md                 # This file
@@ -430,7 +439,9 @@ paranoid/
 | `www/index.html` | HTML structure | No |
 | `www/style.css` | Visual state management | No |
 | `Makefile` | Build orchestration | No |
-| `.github/workflows/deploy.yml` | CI/CD | No |
+| `.github/workflows/ci.yml` | PR verification | No |
+| `.github/workflows/cd.yml` | Push to main | No |
+| `.github/workflows/release.yml` | Releases | No |
 
 **Security-critical code**:
 1. `src/paranoid.c` — Rejection sampling, chi-squared, SHA-256
@@ -455,13 +466,22 @@ snap install zig --classic --beta
 # Or download from https://ziglang.org/download/
 ```
 
-### Submodule Not Initialized
+### Dependencies Not Available
 
 **Error**: `vendor/openssl-wasm/precompiled/lib/libcrypto.a: No such file`
 
-**Solution**:
+**Solution** (recommended): Use Docker — it clones dependencies at SHA-pinned commits automatically:
 ```bash
-git submodule update --init --recursive --depth=1
+docker build -t paranoid-passwd .
+```
+
+**Solution** (local development): Clone dependencies manually at the pinned commits:
+```bash
+mkdir -p vendor
+git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
+cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f && cd ../..
+git clone https://github.com/mity/acutest.git vendor/acutest
+cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
 ```
 
 ### WASM Verification Fails

@@ -1,6 +1,7 @@
 # Build output
 build/
 artifact/
+dist/
 
 # Editor
 *.swp

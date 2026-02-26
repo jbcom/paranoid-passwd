@@ -28,12 +28,16 @@ static int tests_failed = 0;
 
 #define TEST(name) \
     static void test_##name(void); \
+    static int test_##name##_failed; \
     static void run_test_##name(void) { \
+        int prev_failed = tests_failed; \
         printf("  TEST: %s ... ", #name); \
         fflush(stdout); \
         test_##name(); \
-        tests_passed++; \
-        printf("\033[0;32mPASS\033[0m\n"); \
+        if (tests_failed == prev_failed) { \
+            tests_passed++; \
+            printf("\033[0;32mPASS\033[0m\n"); \
+        } \
     } \
     static void test_##name(void)
 

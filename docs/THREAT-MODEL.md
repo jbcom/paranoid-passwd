@@ -412,8 +412,8 @@ crypto.getRandomValues = function(buffer) {
 # Pushes malicious commit to openssl-wasm
 git push origin backdoor-branch
 
-# Our Makefile:
-git submodule update --init --recursive  # Pulls backdoored code
+# If Dockerfile ARG is updated without verification:
+ARG OPENSSL_WASM_COMMIT=<malicious-sha>  # Pulls backdoored code
 ```
 
 **Impact**: CRITICAL
@@ -421,10 +421,10 @@ git submodule update --init --recursive  # Pulls backdoored code
 - Attacker-controlled entropy
 
 **Mitigation**:
-- ✅ Git submodule pinned to specific commit
-- ⚠️ **TODO**: Verify submodule commit against known-good hash
-- ⚠️ **TODO**: Pin submodule SHA in CI explicitly
-- 🔴 **MANUAL**: Inspect submodule commits before updating
+- ✅ Dockerfile ARG pins dependency to specific commit SHA
+- ✅ Docker builds clone at exact SHA (no branch tracking)
+- ⚠️ **TODO**: Verify dependency commit hash against known-good registry
+- 🔴 **MANUAL**: Inspect dependency commits before updating ARG SHAs
 
 ---
 
@@ -477,7 +477,7 @@ uses: tj-actions/changed-files@v4  # Now points to backdoor
 
 **Mitigation**:
 - ✅ **ALL actions SHA-pinned** (not tags)
-- ✅ SHA-pinned in `.github/workflows/deploy.yml`
+- ✅ SHA-pinned in `.github/workflows/ci.yml`, `cd.yml`, `release.yml`
 - ⚠️ **TODO**: Automated SHA verification (Dependabot)
 
 ---
@@ -624,7 +624,7 @@ const length = readI32(257);  // Wrong if compiled with gcc!
 | T8: Prototype Pollution | HIGH | ✅ Mitigated (WASM isolation) | Low |
 | T9: GC Memory Retention | MEDIUM | ✅ Mitigated (WASM memory) | Low |
 | T10: Extension Monkey-Patch | CRITICAL | ⚠️ No defense | High |
-| T11: Compromised OpenSSL | CRITICAL | ⚠️ Partial (submodule pin) | Medium |
+| T11: Compromised OpenSSL | CRITICAL | ⚠️ Partial (Docker ARG SHA pin) | Medium |
 | T12: Zig Backdoor | CRITICAL | 🔴 TODO (reproducible builds) | **HIGH** |
 | T13: Actions Supply Chain | CRITICAL | ✅ Mitigated (SHA pins) | Low |
 | T14: Build Environment Tamper | CRITICAL | 🔴 TODO (attestation) | **HIGH** |
@@ -655,7 +655,7 @@ const length = readI32(257);  // Wrong if compiled with gcc!
 ### Medium Priority
 
 4. **T11: Compromised OpenSSL**
-   - Pin submodule commit SHA explicitly
+   - Verify Docker ARG-pinned commit SHA against known-good registry
    - Automated verification against known-good
 
 5. **T16: SRI Hash Injection**
@@ -685,7 +685,7 @@ Before deploying any change:
 - [ ] Human cryptographer reviewed C code
 - [ ] SRI hashes verified independently
 - [ ] GitHub Actions still SHA-pinned
-- [ ] Submodule commit hasn't changed unexpectedly
+- [ ] Docker ARG-pinned dependency SHAs haven't changed unexpectedly
 - [ ] Build output is bit-for-bit identical (reproducible)
 - [ ] No new WASI imports (only `random_get`)
 

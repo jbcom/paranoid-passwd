@@ -366,50 +366,29 @@ Developer Machine
 ```
 GitHub Repository
     │
-    ├─ Push to main branch
+    ├─ Pull Request
+    │   ▼
+    │  ┌─────────────────────────────────────────────────────────┐
+    │  │  ci.yml (Pull Requests)                                  │
+    │  │  Docker Build → acutest C tests → E2E (Playwright)       │
+    │  │  WASM Verification → All checks must pass to merge       │
+    │  └─────────────────────────────────────────────────────────┘
     │
-    ▼
-┌───────────────────────────────────────────────────────────┐
-│  JOB 1: BUILD                                             │
-│  Runner: ubuntu-24.04                                     │
-│                                                           │
-│  1. Checkout code (SHA-pinned action)                    │
-│  2. Install Zig 0.14.0 (SHA-pinned action)               │
-│  3. Install dependencies (OpenSSL)                       │
-│  4. Initialize submodule (OpenSSL WASM)                  │
-│  5. make site                                            │
-│  6. Compute SHA-256 of paranoid.wasm                     │
-│  7. Upload build/site/ as artifact                       │
-│  8. Output WASM SHA-256 for Job 2                        │
-└───────────────────────────────────────────────────────────┘
+    ├─ Push to main
+    │   ▼
+    │  ┌─────────────────────────────────────────────────────────┐
+    │  │  cd.yml (Push to Main)                                   │
+    │  │  Docker Build → SBOM → Provenance → Cosign Sign          │
+    │  │  release-please → Creates release PR when ready          │
+    │  └─────────────────────────────────────────────────────────┘
     │
-    ▼
-┌───────────────────────────────────────────────────────────┐
-│  JOB 2: VERIFY                                            │
-│  Runner: ubuntu-24.04 (separate from Build)              │
-│  Depends on: Job 1                                       │
-│                                                           │
-│  1. Download build/site/ artifact                        │
-│  2. Verify SHA-256 matches Job 1 output                  │
-│  3. Install wabt                                         │
-│  4. wasm-objdump -x paranoid.wasm                        │
-│  5. Check all required exports exist                     │
-│  6. Check only wasi_snapshot_preview1 imports present    │
-│  7. Fail build if ANY check fails                        │
-└───────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌───────────────────────────────────────────────────────────┐
-│  JOB 3: DEPLOY                                            │
-│  Runner: ubuntu-24.04                                     │
-│  Depends on: Job 1, Job 2                                │
-│  Condition: Branch == main AND Jobs 1,2 passed           │
-│                                                           │
-│  1. Download build/site/ artifact                        │
-│  2. Configure GitHub Pages                               │
-│  3. Upload Pages artifact (SHA-pinned action)            │
-│  4. Deploy to GitHub Pages (SHA-pinned action)           │
-└───────────────────────────────────────────────────────────┘
+    ├─ Release Published
+    │   ▼
+    │  ┌─────────────────────────────────────────────────────────┐
+    │  │  release.yml (Release Published)                         │
+    │  │  Build from tag → Attest → Sign → Upload Assets          │
+    │  │  Deploy to GitHub Pages from signed release              │
+    │  └─────────────────────────────────────────────────────────┘
     │
     ▼
 GitHub Pages
@@ -467,7 +446,7 @@ Application running in browser sandbox
 
 | Attack Vector | Impact | Likelihood | Mitigation |
 |---------------|--------|------------|------------|
-| Compromised OpenSSL WASM | CRITICAL | LOW | Git submodule pin, manual inspection |
+| Compromised OpenSSL WASM | CRITICAL | LOW | Docker ARG SHA pin, manual inspection |
 | Zig compiler backdoor | CRITICAL | VERY LOW | SHA-pinned in CI, reproducible builds |
 | GitHub Actions supply chain | HIGH | LOW | SHA-pinned (all actions) |
 | CDN/proxy MitM | MEDIUM | MEDIUM | SRI hashes (all assets) |

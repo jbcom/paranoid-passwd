@@ -27,7 +27,7 @@
 UNTRUSTED ZONE          VERIFICATION BARRIER          TRUSTED ZONE
 ───────────────         ────────────────────          ────────────
 LLM-authored code    →  Human cryptographer review  →  Audited code
-Git submodules       →  Commit SHA verification     →  Pinned dependencies
+Docker-cloned deps   →  Commit SHA verification     →  Pinned dependencies
 Zig compiler         →  Reproducible builds         →  Verified binary
 GitHub Actions       →  SHA-pinned actions          →  Immutable workflow
 Build artifacts      →  Multi-party attestation     →  Signed WASM
@@ -83,7 +83,7 @@ Deployed assets      →  SRI hash verification       →  Tamper-proof site
   
   "dependencies": {
     "openssl-wasm": {
-      "type": "git_submodule",
+      "type": "docker_arg_pinned",
       "url": "https://github.com/jedisct1/openssl-wasm.git",
       "commit": "d4e5f6g7h8i9...",
       "commit_date": "2025-12-15T10:30:00Z",
@@ -176,9 +176,9 @@ Deployed assets      →  SRI hash verification       →  Tamper-proof site
       "result": "success"
     },
     {
-      "stage": "submodule_init",
+      "stage": "dependency_clone",
       "timestamp": "2026-02-26T02:59:30Z",
-      "action": "git submodule update --init --recursive",
+      "action": "Docker ARG-pinned git clone at SHA-pinned commits",
       "result": "success"
     },
     {
@@ -241,8 +241,8 @@ build/
 ```bash
 # Use container for deterministic environment
 docker run --rm -v $(pwd):/build \
-  debian:bookworm-slim /bin/bash -c "
-    apt-get update && apt-get install -y zig=0.14.0 git openssl
+  alpine:3.21 /bin/sh -c "
+    apk add --no-cache zig git openssl
     cd /build
     export SOURCE_DATE_EPOCH=\$(git log -1 --format=%ct)
     make build
@@ -263,11 +263,12 @@ git verify-commit HEAD
 # Verify no local modifications
 git diff --exit-code || { echo "Uncommitted changes!"; exit 1; }
 
-# Verify submodule SHA
+# Verify dependency SHA (Docker ARG-pinned commits handle this automatically)
+# For local development, verify vendor/ checkouts match expected SHAs
 cd vendor/openssl-wasm
-EXPECTED_SHA="d4e5f6g7h8i9..."
+EXPECTED_SHA="fe926b5006593ad2825243f97e363823cd56599f"
 ACTUAL_SHA=$(git rev-parse HEAD)
-[ "$ACTUAL_SHA" = "$EXPECTED_SHA" ] || { echo "Submodule mismatch!"; exit 1; }
+[ "$ACTUAL_SHA" = "$EXPECTED_SHA" ] || { echo "Dependency SHA mismatch!"; exit 1; }
 ```
 
 #### 3. Tool Verification
@@ -388,21 +389,24 @@ Threshold: 3/5 required ✅ MET
 
 ## Dependency Verification
 
-### OpenSSL WASM Submodule
+### OpenSSL WASM Dependency
 
 **Threat**: Upstream repository compromised.
 
 **Mitigation**:
 
-```bash
-# Pin to specific commit (in .gitmodules)
-[submodule "vendor/openssl-wasm"]
-    path = vendor/openssl-wasm
-    url = https://github.com/jedisct1/openssl-wasm.git
-    commit = d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3  # EXPLICIT PIN
+```dockerfile
+# Pin to specific commit via Docker ARG (in Dockerfile)
+ARG OPENSSL_WASM_REPO=https://github.com/jedisct1/openssl-wasm.git
+ARG OPENSSL_WASM_COMMIT=fe926b5006593ad2825243f97e363823cd56599f
+RUN git clone --filter=blob:none --no-checkout ${OPENSSL_WASM_REPO} openssl-wasm && \
+    cd openssl-wasm && git checkout ${OPENSSL_WASM_COMMIT}
+```
 
-# Verify on every build
-EXPECTED_COMMIT="d4e5f6g7h8i9..."
+```bash
+# Verify on every build (Docker handles this via ARG pinning)
+# For local development, verify vendor/ checkouts:
+EXPECTED_COMMIT="fe926b5006593ad2825243f97e363823cd56599f"
 ACTUAL_COMMIT=$(cd vendor/openssl-wasm && git rev-parse HEAD)
 [ "$ACTUAL_COMMIT" = "$EXPECTED_COMMIT" ] || exit 1
 
@@ -680,11 +684,11 @@ rekor-cli search --email "github-actions@github.com" \
       },
       {
         "uri": "git+https://github.com/jedisct1/openssl-wasm",
-        "digest": {"sha1": "<submodule-sha>"}
+        "digest": {"sha1": "<dependency-sha>"}
       },
       {
-        "uri": "docker://debian:12-slim",
-        "digest": {"sha256": "74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421"}
+        "uri": "docker://alpine:3.21",
+        "digest": {"sha256": "25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659"}
       }
     ]
   }
@@ -722,8 +726,8 @@ Before ANY deployment:
 ### Source Verification
 - [ ] All commits GPG-signed by known developers
 - [ ] No uncommitted local changes
-- [ ] Submodule commit matches expected SHA
-- [ ] Submodule library hash matches known-good registry
+- [ ] Docker ARG-pinned dependency commits match expected SHAs
+- [ ] Dependency library hashes match known-good registry
 
 ### Tool Verification
 - [ ] Zig compiler hash matches known-good

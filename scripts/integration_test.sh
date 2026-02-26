@@ -62,8 +62,9 @@ run_test "Source file exists" "test -f $REPO_ROOT/src/paranoid.c"
 run_test "Header file exists" "test -f $REPO_ROOT/include/paranoid.h"
 run_test "Makefile exists" "test -f $REPO_ROOT/Makefile"
 run_test "Web assets exist" "test -f $REPO_ROOT/www/index.html"
-run_test "Submodule initialized" "test -d $REPO_ROOT/vendor/openssl-wasm/precompiled"
+run_test "OpenSSL WASM available" "test -d $REPO_ROOT/vendor/openssl-wasm/precompiled"
 run_test "libcrypto.a exists" "test -f $REPO_ROOT/vendor/openssl-wasm/precompiled/lib/libcrypto.a"
+run_test "Acutest available" "test -f $REPO_ROOT/vendor/acutest/include/acutest.h"
 
 echo ""
 

@@ -158,6 +158,7 @@ if [ "$HAS_CLANG" -eq 1 ]; then
         -O3 \
         $INCLUDE_FLAGS \
         -DPARANOID_VERSION_STRING=\"2.0.0\" \
+        -lwasi-emulated-getpid \
         -Wl,--no-entry \
         -Wl,--export=paranoid_version \
         -Wl,--export=paranoid_generate \

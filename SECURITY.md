@@ -61,7 +61,7 @@ We follow **coordinated disclosure** practices:
 - `include/paranoid.h` — API definitions and struct layout
 - `www/app.js` — WASI shim (3 lines), struct reading, offset verification
 - `Makefile` — Build system and SRI hash injection
-- `.github/workflows/deploy.yml` — CI/CD pipeline
+- `.github/workflows/ci.yml`, `cd.yml`, `release.yml` — CI/CD pipelines
 
 **Out of scope**:
 - Third-party dependencies (report to upstream: OpenSSL, Zig, GitHub Actions)
@@ -138,9 +138,9 @@ make hash      # Binary integrity verification
 
 | Dependency | Version | SHA-256 | Supply Chain Risk | Mitigation |
 |------------|---------|---------|-------------------|------------|
-| OpenSSL WASM | submodule | N/A | Upstream compromise | Git submodule (pinned commit), manual inspection |
+| OpenSSL WASM | Docker-cloned | N/A | Upstream compromise | SHA-pinned commit in Dockerfile ARG, verified at clone time |
 | Zig | ≥ 0.14.0 | N/A | Compiler backdoor | SHA-pinned in CI, reproducible builds |
-| GitHub Actions | Various | Various | Action compromise | **ALL actions SHA-pinned** (see `.github/workflows/deploy.yml`) |
+| GitHub Actions | Various | Various | Action compromise | **ALL actions SHA-pinned** (see `.github/workflows/ci.yml`, `cd.yml`, `release.yml`) |
 
 **GitHub Actions SHA Pinning**:
 ```yaml

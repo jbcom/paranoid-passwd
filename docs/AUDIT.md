@@ -282,13 +282,16 @@ int paranoid_count_collisions(int batch_size, int pw_length,
 
 ### Why SHA-256 Instead of strcmp?
 
-**Security**: Timing-safe comparison (constant-time).
+**Security**: Avoids variable-length string comparison that leaks password length via timing.
 
 ```c
-// UNSAFE: strcmp leaks timing information
+// UNSAFE: strcmp leaks timing information about password content/length
 if (strcmp(pw1, pw2) == 0) { ... }
 
-// SAFE: memcmp on hashes (constant-time comparison)
+// BETTER: memcmp on fixed-size hashes — fixed comparison length (32 bytes)
+// Note: memcmp itself is NOT constant-time (it short-circuits on first
+// difference), but here we only compare hashes — not secrets — so timing
+// leaks reveal nothing about the original passwords.
 if (memcmp(hash1, hash2, 32) == 0) { ... }
 ```
 

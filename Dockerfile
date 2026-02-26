@@ -12,7 +12,7 @@
 ##   If ANY test fails, the Docker build fails — no artifacts produced.
 ##
 ##   Tests run in order:
-##     1. Native C unit tests (munit framework)
+##     1. Native C unit tests (acutest framework)
 ##     2. WASM compilation with Zig
 ##     3. Integration tests (exports, imports, size, SRI)
 ##     4. Hallucination detection (LLM code safety)
@@ -53,8 +53,8 @@ ARG ALPINE_VERSION=3.21
 ARG ALPINE_SHA256=25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
 ARG OPENSSL_WASM_REPO=https://github.com/jedisct1/openssl-wasm.git
 ARG OPENSSL_WASM_COMMIT=fe926b5006593ad2825243f97e363823cd56599f
-ARG MUNIT_REPO=https://github.com/nemequ/munit.git
-ARG MUNIT_COMMIT=fbbdf1467eb0d04a6ee465def2e529e4c87f2118
+ARG ACUTEST_REPO=https://github.com/mity/acutest.git
+ARG ACUTEST_COMMIT=31751b4089c93b46a9fd8a8183a695f772de66de
 ARG ZIG_VERSION=0.14.0
 ARG ZIG_SHA256=473ec26806133cf4d1918caf1a410f8403a13d979726a9045b421b685031a982
 
@@ -88,8 +88,8 @@ FROM base AS deps
 
 ARG OPENSSL_WASM_REPO
 ARG OPENSSL_WASM_COMMIT
-ARG MUNIT_REPO
-ARG MUNIT_COMMIT
+ARG ACUTEST_REPO
+ARG ACUTEST_COMMIT
 
 WORKDIR /deps
 
@@ -102,14 +102,14 @@ RUN git clone --filter=blob:none --no-checkout ${OPENSSL_WASM_REPO} openssl-wasm
     { echo "ERROR: openssl-wasm commit SHA mismatch! Expected ${OPENSSL_WASM_COMMIT}, got $ACTUAL_SHA"; exit 1; } && \
     echo "✓ openssl-wasm pinned to ${OPENSSL_WASM_COMMIT}"
 
-# Clone munit at pinned commit (no vendor directory needed!)
-RUN git clone --filter=blob:none --no-checkout ${MUNIT_REPO} munit && \
-    cd munit && \
-    git checkout ${MUNIT_COMMIT} && \
+# Clone acutest at pinned commit (header-only test framework, no vendor directory needed!)
+RUN git clone --filter=blob:none --no-checkout ${ACUTEST_REPO} acutest && \
+    cd acutest && \
+    git checkout ${ACUTEST_COMMIT} && \
     ACTUAL_SHA=$(git rev-parse HEAD) && \
-    [ "$ACTUAL_SHA" = "${MUNIT_COMMIT}" ] || \
-    { echo "ERROR: munit commit SHA mismatch! Expected ${MUNIT_COMMIT}, got $ACTUAL_SHA"; exit 1; } && \
-    echo "✓ munit pinned to ${MUNIT_COMMIT}"
+    [ "$ACTUAL_SHA" = "${ACUTEST_COMMIT}" ] || \
+    { echo "ERROR: acutest commit SHA mismatch! Expected ${ACUTEST_COMMIT}, got $ACTUAL_SHA"; exit 1; } && \
+    echo "✓ acutest pinned to ${ACUTEST_COMMIT}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STAGE 3: TEST-NATIVE — Run C unit tests BEFORE WASM compilation
@@ -130,7 +130,7 @@ COPY zig-linux-x86_64-${ZIG_VERSION}.tar.xz .
 
 # Copy dependencies from deps stage
 COPY --from=deps /deps/openssl-wasm /src/vendor/openssl-wasm
-COPY --from=deps /deps/munit /src/vendor/munit
+COPY --from=deps /deps/acutest /src/vendor/acutest
 
 # Verify Zig tarball hash
 RUN echo "${ZIG_SHA256}  zig-linux-x86_64-${ZIG_VERSION}.tar.xz" | sha256sum -c - || \
@@ -140,10 +140,10 @@ RUN echo "${ZIG_SHA256}  zig-linux-x86_64-${ZIG_VERSION}.tar.xz" | sha256sum -c 
 RUN mkdir -p /opt/zig && tar -xf zig-linux-x86_64-${ZIG_VERSION}.tar.xz -C /opt/zig --strip-components=1
 ENV PATH=/opt/zig:${PATH}
 
-# Build and run native C unit tests (munit framework)
+# Build and run native C unit tests (acutest framework)
 # THIS MUST PASS or Docker build fails!
 RUN echo "═══════════════════════════════════════════════════════════" && \
-    echo "  STAGE: Native C Unit Tests (munit)" && \
+    echo "  STAGE: Native C Unit Tests (acutest)" && \
     echo "═══════════════════════════════════════════════════════════" && \
     make test-native && \
     echo "✓ All native C tests passed"

@@ -10,7 +10,7 @@
 #   docker rm temp
 #
 # LOCAL BUILDS (CI/Docker only):
-#   Local builds require vendor/openssl-wasm and vendor/munit.
+#   Local builds require vendor/openssl-wasm and vendor/acutest.
 #   These are cloned automatically inside Docker at SHA-pinned commits.
 #   For local development, use Docker or manually clone dependencies.
 # ═══════════════════════════════════════════════════════════════
@@ -20,10 +20,11 @@
 PROJECT      := paranoid
 VERSION      := 2.0.0
 
-# Submodule paths
+# Dependency paths (cloned at SHA-pinned commits by Docker)
 OPENSSL_SUB  := vendor/openssl-wasm
 OPENSSL_INC  := $(OPENSSL_SUB)/precompiled/include
 OPENSSL_LIB  := $(OPENSSL_SUB)/precompiled/lib/libcrypto.a
+ACUTEST_DIR  := vendor/acutest
 
 # Source
 SRC_DIR      := src
@@ -54,6 +55,15 @@ LDFLAGS      := -lwasi-emulated-getpid -Wl,--no-entry
 SHA256       := $(shell command -v sha256sum 2>/dev/null || \
                         echo "shasum -a 256")
 OPENSSL_BIN  := $(shell command -v openssl 2>/dev/null)
+
+# Reproducible timestamp: honour SOURCE_DATE_EPOCH if set, else current time
+BUILD_TIME   := $(shell if [ -n "$$SOURCE_DATE_EPOCH" ]; then \
+                    date -u -d "@$$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || \
+                    date -u -r "$$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || \
+                    date -u +%Y-%m-%dT%H:%M:%SZ; \
+                else \
+                    date -u +%Y-%m-%dT%H:%M:%SZ; \
+                fi)
 
 # WASM introspection
 WASM_OBJDUMP := $(shell command -v wasm-objdump 2>/dev/null)
@@ -119,7 +129,7 @@ info:
 #
 # SHA-pinned commits (must match Dockerfile ARGs):
 OPENSSL_WASM_SHA := fe926b5006593ad2825243f97e363823cd56599f
-MUNIT_SHA        := fbbdf1467eb0d04a6ee465def2e529e4c87f2118
+ACUTEST_SHA      := 31751b4089c93b46a9fd8a8183a695f772de66de
 
 ## Check if vendor dependencies exist
 check-deps:
@@ -130,11 +140,11 @@ check-deps:
 		printf "    cd vendor/openssl-wasm && git checkout $(OPENSSL_WASM_SHA)\n"; \
 		exit 1; \
 	fi
-	@if [ ! -f vendor/munit/munit.c ]; then \
-		printf "$(_R)✗$(_N) vendor/munit not found\n"; \
+	@if [ ! -f $(ACUTEST_DIR)/include/acutest.h ]; then \
+		printf "$(_R)✗$(_N) vendor/acutest not found\n"; \
 		printf "  Use Docker build (recommended) or manually clone at pinned SHA:\n"; \
-		printf "    git clone https://github.com/nemequ/munit.git vendor/munit\n"; \
-		printf "    cd vendor/munit && git checkout $(MUNIT_SHA)\n"; \
+		printf "    git clone https://github.com/mity/acutest.git vendor/acutest\n"; \
+		printf "    cd vendor/acutest && git checkout $(ACUTEST_SHA)\n"; \
 		exit 1; \
 	fi
 	@printf "$(_G)✓$(_N) Dependencies found\n"
@@ -176,14 +186,14 @@ site: $(WASM) $(HTML) $(CSS) $(JS)
 	    -e 's|__CSS_SRI__|$(CSS_SRI)|g' \
 	    -e 's|__JS_SRI__|$(JS_SRI)|g' \
 	    -e 's|__VERSION__|$(VERSION)|g' \
-	    -e 's|__BUILD_TIME__|$(shell date -u +%Y-%m-%dT%H:%M:%SZ)|g' \
+	    -e 's|__BUILD_TIME__|$(BUILD_TIME)|g' \
 	    $(HTML) > $(SITE_DIR)/index.html
 	@cp $(WASM) $(SITE_DIR)/paranoid.wasm
 	@# Build manifest
 	@printf '{\n' > $(SITE_DIR)/BUILD_MANIFEST.json
 	@printf '  "project": "$(PROJECT)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
 	@printf '  "version": "$(VERSION)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
-	@printf '  "build_time": "$(shell date -u +%Y-%m-%dT%H:%M:%SZ)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
+	@printf '  "build_time": "$(BUILD_TIME)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
 	@printf '  "zig_version": "$(shell zig version 2>/dev/null || echo unknown)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
 	@printf '  "openssl_commit": "$(shell git -C $(OPENSSL_SUB) rev-parse HEAD 2>/dev/null || echo unknown)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
 	@printf '  "source_sha256": "$(shell $(SHA256) $(SRC) | cut -d" " -f1)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
@@ -212,17 +222,22 @@ ifdef WASM_OBJDUMP
 	    fi; \
 	)
 	@printf "\n$(_G)▸$(_N) Import namespaces:\n"
-	@$(WASM_OBJDUMP) -x $(WASM) 2>/dev/null | \
+	@UNEXPECTED=0; \
+	for ns in $$($(WASM_OBJDUMP) -x $(WASM) 2>/dev/null | \
 	    grep "import" | \
 	    sed 's/.*<\(.*\)\..*/\1/' | \
-	    sort -u | \
-	    while read ns; do \
-	        if [ "$$ns" = "wasi_snapshot_preview1" ]; then \
-	            printf "  $(_G)✓$(_N) $$ns (expected)\n"; \
-	        else \
-	            printf "  $(_R)✗$(_N) $$ns (UNEXPECTED — review required)\n"; \
-	        fi; \
-	    done
+	    sort -u); do \
+	    if [ "$$ns" = "wasi_snapshot_preview1" ]; then \
+	        printf "  $(_G)✓$(_N) $$ns (expected)\n"; \
+	    else \
+	        printf "  $(_R)✗$(_N) $$ns (UNEXPECTED — review required)\n"; \
+	        UNEXPECTED=1; \
+	    fi; \
+	done; \
+	if [ "$$UNEXPECTED" -eq 1 ]; then \
+	    printf "  $(_R)✗$(_N) Unexpected import namespaces detected\n"; \
+	    exit 1; \
+	fi
 	@printf "\n$(_G)▸$(_N) Binary size: $$(du -h $(WASM) | cut -f1)\n"
 else
 	@printf "$(_R)✗$(_N) wasm-objdump not found (install wabt)\n"
@@ -249,30 +264,29 @@ serve: site
 # ── Testing ────────────────────────────────────────────────
 
 # Native test binary configuration
-TEST_SRC        := tests/test_munit.c
-MUNIT_SRC       := vendor/munit/munit.c
-TEST_BIN        := $(BUILD_DIR)/test_munit
+TEST_SRC        := tests/test_native.c
+TEST_BIN        := $(BUILD_DIR)/test_native
 
 # Native compiler (system CC for running tests locally)
 NATIVE_CC       := cc
-NATIVE_CFLAGS   := -O2 -Wall -Wextra -I$(INC_DIR) -I$(OPENSSL_INC) -Ivendor/munit \
+NATIVE_CFLAGS   := -O2 -Wall -Wextra -I$(INC_DIR) -I$(OPENSSL_INC) -I$(ACUTEST_DIR)/include \
                    -DPARANOID_VERSION_STRING=\"$(VERSION)\"
 
 ## Run all tests (native C tests first, then integration)
 test: test-native integration hallucination supply-chain
 	@printf "$(_G)✓$(_N) All tests passed\n"
 
-## Run native C unit tests (munit framework)
+## Run native C unit tests (acutest framework)
 test-native: $(TEST_BIN)
-	@printf "$(_G)▸$(_N) Running native C unit tests (munit)\n"
-	@$(TEST_BIN) --color always
+	@printf "$(_G)▸$(_N) Running native C unit tests (acutest)\n"
+	@$(TEST_BIN)
 
-## Build native test binary
-$(TEST_BIN): $(TEST_SRC) $(SRC) $(MUNIT_SRC) $(OPENSSL_LIB)
+## Build native test binary (acutest is header-only — no extra .c file needed)
+$(TEST_BIN): $(TEST_SRC) $(SRC) $(OPENSSL_LIB)
 	@mkdir -p $(BUILD_DIR)
-	@printf "$(_G)▸$(_N) Compiling native test binary\n"
+	@printf "$(_G)▸$(_N) Compiling native test binary (acutest)\n"
 	$(NATIVE_CC) $(NATIVE_CFLAGS) \
-	    $(TEST_SRC) $(SRC) $(MUNIT_SRC) \
+	    $(TEST_SRC) $(SRC) \
 	    $(OPENSSL_LIB) \
 	    -lm -lpthread -ldl \
 	    -o $(TEST_BIN)
@@ -369,7 +383,7 @@ help:
 	@echo ""
 	@echo "  Testing:"
 	@echo "  make test         Run all tests (native + integration)"
-	@echo "  make test-native  Run native C unit tests (munit)"
+	@echo "  make test-native  Run native C unit tests (acutest)"
 	@echo "  make integration  Run integration tests"
 	@echo "  make hallucination  Run LLM hallucination detection"
 	@echo "  make supply-chain Run supply chain verification"

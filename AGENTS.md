@@ -214,7 +214,7 @@ docs/SUPPLY-CHAIN.md
 
 1. **Source verification**
    - Git commit must be signed
-   - Submodule SHA must match expected (see `.gitmodules`)
+   - Dependency SHAs must match expected (see Dockerfile ARGs)
    - No uncommitted changes (`git diff --exit-code`)
 
 2. **Tool verification**
@@ -426,16 +426,18 @@ paranoid/
 │   ├── index.html            # Structure only — no inline JS/CSS
 │   ├── style.css             # Visual state — wizard nav, stages
 │   └── app.js                # Display-only WASM bridge
-├── vendor/
-│   └── openssl-wasm/         # jedisct1/openssl-wasm (submodule)
+├── vendor/                   # (Docker-cloned at SHA-pinned commits)
+│   ├── openssl-wasm/         # jedisct1/openssl-wasm
+│   └── acutest/              # mity/acutest (header-only test framework)
 ├── build/                    # make output (gitignored)
 │   ├── paranoid.wasm
 │   └── site/                 # deployed to GitHub Pages
 ├── Makefile                  # Build system
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml        # SHA-pinned CI/CD pipeline
-├── .gitmodules
+│       ├── ci.yml            # PR verification (build + E2E tests)
+│       ├── cd.yml            # Push to main (build + sign + attest)
+│       └── release.yml       # Published releases (Pages + SBOM)
 ├── .gitignore
 ├── AGENTS.md                 # This file
 └── LICENSE
@@ -451,7 +453,9 @@ paranoid/
 | `www/style.css` | 834 | No | CSS-only wizard navigation (radio `:checked`), audit stage animations (`data-stage`), responsive layout |
 | `www/app.js` | 436 | 3 lines | WASI shim (3 lines), struct reader, DOM updates via `textContent` |
 | `Makefile` | 247 | No | `make` / `make site` / `make verify` / `make hash` / `make serve` / `make clean` |
-| `deploy.yml` | 196 | No | 3-job pipeline: build → verify → deploy. All actions SHA-pinned |
+| `ci.yml` | ~220 | No | PR pipeline: Docker build + E2E tests. All actions SHA-pinned |
+| `cd.yml` | ~240 | No | Main branch: build + SBOM + Cosign signing. SHA-pinned |
+| `release.yml` | ~200 | No | Releases: Pages deploy + attestation. SHA-pinned |
 
 ---
 
@@ -610,41 +614,45 @@ make info         # Show toolchain versions and paths
 5. Writes `BUILD_MANIFEST.json` recording all hashes, compiler version, commit SHA
 6. Copies everything to `build/site/`
 
-### Submodule
+### Dependencies
+
+Docker clones dependencies at SHA-pinned commits via Dockerfile ARGs.
+The `vendor/` directory is ephemeral and not tracked by git. For local
+development, clone manually:
 
 ```bash
-git submodule update --init --recursive
+mkdir -p vendor
+git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
+cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f && cd ../..
+git clone https://github.com/mity/acutest.git vendor/acutest
+cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
 ```
 
-This clones `jedisct1/openssl-wasm` into `vendor/openssl-wasm/`. The
-precompiled `libcrypto.a` (WASM target) is included in that repo.
+The precompiled `libcrypto.a` (WASM target) is included in the openssl-wasm repo.
 
 ---
 
 ## CI/CD Pipeline
 
-`.github/workflows/deploy.yml` — three jobs:
+Three split workflows in `.github/workflows/`:
 
-### Job 1: `make site`
+### ci.yml (Pull Requests)
 
-- Runner: `ubuntu-24.04` (pinned, not `latest`)
-- Zig: 0.14.0 via `mlugg/setup-zig` (SHA-pinned)
-- Runs `make site`, uploads `build/site/` as artifact
-- Outputs WASM SHA-256 for cross-job verification
+- Docker build with all tests inside (acutest C tests, WASM verification)
+- E2E tests via Playwright in isolated container
+- All checks must pass to merge
 
-### Job 2: Verify
+### cd.yml (Push to Main)
 
-- Separate runner (independent of build environment)
-- Downloads WASM artifact
-- Verifies SHA-256 matches Job 1's output
-- Uses `wasm-objdump` to confirm all required exports exist
-- Checks that only `wasi_snapshot_preview1` imports are present
+- Docker build with SBOM + SLSA Level 3 provenance
+- Cosign keyless signing via GitHub OIDC
+- release-please creates release PR when ready
 
-### Job 3: Deploy
+### release.yml (Release Published)
 
-- Only on `main`, only after build + verify pass
-- Deploys `build/site/` to GitHub Pages
-- Uses `actions/deploy-pages` (SHA-pinned)
+- Build from tag, attest, sign, upload assets
+- Deploy to GitHub Pages from signed release
+- Only deploys from verified, attested releases
 
 ### SHA Pinning
 

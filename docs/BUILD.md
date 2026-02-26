@@ -310,11 +310,11 @@ The Dockerfile runs **all tests as a condition of successful build**. If ANY tes
 ║                                                                        ║
 ║  STAGE 2: DEPS                                                         ║
 ║    ├── git clone openssl-wasm @ SHA-pinned commit                     ║
-║    └── git clone munit @ SHA-pinned commit                            ║
+║    └── git clone acutest @ SHA-pinned commit                            ║
 ║    (NO SUBMODULES NEEDED!)                                            ║
 ║                                                                        ║
 ║  STAGE 3: TEST-NATIVE                                                  ║
-║    └── Run munit C tests → MUST PASS or build fails                   ║
+║    └── Run acutest C tests → MUST PASS or build fails                   ║
 ║                                                                        ║
 ║  STAGE 4: BUILD-ZIG                                                    ║
 ║    └── Compile WASM with Zig                                          ║
@@ -337,7 +337,7 @@ The Dockerfile runs **all tests as a condition of successful build**. If ANY tes
 
 The Dockerfile clones dependencies directly at SHA-pinned commits:
 - **openssl-wasm**: `fe926b5006593ad2825243f97e363823cd56599f` (verified 2026-02-26, jedisct1/openssl-wasm master)
-- **munit**: `fbbdf1467eb0d04a6ee465def2e529e4c87f2118` (verified 2026-02-26, nemequ/munit stable)
+- **acutest**: `31751b4089c93b46a9fd8a8183a695f772de66de` (verified 2026-02-26, mity/acutest master)
 
 This makes container builds **fully self-contained** and reproducible without any vendor/ directory or .gitmodules file.
 
@@ -363,7 +363,7 @@ Note: The Liquibase container itself is Java-based for database migrations. We a
 **Features:**
 - **SHA256-pinned base image** — `alpine:3.21@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659`
 - **SHA-pinned openssl-wasm** — Commit `fe926b5006593ad2825243f97e363823cd56599f`
-- **SHA-pinned munit** — Commit `fbbdf1467eb0d04a6ee465def2e529e4c87f2118`
+- **SHA-pinned acutest** — Commit `31751b4089c93b46a9fd8a8183a695f772de66de`
 - **All tests run inside Docker** — Build fails if any test fails
 - **SBOM generation** — Software Bill of Materials attached to every image (`--sbom=true`)
 - **SLSA Level 3 provenance** — Non-falsifiable build attestation (`--provenance=mode=max`)
@@ -454,7 +454,7 @@ diff zig.wat clang.wat
 | Layer | Threat | Mitigation | Status |
 |-------|--------|------------|--------|
 | 1. Source | Malicious commits | Human review, signed commits | ⚠️ Partial |
-| 2. Dependencies | Compromised submodules | Pin commit SHA | ✅ Done |
+| 2. Dependencies | Compromised upstream | Docker SHA-pinned commits | ✅ Done |
 | 3. Compiler | Backdoored Zig | SHA-pinned in CI | ✅ Done |
 | 4. Build env | Compromised runner | Reproducible builds | 🔴 TODO |
 | 5. Artifacts | Tampered WASM | SRI hashes | ✅ Done |
@@ -471,13 +471,13 @@ RUN git clone --filter=blob:none --no-checkout ${OPENSSL_WASM_REPO} openssl-wasm
     git checkout ${OPENSSL_WASM_COMMIT}
 ```
 
-**munit testing framework** (cloned directly in Dockerfile):
+**acutest testing framework** (cloned directly in Dockerfile):
 ```dockerfile
 # In Dockerfile
-ARG MUNIT_COMMIT=fbbdf1467eb0d04a6ee465def2e529e4c87f2118
-RUN git clone --filter=blob:none --no-checkout ${MUNIT_REPO} munit && \
-    cd munit && \
-    git checkout ${MUNIT_COMMIT}
+ARG ACUTEST_COMMIT=31751b4089c93b46a9fd8a8183a695f772de66de
+RUN git clone --filter=blob:none --no-checkout ${ACUTEST_REPO} acutest && \
+    cd acutest && \
+    git checkout ${ACUTEST_COMMIT}
 ```
 
 **Zig compiler** (CI):
@@ -488,7 +488,7 @@ RUN git clone --filter=blob:none --no-checkout ${MUNIT_REPO} munit && \
     version: 0.14.0  # Exact version
 ```
 
-**Note**: The vendor/ directory and .gitmodules are **only for local development** convenience. Docker builds are fully self-contained and clone dependencies directly.
+**Note**: The vendor/ directory is **only for local development** convenience. There are no git submodules. Docker builds are fully self-contained and clone dependencies directly at SHA-pinned commits.
 
 ### Build Attestation (Planned)
 
@@ -569,35 +569,57 @@ Anyone can:
 
 The project uses a comprehensive testing strategy:
 
-1. **Native C Unit Tests** (munit framework) — Run BEFORE WASM compilation
+1. **Native C Unit Tests** (acutest framework) — Run BEFORE WASM compilation
 2. **Integration Tests** — Verify complete WASM module in browser environment
 3. **Hallucination Detection** — Automated checks for LLM-introduced bugs
 4. **Supply Chain Verification** — Dependency and build integrity checks
 
-### µnit (munit) Testing Framework
+### Acutest Testing Framework
 
-We use [µnit](https://nemequ.github.io/munit/) for native C unit testing:
+We use [acutest](https://github.com/mity/acutest) for native C unit testing:
 
-**Why munit?**
-- **Single file** — Just `munit.c` and `munit.h` (trivial to integrate)
+**Why acutest?**
+- **Header-only** — Just `#include "acutest.h"` (trivial to integrate, no separate .c file)
 - **Portable** — Works on any C89+ compiler
-- **Powerful CLI** — Reproducible tests with `--seed`, iterations, filtering
-- **Rich assertions** — Type-specific assertions with value display on failure
-- **Nested suites** — Organize tests hierarchically
+- **Simple API** — `TEST_CHECK()`, `TEST_ASSERT()`, `TEST_MSG()` macros
+- **Zero configuration** — Test list defined via `TEST_LIST` array
+- **Docker-cloned** — Fetched at SHA-pinned commit during Docker build (no submodules)
+
+**API Quick Reference:**
+
+```c
+#include "acutest.h"
+
+void test_sha256_empty(void) {
+    TEST_CHECK(result == expected);
+    TEST_MSG("Expected %s, got %s", expected_hex, actual_hex);
+}
+
+void test_rejection_boundary(void) {
+    int max_valid = (256 / 94) * 94 - 1;
+    TEST_ASSERT(max_valid == 187);
+}
+
+TEST_LIST = {
+    { "sha256/empty",           test_sha256_empty },
+    { "rejection/boundary_94",  test_rejection_boundary },
+    { NULL, NULL }
+};
+```
 
 **Test Coverage:**
 
 | Suite | Coverage |
 |-------|----------|
-| `/sha256` | NIST FIPS 180-4 known-answer vectors |
-| `/rejection` | Boundary verification: `(256/N)*N - 1` |
-| `/generate` | Length, charset, uniqueness, error handling |
-| `/chi_squared` | Uniform/biased distribution, df = N-1 |
-| `/serial` | Correlation tests (constant, alternating) |
-| `/collision` | Duplicate detection |
-| `/struct` | WASM/JS struct offset verification |
-| `/audit` | Full pipeline integration |
-| `/stress` | High-volume distribution verification |
+| `sha256/*` | NIST FIPS 180-4 known-answer vectors |
+| `rejection/*` | Boundary verification: `(256/N)*N - 1` |
+| `generate/*` | Length, charset, uniqueness, error handling |
+| `chi_squared/*` | Uniform/biased distribution, df = N-1 |
+| `serial/*` | Correlation tests (constant, alternating) |
+| `collision/*` | Duplicate detection |
+| `struct/*` | WASM/JS struct offset verification |
+| `audit/*` | Full pipeline integration |
+| `stress/*` | High-volume distribution verification |
 
 **Run Tests:**
 
@@ -605,23 +627,22 @@ We use [µnit](https://nemequ.github.io/munit/) for native C unit testing:
 # Run all native C tests
 make test-native
 
-# Run with munit options
-./build/test_munit --help
-./build/test_munit --seed 12345        # Reproducible PRNG seed
-./build/test_munit /paranoid/sha256    # Run only SHA-256 tests
-./build/test_munit --iterations 100    # Stress test (run each test 100x)
+# Run with acutest options
+./build/test_paranoid --help
+./build/test_paranoid --list             # List all test cases
+./build/test_paranoid sha256             # Run only SHA-256 tests
+./build/test_paranoid -v                 # Verbose output
 ```
 
 **Example Output:**
 
 ```
-Running test suite with seed 0x1a2b3c4d...
-/paranoid/sha256/empty                         [ OK    ]
-/paranoid/sha256/abc                           [ OK    ]
-/paranoid/rejection/boundary_94                [ OK    ]
-/paranoid/stress/distribution                  [ OK    ]
+Test sha256/empty...                              [ OK ]
+Test sha256/abc...                                [ OK ]
+Test rejection/boundary_94...                     [ OK ]
+Test stress/distribution...                       [ OK ]
 
-30 of 30 (100%) tests successful, 0 (0%) test skipped.
+SUCCESS: All 30 tests have passed.
 ```
 
 ### Test Before WASM Compilation
@@ -670,7 +691,7 @@ make clean        # Remove build artifacts
 
 ```bash
 make test         # Run ALL tests (native + integration + checks)
-make test-native  # Run native C unit tests (munit)
+make test-native  # Run native C unit tests (acutest)
 make integration  # Run browser/WASM integration tests
 make hallucination # LLM hallucination detection
 make supply-chain # Supply chain verification
@@ -732,8 +753,8 @@ mkdir -p vendor
 git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
 cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f
 cd ../..
-git clone https://github.com/nemequ/munit.git vendor/munit
-cd vendor/munit && git checkout fbbdf1467eb0d04a6ee465def2e529e4c87f2118
+git clone https://github.com/mity/acutest.git vendor/acutest
+cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de
 ```
 
 **Note**: For production builds, always use Docker — it clones dependencies automatically at SHA-pinned commits.
@@ -808,7 +829,7 @@ cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f
 
 ### 3. Supply Chain Hardening
 
-- [ ] Submodule commit SHA pinning
+- [ ] Dependency commit SHA verification (Docker ARG pinning)
 - [ ] Automated dependency updates (Dependabot)
 - [ ] Vulnerability scanning (Snyk, CodeQL)
 - [ ] SBOM generation (Software Bill of Materials)

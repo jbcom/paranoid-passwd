@@ -51,7 +51,7 @@ This release represents a complete architectural overhaul implementing [Liquibas
 | **✍️ Cosign Signing** | Keyless signatures via GitHub OIDC, recorded in Sigstore's Rekor transparency log |
 | **🧪 E2E Testing** | Playwright browser tests in isolated containers verify the full HTML→CSS→JS→WASM path |
 | **🏔️ Alpine Base** | 8x smaller attack surface than Debian (~3.5MB vs ~29MB) |
-| **🔬 munit C Tests** | Native unit tests with NIST FIPS 180-4 known-answer vectors run before WASM compilation |
+| **🔬 acutest C Tests** | Native unit tests with NIST FIPS 180-4 known-answer vectors run before WASM compilation |
 | **📝 release-please** | Automated, attested releases with signed artifacts |
 
 **Every artifact is:**
@@ -162,8 +162,8 @@ make docker-all  # Build → Extract → E2E Test
 mkdir -p vendor
 git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
 cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f && cd ../..
-git clone https://github.com/nemequ/munit.git vendor/munit
-cd vendor/munit && git checkout fbbdf1467eb0d04a6ee465def2e529e4c87f2118 && cd ../..
+git clone https://github.com/mity/acutest.git vendor/acutest
+cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
 
 # Build and serve
 make site
@@ -187,7 +187,7 @@ paranoid/
 │   ├── style.css            # CSS-only wizard + animations
 │   └── app.js               # Display-only WASM bridge (reads struct, sets textContent)
 ├── tests/
-│   ├── munit/               # Native C unit tests (NIST vectors, rejection sampling)
+│   ├── native/              # Native C unit tests (acutest, NIST vectors, rejection sampling)
 │   └── e2e/                 # Playwright browser tests
 ├── Dockerfile               # Multi-stage build with all verification gates
 ├── docker-compose.yml       # E2E testing with Playwright
@@ -221,7 +221,7 @@ This project implements **Liquibase-style supply chain security** with full arti
 |-------|---------------|--------|
 | **Base Image** | Alpine 3.21 (SHA256-pinned digest) | ✅ |
 | **Dependencies** | SHA-pinned commits (cloned in Dockerfile) | ✅ |
-| **Testing** | munit C tests + Playwright E2E in Docker | ✅ |
+| **Testing** | acutest C tests + Playwright E2E in Docker | ✅ |
 | **SBOM** | Software Bill of Materials (`--sbom=true`) | ✅ |
 | **Provenance** | SLSA Level 3 (`--provenance=mode=max`) | ✅ |
 | **Signing** | Cosign keyless via GitHub OIDC | ✅ |
@@ -236,7 +236,7 @@ This project implements **Liquibase-style supply chain security** with full arti
 ├────────────────────────────────────────────────────────────────────────┤
 │  Docker Build (all tests inside) → E2E Tests → WASM Verification       │
 │      ↓                                ↓              ↓                 │
-│   munit C tests                 Playwright      wasm-objdump           │
+│   acutest C tests               Playwright      wasm-objdump           │
 │   NIST vectors                  screenshots     exports check          │
 │                                                                        │
 │  ✓ ALL CHECKS MUST PASS TO MERGE                                       │
@@ -358,7 +358,7 @@ See [SECURITY.md](SECURITY.md) for our security policy and disclosure process.
 | [SECURITY.md](SECURITY.md) | Security policy, disclosure process, LLM threat model |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Development setup, testing, contributing guidelines |
 | [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
-| [docs/BUILD.md](docs/BUILD.md) | Build system, Docker pipeline, munit testing |
+| [docs/BUILD.md](docs/BUILD.md) | Build system, Docker pipeline, acutest testing |
 | [docs/SUPPLY-CHAIN.md](docs/SUPPLY-CHAIN.md) | SLSA Level 3 attestation, Cosign, SBOM |
 | [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | Comprehensive threat analysis (18 threats) |
 | [docs/AUDIT.md](docs/AUDIT.md) | Statistical audit methodology (7 layers) |

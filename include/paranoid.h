@@ -13,7 +13,7 @@
  *   proofs, and threat assessment runs inside the WASM sandbox.
  *
  * BUILD:
- *   Compiled against jedisct1/openssl-wasm (submodule) with Zig.
+ *   Compiled against jedisct1/openssl-wasm (Docker-cloned at SHA-pinned commit) with Zig.
  *   See Makefile for targets.
  */
 

@@ -9,7 +9,7 @@
 # SUPPLY CHAIN SECURITY (Liquibase-style):
 #   - All builds run inside Docker (no local make commands)
 #   - SHA-pinned base images and actions
-#   - All testing runs inside Docker build (munit C tests, WASM verification)
+#   - All testing runs inside Docker build (acutest C tests, WASM verification)
 #   - E2E tests run via docker-compose after artifact extraction
 #
 # Reference: https://www.liquibase.com/blog/docker-supply-chain-security
@@ -63,7 +63,7 @@ jobs:
 
       # ─────────────────────────────────────────────────────────
       # DOCKER BUILD: All tests run inside as build stages
-      #   - Native C unit tests (munit)
+      #   - Native C unit tests (acutest)
       #   - WASM compilation with Zig
       #   - Integration tests (exports, imports, size, SRI)
       #   - Hallucination detection

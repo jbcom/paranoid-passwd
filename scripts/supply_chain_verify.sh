@@ -5,8 +5,8 @@
 #
 # Verifies the complete supply chain before build/deploy:
 #   1. Git commit signature
-#   2. Submodule commit matches expected SHA
-#   3. Submodule library hash verification
+#   2. Docker-cloned dependency SHAs match expected
+#   3. Dependency library hash verification
 #   4. Zig compiler hash verification (if available)
 #   5. GitHub Actions SHA pinning
 #   6. No uncommitted changes
@@ -54,39 +54,38 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────
-# Check 2: Submodule initialized
+# Check 2: Dependencies available (Docker-cloned or local vendor/)
 # ─────────────────────────────────────────────────────────────
-echo -n "Check 2: Submodule initialized... "
+echo -n "Check 2: OpenSSL WASM dependency available... "
 
-OPENSSL_SUBMODULE="$REPO_ROOT/vendor/openssl-wasm"
-if [ -d "$OPENSSL_SUBMODULE/.git" ] || [ -f "$OPENSSL_SUBMODULE/.git" ]; then
+OPENSSL_VENDOR="$REPO_ROOT/vendor/openssl-wasm"
+if [ -d "$OPENSSL_VENDOR" ]; then
     echo -e "${GREEN}PASS${NC}"
 else
-    echo -e "${RED}FAIL${NC}"
-    echo "  OpenSSL submodule not initialized!"
-    echo "  Run: git submodule update --init --recursive"
-    FAILED=1
+    echo -e "${YELLOW}WARN${NC}"
+    echo "  vendor/openssl-wasm not found locally."
+    echo "  This is expected — Docker build clones it at a SHA-pinned commit."
+    WARNINGS=$((WARNINGS + 1))
 fi
 
 # ─────────────────────────────────────────────────────────────
-# Check 3: libcrypto.a exists
+# Check 3: libcrypto.a exists (only in Docker/local builds)
 # ─────────────────────────────────────────────────────────────
 echo -n "Check 3: libcrypto.a exists... "
 
-LIBCRYPTO="$OPENSSL_SUBMODULE/precompiled/lib/libcrypto.a"
+LIBCRYPTO="$OPENSSL_VENDOR/precompiled/lib/libcrypto.a"
 if [ -f "$LIBCRYPTO" ]; then
     echo -e "${GREEN}PASS${NC}"
-    
+
     # Also compute and display hash
     if command -v sha256sum &> /dev/null; then
         CRYPTO_HASH=$(sha256sum "$LIBCRYPTO" | cut -d' ' -f1)
         echo "    Hash: ${CRYPTO_HASH:0:16}..."
     fi
 else
-    echo -e "${RED}FAIL${NC}"
-    echo "  libcrypto.a not found at: $LIBCRYPTO"
-    echo "  Submodule may be corrupted or incomplete"
-    FAILED=1
+    echo -e "${YELLOW}WARN${NC}"
+    echo "  libcrypto.a not found locally (expected in Docker builds)."
+    WARNINGS=$((WARNINGS + 1))
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -121,25 +120,30 @@ fi
 # ─────────────────────────────────────────────────────────────
 echo -n "Check 5: GitHub Actions SHA-pinned... "
 
-WORKFLOW="$REPO_ROOT/.github/workflows/deploy.yml"
-if [ -f "$WORKFLOW" ]; then
-    # Count actual uses: lines (not comments)
-    USES_COUNT=$(grep -E '^\s*uses:' "$WORKFLOW" 2>/dev/null | wc -l || echo "0")
-    # Count SHA-pinned uses (40-char hex after @)
-    SHA_PINNED=$(grep -E '^\s*uses:.*@[a-f0-9]{40}' "$WORKFLOW" 2>/dev/null | wc -l || echo "0")
-    
-    if [ "$USES_COUNT" -eq "$SHA_PINNED" ] && [ "$USES_COUNT" -gt 0 ]; then
-        echo -e "${GREEN}PASS${NC} ($SHA_PINNED/$USES_COUNT actions pinned)"
+WORKFLOWS="$REPO_ROOT/.github/workflows"
+TOTAL_USES=0
+TOTAL_PINNED=0
+if [ -d "$WORKFLOWS" ]; then
+    for WF in "$WORKFLOWS"/*.yml; do
+        [ -f "$WF" ] || continue
+        USES_COUNT=$(grep -cE '^\s*uses:' "$WF" 2>/dev/null || echo "0")
+        SHA_PINNED=$(grep -cE '^\s*uses:.*@[a-f0-9]{40}' "$WF" 2>/dev/null || echo "0")
+        TOTAL_USES=$((TOTAL_USES + USES_COUNT))
+        TOTAL_PINNED=$((TOTAL_PINNED + SHA_PINNED))
+    done
+
+    if [ "$TOTAL_USES" -eq "$TOTAL_PINNED" ] && [ "$TOTAL_USES" -gt 0 ]; then
+        echo -e "${GREEN}PASS${NC} ($TOTAL_PINNED/$TOTAL_USES actions pinned across all workflows)"
     else
         echo -e "${RED}FAIL${NC}"
         echo "  Not all actions are SHA-pinned!"
-        echo "  Pinned: $SHA_PINNED / $USES_COUNT"
+        echo "  Pinned: $TOTAL_PINNED / $TOTAL_USES"
         echo "  Unpinned actions:"
-        grep -E '^\s*uses:' "$WORKFLOW" | grep -v '@[a-f0-9]\{40\}' | sed 's/^/    /'
+        grep -rE '^\s*uses:' "$WORKFLOWS"/*.yml | grep -v '@[a-f0-9]\{40\}' | sed 's/^/    /'
         FAILED=1
     fi
 else
-    echo -e "${YELLOW}SKIP${NC} (workflow not found)"
+    echo -e "${YELLOW}SKIP${NC} (workflows directory not found)"
 fi
 
 # ─────────────────────────────────────────────────────────────
