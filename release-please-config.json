@@ -7,9 +7,10 @@
       "bump-patch-for-minor-pre-major": true,
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        "Makefile",
         "CMakeLists.txt",
-        "include/paranoid.h"
+        "include/paranoid.h",
+        "melange.yaml",
+        "sonar-project.properties"
       ]
     }
   },
