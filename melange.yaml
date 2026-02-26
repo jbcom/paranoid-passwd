@@ -40,6 +40,7 @@ environment:
     packages:
       - build-base
       - cmake
+      - openssl
       - openssl-dev
       - zig
       - wabt
@@ -76,18 +77,12 @@ pipeline:
         mv build-wasm/paranoid build-wasm/paranoid.wasm
       fi
 
-  # ── Step 3: Validate WASM ───────────────────────────────────
-  # wasm-validate catches codegen bugs that browsers would reject.
-  - runs: |
-      wasm-validate build-wasm/paranoid.wasm
-      echo "wasm-validate: PASS"
+  # Note: Steps 3-4 (wasm-validate, wasm-opt) are handled by
+  # CMake post-build commands in CMakeLists.txt. The CMake build
+  # runs wasm-opt with --enable-bulk-memory, then wasm-strip,
+  # then wasm-validate as a hard gate. No need to repeat here.
 
-  # ── Step 4: Optimize WASM ───────────────────────────────────
-  # wasm-opt fixes Zig WASM codegen issues and reduces binary size.
-  - runs: |
-      wasm-opt -O2 build-wasm/paranoid.wasm -o build-wasm/paranoid.wasm
-
-  # ── Step 5: Generate BUILD_MANIFEST.json ────────────────────
+  # ── Step 3: Generate BUILD_MANIFEST.json ────────────────────
   # Record hashes, versions, and SRI integrity values for all
   # site assets. This is the only generated file in the site
   # directory (besides paranoid.wasm).
