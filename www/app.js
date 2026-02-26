@@ -112,7 +112,7 @@ function buildCharset() {
     const seen = new Set();
     let result = '';
     for (const ch of customInput.value) {
-      const code = ch.charCodeAt(0);
+      const code = ch.codePointAt(0);
       if (code >= 32 && code <= 126 && !seen.has(ch)) {
         seen.add(ch);
         result += ch;
@@ -368,10 +368,87 @@ function setupCopyButton(btnId, getText) {
    before generation. Update the strength bar and compliance text.
    =================================================================== */
 
+/**
+ * Evaluate compliance status of selected frameworks against given parameters.
+ * Returns { meetsAll, meetsSome, metFrameworks, failedFrameworks }.
+ */
+function evaluateCompliance(selected, length, totalEntropy) {
+  let meetsAll = true;
+  let meetsSome = false;
+  const metFrameworks = [];
+  const failedFrameworks = [];
+
+  for (const fwKey of selected) {
+    const fw = FRAMEWORKS[fwKey];
+    if (!fw) continue;
+    const passes = length >= fw.minLen && totalEntropy >= fw.minEntropy;
+    if (passes) {
+      meetsSome = true;
+      metFrameworks.push(fw.name);
+    } else {
+      meetsAll = false;
+      failedFrameworks.push(fw.name);
+    }
+  }
+
+  if (selected.length === 0) {
+    meetsAll = true;
+  }
+  if (!meetsSome && selected.length > 0) {
+    meetsAll = false;
+  }
+
+  return { meetsAll, meetsSome, metFrameworks, failedFrameworks };
+}
+
+/**
+ * D15: Determine the strength bar CSS class based on entropy and compliance.
+ */
+function getStrengthClass(selected, meetsAll, meetsSome, totalEntropy) {
+  if (selected.length === 0) {
+    /* No frameworks selected -- base on raw entropy */
+    if (totalEntropy >= 256) return 'strength-bar strength-purple';
+    if (totalEntropy >= 128) return 'strength-bar strength-green';
+    if (totalEntropy >= 60)  return 'strength-bar strength-yellow';
+    return 'strength-bar strength-red';
+  }
+  if (meetsAll && totalEntropy >= 256) return 'strength-bar strength-purple';
+  if (meetsAll)  return 'strength-bar strength-green';
+  if (meetsSome) return 'strength-bar strength-yellow';
+  return 'strength-bar strength-red';
+}
+
+/**
+ * D16: Build the entropy preview text string.
+ */
+function buildEntropyPreviewText(totalEntropy, compliance) {
+  const { meetsAll, meetsSome, metFrameworks, failedFrameworks } = compliance;
+  let text = 'Current config: ' + totalEntropy.toFixed(1) + ' bits';
+
+  if (metFrameworks.length === 0 && failedFrameworks.length === 0) {
+    return text;
+  }
+
+  if (meetsAll && metFrameworks.length > 0) {
+    if (totalEntropy >= 256) {
+      text += ' -- exceeds all selected frameworks (post-quantum territory)';
+    } else {
+      text += ' -- meets ' + metFrameworks.join(', ');
+    }
+  } else if (meetsSome) {
+    text += ' -- meets ' + metFrameworks.join(', ');
+    text += ' | fails ' + failedFrameworks.join(', ');
+  } else {
+    text += ' -- below all selected frameworks';
+  }
+
+  return text;
+}
+
 function updateEntropyPreview() {
   const charset = buildCharset();
   const N = charset.length;
-  const length = parseInt($('cfg-length') ? $('cfg-length').value : '32') || 32;
+  const length = Number.parseInt($('cfg-length') ? $('cfg-length').value : '32') || 32;
 
   const charsetPreview = $('charset-preview');
   const strengthBar = $('strength-bar');
@@ -391,72 +468,15 @@ function updateEntropyPreview() {
     charsetPreview.textContent = 'Effective charset: ' + N + ' characters, ' + bitsPerChar.toFixed(2) + ' bits per character';
   }
 
-  /* Determine compliance status for selected frameworks */
   const selected = getSelectedFrameworks();
-  let meetsAll = true;
-  let meetsSome = false;
-  let meetsNone = true;
-  const metFrameworks = [];
-  const failedFrameworks = [];
+  const compliance = evaluateCompliance(selected, length, totalEntropy);
 
-  for (const fwKey of selected) {
-    const fw = FRAMEWORKS[fwKey];
-    if (!fw) continue;
-    const passes = length >= fw.minLen && totalEntropy >= fw.minEntropy;
-    if (passes) {
-      meetsSome = true;
-      meetsNone = false;
-      metFrameworks.push(fw.name);
-    } else {
-      meetsAll = false;
-      failedFrameworks.push(fw.name);
-    }
+  if (strengthBar) {
+    strengthBar.className = getStrengthClass(selected, compliance.meetsAll, compliance.meetsSome, totalEntropy);
   }
 
-  if (selected.length === 0) {
-    meetsAll = true;
-    meetsNone = false;
-  }
-  if (!meetsSome && selected.length > 0) meetsAll = false;
-
-  /* D15: Strength bar color */
-  let strengthClass = 'strength-bar';
-  if (selected.length === 0) {
-    /* No frameworks selected -- base on raw entropy */
-    if (totalEntropy >= 256) strengthClass += ' strength-purple';
-    else if (totalEntropy >= 128) strengthClass += ' strength-green';
-    else if (totalEntropy >= 60) strengthClass += ' strength-yellow';
-    else strengthClass += ' strength-red';
-  } else if (meetsAll && totalEntropy >= 256) {
-    strengthClass += ' strength-purple';
-  } else if (meetsAll) {
-    strengthClass += ' strength-green';
-  } else if (meetsSome) {
-    strengthClass += ' strength-yellow';
-  } else {
-    strengthClass += ' strength-red';
-  }
-
-  if (strengthBar) strengthBar.className = strengthClass;
-
-  /* D16: Entropy preview text */
   if (entropyPreview) {
-    let previewText = 'Current config: ' + totalEntropy.toFixed(1) + ' bits';
-    if (selected.length > 0) {
-      if (meetsAll && metFrameworks.length > 0) {
-        if (totalEntropy >= 256) {
-          previewText += ' -- exceeds all selected frameworks (post-quantum territory)';
-        } else {
-          previewText += ' -- meets ' + metFrameworks.join(', ');
-        }
-      } else if (meetsSome) {
-        previewText += ' -- meets ' + metFrameworks.join(', ');
-        previewText += ' | fails ' + failedFrameworks.join(', ');
-      } else {
-        previewText += ' -- below all selected frameworks';
-      }
-    }
-    entropyPreview.textContent = previewText;
+    entropyPreview.textContent = buildEntropyPreviewText(totalEntropy, compliance);
   }
 }
 
@@ -465,11 +485,11 @@ function updateEntropyPreview() {
    =================================================================== */
 
 function validateRequirements() {
-  const length = parseInt($('cfg-length') ? $('cfg-length').value : '32') || 32;
-  const minLower = parseInt($('cfg-min-lower') ? $('cfg-min-lower').value : '0') || 0;
-  const minUpper = parseInt($('cfg-min-upper') ? $('cfg-min-upper').value : '0') || 0;
-  const minDigits = parseInt($('cfg-min-digits') ? $('cfg-min-digits').value : '0') || 0;
-  const minSymbols = parseInt($('cfg-min-symbols') ? $('cfg-min-symbols').value : '0') || 0;
+  const length = Number.parseInt($('cfg-length') ? $('cfg-length').value : '32') || 32;
+  const minLower = Number.parseInt($('cfg-min-lower') ? $('cfg-min-lower').value : '0') || 0;
+  const minUpper = Number.parseInt($('cfg-min-upper') ? $('cfg-min-upper').value : '0') || 0;
+  const minDigits = Number.parseInt($('cfg-min-digits') ? $('cfg-min-digits').value : '0') || 0;
+  const minSymbols = Number.parseInt($('cfg-min-symbols') ? $('cfg-min-symbols').value : '0') || 0;
 
   const totalRequired = minLower + minUpper + minDigits + minSymbols;
   const validation = $('requirements-validation');
@@ -535,10 +555,10 @@ async function launchAudit() {
     return;
   }
 
-  const length  = parseInt($('cfg-length').value) || 32;
+  const length  = Number.parseInt($('cfg-length').value) || 32;
   const charset = buildCharset();
-  const batch   = parseInt($('cfg-batch').value) || 500;
-  const count   = Math.max(1, Math.min(10, parseInt($('cfg-count') ? $('cfg-count').value : '1') || 1));
+  const batch   = Number.parseInt($('cfg-batch').value) || 500;
+  const count   = Math.max(1, Math.min(10, Number.parseInt($('cfg-count') ? $('cfg-count').value : '1') || 1));
   const N       = charset.length;
 
   if (N === 0) {
@@ -547,10 +567,10 @@ async function launchAudit() {
   }
 
   /* Check requirements feasibility */
-  const minLower = parseInt($('cfg-min-lower') ? $('cfg-min-lower').value : '0') || 0;
-  const minUpper = parseInt($('cfg-min-upper') ? $('cfg-min-upper').value : '0') || 0;
-  const minDigits = parseInt($('cfg-min-digits') ? $('cfg-min-digits').value : '0') || 0;
-  const minSymbols = parseInt($('cfg-min-symbols') ? $('cfg-min-symbols').value : '0') || 0;
+  const minLower = Number.parseInt($('cfg-min-lower') ? $('cfg-min-lower').value : '0') || 0;
+  const minUpper = Number.parseInt($('cfg-min-upper') ? $('cfg-min-upper').value : '0') || 0;
+  const minDigits = Number.parseInt($('cfg-min-digits') ? $('cfg-min-digits').value : '0') || 0;
+  const minSymbols = Number.parseInt($('cfg-min-symbols') ? $('cfg-min-symbols').value : '0') || 0;
   const totalRequired = minLower + minUpper + minDigits + minSymbols;
 
   if (totalRequired > length) {
@@ -565,7 +585,7 @@ async function launchAudit() {
   /* Write charset into WASM memory */
   const csPtr = wasm.malloc(N + 1);
   const csView = new Uint8Array(mem.buffer, csPtr, N + 1);
-  for (let i = 0; i < N; i++) csView[i] = charset.charCodeAt(i);
+  for (let i = 0; i < N; i++) csView[i] = charset.codePointAt(i);
   csView[N] = 0;
 
   /* Get result struct pointer */

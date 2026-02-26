@@ -48,16 +48,16 @@
 
   <div class="global-progress"><div class="global-progress-fill"></div></div>
 
-  <nav class="wizard-nav" aria-label="Audit wizard steps">
-    <label for="step-configure" class="step-label" data-num="1">Configure</label>
-    <label for="step-audit"     class="step-label" data-num="2">Generate &amp; Audit</label>
-    <label for="step-results"   class="step-label" data-num="3">Results &amp; Password</label>
+  <nav class="wizard-nav" role="tablist" aria-label="Audit wizard steps">
+    <label for="step-configure" class="step-label" data-num="1" role="tab" aria-controls="panel-configure">Configure</label>
+    <label for="step-audit"     class="step-label" data-num="2" role="tab" aria-controls="panel-audit">Generate &amp; Audit</label>
+    <label for="step-results"   class="step-label" data-num="3" role="tab" aria-controls="panel-results">Results &amp; Password</label>
   </nav>
 
   <main class="wizard-content">
 
     <!-- === PANEL 1: CONFIGURE ======================================= -->
-    <section class="wizard-panel" id="panel-configure">
+    <section class="wizard-panel" id="panel-configure" role="tabpanel" aria-labelledby="step-configure">
       <div class="config-section">
 
         <!-- D1: Hero / Landing Section -->
@@ -320,7 +320,7 @@
     </section>
 
     <!-- === PANEL 2: GENERATE & AUDIT ================================ -->
-    <section class="wizard-panel" id="panel-audit">
+    <section class="wizard-panel" id="panel-audit" role="tabpanel" aria-labelledby="step-audit">
       <div class="audit-section" id="audit-runner" role="region" aria-live="polite" data-stage="idle">
         <h2>7-Layer Cryptographic Audit</h2>
         <p class="config-subtitle">Watching each verification stage in real-time.</p>
@@ -382,7 +382,7 @@
     </section>
 
     <!-- === PANEL 3: RESULTS & PASSWORD ============================== -->
-    <section class="wizard-panel" id="panel-results">
+    <section class="wizard-panel" id="panel-results" role="tabpanel" aria-labelledby="step-results">
       <div class="results-section">
         <h2>Results &amp; Password</h2>
 
