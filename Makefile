@@ -84,7 +84,7 @@ _N := \033[0m
 # ═══════════════════════════════════════════════════════════
 
 .PHONY: all build site clean verify hash deploy check \
-        submodule info help
+        submodule info help test integration hallucination supply-chain
 
 ## Default: build everything
 all: site
@@ -220,6 +220,27 @@ serve: site
 	@printf "    (Ctrl+C to stop)\n"
 	@cd $(SITE_DIR) && python3 -m http.server 8080
 
+# ── Testing ────────────────────────────────────────────────
+
+## Run all tests
+test: integration hallucination supply-chain
+	@printf "$(_G)✓$(_N) All tests passed\n"
+
+## Run integration tests
+integration: site
+	@printf "$(_G)▸$(_N) Running integration tests\n"
+	@./scripts/integration_test.sh
+
+## Run hallucination detection
+hallucination:
+	@printf "$(_G)▸$(_N) Running hallucination detection\n"
+	@./scripts/hallucination_check.sh
+
+## Run supply chain verification
+supply-chain:
+	@printf "$(_G)▸$(_N) Running supply chain verification\n"
+	@./scripts/supply_chain_verify.sh
+
 # ── Clean ──────────────────────────────────────────────────
 
 ## Remove all build artifacts
@@ -245,4 +266,10 @@ help:
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make info         Show project configuration"
 	@echo "  make submodule    Initialize OpenSSL submodule"
+	@echo ""
+	@echo "  Testing:"
+	@echo "  make test         Run all tests"
+	@echo "  make integration  Run integration tests"
+	@echo "  make hallucination  Run LLM hallucination detection"
+	@echo "  make supply-chain Run supply chain verification"
 	@echo ""
