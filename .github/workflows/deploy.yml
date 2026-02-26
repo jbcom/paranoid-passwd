@@ -7,15 +7,21 @@
 #   - Cosign keyless signing via GitHub OIDC
 #   - SHA-pinned base images and actions
 #   - Reproducible builds (SOURCE_DATE_EPOCH)
+#   - All dependencies cloned at SHA-pinned commits in Dockerfile
 #
 # Reference: https://www.liquibase.com/blog/docker-supply-chain-security
 #
 # SUPPLY CHAIN:
 #   Source:    src/paranoid.c + include/paranoid.h
-#   Crypto:   vendor/openssl-wasm (submodule, pinned commit)
-#   Compiler: Zig (deterministic cross-compilation, pinned version)
-#   Actions:  All pinned to full 40-char commit SHAs
-#   Output:   build/site/ (index.html + style.css + app.js + paranoid.wasm)
+#   Crypto:    openssl-wasm (cloned in Dockerfile at pinned SHA)
+#   Testing:   munit (cloned in Dockerfile at pinned SHA)
+#   Compiler:  Zig (deterministic cross-compilation, pinned version)
+#   Actions:   All pinned to full 40-char commit SHAs
+#   Output:    build/site/ (index.html + style.css + app.js + paranoid.wasm)
+#
+# NO SUBMODULES/VENDOR:
+#   Dependencies are cloned inside Docker at SHA-pinned commits.
+#   This makes builds fully self-contained and reproducible.
 #
 # BUILD:
 #   This workflow runs `make site` which:
@@ -70,10 +76,9 @@ jobs:
       wasm-sha256: ${{ steps.hash.outputs.sha256 }}
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          submodules: recursive
           fetch-depth: 1
           persist-credentials: false
 
@@ -230,10 +235,9 @@ jobs:
       image-digest: ${{ steps.build-push.outputs.digest }}
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          submodules: recursive
           fetch-depth: 0  # Full history for SOURCE_DATE_EPOCH
           persist-credentials: false
 

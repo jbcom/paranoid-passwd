@@ -1,0 +1,95 @@
+# ═══════════════════════════════════════════════════════════════
+# paranoid — Docker Compose for E2E Testing
+#
+# This compose file sets up isolated end-to-end testing with:
+#   1. paranoid-build: Builds and extracts verified WASM artifacts
+#   2. paranoid-server: Minimal HTTP server serving the site
+#   3. playwright: Official Playwright container for browser testing
+#
+# USAGE:
+#   # Build and run E2E tests
+#   docker compose up --build --abort-on-container-exit
+#
+#   # Run tests with screenshot capture
+#   docker compose run playwright npx playwright test --project=chromium
+#
+#   # Interactive testing (connects to MCP)
+#   docker compose run playwright bash
+#
+# The build container extracts artifacts to ./artifact which is
+# mounted into the server container at /www for serving.
+# ═══════════════════════════════════════════════════════════════
+
+version: "3.9"
+
+services:
+  # ─────────────────────────────────────────────────────────────
+  # Build Stage: Compile and extract verified WASM artifacts
+  # ─────────────────────────────────────────────────────────────
+  paranoid-build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - artifact-data:/extract
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "═══════════════════════════════════════════════════════════"
+        echo "  Extracting verified artifacts..."
+        echo "═══════════════════════════════════════════════════════════"
+        cp -r /artifact/* /extract/
+        echo "✓ Artifacts extracted to /extract"
+        ls -la /extract/
+        ls -la /extract/site/
+
+  # ─────────────────────────────────────────────────────────────
+  # HTTP Server: Serve the site for browser testing
+  # ─────────────────────────────────────────────────────────────
+  paranoid-server:
+    image: python:3.12-alpine
+    depends_on:
+      paranoid-build:
+        condition: service_completed_successfully
+    volumes:
+      - artifact-data:/www:ro
+    working_dir: /www/site
+    command: ["python", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - paranoid-net
+
+  # ─────────────────────────────────────────────────────────────
+  # Playwright: Official browser testing container
+  # ─────────────────────────────────────────────────────────────
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.50.0-noble
+    depends_on:
+      paranoid-server:
+        condition: service_healthy
+    volumes:
+      - ./tests/e2e:/tests:ro
+      - ./playwright.config.ts:/playwright.config.ts:ro
+      - ./test-results:/test-results
+      - ./playwright-report:/playwright-report
+    working_dir: /
+    environment:
+      - BASE_URL=http://paranoid-server:8080
+      - CI=true
+    command: ["npx", "playwright", "test", "--reporter=html"]
+    networks:
+      - paranoid-net
+
+volumes:
+  artifact-data:
+
+networks:
+  paranoid-net:
+    driver: bridge

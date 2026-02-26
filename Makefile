@@ -2,7 +2,17 @@
 # paranoid — Makefile
 #
 # This is a C project that compiles to WASM and deploys to a browser.
-# Treat it like one: make, make test, make clean, make deploy.
+# 
+# RECOMMENDED: Use Docker for builds (handles all dependencies):
+#   docker build -t paranoid-artifact .
+#   docker create --name temp paranoid-artifact
+#   docker cp temp:/artifact ./artifact
+#   docker rm temp
+#
+# LOCAL BUILDS (CI/Docker only):
+#   Local builds require vendor/openssl-wasm and vendor/munit.
+#   These are cloned automatically inside Docker at SHA-pinned commits.
+#   For local development, use Docker or manually clone dependencies.
 # ═══════════════════════════════════════════════════════════════
 
 # ── Configuration ──────────────────────────────────────────
@@ -84,7 +94,7 @@ _N := \033[0m
 # ═══════════════════════════════════════════════════════════
 
 .PHONY: all build site clean verify hash deploy check \
-        submodule info help test test-native integration hallucination supply-chain
+        check-deps info help test test-native integration hallucination supply-chain
 
 ## Default: build everything
 all: site
@@ -102,16 +112,25 @@ info:
 	@printf "  Output:     $(_D)$(SITE_DIR)/$(_N)\n"
 	@echo ""
 
-# ── Submodule ──────────────────────────────────────────────
+# ── Dependencies ───────────────────────────────────────────
+# Dependencies are cloned inside Docker at SHA-pinned commits.
+# For local builds, ensure vendor/ exists (see Docker build or manual clone).
 
-## Ensure OpenSSL submodule is checked out
-submodule: $(OPENSSL_LIB)
-
-$(OPENSSL_LIB):
-	@printf "$(_G)▸$(_N) Initializing OpenSSL submodule...\n"
-	git submodule update --init --recursive --depth=1
-	@test -f $@ || { printf "$(_R)✗$(_N) libcrypto.a not found\n"; exit 1; }
-	@printf "$(_G)✓$(_N) OpenSSL ready: $@\n"
+## Check if vendor dependencies exist
+check-deps:
+	@if [ ! -f $(OPENSSL_LIB) ]; then \
+		printf "$(_R)✗$(_N) vendor/openssl-wasm not found\n"; \
+		printf "  Use Docker build or manually clone:\n"; \
+		printf "    git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm\n"; \
+		exit 1; \
+	fi
+	@if [ ! -f vendor/munit/munit.c ]; then \
+		printf "$(_R)✗$(_N) vendor/munit not found\n"; \
+		printf "  Use Docker build or manually clone:\n"; \
+		printf "    git clone https://github.com/nemequ/munit.git vendor/munit\n"; \
+		exit 1; \
+	fi
+	@printf "$(_G)✓$(_N) Dependencies found\n"
 
 # ── Compile ────────────────────────────────────────────────
 
@@ -283,6 +302,13 @@ help:
 	@printf "$(_B)$(PROJECT)$(_N) v$(VERSION) — build targets\n"
 	@echo "────────────────────────────────────"
 	@echo ""
+	@echo "  RECOMMENDED: Use Docker for builds"
+	@echo "    docker build -t paranoid-artifact ."
+	@echo "    docker create --name temp paranoid-artifact"
+	@echo "    docker cp temp:/artifact ./artifact"
+	@echo "    docker rm temp"
+	@echo ""
+	@echo "  Local (requires vendor/):"
 	@echo "  make              Build site (WASM + HTML/CSS/JS)"
 	@echo "  make build        Compile WASM binary only"
 	@echo "  make site         Assemble site with SRI hashes"
@@ -291,7 +317,7 @@ help:
 	@echo "  make serve        Local dev server (port 8080)"
 	@echo "  make clean        Remove build artifacts"
 	@echo "  make info         Show project configuration"
-	@echo "  make submodule    Initialize OpenSSL submodule"
+	@echo "  make check-deps   Check if vendor dependencies exist"
 	@echo ""
 	@echo "  Testing:"
 	@echo "  make test         Run all tests (native + integration)"
