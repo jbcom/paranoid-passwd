@@ -197,11 +197,8 @@ jobs:
           SERVER_PID=$!
           sleep 2
 
-          # Run Playwright tests (config at root, testDir: ./tests/e2e)
-          # Only run chromium in CI (firefox/webkit are heavier)
-          npx playwright test \
-            --config ../../playwright.config.ts \
-            --project chromium \
+          # Run Playwright tests (chromium only in CI)
+          npx playwright test --project chromium \
             || { kill $SERVER_PID 2>/dev/null; exit 1; }
 
           kill $SERVER_PID 2>/dev/null || true
@@ -212,8 +209,8 @@ jobs:
         with:
           name: playwright-report
           path: |
-            playwright-report/
-            test-results/
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
           retention-days: 7
 
   # ---------------------------------------------------------------
