@@ -67,6 +67,9 @@
           <p class="hero-desc">Generate cryptographically secure passwords backed by a 7-layer statistical audit that proves they're safe. Every byte comes from a CSPRNG inside a WASM sandbox &mdash; JavaScript never touches the random data.</p>
         </div>
 
+        <div class="config-dashboard">
+        <div class="config-main">
+
         <!-- D5/D6: Full Charset Control -->
         <fieldset class="config-fieldset" id="fieldset-charset">
           <legend>Character Set</legend>
@@ -154,7 +157,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>NIST SP 800-63B</strong>
-                <span>US federal digital identity standard</span>
+                <span>US federal digital identity &mdash; min 8 chars, 30+ bit entropy</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -162,7 +165,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>PCI DSS 4.0</strong>
-                <span>Payment card industry standard (min 12 chars)</span>
+                <span>Payment card industry &mdash; min 12 chars, 60+ bit entropy</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -170,7 +173,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>HIPAA</strong>
-                <span>US healthcare information privacy</span>
+                <span>US healthcare privacy &mdash; min 8 chars, 60+ bit entropy</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -178,7 +181,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>SOC 2</strong>
-                <span>Service organization controls for SaaS</span>
+                <span>SaaS org controls &mdash; min 8 chars, 60+ bit entropy</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -186,7 +189,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>GDPR / ENISA</strong>
-                <span>EU data protection (80+ bit entropy)</span>
+                <span>EU data protection &mdash; min 8 chars, 80+ bit entropy</span>
               </span>
             </label>
             <label class="compliance-option">
@@ -194,7 +197,7 @@
               <span class="check-box"></span>
               <span class="compliance-text">
                 <strong>ISO 27001</strong>
-                <span>International information security (12+ chars, 90+ bits)</span>
+                <span>Intl. info security &mdash; min 12 chars, 90+ bit entropy</span>
               </span>
             </label>
           </div>
@@ -229,6 +232,11 @@
             <output class="requirements-validation" id="requirements-validation" aria-live="polite"></output>
           </fieldset>
         </details>
+
+        </div><!-- /.config-main -->
+
+        <div class="config-sidebar">
+        <div class="sidebar-sticky">
 
         <!-- D15 + D16: Strength Meter + Entropy Preview -->
         <div class="strength-section">
@@ -315,6 +323,10 @@
             </div>
           </div>
         </div>
+
+        </div><!-- /.sidebar-sticky -->
+        </div><!-- /.config-sidebar -->
+        </div><!-- /.config-dashboard -->
 
       </div>
     </section>

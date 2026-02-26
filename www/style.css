@@ -114,7 +114,7 @@ code, pre, .result-body, .password-text, #audit-hash, #result-hash,
 /* -- Page Wrapper ------------------------------------------------ */
 
 .page-wrapper {
-  max-width: 860px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 0 24px 40px;
 }
@@ -326,34 +326,39 @@ code, pre, .result-body, .password-text, #audit-hash, #result-hash,
 /* -- Hero / Landing Section (D1) --------------------------------- */
 
 .hero {
-  text-align: center;
-  margin-bottom: 36px;
-  padding: 24px 0 8px;
+  text-align: left;
+  margin-bottom: 28px;
+  padding: 16px 0 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .hero-title {
-  font-size: 2.2rem;
+  font-size: 1.6rem;
   font-weight: 800;
   color: var(--text-hi);
   letter-spacing: -1px;
   font-family: var(--font-mono);
-  margin-bottom: 4px;
+  margin-bottom: 0;
 }
 
 .hero-subtitle {
-  font-size: 1.05rem;
+  font-size: 0.88rem;
   font-weight: 600;
   color: var(--green);
-  margin-bottom: 16px;
+  margin-bottom: 0;
   letter-spacing: 0.2px;
 }
 
 .hero-desc {
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   color: var(--text);
-  max-width: 580px;
-  margin: 0 auto;
-  line-height: 1.7;
+  max-width: 100%;
+  margin: 0;
+  line-height: 1.6;
+  flex-basis: 100%;
 }
 
 /* -- Config Fieldsets --------------------------------------------- */
@@ -679,6 +684,34 @@ input[type="range"]::-moz-range-thumb {
   height: 0;
 }
 
+/* Checked state for compliance checkboxes */
+.compliance-option input[type="checkbox"]:checked + .check-box {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.compliance-option input[type="checkbox"]:checked + .check-box::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border: solid var(--bg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.compliance-option input[type="checkbox"]:focus-visible + .check-box {
+  box-shadow: 0 0 0 3px var(--green-dim);
+}
+
+/* Highlight entire compliance card when checked */
+.compliance-option:has(input:checked) {
+  border-color: var(--green);
+  background: var(--green-dim);
+}
+
 .compliance-option .check-box {
   margin-top: 2px;
 }
@@ -821,6 +854,41 @@ input[type="range"]::-moz-range-thumb {
   font-size: 0.78rem;
   color: var(--text);
   line-height: 1.5;
+}
+
+/* -- Two-Column Dashboard Layout --------------------------------- */
+
+.config-dashboard {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 24px;
+  align-items: start;
+}
+
+.config-main {
+  min-width: 0;
+}
+
+.config-sidebar {
+  min-width: 0;
+}
+
+.sidebar-sticky {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Inside sidebar, remove bottom margin from strength section */
+.sidebar-sticky .strength-section {
+  margin-bottom: 0;
+}
+
+/* Inside sidebar, launch button needs no bottom margin */
+.sidebar-sticky .btn-launch {
+  margin-bottom: 0;
 }
 
 /* -- Launch Button ----------------------------------------------- */
@@ -1617,6 +1685,26 @@ input[type="range"]::-moz-range-thumb {
 
 /* -- Responsive -------------------------------------------------- */
 
+/* Collapse dashboard to single column on tablets */
+@media (max-width: 960px) {
+  .config-dashboard {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar-sticky {
+    position: static;
+  }
+
+  .hero {
+    text-align: center;
+    justify-content: center;
+  }
+
+  .hero-desc {
+    text-align: center;
+  }
+}
+
 @media (max-width: 640px) {
   html {
     font-size: 14px;
@@ -1666,11 +1754,11 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .hero-title {
-    font-size: 1.6rem;
+    font-size: 1.4rem;
   }
 
   .hero-subtitle {
-    font-size: 0.92rem;
+    font-size: 0.82rem;
   }
 
   .password-text-large {
