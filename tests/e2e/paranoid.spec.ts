@@ -75,8 +75,10 @@ test.describe('paranoid Password Generator E2E', () => {
       expect(passwords).not.toContain(password);
       passwords.push(password!);
       
-      // Small delay between generations
-      await page.waitForTimeout(100);
+      // Wait for UI to be ready for next generation
+      await page.waitForSelector('#btn-generate:not([disabled]), [data-action="generate"]:not([disabled])', {
+        timeout: 5000
+      });
     }
     
     // All passwords should be unique
@@ -278,8 +280,10 @@ test.describe('paranoid Password Generator E2E', () => {
     const generateBtn = page.locator('#btn-generate, [data-action="generate"]');
     await generateBtn.click();
     
-    // Capture audit in progress
-    await page.waitForTimeout(500);
+    // Wait for audit to start and capture in progress
+    await page.waitForSelector('[data-stage]:not([data-stage="idle"]), [data-audit-started]', { 
+      timeout: 5000 
+    });
     await page.screenshot({ 
       path: 'test-results/screenshots/02-audit-progress.png',
       fullPage: true 

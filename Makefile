@@ -115,19 +115,25 @@ info:
 # ── Dependencies ───────────────────────────────────────────
 # Dependencies are cloned inside Docker at SHA-pinned commits.
 # For local builds, ensure vendor/ exists (see Docker build or manual clone).
+#
+# SHA-pinned commits (must match Dockerfile ARGs):
+OPENSSL_WASM_SHA := fe926b5006593ad2825243f97e363823cd56599f
+MUNIT_SHA        := fbbdf1467eb0d04a6ee465def2e529e4c87f2118
 
 ## Check if vendor dependencies exist
 check-deps:
 	@if [ ! -f $(OPENSSL_LIB) ]; then \
 		printf "$(_R)✗$(_N) vendor/openssl-wasm not found\n"; \
-		printf "  Use Docker build or manually clone:\n"; \
+		printf "  Use Docker build (recommended) or manually clone at pinned SHA:\n"; \
 		printf "    git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm\n"; \
+		printf "    cd vendor/openssl-wasm && git checkout $(OPENSSL_WASM_SHA)\n"; \
 		exit 1; \
 	fi
 	@if [ ! -f vendor/munit/munit.c ]; then \
 		printf "$(_R)✗$(_N) vendor/munit not found\n"; \
-		printf "  Use Docker build or manually clone:\n"; \
+		printf "  Use Docker build (recommended) or manually clone at pinned SHA:\n"; \
 		printf "    git clone https://github.com/nemequ/munit.git vendor/munit\n"; \
+		printf "    cd vendor/munit && git checkout $(MUNIT_SHA)\n"; \
 		exit 1; \
 	fi
 	@printf "$(_G)✓$(_N) Dependencies found\n"

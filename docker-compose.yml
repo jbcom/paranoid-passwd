@@ -6,6 +6,9 @@
 #   2. paranoid-server: Minimal HTTP server serving the site
 #   3. playwright: Official Playwright container for browser testing
 #
+# SUPPLY CHAIN SECURITY:
+#   All images are SHA-pinned for immutability (consistent with AGENTS.md).
+#
 # USAGE:
 #   # Build and run E2E tests
 #   docker compose up --build --abort-on-container-exit
@@ -45,9 +48,10 @@ services:
 
   # ─────────────────────────────────────────────────────────────
   # HTTP Server: Serve the site for browser testing
+  # SHA-pinned Python Alpine image for supply chain security
   # ─────────────────────────────────────────────────────────────
   paranoid-server:
-    image: python:3.12-alpine
+    image: python@sha256:2d91681153dd4b8cdb52d4fd34a17b9edbafa4dd3086143cfd4b6c3a84c1acb0
     depends_on:
       paranoid-build:
         condition: service_completed_successfully
@@ -68,9 +72,10 @@ services:
 
   # ─────────────────────────────────────────────────────────────
   # Playwright: Official browser testing container
+  # SHA-pinned for supply chain security (v1.50.0-noble)
   # ─────────────────────────────────────────────────────────────
   playwright:
-    image: mcr.microsoft.com/playwright:v1.50.0-noble
+    image: mcr.microsoft.com/playwright@sha256:e46352b075b3c97e226ad9ed27d6999dbc6e7f021ba94b30d833136fcee349f1
     depends_on:
       paranoid-server:
         condition: service_healthy
