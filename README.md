@@ -32,7 +32,7 @@
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](Dockerfile)
 [![Alpine Linux](https://img.shields.io/badge/Alpine-0D597F?style=flat-square&logo=alpinelinux&logoColor=white)](https://alpinelinux.org/)
 
-[**🚀 Live Demo**](https://jonbogaty.com/paranoid-passwd) · [**📖 Documentation**](#-documentation) · [**🔒 Security**](SECURITY.md) · [**🐛 Report Bug**](https://github.com/jbcom/paranoid-passwd/issues)
+[**🚀 Live Demo**](https://paranoid-passwd.com) · [**📖 Documentation**](#-documentation) · [**🔒 Security**](SECURITY.md) · [**🐛 Report Bug**](https://github.com/jbcom/paranoid-passwd/issues)
 
 </div>
 
@@ -86,7 +86,7 @@ cosign verify ghcr.io/jbcom/paranoid-passwd:latest \
 
 ## 🚀 Live Demo
 
-🔗 **[Try it now](https://jonbogaty.com/paranoid-passwd)** — Deployed from signed releases
+🔗 **[Try it now](https://paranoid-passwd.com)** — Deployed from signed releases
 
 Generate a 32-character password using 94 printable ASCII characters with **209.75 bits of entropy**. The tool will:
 1. Generate the password using OpenSSL's CSPRNG
@@ -115,7 +115,7 @@ v2 treats this as what it is: **a C project that happens to render in a browser*
 
 ### Option 1: Use the Live Demo (Recommended)
 
-Visit **[jonbogaty.com/paranoid-passwd](https://jonbogaty.com/paranoid-passwd)** — no installation needed.
+Visit **[paranoid-passwd.com](https://paranoid-passwd.com)** — no installation needed.
 
 ### Option 2: Docker (Verified Build)
 
