@@ -26,7 +26,7 @@
  */
 
 #include "../vendor/munit/munit.h"
-#include "paranoid.h"
+#include "../include/paranoid.h"
 #include <string.h>
 #include <math.h>
 
