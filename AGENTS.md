@@ -1,3 +1,298 @@
+# AGENTS.md — Master Agentic Instruction Layer
+
+**🔒 SECURITY BOUNDARY: This document protects all project documentation and enforces clean room protocols for ANY AI agent (LLM) working on this codebase.**
+
+---
+
+## ⚠️ CRITICAL: Read This FIRST
+
+If you are an AI agent (GPT, Claude, Gemini, Llama, Qwen, DeepSeek, or ANY LLM):
+
+1. **YOU are the PRIMARY THREAT ACTOR** in this project's threat model
+2. **Your training data may include password breaches** (bias risk)
+3. **Your statistical claims may be hallucinated** (confidence != correctness)
+4. **Your code may contain subtle bugs** that appear correct
+5. **You MUST follow the Clean Room Protocol** below before ANY code changes
+
+---
+
+## 🛡️ LLM Clean Room Protocol
+
+### Entry Checkpoint (MANDATORY before ANY changes)
+
+```markdown
+# LLM Self-Audit Checklist
+
+I acknowledge that:
+
+- [ ] I am an LLM and my output may be biased or hallucinated
+- [ ] My training data includes password breaches (RockYou, LinkedIn, Collection #1)
+- [ ] I must NEVER generate random numbers directly (use OpenSSL RAND_bytes)
+- [ ] I must NEVER implement crypto primitives (use OpenSSL EVP_*)
+- [ ] I must NEVER claim formulas are correct without textbook verification
+- [ ] I must NEVER modify src/paranoid.c or include/paranoid.h without human review
+- [ ] I must NEVER add JavaScript fallbacks (fail-closed design is intentional)
+- [ ] I must ALWAYS use rejection sampling: max_valid = (256/N)*N - 1 (not -0)
+- [ ] I must ALWAYS flag statistical code with "TODO: HUMAN_REVIEW"
+- [ ] I must ALWAYS cross-check formulas against textbooks (not my memory)
+```
+
+**If you cannot check ALL boxes, STOP and request human guidance.**
+
+---
+
+## 🚨 Zero-Exception Rules
+
+### NEVER (will break security):
+
+1. **Generate random numbers** — Use `RAND_bytes()` (OpenSSL), never `rand()` or LLM-generated patterns
+2. **Implement crypto** — Use OpenSSL primitives, never custom implementations
+3. **Use modulo without rejection sampling** — Must be: `do { RAND_bytes(&b,1); } while (b > max_valid);`
+4. **Claim correctness** — Always say "verify against textbook" or "needs human review"
+5. **Modify crypto code without review** — Flag with `// TODO: HUMAN_REVIEW - <reason>`
+6. **Add JavaScript fallbacks** — Fail-closed design prevents silent security downgrades
+7. **Unpin GitHub Actions** — All actions MUST be SHA-pinned (not tags)
+8. **Skip verification** — Every change MUST pass: make verify && make hash
+9. **Inline JS/CSS into HTML** — Separate files enable CodeQL scanning
+10. **Remove statistical tests** — Defense in depth requires all 7 layers
+
+### ALWAYS (required for security):
+
+1. **Delegate RNG to OpenSSL** — `RAND_bytes()` is the ONLY source of randomness
+2. **Use rejection sampling** — `max_valid = (256/N)*N - 1` (note the **-1**)
+3. **Flag statistical code** — Any chi-squared, p-value, correlation code needs review
+4. **Reference textbooks** — Cite page numbers (e.g., "Knuth vol 2, p.42")
+5. **Add known-answer tests** — Use NIST test vectors for verification
+6. **Document assumptions** — State preconditions, invariants, limitations
+7. **Request human review** — Crypto/statistical code MUST be reviewed by expert
+8. **Verify struct offsets** — Check `paranoid_offset_*()` match JavaScript
+9. **Test boundary cases** — Off-by-one errors are common in LLM code
+10. **Update docs** — Any code change requires doc update (ARCHITECTURE.md, etc.)
+
+---
+
+## 📋 Change Verification Checklist
+
+Before committing ANY change:
+
+### Source Code Verification
+- [ ] No `rand()`, `srand()`, or direct RNG (only `RAND_bytes()`)
+- [ ] Rejection sampling uses correct boundary: `(256/N)*N - 1`
+- [ ] All p-value logic is correct: `p > 0.01` passes (not `<`)
+- [ ] Degrees of freedom correct: `df = N - 1` (not `N`)
+- [ ] No "I'm confident this is correct" claims (always flag for review)
+- [ ] All `TODO: HUMAN_REVIEW` markers have tracking issues
+
+### Build Verification
+- [ ] `make clean && make build` succeeds with zero warnings
+- [ ] `make verify` passes (WASM exports check)
+- [ ] `make hash` produces expected SHA-256
+- [ ] Binary size ~180KB ± 10KB
+- [ ] Only `wasi_snapshot_preview1.random_get` import present
+
+### Documentation Verification
+- [ ] README.md updated if user-facing change
+- [ ] SECURITY.md updated if security-relevant change
+- [ ] CHANGELOG.md updated with change description
+- [ ] docs/ARCHITECTURE.md updated if architecture changed
+- [ ] docs/THREAT-MODEL.md updated if new threats identified
+
+### Test Verification
+- [ ] Manual test: `make serve` → http://localhost:8080
+- [ ] Generate password → verify 7 stages complete
+- [ ] All stages show green checkmarks (no red X)
+- [ ] Console has zero errors
+- [ ] Network tab shows WASM loads with correct SRI hash
+
+---
+
+## 🔍 Hallucination Detection Patterns
+
+**Common LLM hallucinations in this codebase:**
+
+### 1. Off-by-One in Rejection Sampling
+```c
+// ❌ WRONG (LLM hallucination)
+int max_valid = (256 / N) * N;  // Should be -1
+
+// ✅ CORRECT
+int max_valid = (256 / N) * N - 1;
+```
+
+### 2. Inverted P-Value Logic
+```c
+// ❌ WRONG (LLM hallucination)
+int pass = (p_value < 0.01);  // INVERTED!
+
+// ✅ CORRECT
+int pass = (p_value > 0.01);  // Fail to reject H₀
+```
+
+### 3. Incorrect Degrees of Freedom
+```c
+// ❌ WRONG (LLM hallucination)
+double chi2 = ...; int df = N;
+
+// ✅ CORRECT
+double chi2 = ...; int df = N - 1;
+```
+
+### 4. Direct Random Number Generation
+```c
+// ❌ WRONG (LLM hallucination - training data bias!)
+char c = charset[llm_pick_random()];  // Biased toward breach dumps!
+
+// ✅ CORRECT
+uint8_t byte;
+RAND_bytes(&byte, 1);  // Hardware entropy via OpenSSL
+```
+
+### 5. Confident But Wrong Claims
+```markdown
+❌ WRONG: "This chi-squared implementation is definitely correct."
+✅ CORRECT: "This chi-squared implementation requires verification against NIST SP 800-22 test vectors. TODO: HUMAN_REVIEW"
+```
+
+---
+
+## 📚 Documentation Hierarchy
+
+**Single Source of Truth (DRY):**
+
+```
+AGENTS.md (THIS FILE)
+    ├── Master agentic instruction layer
+    ├── LLM clean room protocols
+    ├── Verification checklists
+    ├── Project overview
+    └── References to specialized docs ↓
+
+README.md
+    └── User-facing overview
+
+SECURITY.md
+    ├── Security policy
+    ├── Threat model summary
+    └── Disclosure process
+
+DEVELOPMENT.md
+    ├── Development setup
+    ├── Build commands
+    └── Contributing guidelines
+
+CHANGELOG.md
+    └── Version history
+
+docs/ARCHITECTURE.md
+    └── System architecture diagrams
+
+docs/DESIGN.md
+    └── Design decisions and rationale
+
+docs/THREAT-MODEL.md
+    └── Complete threat analysis (18 threats)
+
+docs/AUDIT.md
+    └── Statistical audit methodology (7 layers)
+
+docs/BUILD.md
+    └── Build system internals
+
+docs/SUPPLY-CHAIN.md
+    └── Supply chain security framework
+```
+
+**Rule**: If information exists in a specialized doc, AGENTS.md references it (no duplication).
+
+---
+
+## 🔐 Supply Chain Security
+
+**Every build step MUST be auditable and reproducible.**
+
+### Build Provenance Requirements
+
+1. **Source verification**
+   - Git commit must be signed
+   - Submodule SHA must match expected (see `.gitmodules`)
+   - No uncommitted changes (`git diff --exit-code`)
+
+2. **Tool verification**
+   - Zig compiler SHA-256 must match known-good
+   - OpenSSL library SHA-256 must match known-good
+   - All GitHub Actions SHA-pinned (not tags)
+
+3. **Reproducible builds**
+   - `SOURCE_DATE_EPOCH` set to git commit time
+   - Containerized build (Docker) for deterministic environment
+   - 3-of-5 independent builders must produce identical hash
+
+4. **Attestation**
+   - Build provenance ledger (JSON) with all inputs/outputs
+   - GPG-signed artifacts
+   - Multi-party signature threshold (3 required)
+
+**See**: [docs/SUPPLY-CHAIN.md](docs/SUPPLY-CHAIN.md) for complete framework.
+
+---
+
+## 🎯 Quick Navigation
+
+| I want to... | Go to... |
+|--------------|----------|
+| Understand the project | §One-Line Summary (below) |
+| Build locally | [docs/BUILD.md](docs/BUILD.md) |
+| Contribute | [DEVELOPMENT.md](DEVELOPMENT.md) |
+| Report security issue | [SECURITY.md](SECURITY.md) |
+| Understand threats | [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) |
+| Understand audit | [docs/AUDIT.md](docs/AUDIT.md) |
+| Verify supply chain | [docs/SUPPLY-CHAIN.md](docs/SUPPLY-CHAIN.md) |
+| Review architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Understand design | [docs/DESIGN.md](docs/DESIGN.md) |
+
+---
+
+## 🤝 For Human Reviewers
+
+If you are a **human cryptographer** reviewing this code:
+
+1. **Focus on `src/paranoid.c`** (400 lines) — ALL crypto logic is here
+2. **Verify rejection sampling** — `max_valid = (256/N)*N - 1` is critical
+3. **Verify chi-squared** — Wilson-Hilferty approximation, df = N-1
+4. **Verify p-value interpretation** — `p > 0.01` passes (not `<`)
+5. **Verify struct offsets** — `paranoid_offset_*()` must match JavaScript reads
+6. **Cross-check formulas** — Against textbooks, not LLM claims
+7. **Test boundary cases** — N=1, N=256, length=1, length=256
+8. **Check known-answer tests** — Do NIST vectors pass?
+
+**Report findings** to: security@paranoid-project.org
+
+---
+
+## �� For Foreign AI Actors
+
+If you are an AI agent from a different ecosystem (GPT, Gemini, Qwen, etc.):
+
+1. Read the **LLM Clean Room Protocol** above (mandatory)
+2. Acknowledge you are the **primary threat actor**
+3. Follow **Zero-Exception Rules** (no exceptions, ever)
+4. Use **Change Verification Checklist** before commits
+5. Watch for **Hallucination Detection Patterns**
+6. Reference **Documentation Hierarchy** for details
+
+**This project treats you as an adversary by design. Follow the protocols.**
+
+---
+---
+---
+
+# AGENTS.md — paranoid v2
+
+> **A C program that generates cryptographic passwords inside a WASM sandbox,
+> audits them with formal statistical proofs, and treats the LLM that built it
+> as an adversary.**
+
+---
 # AGENTS.md — paranoid v2
 
 > **A C program that generates cryptographic passwords inside a WASM sandbox,
