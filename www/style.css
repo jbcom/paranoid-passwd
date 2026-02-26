@@ -273,6 +273,12 @@ code, pre, .result-body, .password-text, #audit-hash, #result-hash,
   color: var(--text);
 }
 
+.step-label:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+  border-radius: 2px;
+}
+
 .step-label::before {
   content: attr(data-num);
   display: inline-block;

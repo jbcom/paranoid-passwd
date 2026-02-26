@@ -580,6 +580,7 @@ async function launchAudit() {
 
   /* Switch to audit panel */
   $('step-audit').checked = true;
+  syncWizardAria();
   setStage('generating');
 
   /* Write charset into WASM memory */
@@ -779,6 +780,7 @@ async function launchAudit() {
 
   /* Switch to results */
   $('step-results').checked = true;
+  syncWizardAria();
 }
 
 /* ===================================================================
@@ -854,12 +856,63 @@ function populateComplianceResults(r) {
 }
 
 /* ===================================================================
+   ARIA TABS -- keep role="tab" state in sync with wizard radios
+   =================================================================== */
+
+const WIZARD_STEPS = ['configure', 'audit', 'results'];
+
+/** Sync aria-selected and tabindex to match the currently checked radio. */
+function syncWizardAria() {
+  for (const step of WIZARD_STEPS) {
+    const radio = $('step-' + step);
+    const tab = $('tab-' + step);
+    if (!radio || !tab) continue;
+    const active = radio.checked;
+    tab.setAttribute('aria-selected', String(active));
+    tab.setAttribute('tabindex', active ? '0' : '-1');
+  }
+}
+
+/** Arrow key navigation for the tablist (WAI-ARIA Tabs Pattern). */
+function initTablistKeyboard() {
+  const tabs = WIZARD_STEPS.map(function(s) { return $('tab-' + s); }).filter(Boolean);
+  for (const tab of tabs) {
+    tab.addEventListener('keydown', function(e) {
+      const idx = tabs.indexOf(e.currentTarget);
+      let next = -1;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        next = (idx + 1) % tabs.length;
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        next = (idx - 1 + tabs.length) % tabs.length;
+      } else if (e.key === 'Home') {
+        next = 0;
+      } else if (e.key === 'End') {
+        next = tabs.length - 1;
+      }
+      if (next >= 0) {
+        e.preventDefault();
+        tabs[next].click();
+        tabs[next].focus();
+      }
+    });
+  }
+}
+
+/* ===================================================================
    INIT -- load WASM, wire up UI, load manifest
    =================================================================== */
 
 document.addEventListener('DOMContentLoaded', async () => {
   /* D10: Load BUILD_MANIFEST.json for version/hash data */
   loadBuildManifest();
+
+  /* ARIA tabs: sync state on radio change + arrow key nav */
+  for (const step of WIZARD_STEPS) {
+    const radio = $('step-' + step);
+    if (radio) radio.addEventListener('change', syncWizardAria);
+  }
+  initTablistKeyboard();
+  syncWizardAria();
 
   /* Range slider live label */
   const range = $('cfg-length');
