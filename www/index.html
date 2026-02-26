@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>paranoid-passwd — self-auditing cryptographic password generator</title>
+<meta name="description" content="A self-auditing cryptographic password generator that treats the LLM that built it as an adversary. OpenSSL CSPRNG + WASM sandbox + 7-layer statistical audit.">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'self';
+               script-src 'self' 'wasm-unsafe-eval';
+               connect-src 'self';
+               img-src 'self' data:;">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='none' stroke='%2334d399' stroke-width='2'%3E%3Crect x='7' y='14' width='18' height='14' rx='2'/%3E%3Cpath d='M11 14V9a5 5 0 0 1 10 0v5'/%3E%3Ccircle cx='16' cy='21' r='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===================================================================
+     WIZARD STATE MACHINE — Hidden radios at document root.
+     CSS :checked ~ selectors control ALL navigation.
+     Zero JavaScript needed for panel switching.
+     =================================================================== -->
+
+<input type="radio" name="wizard" id="step-configure" class="wizard-radio" aria-label="Step 1: Configure password settings" checked>
+<input type="radio" name="wizard" id="step-audit"     class="wizard-radio" aria-label="Step 2: Generate and audit password">
+<input type="radio" name="wizard" id="step-results"   class="wizard-radio" aria-label="Step 3: View results and password">
+
+<div class="page-wrapper" id="page">
+
+  <header class="topbar">
+    <div class="topbar-brand">
+      <span class="topbar-logo" aria-hidden="true"></span>
+      <div class="topbar-brand-text">
+        <span class="topbar-name">paranoid-passwd</span>
+        <span class="topbar-tagline">self-auditing cryptographic password generator</span>
+      </div>
+    </div>
+    <div class="topbar-meta">
+      <code id="engine-badge" aria-label="WASM engine status">loading...</code>
+      <div class="csprng-badge" aria-label="CSPRNG status">
+        <span class="csprng-dot" id="status-dot" aria-label="Status indicator"></span>
+        <span id="status-text">init</span>
+      </div>
+      <span class="topbar-tag" id="version-tag">loading...</span>
+    </div>
+  </header>
+
+  <div class="global-progress"><div class="global-progress-fill"></div></div>
+
+  <nav class="wizard-nav" role="tablist" aria-label="Audit wizard steps">
+    <label for="step-configure" class="step-label" data-num="1" role="tab" aria-controls="panel-configure">Configure</label>
+    <label for="step-audit"     class="step-label" data-num="2" role="tab" aria-controls="panel-audit">Generate &amp; Audit</label>
+    <label for="step-results"   class="step-label" data-num="3" role="tab" aria-controls="panel-results">Results &amp; Password</label>
+  </nav>
+
+  <main class="wizard-content">
+
+    <!-- === PANEL 1: CONFIGURE ======================================= -->
+    <section class="wizard-panel" id="panel-configure" role="tabpanel" aria-labelledby="step-configure">
+      <div class="config-section">
+
+        <!-- D1: Hero / Landing Section -->
+        <div class="hero">
+          <h1 class="hero-title">paranoid-passwd</h1>
+          <p class="hero-subtitle">Self-Auditing Cryptographic Password Generator</p>
+          <p class="hero-desc">Generate cryptographically secure passwords backed by a 7-layer statistical audit that proves they're safe. Every byte comes from a CSPRNG inside a WASM sandbox &mdash; JavaScript never touches the random data.</p>
+        </div>
+
+        <div class="config-dashboard">
+        <div class="config-main">
+
+        <!-- D5/D6: Full Charset Control -->
+        <fieldset class="config-fieldset" id="fieldset-charset">
+          <legend>Character Set</legend>
+
+          <div class="charset-checks">
+            <label class="check-label">
+              <input type="checkbox" id="cfg-lower" checked>
+              <span class="check-box"></span>
+              <span class="check-text"><code>[a-z]</code> Lowercase</span>
+            </label>
+            <label class="check-label">
+              <input type="checkbox" id="cfg-upper" checked>
+              <span class="check-box"></span>
+              <span class="check-text"><code>[A-Z]</code> Uppercase</span>
+            </label>
+            <label class="check-label">
+              <input type="checkbox" id="cfg-digits" checked>
+              <span class="check-box"></span>
+              <span class="check-text"><code>[0-9]</code> Digits</span>
+            </label>
+            <label class="check-label">
+              <input type="checkbox" id="cfg-symbols" checked>
+              <span class="check-box"></span>
+              <span class="check-text"><code>[!@#$...]</code> Symbols</span>
+            </label>
+          </div>
+
+          <div class="charset-toggles">
+            <label class="check-label">
+              <input type="checkbox" id="cfg-extended">
+              <span class="check-box"></span>
+              <span class="check-text">Extended printable ASCII (space + DEL-adjacent)</span>
+            </label>
+            <!-- D7: Exclude Ambiguous Characters -->
+            <label class="check-label">
+              <input type="checkbox" id="cfg-no-ambiguous">
+              <span class="check-box"></span>
+              <span class="check-text">Exclude ambiguous characters (0, O, I, l, 1, |)</span>
+            </label>
+          </div>
+
+          <div class="field field-full">
+            <label class="field-label" for="cfg-custom-charset">Custom charset (overrides above if non-empty)</label>
+            <input type="text" id="cfg-custom-charset" class="text-input" placeholder="Type exact characters to use, e.g. abc123!@#" autocomplete="off" spellcheck="false">
+          </div>
+
+          <output class="charset-preview" id="charset-preview" aria-live="polite">
+            Effective charset: 94 characters, 6.55 bits per character
+          </output>
+        </fieldset>
+
+        <!-- D3: Number of passwords + Length + Batch -->
+        <fieldset class="config-fieldset" id="fieldset-generation">
+          <legend>Generation Settings</legend>
+
+          <div class="config-grid">
+            <div class="field">
+              <label class="field-label" for="cfg-count">Number of Passwords</label>
+              <input type="number" id="cfg-count" class="text-input" min="1" max="10" value="1">
+            </div>
+            <div class="field">
+              <label class="field-label" for="cfg-batch">Audit Batch Size</label>
+              <select id="cfg-batch">
+                <option value="200">200 passwords</option>
+                <option value="500" selected>500 passwords</option>
+                <option value="1000">1,000 passwords</option>
+              </select>
+            </div>
+            <div class="field field-full">
+              <label class="field-label" for="cfg-length">Password Length &mdash; <output id="cfg-length-val">32</output> characters</label>
+              <input type="range" id="cfg-length" min="8" max="128" value="32">
+              <div class="range-labels"><span>8</span><span>128</span></div>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- D4: Regulatory Compliance Multi-Select -->
+        <fieldset class="config-fieldset" id="fieldset-compliance">
+          <legend>Compliance Frameworks</legend>
+          <p class="fieldset-desc">Select the regulatory frameworks you need to comply with. The strictest requirements apply.</p>
+
+          <div class="compliance-grid">
+            <label class="compliance-option">
+              <input type="checkbox" name="compliance" value="nist" checked>
+              <span class="check-box"></span>
+              <span class="compliance-text">
+                <strong>NIST SP 800-63B</strong>
+                <span>US federal digital identity &mdash; min 8 chars, 30+ bit entropy</span>
+              </span>
+            </label>
+            <label class="compliance-option">
+              <input type="checkbox" name="compliance" value="pci_dss">
+              <span class="check-box"></span>
+              <span class="compliance-text">
+                <strong>PCI DSS 4.0</strong>
+                <span>Payment card industry &mdash; min 12 chars, 60+ bit entropy</span>
+              </span>
+            </label>
+            <label class="compliance-option">
+              <input type="checkbox" name="compliance" value="hipaa">
+              <span class="check-box"></span>
+              <span class="compliance-text">
+                <strong>HIPAA</strong>
+                <span>US healthcare privacy &mdash; min 8 chars, 60+ bit entropy</span>
+              </span>
+            </label>
+            <label class="compliance-option">
+              <input type="checkbox" name="compliance" value="soc2">
+              <span class="check-box"></span>
+              <span class="compliance-text">
+                <strong>SOC 2</strong>
+                <span>SaaS org controls &mdash; min 8 chars, 60+ bit entropy</span>
+              </span>
+            </label>
+            <label class="compliance-option">
+              <input type="checkbox" name="compliance" value="gdpr">
+              <span class="check-box"></span>
+              <span class="compliance-text">
+                <strong>GDPR / ENISA</strong>
+                <span>EU data protection &mdash; min 8 chars, 80+ bit entropy</span>
+              </span>
+            </label>
+            <label class="compliance-option">
+              <input type="checkbox" name="compliance" value="iso27001">
+              <span class="check-box"></span>
+              <span class="compliance-text">
+                <strong>ISO 27001</strong>
+                <span>Intl. info security &mdash; min 12 chars, 90+ bit entropy</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        <!-- D8: Minimum Character-Type Requirements -->
+        <details class="advanced-details" id="advanced-requirements">
+          <summary class="advanced-summary">Advanced Requirements</summary>
+          <fieldset class="config-fieldset config-fieldset-inner">
+            <legend class="sr-only">Minimum character-type requirements</legend>
+            <p class="fieldset-desc">Optionally enforce minimum counts per character type. Passwords that don't meet these are rejected and regenerated.</p>
+
+            <div class="config-grid config-grid-4">
+              <div class="field">
+                <label class="field-label" for="cfg-min-lower">Min lowercase</label>
+                <input type="number" id="cfg-min-lower" class="text-input" min="0" max="128" value="0">
+              </div>
+              <div class="field">
+                <label class="field-label" for="cfg-min-upper">Min uppercase</label>
+                <input type="number" id="cfg-min-upper" class="text-input" min="0" max="128" value="0">
+              </div>
+              <div class="field">
+                <label class="field-label" for="cfg-min-digits">Min digits</label>
+                <input type="number" id="cfg-min-digits" class="text-input" min="0" max="128" value="0">
+              </div>
+              <div class="field">
+                <label class="field-label" for="cfg-min-symbols">Min symbols</label>
+                <input type="number" id="cfg-min-symbols" class="text-input" min="0" max="128" value="0">
+              </div>
+            </div>
+
+            <output class="requirements-validation" id="requirements-validation" aria-live="polite"></output>
+          </fieldset>
+        </details>
+
+        </div><!-- /.config-main -->
+
+        <div class="config-sidebar">
+        <div class="sidebar-sticky">
+
+        <!-- D15 + D16: Strength Meter + Entropy Preview -->
+        <div class="strength-section">
+          <div class="strength-bar-container">
+            <div class="strength-bar" id="strength-bar"></div>
+          </div>
+          <output class="entropy-preview" id="entropy-preview" aria-live="polite">
+            Current config: calculating...
+          </output>
+        </div>
+
+        <button class="btn-launch" id="btn-launch">Generate + Run 7-Layer Audit</button>
+
+        <!-- Provenance Chain -->
+        <div class="provenance">
+          <h3 class="provenance-title">Full Provenance Chain</h3>
+          <p class="provenance-subtitle">Every component in this tool is verifiable. Nothing is hidden.</p>
+
+          <ol class="provenance-chain">
+            <li class="chain-link">
+              <div class="chain-icon">C</div>
+              <div class="chain-detail">
+                <strong>Source</strong>
+                <span>src/paranoid.c &mdash; all cryptographic logic in ~400 lines of C</span>
+              </div>
+            </li>
+            <li class="chain-link">
+              <div class="chain-icon">Zig</div>
+              <div class="chain-detail">
+                <strong>Compiler</strong>
+                <span>Zig 0.13.0 cross-compiles C to wasm32-wasi (SHA-256 verified tarball)</span>
+              </div>
+            </li>
+            <li class="chain-link">
+              <div class="chain-icon">SSL</div>
+              <div class="chain-detail">
+                <strong>CSPRNG</strong>
+                <span>OpenSSL RAND_bytes via DRBG &mdash; WASI random_get bridges to Web Crypto</span>
+              </div>
+            </li>
+            <li class="chain-link">
+              <div class="chain-icon">WASM</div>
+              <div class="chain-detail">
+                <strong>Sandbox</strong>
+                <span>WebAssembly linear memory &mdash; JS cannot access DRBG state</span>
+              </div>
+            </li>
+            <li class="chain-link">
+              <div class="chain-icon">SRI</div>
+              <div class="chain-detail">
+                <strong>Integrity</strong>
+                <span>SHA-384 Subresource Integrity on every asset. Tamper = fail.</span>
+              </div>
+            </li>
+          </ol>
+
+          <div class="provenance-build">
+            <strong>Build attestation:</strong>
+            WASM SHA-256: <code id="build-sha">loading...</code>
+            <span class="build-sep">&middot;</span>
+            SRI: <code id="build-sri">loading...</code>
+            <span class="build-sep">&middot;</span>
+            Built <time id="build-time">loading...</time>
+            <span class="build-sep">&middot;</span>
+            <a href="BUILD_MANIFEST.json">Full manifest</a>
+          </div>
+
+          <div class="provenance-guarantees">
+            <div class="guarantee">
+              <strong>Zero external requests</strong>
+              <span>No CDNs, no analytics, no fonts loaded from third parties. CSP enforced.</span>
+            </div>
+            <div class="guarantee">
+              <strong>Zero JavaScript computation</strong>
+              <span>JS only reads a C struct from WASM memory and sets DOM textContent.</span>
+            </div>
+            <div class="guarantee">
+              <strong>Docker-attested builds</strong>
+              <span>SBOM + SLSA L3 provenance. All tests gate the Docker build.</span>
+            </div>
+            <div class="guarantee">
+              <strong>SHA-pinned supply chain</strong>
+              <span>Alpine base image, Zig compiler, OpenSSL WASM, acutest &mdash; all SHA-pinned.</span>
+            </div>
+          </div>
+        </div>
+
+        </div><!-- /.sidebar-sticky -->
+        </div><!-- /.config-sidebar -->
+        </div><!-- /.config-dashboard -->
+
+      </div>
+    </section>
+
+    <!-- === PANEL 2: GENERATE & AUDIT ================================ -->
+    <section class="wizard-panel" id="panel-audit" role="tabpanel" aria-labelledby="step-audit">
+      <div class="audit-section" id="audit-runner" role="region" aria-live="polite" data-stage="idle">
+        <h2>7-Layer Cryptographic Audit</h2>
+        <p class="config-subtitle">Watching each verification stage in real-time.</p>
+
+        <div class="password-reveal">
+          <div class="password-reveal-label">Generated Password</div>
+          <div class="password-reveal-row">
+            <div id="audit-password" class="password-text"></div>
+            <button class="btn-copy btn-copy-small" id="btn-copy-audit" aria-label="Copy password to clipboard" type="button">Copy</button>
+          </div>
+          <div class="password-hash">SHA-256: <code id="audit-hash"></code></div>
+        </div>
+
+        <ol class="stage-list">
+          <li class="stage-item stage-generate">
+            <div class="stage-icon" data-num="1"></div>
+            <div class="stage-name">Password Generation<span>CSPRNG + rejection sampling</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-generate">pending</div>
+          </li>
+          <li class="stage-item stage-chi2">
+            <div class="stage-icon" data-num="2"></div>
+            <div class="stage-name">Chi-Squared Uniformity<span>Pearson's chi-squared test on batch</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-chi2">pending</div>
+          </li>
+          <li class="stage-item stage-serial">
+            <div class="stage-icon" data-num="3"></div>
+            <div class="stage-name">Serial Correlation<span>Adjacent character dependency</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-serial">pending</div>
+          </li>
+          <li class="stage-item stage-collisions">
+            <div class="stage-icon" data-num="4"></div>
+            <div class="stage-name">Collision Detection<span>Duplicate check across batch</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-collisions">pending</div>
+          </li>
+          <li class="stage-item stage-proofs">
+            <div class="stage-icon" data-num="5"></div>
+            <div class="stage-name">Entropy &amp; Uniqueness Proofs<span>Formal mathematical derivation</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-proofs">pending</div>
+          </li>
+          <li class="stage-item stage-patterns">
+            <div class="stage-icon" data-num="6"></div>
+            <div class="stage-name">Pattern Detection<span>Keyboard walks, repeats, sequences</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-patterns">pending</div>
+          </li>
+          <li class="stage-item stage-threats">
+            <div class="stage-icon" data-num="7"></div>
+            <div class="stage-name">LLM Threat Assessment<span>6-vector hallucination model</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-threats">pending</div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- === PANEL 3: RESULTS & PASSWORD ============================== -->
+    <section class="wizard-panel" id="panel-results" role="tabpanel" aria-labelledby="step-results">
+      <div class="results-section">
+        <h2>Results &amp; Password</h2>
+
+        <!-- D2: Password prominently on Results page -->
+        <div class="result-password-card">
+          <div class="result-password-label">Your Password</div>
+          <div class="result-password-row">
+            <div id="result-password" class="password-text password-text-large"></div>
+            <button class="btn-copy" id="btn-copy-result" aria-label="Copy password to clipboard" type="button">Copy</button>
+          </div>
+          <div class="result-password-hash">SHA-256: <code id="result-hash"></code></div>
+        </div>
+
+        <!-- D3: Multi-password list (shown when count > 1) -->
+        <div class="multi-password-section" id="multi-passwords" hidden>
+          <h3 class="multi-password-title">Additional Passwords</h3>
+          <ol class="multi-password-list" id="multi-password-list"></ol>
+        </div>
+
+        <div class="verdict-banner" id="verdict-banner" role="alert">
+          <span id="verdict-icon"></span>
+          <span id="verdict-text"></span>
+        </div>
+
+        <!-- D4: Compliance results per framework -->
+        <details class="result-details" id="det-compliance-wrap" open>
+          <summary>Compliance Results <span class="details-badge" id="det-compliance-badge"></span></summary>
+          <div class="result-body" id="det-compliance"></div>
+        </details>
+
+        <details class="result-details">
+          <summary>Entropy Proof <span class="details-badge" id="det-entropy-badge"></span></summary>
+          <div class="result-body" id="det-entropy"></div>
+        </details>
+
+        <details class="result-details">
+          <summary>Statistical Tests <span class="details-badge" id="det-stats-badge"></span></summary>
+          <div class="result-body" id="det-stats"></div>
+        </details>
+
+        <details class="result-details">
+          <summary>Uniqueness Proof <span class="details-badge" id="det-unique-badge"></span></summary>
+          <div class="result-body" id="det-unique"></div>
+        </details>
+
+        <details class="result-details">
+          <summary>LLM Threat Model <span class="details-badge badge-info">6 VECTORS</span></summary>
+          <div class="result-body" id="det-threats"></div>
+        </details>
+
+        <details class="result-details">
+          <summary>Self-Audit <span class="details-badge badge-warn">READ THIS</span></summary>
+          <div class="result-body" id="det-self-audit"></div>
+        </details>
+
+        <div class="warning-footer">
+          <strong>Honest Disclosure:</strong> This tool was built by an LLM. The CSPRNG
+          (OpenSSL RAND_bytes via WASM) and statistical tests (chi-squared, serial
+          correlation) run in C inside the WASM sandbox. The display-only JS bridge
+          reads a result struct from WASM linear memory and sets DOM textContent.
+          Have a human cryptographer verify <code>src/paranoid.c</code> before production use.
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-links">
+      <a href="https://github.com/jbcom/paranoid-passwd">Source Code</a>
+      <a href="BUILD_MANIFEST.json">Build Manifest</a>
+    </div>
+    <p class="footer-text">
+      paranoid-passwd is open source (MIT). No data leaves your browser.
+      <br>
+      Built with C, Zig, OpenSSL, WebAssembly. Zero runtime dependencies.
+    </p>
+  </footer>
+
+</div>
+
+<script src="app.js"></script>
+
+</body>
+</html>

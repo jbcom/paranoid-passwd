@@ -1,0 +1,43 @@
+# ================================================================
+# apko.yaml -- OCI image configuration for paranoid-passwd
+#
+# Replaces Dockerfile + docker-compose.yml. Produces a minimal
+# container image containing only the static site artifacts.
+#
+# The image contains NO runtime dependencies -- paranoid.wasm
+# runs in the browser, not in the container. The container is
+# a distribution mechanism: copy the site files out or serve
+# them with any static file server.
+#
+# Build:
+#   apko build apko.yaml paranoid-passwd:latest paranoid-passwd.tar
+#
+# Extract artifacts:
+#   docker load < paranoid-passwd.tar
+#   docker create --name tmp paranoid-passwd:latest
+#   docker cp tmp:/usr/share/paranoid-passwd/site ./site
+#   docker rm tmp
+#
+# Or serve directly:
+#   docker run --rm -p 8080:8080 paranoid-passwd:latest \
+#     httpd -f -p 8080 -h /usr/share/paranoid-passwd/site
+# ================================================================
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    - paranoid-passwd
+
+entrypoint:
+  command: /bin/sh
+
+# Minimal image -- only static files, no runtime needed.
+# The WASM binary runs in the browser, not in the container.
+cmd: echo "paranoid-passwd artifacts at /usr/share/paranoid-passwd/site/"
+
+archs:
+  - x86_64
+  - aarch64

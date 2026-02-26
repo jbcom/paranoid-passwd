@@ -1,0 +1,20 @@
+diff --git a/Configurations/10-main.conf b/Configurations/10-main.conf
+--- a/Configurations/10-main.conf
++++ b/Configurations/10-main.conf
+@@ -1927,6 +1927,16 @@
+         multilib         => "64",
+     },
+
++    "wasm32-wasi" => {
++        inherit_from     => [ "BASE_unix" ],
++        CC               => "zig cc",
++        CXX              => "zig c++",
++        cflags           => add("--target=wasm32-wasi"),
++        cxxflags         => add("--target=wasm32-wasi"),
++        lib_cppflags     => add("-DL_ENDIAN"),
++        bn_ops           => "THIRTY_TWO_BIT",
++    },
++
+ #### uClinux
+     "uClinux-dist" => {
+         inherit_from     => [ "BASE_unix" ],

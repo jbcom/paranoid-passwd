@@ -1,0 +1,129 @@
+# ================================================================
+# melange.yaml -- Wolfi package recipe for paranoid-passwd
+#
+# Replaces the multi-stage Dockerfile. Builds:
+#   1. Native binary + tests (CMake, system OpenSSL)
+#   2. WASM binary (CMake, Zig cross-compilation toolchain)
+#   3. Validated + optimized WASM
+#   4. BUILD_MANIFEST.json with SRI hashes
+#   5. Installs static site artifacts
+#
+# Build:
+#   melange build melange.yaml --arch x86_64,aarch64
+#
+# The resulting APK contains:
+#   /usr/share/paranoid-passwd/site/
+#     paranoid.wasm
+#     BUILD_MANIFEST.json
+#     index.html
+#     app.js
+#     style.css
+# ================================================================
+
+package:
+  name: paranoid-passwd
+  version: 3.0.0
+  epoch: 0
+  description: "Self-auditing cryptographic password generator -- WASM binary + web UI"
+  copyright:
+    - license: MIT
+  target-architecture:
+    - x86_64
+    - aarch64
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - build-base
+      - cmake
+      - openssl
+      - openssl-dev
+      - zig
+      - wabt
+      - binaryen
+      - wolfi-base
+
+pipeline:
+  # ── Step 1: Native build + test ──────────────────────────────
+  # Compile with system cc and OpenSSL, then run unit tests.
+  # This validates the C code on the host before cross-compiling.
+  - uses: cmake/configure
+    with:
+      opts: |
+        -DCMAKE_BUILD_TYPE=Release
+
+  - uses: cmake/build
+
+  - runs: |
+      ctest --test-dir output --output-on-failure
+      echo "native tests: PASS"
+
+  # ── Step 2: WASM build ──────────────────────────────────────
+  # Cross-compile to wasm32-wasi using the Zig toolchain file.
+  # This produces paranoid.wasm with no OpenSSL dependency --
+  # the WASM target uses platform_wasm.c + sha256_compact.c.
+  - runs: |
+      cmake -B build-wasm \
+        -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
+        -DCMAKE_BUILD_TYPE=Release
+      cmake --build build-wasm
+      # CMake with -mexec-model=reactor may produce "paranoid" without
+      # the .wasm extension on some Zig versions. Normalize the name.
+      if [ -f build-wasm/paranoid ] && [ ! -f build-wasm/paranoid.wasm ]; then
+        mv build-wasm/paranoid build-wasm/paranoid.wasm
+      fi
+
+  # Note: Steps 3-4 (wasm-validate, wasm-opt) are handled by
+  # CMake post-build commands in CMakeLists.txt. The CMake build
+  # runs wasm-opt with --enable-bulk-memory, then wasm-strip,
+  # then wasm-validate as a hard gate. No need to repeat here.
+
+  # ── Step 3: Generate BUILD_MANIFEST.json ────────────────────
+  # Record hashes, versions, and SRI integrity values for all
+  # site assets. This is the only generated file in the site
+  # directory (besides paranoid.wasm).
+  - runs: |
+      WASM_SHA256=$(sha256sum build-wasm/paranoid.wasm | cut -d' ' -f1)
+      WASM_SRI=$(openssl dgst -sha384 -binary build-wasm/paranoid.wasm | openssl base64 -A)
+      CSS_SRI=$(openssl dgst -sha384 -binary www/style.css | openssl base64 -A)
+      JS_SRI=$(openssl dgst -sha384 -binary www/app.js | openssl base64 -A)
+      BUILD_TIME=${SOURCE_DATE_EPOCH:+$(date -u -d @${SOURCE_DATE_EPOCH} +%Y-%m-%dT%H:%M:%SZ)}; BUILD_TIME=${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+      cat > build-wasm/BUILD_MANIFEST.json <<MANIFEST
+      {
+        "project": "paranoid-passwd",
+        "version": "3.0.0",
+        "build_time": "${BUILD_TIME}",
+        "zig_version": "$(zig version)",
+        "openssl_version": "$(openssl version | cut -d' ' -f2)",
+        "wasm_sha256": "${WASM_SHA256}",
+        "wasm_sri": "sha384-${WASM_SRI}",
+        "css_sri": "sha384-${CSS_SRI}",
+        "js_sri": "sha384-${JS_SRI}"
+      }
+      MANIFEST
+
+  # ── Step 6: Install artifacts ───────────────────────────────
+  # Copy all site files to the package destination directory.
+  # www/index.html, www/app.js, www/style.css are SOURCE files
+  # that ship as-is (no build-time modification).
+  - runs: |
+      mkdir -p ${{targets.destdir}}/usr/share/paranoid-passwd/site
+      cp build-wasm/paranoid.wasm ${{targets.destdir}}/usr/share/paranoid-passwd/site/
+      cp build-wasm/BUILD_MANIFEST.json ${{targets.destdir}}/usr/share/paranoid-passwd/site/
+      cp www/index.html ${{targets.destdir}}/usr/share/paranoid-passwd/site/
+      cp www/app.js ${{targets.destdir}}/usr/share/paranoid-passwd/site/
+      cp www/style.css ${{targets.destdir}}/usr/share/paranoid-passwd/site/
+
+test:
+  pipeline:
+    - runs: |
+        test -f /usr/share/paranoid-passwd/site/paranoid.wasm
+        test -f /usr/share/paranoid-passwd/site/BUILD_MANIFEST.json
+        test -f /usr/share/paranoid-passwd/site/index.html
+        test -f /usr/share/paranoid-passwd/site/app.js
+        test -f /usr/share/paranoid-passwd/site/style.css
+        echo "All artifacts present"

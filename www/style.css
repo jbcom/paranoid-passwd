@@ -1,0 +1,1782 @@
+/* ===================================================================
+   paranoid-passwd v3.0 -- stylesheet
+
+   ARCHITECTURE:
+     All visual state is driven by CSS selectors:
+     - Wizard navigation: radio :checked ~ .page-wrapper
+     - Audit progress:    [data-stage="X"] .stage-item
+     - Results:           native <details> + :open
+
+   No JavaScript manipulates classes for layout/animation.
+   CodeQL can scan this as a standard .css file.
+
+   TYPOGRAPHY:
+     System font stack only -- zero external requests.
+     Display text uses the OS native UI font.
+     Code/passwords use the OS native monospace font.
+   =================================================================== */
+
+/* -- Custom Properties ------------------------------------------- */
+
+:root {
+  /* Color palette -- deep navy with emerald accents */
+  --bg:        #080c14;
+  --bg-card:   #0d1119;
+  --bg-input:  #111723;
+  --bg-hover:  #161d2e;
+  --border:    #1c2438;
+  --border-hi: #283350;
+
+  /* Text hierarchy */
+  --text:      #b8bdd0;
+  --text-dim:  #5c6380;
+  --text-hi:   #e4e7f2;
+
+  /* Semantic colors */
+  --green:     #34d399;
+  --green-dim: rgba(52, 211, 153, 0.12);
+  --green-glow: rgba(52, 211, 153, 0.25);
+  --red:       #f43f5e;
+  --red-dim:   rgba(244, 63, 94, 0.12);
+  --amber:     #f59e0b;
+  --amber-dim: rgba(245, 158, 11, 0.12);
+  --blue:      #38bdf8;
+  --blue-dim:  rgba(56, 189, 248, 0.12);
+  --purple:    #a78bfa;
+  --purple-dim: rgba(167, 139, 250, 0.12);
+
+  /* Layout */
+  --radius:    8px;
+  --radius-lg: 12px;
+
+  /* Typography -- system fonts only, zero external requests.
+     Modern Font Stacks (https://modernfontstacks.com/) approach:
+     system-ui resolves to SF Pro (macOS), Segoe UI (Windows),
+     Roboto (Android/ChromeOS). ui-monospace resolves to
+     SF Mono, Cascadia Code, etc. No layout shift. Instant render. */
+  --font-ui:   system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+               Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro',
+               Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+}
+
+/* -- Reset ------------------------------------------------------- */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: var(--bg);
+  background-image:
+    radial-gradient(circle at 50% 0%, rgba(52, 211, 153, 0.04) 0%, transparent 50%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke-width='0.5' stroke='rgb(28 36 56 / 0.4)'%3E%3Cpath d='M0 .5H31.5V32'/%3E%3C/svg%3E");
+  color: var(--text);
+  font-family: var(--font-ui);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+code, pre, .result-body, .password-text, #audit-hash, #result-hash,
+#engine-badge, #build-sha, #build-sri, .stage-result {
+  font-family: var(--font-mono);
+}
+
+/* Screen-reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* -- Wizard Radio Buttons (hidden) ------------------------------- */
+
+.wizard-radio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* -- Page Wrapper ------------------------------------------------ */
+
+.page-wrapper {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px 40px;
+}
+
+/* -- Top Bar ----------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 0 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 28px;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--green) 0%, #059669 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.topbar-logo::after {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border: 2.5px solid var(--bg);
+  border-radius: 50%;
+  position: absolute;
+}
+
+.topbar-brand-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar-name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-hi);
+  letter-spacing: -0.5px;
+  font-family: var(--font-mono);
+}
+
+.topbar-tagline {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  letter-spacing: 0.2px;
+}
+
+.topbar-tag {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+}
+
+.topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-meta code {
+  font-size: 0.72rem;
+  color: var(--green);
+  background: var(--green-dim);
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+.csprng-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.csprng-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green-glow);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+/* -- Global Progress Bar ----------------------------------------- */
+
+.global-progress {
+  height: 2px;
+  background: var(--border);
+  border-radius: 1px;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.global-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--green), #059669);
+  transition: width 0.4s ease;
+}
+
+#step-configure:checked ~ .page-wrapper .global-progress-fill { width: 0%; }
+#step-audit:checked ~ .page-wrapper .global-progress-fill     { width: 50%; }
+#step-results:checked ~ .page-wrapper .global-progress-fill   { width: 100%; }
+
+/* -- Wizard Navigation ------------------------------------------- */
+
+.wizard-nav {
+  display: flex;
+  gap: 0;
+  margin-bottom: 32px;
+  border-bottom: 2px solid var(--border);
+}
+
+.step-label {
+  flex: 1;
+  text-align: center;
+  padding: 12px 0;
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.3s, border-color 0.3s;
+  user-select: none;
+}
+
+.step-label:hover {
+  color: var(--text);
+}
+
+.step-label::before {
+  content: attr(data-num);
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  border-radius: 50%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.65rem;
+  margin-right: 8px;
+  text-align: center;
+  vertical-align: middle;
+  transition: all 0.3s;
+  font-family: var(--font-mono);
+}
+
+/* Active step styling -- CSS-only via radio :checked */
+#step-configure:checked ~ .page-wrapper .step-label[for="step-configure"],
+#step-audit:checked ~ .page-wrapper .step-label[for="step-audit"],
+#step-results:checked ~ .page-wrapper .step-label[for="step-results"] {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+
+#step-configure:checked ~ .page-wrapper .step-label[for="step-configure"]::before,
+#step-audit:checked ~ .page-wrapper .step-label[for="step-audit"]::before,
+#step-results:checked ~ .page-wrapper .step-label[for="step-results"]::before {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+/* -- Panel Visibility -- CSS-only wizard ------------------------- */
+
+.wizard-panel {
+  display: none;
+  animation: fadeIn 0.35s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+#step-configure:checked ~ .page-wrapper #panel-configure { display: block; }
+#step-audit:checked ~ .page-wrapper #panel-audit         { display: block; }
+#step-results:checked ~ .page-wrapper #panel-results     { display: block; }
+
+/* -- Hero / Landing Section (D1) --------------------------------- */
+
+.hero {
+  text-align: left;
+  margin-bottom: 28px;
+  padding: 16px 0 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.hero-title {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--text-hi);
+  letter-spacing: -1px;
+  font-family: var(--font-mono);
+  margin-bottom: 0;
+}
+
+.hero-subtitle {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--green);
+  margin-bottom: 0;
+  letter-spacing: 0.2px;
+}
+
+.hero-desc {
+  font-size: 0.82rem;
+  color: var(--text);
+  max-width: 100%;
+  margin: 0;
+  line-height: 1.6;
+  flex-basis: 100%;
+}
+
+/* -- Config Fieldsets --------------------------------------------- */
+
+.config-fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px 24px;
+  margin-bottom: 20px;
+  background: var(--bg-card);
+}
+
+.config-fieldset legend {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-hi);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 0 8px;
+}
+
+.config-fieldset-inner {
+  border: none;
+  padding: 0;
+  margin-bottom: 0;
+  background: transparent;
+}
+
+.fieldset-desc {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+  margin-top: 4px;
+}
+
+.config-section h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-hi);
+  margin-bottom: 6px;
+  letter-spacing: -0.3px;
+}
+
+.config-section h2 span {
+  color: var(--green);
+}
+
+.config-subtitle {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  margin-bottom: 28px;
+  max-width: 560px;
+}
+
+/* -- Config Grid ------------------------------------------------- */
+
+.config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 0;
+}
+
+.config-grid-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.field-full {
+  grid-column: 1 / -1;
+}
+
+.field-label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.field select,
+.field input[type="range"] {
+  width: 100%;
+}
+
+/* -- Form Controls ----------------------------------------------- */
+
+select {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-hi);
+  padding: 10px 14px;
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%235c6380'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+select:hover {
+  border-color: var(--border-hi);
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--green-dim);
+}
+
+.text-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-hi);
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  width: 100%;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.text-input:hover {
+  border-color: var(--border-hi);
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--green-dim);
+}
+
+.text-input::placeholder {
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  margin-top: 8px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--green);
+  cursor: pointer;
+  box-shadow: 0 0 8px var(--green-glow);
+  transition: box-shadow 0.2s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 14px var(--green-glow);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--green);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 8px var(--green-glow);
+}
+
+.range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-top: 6px;
+  font-family: var(--font-mono);
+}
+
+/* -- Checkbox Controls (D5/D6/D7) -------------------------------- */
+
+.charset-checks {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.charset-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.check-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.check-label:hover {
+  border-color: var(--border-hi);
+  background: var(--bg-hover);
+}
+
+.check-label input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.check-box {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border-hi);
+  background: var(--bg);
+  flex-shrink: 0;
+  position: relative;
+  transition: all 0.2s;
+}
+
+.check-label input[type="checkbox"]:checked + .check-box {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.check-label input[type="checkbox"]:checked + .check-box::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border: solid var(--bg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.check-label input[type="checkbox"]:focus-visible + .check-box {
+  box-shadow: 0 0 0 3px var(--green-dim);
+}
+
+.check-text {
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.check-text code {
+  font-size: 0.78rem;
+  color: var(--green);
+  background: var(--green-dim);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-right: 4px;
+}
+
+/* -- Charset Preview (D5) ---------------------------------------- */
+
+.charset-preview {
+  display: block;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--green);
+  margin-top: 12px;
+}
+
+/* -- Compliance Grid (D4) ---------------------------------------- */
+
+.compliance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.compliance-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.compliance-option:hover {
+  border-color: var(--border-hi);
+  background: var(--bg-hover);
+}
+
+.compliance-option input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* Checked state for compliance checkboxes */
+.compliance-option input[type="checkbox"]:checked + .check-box {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.compliance-option input[type="checkbox"]:checked + .check-box::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border: solid var(--bg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.compliance-option input[type="checkbox"]:focus-visible + .check-box {
+  box-shadow: 0 0 0 3px var(--green-dim);
+}
+
+/* Highlight entire compliance card when checked */
+.compliance-option:has(input:checked) {
+  border-color: var(--green);
+  background: var(--green-dim);
+}
+
+.compliance-option .check-box {
+  margin-top: 2px;
+}
+
+.compliance-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.compliance-text strong {
+  font-size: 0.82rem;
+  color: var(--text-hi);
+  font-weight: 600;
+}
+
+.compliance-text span {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+/* -- Advanced Requirements (D8) ---------------------------------- */
+
+.advanced-details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-bottom: 20px;
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.advanced-summary {
+  padding: 14px 24px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  transition: background 0.2s;
+}
+
+.advanced-summary:hover {
+  background: var(--bg-hover);
+}
+
+.advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-summary::before {
+  content: '\25B6';
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  transition: transform 0.2s;
+}
+
+.advanced-details[open] .advanced-summary::before {
+  transform: rotate(90deg);
+}
+
+.advanced-details[open] > .config-fieldset-inner {
+  padding: 0 24px 20px;
+}
+
+.requirements-validation {
+  display: block;
+  margin-top: 12px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  min-height: 0;
+}
+
+.requirements-validation:empty {
+  display: none;
+}
+
+.requirements-validation.validation-error {
+  background: var(--red-dim);
+  border: 1px solid var(--red);
+  color: var(--red);
+}
+
+.requirements-validation.validation-ok {
+  background: var(--green-dim);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  color: var(--green);
+}
+
+/* -- Strength Meter + Entropy Preview (D15/D16) ------------------ */
+
+.strength-section {
+  margin-bottom: 24px;
+}
+
+.strength-bar-container {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.strength-bar {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  transition: width 0.4s ease, background-color 0.4s ease;
+}
+
+.strength-bar.strength-red {
+  background: var(--red);
+  width: 25%;
+}
+
+.strength-bar.strength-yellow {
+  background: var(--amber);
+  width: 50%;
+}
+
+.strength-bar.strength-green {
+  background: var(--green);
+  width: 75%;
+}
+
+.strength-bar.strength-purple {
+  background: var(--purple);
+  width: 100%;
+}
+
+.entropy-preview {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* -- Two-Column Dashboard Layout --------------------------------- */
+
+.config-dashboard {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 24px;
+  align-items: start;
+}
+
+.config-main {
+  min-width: 0;
+}
+
+.config-sidebar {
+  min-width: 0;
+}
+
+.sidebar-sticky {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Inside sidebar, remove bottom margin from strength section */
+.sidebar-sticky .strength-section {
+  margin-bottom: 0;
+}
+
+/* Inside sidebar, launch button needs no bottom margin */
+.sidebar-sticky .btn-launch {
+  margin-bottom: 0;
+}
+
+/* -- Launch Button ----------------------------------------------- */
+
+.btn-launch {
+  display: block;
+  width: 100%;
+  padding: 16px;
+  background: linear-gradient(135deg, var(--green) 0%, #059669 100%);
+  color: var(--bg);
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font-ui);
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+  margin-bottom: 36px;
+}
+
+.btn-launch:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px var(--green-glow);
+}
+
+.btn-launch:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-launch:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* -- Copy Button (D14) ------------------------------------------- */
+
+.btn-copy {
+  padding: 8px 18px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  flex-shrink: 0;
+}
+
+.btn-copy:hover {
+  background: var(--bg-hover);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.btn-copy.copied {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.btn-copy-small {
+  padding: 4px 12px;
+  font-size: 0.72rem;
+}
+
+/* -- Provenance Chain -------------------------------------------- */
+
+.provenance {
+  margin-top: 0;
+  padding: 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.provenance-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-hi);
+  margin-bottom: 4px;
+}
+
+.provenance-subtitle {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-bottom: 24px;
+}
+
+.provenance-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 24px;
+  list-style: none;
+  counter-reset: chain-counter;
+}
+
+.chain-link {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.2s;
+}
+
+.chain-link:hover {
+  border-color: var(--border-hi);
+}
+
+.chain-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--green-dim);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--green);
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  letter-spacing: -0.3px;
+}
+
+.chain-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chain-detail strong {
+  font-size: 0.82rem;
+  color: var(--text-hi);
+  font-weight: 600;
+}
+
+.chain-detail span {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.provenance-build {
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  line-height: 1.8;
+  margin-bottom: 20px;
+}
+
+.provenance-build code {
+  font-size: 0.68rem;
+  background: var(--bg);
+  padding: 2px 5px;
+  border-radius: 3px;
+  word-break: break-all;
+}
+
+.provenance-build a {
+  color: var(--green);
+  text-decoration: none;
+}
+
+.provenance-build a:hover {
+  text-decoration: underline;
+}
+
+.build-sep {
+  margin: 0 2px;
+}
+
+.provenance-guarantees {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.guarantee {
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.guarantee strong {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-hi);
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.guarantee span {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* -- Audit Panel ------------------------------------------------- */
+
+.audit-section h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-hi);
+  margin-bottom: 6px;
+  letter-spacing: -0.3px;
+}
+
+.password-reveal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  margin: 24px 0;
+}
+
+.password-reveal-label {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.password-reveal-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.password-text {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--green);
+  word-break: break-all;
+  line-height: 1.5;
+  min-height: 1.6em;
+  letter-spacing: 0.5px;
+  flex: 1;
+}
+
+.password-hash {
+  margin-top: 10px;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.password-hash code {
+  font-size: 0.68rem;
+  word-break: break-all;
+}
+
+/* -- Stage List (D13: <ol>) -------------------------------------- */
+
+.stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+}
+
+.stage-item {
+  display: grid;
+  grid-template-columns: 36px 1fr 120px auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.3s, background 0.3s;
+}
+
+.stage-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  transition: all 0.3s;
+  font-family: var(--font-mono);
+}
+
+.stage-icon::after {
+  content: attr(data-num);
+}
+
+.stage-name {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.stage-name span {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.stage-bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.stage-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--green);
+  transition: width 0.4s ease;
+}
+
+.stage-result {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-align: right;
+  min-width: 60px;
+}
+
+/* -- Stage Animations via data-stage -----------------------------
+   The JS sets ONE data-stage attribute on the audit runner.
+   CSS handles all visual transitions. */
+
+/* Active stage -- pulsing green icon */
+[data-stage="generating"] .stage-generate .stage-icon,
+[data-stage="chi2"] .stage-chi2 .stage-icon,
+[data-stage="serial"] .stage-serial .stage-icon,
+[data-stage="collisions"] .stage-collisions .stage-icon,
+[data-stage="proofs"] .stage-proofs .stage-icon,
+[data-stage="patterns"] .stage-patterns .stage-icon,
+[data-stage="threats"] .stage-threats .stage-icon {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: var(--green);
+  animation: stagePulse 1s infinite;
+}
+
+@keyframes stagePulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50%      { box-shadow: 0 0 10px var(--green-glow); }
+}
+
+/* Active stage progress bar animation */
+[data-stage="generating"] .stage-generate .stage-bar-fill,
+[data-stage="chi2"] .stage-chi2 .stage-bar-fill,
+[data-stage="serial"] .stage-serial .stage-bar-fill,
+[data-stage="collisions"] .stage-collisions .stage-bar-fill,
+[data-stage="proofs"] .stage-proofs .stage-bar-fill,
+[data-stage="patterns"] .stage-patterns .stage-bar-fill,
+[data-stage="threats"] .stage-threats .stage-bar-fill {
+  width: 60%;
+  animation: barPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes barPulse {
+  0%, 100% { width: 40%; }
+  50%      { width: 80%; }
+}
+
+/* Completed stages: green check + full bar */
+
+/* When we're past a stage, mark it done */
+[data-stage="chi2"] .stage-generate,
+[data-stage="serial"] .stage-generate,
+[data-stage="serial"] .stage-chi2,
+[data-stage="collisions"] .stage-generate,
+[data-stage="collisions"] .stage-chi2,
+[data-stage="collisions"] .stage-serial,
+[data-stage="proofs"] .stage-generate,
+[data-stage="proofs"] .stage-chi2,
+[data-stage="proofs"] .stage-serial,
+[data-stage="proofs"] .stage-collisions,
+[data-stage="patterns"] .stage-generate,
+[data-stage="patterns"] .stage-chi2,
+[data-stage="patterns"] .stage-serial,
+[data-stage="patterns"] .stage-collisions,
+[data-stage="patterns"] .stage-proofs,
+[data-stage="threats"] .stage-generate,
+[data-stage="threats"] .stage-chi2,
+[data-stage="threats"] .stage-serial,
+[data-stage="threats"] .stage-collisions,
+[data-stage="threats"] .stage-proofs,
+[data-stage="threats"] .stage-patterns,
+[data-stage="complete"] .stage-generate,
+[data-stage="complete"] .stage-chi2,
+[data-stage="complete"] .stage-serial,
+[data-stage="complete"] .stage-collisions,
+[data-stage="complete"] .stage-proofs,
+[data-stage="complete"] .stage-patterns,
+[data-stage="complete"] .stage-threats {
+  border-color: var(--green);
+}
+
+[data-stage="chi2"] .stage-generate .stage-icon,
+[data-stage="serial"] .stage-generate .stage-icon,
+[data-stage="serial"] .stage-chi2 .stage-icon,
+[data-stage="collisions"] .stage-generate .stage-icon,
+[data-stage="collisions"] .stage-chi2 .stage-icon,
+[data-stage="collisions"] .stage-serial .stage-icon,
+[data-stage="proofs"] .stage-generate .stage-icon,
+[data-stage="proofs"] .stage-chi2 .stage-icon,
+[data-stage="proofs"] .stage-serial .stage-icon,
+[data-stage="proofs"] .stage-collisions .stage-icon,
+[data-stage="patterns"] .stage-generate .stage-icon,
+[data-stage="patterns"] .stage-chi2 .stage-icon,
+[data-stage="patterns"] .stage-serial .stage-icon,
+[data-stage="patterns"] .stage-collisions .stage-icon,
+[data-stage="patterns"] .stage-proofs .stage-icon,
+[data-stage="threats"] .stage-generate .stage-icon,
+[data-stage="threats"] .stage-chi2 .stage-icon,
+[data-stage="threats"] .stage-serial .stage-icon,
+[data-stage="threats"] .stage-collisions .stage-icon,
+[data-stage="threats"] .stage-proofs .stage-icon,
+[data-stage="threats"] .stage-patterns .stage-icon,
+[data-stage="complete"] .stage-generate .stage-icon,
+[data-stage="complete"] .stage-chi2 .stage-icon,
+[data-stage="complete"] .stage-serial .stage-icon,
+[data-stage="complete"] .stage-collisions .stage-icon,
+[data-stage="complete"] .stage-proofs .stage-icon,
+[data-stage="complete"] .stage-patterns .stage-icon,
+[data-stage="complete"] .stage-threats .stage-icon {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--bg);
+  animation: none;
+}
+
+[data-stage="chi2"] .stage-generate .stage-icon::after,
+[data-stage="serial"] .stage-generate .stage-icon::after,
+[data-stage="serial"] .stage-chi2 .stage-icon::after,
+[data-stage="collisions"] .stage-generate .stage-icon::after,
+[data-stage="collisions"] .stage-chi2 .stage-icon::after,
+[data-stage="collisions"] .stage-serial .stage-icon::after,
+[data-stage="proofs"] .stage-generate .stage-icon::after,
+[data-stage="proofs"] .stage-chi2 .stage-icon::after,
+[data-stage="proofs"] .stage-serial .stage-icon::after,
+[data-stage="proofs"] .stage-collisions .stage-icon::after,
+[data-stage="patterns"] .stage-generate .stage-icon::after,
+[data-stage="patterns"] .stage-chi2 .stage-icon::after,
+[data-stage="patterns"] .stage-serial .stage-icon::after,
+[data-stage="patterns"] .stage-collisions .stage-icon::after,
+[data-stage="patterns"] .stage-proofs .stage-icon::after,
+[data-stage="threats"] .stage-generate .stage-icon::after,
+[data-stage="threats"] .stage-chi2 .stage-icon::after,
+[data-stage="threats"] .stage-serial .stage-icon::after,
+[data-stage="threats"] .stage-collisions .stage-icon::after,
+[data-stage="threats"] .stage-proofs .stage-icon::after,
+[data-stage="threats"] .stage-patterns .stage-icon::after,
+[data-stage="complete"] .stage-generate .stage-icon::after,
+[data-stage="complete"] .stage-chi2 .stage-icon::after,
+[data-stage="complete"] .stage-serial .stage-icon::after,
+[data-stage="complete"] .stage-collisions .stage-icon::after,
+[data-stage="complete"] .stage-proofs .stage-icon::after,
+[data-stage="complete"] .stage-patterns .stage-icon::after,
+[data-stage="complete"] .stage-threats .stage-icon::after {
+  content: '\2713';
+}
+
+[data-stage="chi2"] .stage-generate .stage-bar-fill,
+[data-stage="serial"] .stage-generate .stage-bar-fill,
+[data-stage="serial"] .stage-chi2 .stage-bar-fill,
+[data-stage="collisions"] .stage-generate .stage-bar-fill,
+[data-stage="collisions"] .stage-chi2 .stage-bar-fill,
+[data-stage="collisions"] .stage-serial .stage-bar-fill,
+[data-stage="proofs"] .stage-generate .stage-bar-fill,
+[data-stage="proofs"] .stage-chi2 .stage-bar-fill,
+[data-stage="proofs"] .stage-serial .stage-bar-fill,
+[data-stage="proofs"] .stage-collisions .stage-bar-fill,
+[data-stage="patterns"] .stage-generate .stage-bar-fill,
+[data-stage="patterns"] .stage-chi2 .stage-bar-fill,
+[data-stage="patterns"] .stage-serial .stage-bar-fill,
+[data-stage="patterns"] .stage-collisions .stage-bar-fill,
+[data-stage="patterns"] .stage-proofs .stage-bar-fill,
+[data-stage="threats"] .stage-generate .stage-bar-fill,
+[data-stage="threats"] .stage-chi2 .stage-bar-fill,
+[data-stage="threats"] .stage-serial .stage-bar-fill,
+[data-stage="threats"] .stage-collisions .stage-bar-fill,
+[data-stage="threats"] .stage-proofs .stage-bar-fill,
+[data-stage="threats"] .stage-patterns .stage-bar-fill,
+[data-stage="complete"] .stage-generate .stage-bar-fill,
+[data-stage="complete"] .stage-chi2 .stage-bar-fill,
+[data-stage="complete"] .stage-serial .stage-bar-fill,
+[data-stage="complete"] .stage-collisions .stage-bar-fill,
+[data-stage="complete"] .stage-proofs .stage-bar-fill,
+[data-stage="complete"] .stage-patterns .stage-bar-fill,
+[data-stage="complete"] .stage-threats .stage-bar-fill {
+  width: 100%;
+  animation: none;
+}
+
+/* -- Results Panel ----------------------------------------------- */
+
+.results-section h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-hi);
+  margin-bottom: 20px;
+  letter-spacing: -0.3px;
+}
+
+/* D2: Password card on results page */
+.result-password-card {
+  background: var(--bg-card);
+  border: 2px solid var(--green);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 0 20px var(--green-dim);
+}
+
+.result-password-label {
+  font-size: 0.72rem;
+  color: var(--green);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+
+.result-password-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.password-text-large {
+  font-size: 1.35rem;
+  letter-spacing: 1px;
+}
+
+.result-password-hash {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.result-password-hash code {
+  font-size: 0.7rem;
+  word-break: break-all;
+  font-family: var(--font-mono);
+}
+
+/* D3: Multi-password list */
+.multi-password-section {
+  margin-bottom: 20px;
+}
+
+.multi-password-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-hi);
+  margin-bottom: 10px;
+}
+
+.multi-password-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  counter-reset: mp-counter;
+}
+
+.multi-password-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  counter-increment: mp-counter;
+}
+
+.multi-password-item::before {
+  content: counter(mp-counter);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--border-hi);
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.multi-password-text {
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  color: var(--green);
+  word-break: break-all;
+  flex: 1;
+}
+
+/* -- Verdict Banner ---------------------------------------------- */
+
+.verdict-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 24px;
+  background: var(--green-dim);
+  border: 1px solid var(--green);
+  border-radius: var(--radius-lg);
+  margin-bottom: 24px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--green);
+}
+
+.verdict-banner.verdict-fail {
+  background: var(--amber-dim);
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+#verdict-icon {
+  font-size: 1.5rem;
+}
+
+/* -- Result Details (native <details>) --------------------------- */
+
+.result-details {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.result-details[open] {
+  border-color: var(--border-hi);
+}
+
+.result-details summary {
+  padding: 14px 18px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  transition: background 0.2s;
+}
+
+.result-details summary:hover {
+  background: var(--bg-hover);
+}
+
+.result-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.result-details summary::before {
+  content: '\25B6';
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  transition: transform 0.2s;
+}
+
+.result-details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.result-body {
+  padding: 0 18px 18px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+/* -- Detail Badges ----------------------------------------------- */
+
+.details-badge {
+  margin-left: auto;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+
+.badge-pass {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.badge-fail {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.badge-warn {
+  background: var(--amber-dim);
+  color: var(--amber);
+}
+
+.badge-info {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+
+.badge-purple {
+  background: var(--purple-dim);
+  color: var(--purple);
+}
+
+/* -- Warning Footer ---------------------------------------------- */
+
+.warning-footer {
+  margin-top: 28px;
+  padding: 18px 22px;
+  background: var(--amber-dim);
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-lg);
+  font-size: 0.78rem;
+  color: var(--amber);
+  line-height: 1.7;
+}
+
+.warning-footer code {
+  font-size: 0.75rem;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* -- Site Footer ------------------------------------------------- */
+
+.site-footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.footer-links {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-bottom: 12px;
+}
+
+.footer-links a {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.footer-links a:hover {
+  color: var(--green);
+}
+
+.footer-text {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.7;
+  opacity: 0.7;
+}
+
+/* -- Responsive -------------------------------------------------- */
+
+/* Collapse dashboard to single column on tablets */
+@media (max-width: 960px) {
+  .config-dashboard {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar-sticky {
+    position: static;
+  }
+
+  .hero {
+    text-align: center;
+    justify-content: center;
+  }
+
+  .hero-desc {
+    text-align: center;
+  }
+}
+
+@media (max-width: 640px) {
+  html {
+    font-size: 14px;
+  }
+
+  .page-wrapper {
+    padding: 0 16px 32px;
+  }
+
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .config-grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .charset-checks {
+    grid-template-columns: 1fr;
+  }
+
+  .compliance-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stage-item {
+    grid-template-columns: 32px 1fr auto;
+  }
+
+  .stage-bar {
+    display: none;
+  }
+
+  .topbar {
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .topbar-meta {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .provenance-guarantees {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-title {
+    font-size: 1.4rem;
+  }
+
+  .hero-subtitle {
+    font-size: 0.82rem;
+  }
+
+  .password-text-large {
+    font-size: 1rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .step-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.5px;
+  }
+
+  .step-label::before {
+    display: none;
+  }
+
+  .config-grid-4 {
+    grid-template-columns: 1fr;
+  }
+}

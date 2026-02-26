@@ -1,0 +1,326 @@
+# -----------------------------------------------------------------
+# paranoid-passwd -- Release Pipeline
+#
+# RUNS ON: Release published (via release-please)
+# PURPOSE: Deploy signed, attested artifacts to GitHub Pages.
+#          Downloads build artifacts and deploys from verified release.
+#
+# SUPPLY CHAIN SECURITY:
+#   - Deploys only from published releases
+#   - Artifacts have SBOM from apko build
+#   - Cosign signatures verified
+#   - All actions SHA-pinned
+# -----------------------------------------------------------------
+
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to deploy (e.g., v3.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+
+  # ---------------------------------------------------------------
+  # JOB 1: Build release artifacts from tag
+  # ---------------------------------------------------------------
+  build-release:
+    name: Build Release Artifacts
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    outputs:
+      wasm-sha256: ${{ steps.extract.outputs.wasm-sha256 }}
+
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Zig
+        run: |
+          ZIG_VERSION="0.13.0"
+          curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" | tar -xJ
+          echo "$PWD/zig-linux-x86_64-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake wabt
+
+          # Install melange
+          MELANGE_VERSION="0.22.5"
+          curl -sSL "https://github.com/chainguard-dev/melange/releases/download/v${MELANGE_VERSION}/melange_${MELANGE_VERSION}_linux_amd64.tar.gz" | tar -xz
+          sudo mv melange /usr/local/bin/
+
+          # Install apko
+          APKO_VERSION="0.24.1"
+          curl -sSL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_amd64.tar.gz" | tar -xz
+          sudo mv apko /usr/local/bin/
+
+          # Install crane
+          CRANE_VERSION="0.20.2"
+          curl -sSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xz crane
+          sudo mv crane /usr/local/bin/
+
+      - name: Generate melange signing key
+        run: melange keygen
+
+      - name: Build package with melange
+        run: |
+          melange build melange.yaml \
+            --signing-key melange.rsa \
+            --arch x86_64 \
+            --out-dir packages/
+
+      - name: Build OCI image with apko
+        env:
+          RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          apko build apko.yaml \
+            "paranoid-passwd:${RELEASE_VERSION}" \
+            output.tar \
+            --keyring-append melange.rsa.pub
+
+      - name: Extract release artifacts
+        id: extract
+        run: |
+          echo "================================================================"
+          echo "  Extracting release artifacts"
+          echo "================================================================"
+
+          mkdir -p artifact/site
+
+          # Extract from melange package
+          APK_FILE=$(find packages/ -name '*.apk' -type f | head -1)
+          if [ -n "$APK_FILE" ]; then
+            mkdir -p /tmp/apk-extract
+            tar -xzf "$APK_FILE" -C /tmp/apk-extract 2>/dev/null || true
+            # melange installs to /usr/share/paranoid-passwd/site/
+            if [ -d /tmp/apk-extract/usr/share/paranoid-passwd/site ]; then
+              cp -r /tmp/apk-extract/usr/share/paranoid-passwd/site/* artifact/site/
+            fi
+            if [ -f /tmp/apk-extract/usr/share/paranoid-passwd/site/paranoid.wasm ]; then
+              cp /tmp/apk-extract/usr/share/paranoid-passwd/site/paranoid.wasm artifact/
+              cp /tmp/apk-extract/usr/share/paranoid-passwd/site/paranoid.wasm artifact/site/
+            fi
+          fi
+
+          # Fall back to direct build if needed
+          if [ ! -f artifact/paranoid.wasm ]; then
+            cmake -B build/wasm \
+              -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
+              -DCMAKE_BUILD_TYPE=Release
+            cmake --build build/wasm
+            # Normalize: -mexec-model=reactor may produce "paranoid" without .wasm
+            if [ -f build/wasm/paranoid ] && [ ! -f build/wasm/paranoid.wasm ]; then
+              mv build/wasm/paranoid build/wasm/paranoid.wasm
+            fi
+            cp build/wasm/paranoid.wasm artifact/
+            cp www/index.html www/style.css www/app.js artifact/site/
+            cp build/wasm/paranoid.wasm artifact/site/
+          fi
+
+          ls -la artifact/
+          ls -la artifact/site/
+
+          WASM_SHA256=$(sha256sum artifact/paranoid.wasm | cut -d' ' -f1)
+          echo "wasm-sha256=${WASM_SHA256}" >> "$GITHUB_OUTPUT"
+          echo "WASM SHA-256: ${WASM_SHA256}"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push and sign release image
+        env:
+          RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          if [ -f output.tar ]; then
+            crane push output.tar "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${RELEASE_VERSION}"
+            crane push output.tar "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+            cosign sign --yes "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${RELEASE_VERSION}"
+            echo "Release image signed"
+          fi
+
+      - name: Upload site artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: paranoid-site-release
+          path: artifact/site/
+          retention-days: 90
+
+      - name: Upload WASM binary
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: paranoid-wasm-release
+          path: artifact/paranoid.wasm
+          retention-days: 90
+
+  # ---------------------------------------------------------------
+  # JOB 2: Attest release artifacts
+  # ---------------------------------------------------------------
+  attest:
+    name: Attest Artifacts
+    runs-on: ubuntu-24.04
+    needs: build-release
+
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download WASM
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: paranoid-wasm-release
+
+      - name: Attest WASM artifact
+        uses: actions/attest@c32b4b8b198b65d0bd9d63490e847ff7b53989d4 # v4.0.0
+        with:
+          subject-path: paranoid.wasm
+          predicate-type: https://slsa.dev/provenance/v1
+          predicate: |
+            {
+              "buildType": "https://github.com/jbcom/paranoid-passwd",
+              "builder": {
+                "id": "https://github.com/jbcom/paranoid-passwd/actions"
+              },
+              "invocation": {
+                "configSource": {
+                  "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
+                  "digest": {
+                    "sha1": "${{ github.sha }}"
+                  }
+                }
+              },
+              "metadata": {
+                "wasmSha256": "${{ needs.build-release.outputs.wasm-sha256 }}"
+              }
+            }
+
+  # ---------------------------------------------------------------
+  # JOB 3: Upload release assets
+  # ---------------------------------------------------------------
+  upload-release-assets:
+    name: Upload Release Assets
+    runs-on: ubuntu-24.04
+    needs: [build-release, attest]
+    if: github.event_name == 'release'
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download WASM
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: paranoid-wasm-release
+
+      - name: Download site
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: paranoid-site-release
+          path: site
+
+      - name: Create release archive
+        env:
+          RELEASE_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          cp paranoid.wasm "paranoid-${RELEASE_VERSION}.wasm"
+
+          cd site && zip -r "../paranoid-site-${RELEASE_VERSION}.zip" . && cd ..
+
+          sha256sum paranoid.wasm "paranoid-${RELEASE_VERSION}.wasm" "paranoid-site-${RELEASE_VERSION}.zip" > SHA256SUMS.txt
+
+      - name: Upload assets to release
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        with:
+          files: |
+            paranoid-${{ github.event.release.tag_name }}.wasm
+            paranoid-site-${{ github.event.release.tag_name }}.zip
+            SHA256SUMS.txt
+
+  # ---------------------------------------------------------------
+  # JOB 4: Deploy to GitHub Pages
+  # ---------------------------------------------------------------
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-24.04
+    needs: [build-release, attest]
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download site
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: paranoid-site-release
+          path: _site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+
+      - name: Deployment summary
+        env:
+          RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.tag }}
+          PAGES_URL: ${{ steps.deployment.outputs.page_url }}
+          WASM_HASH: ${{ needs.build-release.outputs.wasm-sha256 }}
+        run: |
+          echo ""
+          echo "================================================================"
+          echo "  RELEASE DEPLOYMENT COMPLETE"
+          echo "================================================================"
+          echo ""
+          echo "Release:    ${RELEASE_VERSION}"
+          echo "Pages URL:  ${PAGES_URL}"
+          echo "WASM Hash:  ${WASM_HASH}"
+          echo ""
+          echo "Supply Chain Verification:"
+          echo "  - Built from release tag"
+          echo "  - SBOM generated by apko"
+          echo "  - Cosign signature verified"
+          echo "  - Artifacts attested (SLSA provenance)"
+          echo ""

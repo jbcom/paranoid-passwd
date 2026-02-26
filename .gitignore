@@ -1,0 +1,40 @@
+# Build output
+build/
+build-*/
+artifact/
+dist/
+*.apk
+*.tar
+packages/
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+_codeql_detected_source_root
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+.playwright-mcp/
+node_modules/
+
+# Test screenshots
+*.png
+
+# Dependencies (cloned in Docker at pinned SHAs)
+vendor/
+
+# Claude Code project settings (local, not committed)
+.claude/
+
+# Melange signing keys
+melange.rsa
+melange.rsa.pub

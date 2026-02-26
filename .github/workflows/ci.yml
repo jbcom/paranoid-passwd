@@ -1,0 +1,356 @@
+# -----------------------------------------------------------------
+# paranoid-passwd -- CI Pipeline (Pull Requests)
+#
+# RUNS ON: All pull requests to main
+# PURPOSE: Full verification including native tests, WASM build,
+#          E2E tests with Playwright, static analysis, and
+#          hallucination/supply-chain checks.
+#
+# SUPPLY CHAIN SECURITY:
+#   - All GitHub Actions SHA-pinned (not tags)
+#   - CMake-based build with Zig cross-compilation
+#   - Native tests via CTest + acutest
+#   - WASM validation with wasm-validate (wabt)
+#   - CodeQL, SonarCloud, and shellcheck static analysis
+#   - LLM hallucination detection
+#   - Supply chain verification
+# -----------------------------------------------------------------
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: "0.13.0"
+  # acutest v1.7.5 (2024-01-14) — pinned by SHA for supply chain security
+  ACUTEST_SHA: "31751b4089c93b46a9fd8a8183a695f772de66de"
+
+jobs:
+
+  # ---------------------------------------------------------------
+  # JOB 1: Native Build + Tests (CMake + CTest)
+  # ---------------------------------------------------------------
+  native-test:
+    name: Native Build + Tests
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev cmake
+
+      - name: Clone acutest
+        run: |
+          mkdir -p vendor
+          git clone https://github.com/mity/acutest.git vendor/acutest
+          cd vendor/acutest && git checkout "$ACUTEST_SHA"
+
+      - name: Configure (CMake native)
+        run: cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build/native
+
+      - name: Test (CTest)
+        run: ctest --test-dir build/native --output-on-failure
+
+  # ---------------------------------------------------------------
+  # JOB 2: WASM Build (CMake + wasm32-wasi via Zig)
+  # ---------------------------------------------------------------
+  wasm-build:
+    name: WASM Build + Validate
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Zig
+        run: |
+          curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" | tar -xJ
+          echo "$PWD/zig-linux-x86_64-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Install wabt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wabt
+
+      - name: Configure (CMake WASM)
+        run: |
+          cmake -B build/wasm \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build WASM
+        run: |
+          cmake --build build/wasm
+          # Normalize output name: -mexec-model=reactor may produce
+          # "paranoid" without .wasm extension on some Zig versions
+          if [ -f build/wasm/paranoid ] && [ ! -f build/wasm/paranoid.wasm ]; then
+            mv build/wasm/paranoid build/wasm/paranoid.wasm
+          fi
+
+      - name: Validate WASM binary
+        run: |
+          echo "Validating WASM binary..."
+          wasm-validate build/wasm/paranoid.wasm
+          echo "WASM binary is valid."
+
+      - name: Verify WASM exports
+        run: |
+          echo "=== Required exports ==="
+          for fn in paranoid_version paranoid_generate paranoid_run_audit \
+                    paranoid_get_result_ptr paranoid_get_result_size \
+                    paranoid_sha256 paranoid_sha256_hex \
+                    paranoid_chi_squared paranoid_serial_correlation \
+                    paranoid_count_collisions malloc free; do
+            if wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | grep -q "<${fn}>"; then
+              echo "  OK: ${fn}"
+            else
+              echo "  MISSING: ${fn}"; exit 1
+            fi
+          done
+
+          echo ""
+          echo "=== Import namespaces ==="
+          NAMESPACES=$(wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | \
+            grep " <- " | \
+            sed 's/.*<- \([^.]*\)\..*/\1/' | sort -u)
+          for ns in $NAMESPACES; do
+            if [ "$ns" = "wasi_snapshot_preview1" ]; then
+              echo "  OK: $ns"
+            else
+              echo "  UNEXPECTED: $ns"; exit 1
+            fi
+          done
+
+      - name: Report binary size
+        run: |
+          SIZE=$(stat -c%s build/wasm/paranoid.wasm)
+          echo "WASM binary size: ${SIZE} bytes"
+          SHA=$(sha256sum build/wasm/paranoid.wasm | cut -d' ' -f1)
+          echo "WASM SHA-256: ${SHA}"
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: paranoid-wasm
+          path: build/wasm/paranoid.wasm
+          retention-days: 7
+
+  # ---------------------------------------------------------------
+  # JOB 3: E2E Tests (Playwright)
+  # ---------------------------------------------------------------
+  e2e-test:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-24.04
+    needs: wasm-build
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download WASM artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: paranoid-wasm
+          path: build/wasm
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Assemble site
+        run: |
+          mkdir -p build/site
+          cp www/index.html www/style.css www/app.js build/site/
+          cp build/wasm/paranoid.wasm build/site/
+
+      - name: Install Playwright
+        working-directory: tests/e2e
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Start server and run E2E tests
+        working-directory: tests/e2e
+        run: |
+          # Start a static file server in the background
+          python3 -m http.server 8080 --directory ../../build/site &
+          SERVER_PID=$!
+          sleep 2
+
+          # Run Playwright tests (chromium only in CI)
+          npx playwright test --project chromium \
+            || { kill $SERVER_PID 2>/dev/null; exit 1; }
+
+          kill $SERVER_PID 2>/dev/null || true
+
+      - name: Upload E2E test results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 7
+
+  # ---------------------------------------------------------------
+  # JOB 4: CodeQL Analysis
+  # ---------------------------------------------------------------
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [c-cpp, javascript]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@f35333b910470a5408cb081b68f0701254a7d27b # v3.28.18
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@f35333b910470a5408cb081b68f0701254a7d27b # v3.28.18
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@f35333b910470a5408cb081b68f0701254a7d27b # v3.28.18
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  # ---------------------------------------------------------------
+  # JOB 5: SonarCloud
+  # ---------------------------------------------------------------
+  sonarcloud:
+    name: SonarCloud
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8 # v5.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ---------------------------------------------------------------
+  # JOB 6: ShellCheck
+  # ---------------------------------------------------------------
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck on all scripts
+        run: |
+          echo "Running ShellCheck on scripts/*.sh..."
+          FAILED=0
+          for script in scripts/*.sh; do
+            echo "  Checking $script..."
+            if ! shellcheck -x "$script"; then
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -ne 0 ]; then
+            echo "ShellCheck found issues."
+            exit 1
+          fi
+          echo "All scripts passed ShellCheck."
+
+  # ---------------------------------------------------------------
+  # JOB 7: Hallucination Check
+  # ---------------------------------------------------------------
+  hallucination-check:
+    name: Hallucination Check
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run hallucination check
+        run: ./scripts/hallucination_check.sh
+
+  # ---------------------------------------------------------------
+  # JOB 8: Supply Chain Verification
+  # ---------------------------------------------------------------
+  supply-chain-verify:
+    name: Supply Chain Verify
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run supply chain verification
+        run: ./scripts/supply_chain_verify.sh

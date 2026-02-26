@@ -1,0 +1,758 @@
+# Build System Internals
+
+This document describes the CMake build system, reproducible build process via
+melange + apko, and supply chain security measures.
+
+**v3.0 changes**: CMake replaces Makefile. melange + apko replace Docker
+multi-stage builds. WASM binary is <100KB (no OpenSSL in WASM -- uses
+platform abstraction with compact FIPS 180-4 SHA-256 and WASI random_get).
+
+---
+
+## Table of Contents
+
+- [Build Overview](#build-overview)
+- [Makefile Architecture](#makefile-architecture)
+- [Compilation Process](#compilation-process)
+- [SRI Hash Injection](#sri-hash-injection)
+- [Build Manifest](#build-manifest)
+- [Reproducible Builds](#reproducible-builds)
+- [Supply Chain Security](#supply-chain-security)
+- [Verification](#verification)
+
+---
+
+## Build Overview
+
+The build system transforms source files into a deployable website:
+
+```
+INPUT                                OUTPUT
+─────────────────────               ───────────────────────
+src/paranoid.c                      build/wasm/paranoid.wasm (<100KB)
+src/platform_wasm.c
+src/sha256_compact.c                build/site/
+src/wasm_entry.c                      ├── index.html (with SRI hashes)
+include/paranoid.h                    ├── paranoid.wasm
+include/paranoid_platform.h           ├── app.js
+www/index.html                        ├── style.css
+www/app.js                            └── BUILD_MANIFEST.json
+www/style.css
+                                    (NO OpenSSL in WASM build)
+```
+
+---
+
+## CMake Build System
+
+### Build Commands
+
+```bash
+# WASM build (release):
+cmake -B build/wasm \
+    -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build/wasm
+
+# Native build (tests):
+cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/native
+ctest --test-dir build/native --output-on-failure
+```
+
+### Key Variables (CMakeLists.txt)
+
+```cmake
+project(paranoid VERSION 3.0.0 LANGUAGES C)
+set(CMAKE_C_STANDARD 11)
+
+# WASM build: platform_wasm.c + sha256_compact.c (no OpenSSL)
+# Native build: platform_native.c + system OpenSSL
+```
+
+---
+
+## Compilation Process
+
+### Step 1: Compile C to WASM (via CMake + Zig)
+
+CMake uses the `cmake/wasm32-wasi.cmake` toolchain file which configures
+Zig as the C compiler targeting `wasm32-wasi`.
+
+**Source files for WASM target**:
+- `src/paranoid.c` -- Core computation (generation, stats, audit)
+- `src/platform_wasm.c` -- WASI random_get backend
+- `src/sha256_compact.c` -- FIPS 180-4 SHA-256 (replaces OpenSSL EVP)
+- `src/wasm_entry.c` -- Stub main() for WASI libc linker
+
+**Key compile options**:
+- `-Wall -Wextra -Werror` -- Strict warnings
+- `-O2` -- Optimization (balanced size/speed)
+- `-fdata-sections -ffunction-sections` -- Enable dead code elimination
+- `-Wl,--gc-sections` -- Remove unreferenced sections
+- `-Wl,--no-entry` -- Reactor (library) mode, no _start entry
+
+**No external library dependencies** -- the WASM target does not link
+against OpenSSL. This eliminates the 1.5MB libcrypto.a and produces
+a <100KB WASM binary.
+
+**Output**: `build/wasm/paranoid.wasm` (<100KB)
+
+### Step 2: Compute SRI Hashes
+
+```makefile
+WASM_HASH := $(shell openssl dgst -sha384 -binary $(WASM_OUT) | openssl base64 -A)
+JS_HASH := $(shell openssl dgst -sha384 -binary www/app.js | openssl base64 -A)
+CSS_HASH := $(shell openssl dgst -sha384 -binary www/style.css | openssl base64 -A)
+```
+
+**Why SHA-384?**
+- SHA-256: Adequate but SHA-1 collisions exist
+- SHA-384: Truncated SHA-512 (more conservative)
+- SHA-512: Overkill for SRI (larger hashes, minimal benefit)
+
+**Format**: `sha384-<base64-encoded-hash>`
+
+### Step 3: Inject SRI Hashes
+
+```makefile
+build/site/index.html: www/index.html build/paranoid.wasm
+	@mkdir -p build/site
+	@cp www/index.html build/site/index.html
+	@sed -i 's|__WASM_SRI__|sha384-$(WASM_HASH)|g' build/site/index.html
+	@sed -i 's|__JS_SRI__|sha384-$(JS_HASH)|g' build/site/index.html
+	@sed -i 's|__CSS_SRI__|sha384-$(CSS_HASH)|g' build/site/index.html
+```
+
+**Placeholders in `www/index.html`**:
+```html
+<script src="app.js" integrity="__JS_SRI__" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="style.css" integrity="__CSS_SRI__">
+```
+
+**After injection**:
+```html
+<script src="app.js" 
+        integrity="sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K/6CC..." 
+        crossorigin="anonymous"></script>
+```
+
+### Step 4: Copy Assets
+
+```makefile
+	@cp $(WASM_OUT) build/site/paranoid.wasm
+	@cp www/app.js build/site/app.js
+	@cp www/style.css build/site/style.css
+```
+
+### Step 5: Generate Build Manifest
+
+```makefile
+	@echo '{ \
+		"timestamp": "$(shell date -u +%Y-%m-%dT%H:%M:%SZ)", \
+		"commit": "$(shell git rev-parse HEAD)", \
+		"zig_version": "$(shell $(ZIG) version)", \
+		"wasm_sha256": "$(shell openssl dgst -sha256 -binary $(WASM_OUT) | openssl base64 -A)", \
+		"wasm_sri": "sha384-$(WASM_HASH)", \
+		"js_sri": "sha384-$(JS_HASH)", \
+		"css_sri": "sha384-$(CSS_HASH)" \
+	}' > build/site/BUILD_MANIFEST.json
+```
+
+**Example output**:
+```json
+{
+  "timestamp": "2026-02-26T03:00:00Z",
+  "commit": "bc727e2a1f3e4b5c6d7e8f9a0b1c2d3e4f5a6b7c",
+  "zig_version": "0.13.0",
+  "wasm_sha256": "3a2b1c4d5e6f7g8h9i0j1k2l3m4n5o6p...",
+  "wasm_sri": "sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K...",
+  "js_sri": "sha384-9rGHJkLpMnOqRsTuVwXyZ0123456789A...",
+  "css_sri": "sha384-BcDeFgHiJkLmNoPqRsTuVwXyZ0123456..."
+}
+```
+
+---
+
+## SRI Hash Injection
+
+### Why SRI?
+
+**Subresource Integrity** prevents tampered assets from loading:
+
+```
+Attacker:  CDN compromise → modify app.js → inject backdoor
+Browser:   Compute hash(downloaded app.js) → mismatch with SRI hash → REFUSE TO LOAD
+```
+
+### How It Works
+
+1. **Build time**: Compute hash of asset
+2. **Deploy time**: HTML includes hash in `integrity` attribute
+3. **Runtime**: Browser computes hash of downloaded asset
+4. **Verification**: If hashes match → load; if mismatch → block
+
+### Browser Enforcement
+
+```javascript
+// Browser behavior (pseudo-code)
+function loadScript(url, sri_hash) {
+    const content = fetch(url);
+    const computed_hash = sha384(content);
+    
+    if (computed_hash === sri_hash) {
+        execute(content);  // SAFE
+    } else {
+        throw new SecurityError("SRI check failed");  // BLOCK
+    }
+}
+```
+
+### Limitations
+
+- **Same-origin only** (or CORS-enabled)
+- **Requires `crossorigin` attribute** for scripts from CDN
+- **Cache invalidation** (hash change = new file)
+
+---
+
+## Build Manifest
+
+### Purpose
+
+Cryptographic record of build provenance:
+
+```json
+{
+  "timestamp": "ISO 8601 UTC",
+  "commit": "Git SHA (40 chars)",
+  "zig_version": "Compiler version",
+  "wasm_sha256": "Binary hash (base64)",
+  "wasm_sri": "SRI hash for integrity attribute",
+  "js_sri": "JavaScript SRI hash",
+  "css_sri": "CSS SRI hash"
+}
+```
+
+### Use Cases
+
+1. **Reproducible builds**: Compare manifests across machines
+2. **Audit trail**: Verify deployed binary matches build
+3. **Rollback**: Identify which commit produced current binary
+4. **Debugging**: Confirm correct build artifacts deployed
+
+---
+
+## Reproducible Builds
+
+### Goal
+
+**Bit-for-bit identical output** from same source, on any machine.
+
+### Challenges
+
+| Challenge | Impact | Mitigation |
+|-----------|--------|------------|
+| Timestamps in binary | Different hashes | `SOURCE_DATE_EPOCH` |
+| File paths embedded | Different hashes | Relative paths only |
+| Build machine differences | Different hashes | Containerized builds |
+| Compiler version drift | Different hashes | Pin version (Zig 0.13.0) |
+| Non-deterministic linking | Different hashes | Reproducible linker flags |
+
+### SOURCE_DATE_EPOCH
+
+```makefile
+# Use deterministic timestamp
+export SOURCE_DATE_EPOCH := $(shell git log -1 --format=%ct)
+
+build/paranoid.wasm: src/paranoid.c
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH) \
+	$(ZIG) cc ... -o $(WASM_OUT) src/paranoid.c
+```
+
+**Effect**: All embedded timestamps use commit time (deterministic).
+
+### Container-Based Builds (melange + apko)
+
+v3.0 replaces the Docker multi-stage build with **melange + apko** from
+the Wolfi ecosystem. This provides bitwise-reproducible builds with
+cryptographic provenance.
+
+**Build Pipeline:**
+
+```
+melange.yaml                    apko.yaml
+   |                               |
+   v                               v
+melange build                   apko build
+   |                               |
+   v                               v
+Wolfi APK packages              OCI container image
+(zig, cmake, wabt,              (distroless, <5MB)
+ paranoid-passwd)
+```
+
+**Key advantages over Docker multi-stage:**
+- **Bitwise reproducible**: melange produces identical APK packages
+  from the same source on any builder
+- **Wolfi-provided Zig**: Zig is built from source via melange (not
+  downloaded as a tarball)
+- **Distroless final image**: apko produces minimal images (no shell,
+  no package manager, no OS utilities)
+- **SBOM built-in**: Every APK package includes an SBOM
+- **Sigstore signing**: Packages are signed via cosign + Sigstore
+
+**Build locally:**
+
+```bash
+# Build packages with melange
+melange build melange.yaml --arch x86_64
+
+# Build container image with apko
+apko build apko.yaml paranoid:latest paranoid.tar
+```
+
+**Verify Cosign signature (after push):**
+
+```bash
+cosign verify ghcr.io/jbcom/paranoid-passwd:latest \
+  --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp="https://github.com/jbcom/paranoid-passwd/.*"
+```
+
+### Diverse Double-Compilation
+
+Compile with **two different compilers**, compare outputs.
+Implemented in `scripts/double_compile.sh` and wired to CI.
+
+```bash
+# Build 1: Zig
+zig cc ... -o build/paranoid-zig.wasm
+
+# Build 2: Clang
+clang --target=wasm32-wasi ... -o build/paranoid-clang.wasm
+
+# Compare (should be functionally equivalent)
+wasm2wat build/paranoid-zig.wasm > zig.wat
+wasm2wat build/paranoid-clang.wasm > clang.wat
+diff zig.wat clang.wat
+```
+
+**Rationale**: If both compilers produce same functionality, less likely both have same backdoor.
+
+---
+
+## Supply Chain Security
+
+### Threat Model
+
+**Attacker goals**:
+1. Inject backdoor during build
+2. Compromise dependencies (OpenSSL, Zig)
+3. Tamper with deployed artifacts
+
+### Defense Layers
+
+| Layer | Threat | Mitigation | Status |
+|-------|--------|------------|--------|
+| 1. Source | Malicious commits | Human review, signed commits | ⚠️ Partial |
+| 2. Dependencies | Compromised upstream | Docker SHA-pinned commits | ✅ Done |
+| 3. Compiler | Backdoored Zig | SHA-pinned in CI | ✅ Done |
+| 4. Build env | Compromised runner | Reproducible builds | 🔴 TODO |
+| 5. Artifacts | Tampered WASM | SRI hashes | ✅ Done |
+| 6. Deploy | CDN compromise | SRI + multi-party verification | ⚠️ Partial |
+
+### Dependency Pinning
+
+**OpenSSL** (built from official source in Dockerfile):
+```dockerfile
+# In Dockerfile
+ARG OPENSSL_TAG=openssl-3.4.0
+RUN git clone --depth=1 --branch=${OPENSSL_TAG} https://github.com/openssl/openssl.git && \
+    cd openssl && \
+    # Apply WASI patches
+    git apply /build/patches/01-wasi-config.patch && \
+    git apply /build/patches/02-rand-wasi.patch && \
+    git apply /build/patches/03-ssl-cert-posix-io.patch
+# Then compile with Zig to produce vendor/openssl/lib/libcrypto.a
+```
+
+**acutest testing framework** (cloned directly in Dockerfile):
+```dockerfile
+# In Dockerfile
+ARG ACUTEST_COMMIT=31751b4089c93b46a9fd8a8183a695f772de66de
+RUN git clone --filter=blob:none --no-checkout ${ACUTEST_REPO} acutest && \
+    cd acutest && \
+    git checkout ${ACUTEST_COMMIT}
+```
+
+**Zig compiler** (CI):
+```yaml
+- name: Setup Zig
+  uses: mlugg/setup-zig@7d14f16220b57e3e4e02a93c4e5e8dbbdb2a2f7e  # SHA-pinned
+  with:
+    version: 0.13.0  # Exact version
+```
+
+**Note**: The vendor/ directory is **only for local development** convenience. There are no git submodules. Docker builds are fully self-contained -- OpenSSL is built from official source and test dependencies are cloned directly at SHA-pinned commits.
+
+### Build Attestation (DONE)
+
+Build artifacts are signed via **cosign + Sigstore** (keyless signing
+via GitHub OIDC). This is wired into the CI/CD pipeline.
+
+**Multi-party verification** (`scripts/multiparty_verify.sh`):
+- Builder 1 builds and submits hash
+- Builder 2 builds and submits hash
+- Builder 3 builds and submits hash
+- Require 3 matching hashes before deploy (3-of-5 threshold)
+
+---
+
+## Verification
+
+### Local Verification
+
+```bash
+# Build locally
+make clean && make site
+
+# Compute hash
+make hash
+# SHA-256: 3a2b1c4d...
+# SRI-384: sha384-oqVu...
+
+# Compare against BUILD_MANIFEST.json
+cat build/site/BUILD_MANIFEST.json
+```
+
+### CI Verification (Job 2)
+
+```yaml
+- name: Verify WASM
+  run: |
+    # Download artifact from Job 1
+    # Compute SHA-256
+    COMPUTED_HASH=$(openssl dgst -sha256 ...)
+    
+    # Compare against Job 1 output
+    if [ "$COMPUTED_HASH" != "$EXPECTED_HASH" ]; then
+      echo "HASH MISMATCH!"
+      exit 1
+    fi
+```
+
+### Community Verification (Planned)
+
+**Transparency log**:
+```
+https://paranoid-project.org/builds/
+├── v2.0.0/
+│   ├── BUILD_MANIFEST.json
+│   ├── paranoid.wasm
+│   ├── paranoid.wasm.asc (GPG signature)
+│   └── checksums.txt
+```
+
+Anyone can:
+1. Download source at tagged commit
+2. Build locally
+3. Compare hash against transparency log
+4. Report mismatch (supply chain attack detected)
+
+---
+
+## Testing
+
+### Overview
+
+The project uses a comprehensive testing strategy:
+
+1. **Native C Unit Tests** (acutest framework) — Run BEFORE WASM compilation
+2. **Integration Tests** — Verify complete WASM module in browser environment
+3. **Hallucination Detection** — Automated checks for LLM-introduced bugs
+4. **Supply Chain Verification** — Dependency and build integrity checks
+
+### Acutest Testing Framework
+
+We use [acutest](https://github.com/mity/acutest) for native C unit testing:
+
+**Why acutest?**
+- **Header-only** — Just `#include "acutest.h"` (trivial to integrate, no separate .c file)
+- **Portable** — Works on any C89+ compiler
+- **Simple API** — `TEST_CHECK()`, `TEST_ASSERT()`, `TEST_MSG()` macros
+- **Zero configuration** — Test list defined via `TEST_LIST` array
+- **Docker-cloned** — Fetched at SHA-pinned commit during Docker build (no submodules)
+
+**API Quick Reference:**
+
+```c
+#include "acutest.h"
+
+void test_sha256_empty(void) {
+    TEST_CHECK(result == expected);
+    TEST_MSG("Expected %s, got %s", expected_hex, actual_hex);
+}
+
+void test_rejection_boundary(void) {
+    int max_valid = (256 / 94) * 94 - 1;
+    TEST_ASSERT(max_valid == 187);
+}
+
+TEST_LIST = {
+    { "sha256/empty",           test_sha256_empty },
+    { "rejection/boundary_94",  test_rejection_boundary },
+    { NULL, NULL }
+};
+```
+
+**Test Coverage:**
+
+| Suite | Coverage |
+|-------|----------|
+| `sha256/*` | NIST FIPS 180-4 known-answer vectors |
+| `rejection/*` | Boundary verification: `(256/N)*N - 1` |
+| `generate/*` | Length, charset, uniqueness, error handling |
+| `chi_squared/*` | Uniform/biased distribution, df = N-1 |
+| `serial/*` | Correlation tests (constant, alternating) |
+| `collision/*` | Duplicate detection |
+| `struct/*` | WASM/JS struct offset verification |
+| `audit/*` | Full pipeline integration |
+| `stress/*` | High-volume distribution verification |
+
+**Run Tests:**
+
+```bash
+# Run all native C tests
+make test-native
+
+# Run with acutest options
+./build/test_paranoid --help
+./build/test_paranoid --list             # List all test cases
+./build/test_paranoid sha256             # Run only SHA-256 tests
+./build/test_paranoid -v                 # Verbose output
+```
+
+**Example Output:**
+
+```
+Test sha256/empty...                              [ OK ]
+Test sha256/abc...                                [ OK ]
+Test rejection/boundary_94...                     [ OK ]
+Test stress/distribution...                       [ OK ]
+
+SUCCESS: All 30 tests have passed.
+```
+
+### Test Before WASM Compilation
+
+The testing strategy ensures correctness at the **native C level** before compiling to WASM:
+
+```
+                    TESTING STAGES
+┌──────────────────────────────────────────────────────┐
+│                                                      │
+│  src/paranoid.c  ──► [make test-native] ──► PASS?   │
+│       │                                     │        │
+│       │                                     ▼        │
+│       │                               [make build]  │
+│       │                                     │        │
+│       ▼                                     ▼        │
+│  paranoid.wasm  ◄────────────────────────────       │
+│       │                                              │
+│       ▼                                              │
+│  [make integration] ──► Browser/WASM tests          │
+│                                                      │
+└──────────────────────────────────────────────────────┘
+```
+
+This catches:
+- Rejection sampling bugs (`max_valid = (256/N)*N - 1`)
+- Statistical formula errors (df = N-1, p-value interpretation)
+- Memory safety issues (before they become WASM traps)
+- Entropy calculation errors
+
+---
+
+## Build Commands Reference
+
+### Development (CMake)
+
+```bash
+# WASM build
+cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build/wasm
+
+# Native build (for testing)
+cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/native
+```
+
+### Testing
+
+```bash
+# Run all native C tests via CTest
+ctest --test-dir build/native --output-on-failure
+
+# Run individual test binaries
+./build/native/test_native              # Comprehensive acutest suite
+./build/native/test_sha256              # NIST CAVP SHA-256 vectors
+./build/native/test_statistics          # Chi-squared + serial correlation KATs
+./build/native/test_paranoid            # Standalone test framework
+```
+
+### Verification Scripts
+
+```bash
+./scripts/hallucination_check.sh        # LLM hallucination detection
+./scripts/supply_chain_verify.sh        # Supply chain verification
+./scripts/double_compile.sh             # Diverse double-compilation
+./scripts/multiparty_verify.sh check    # Multi-party build verification
+./scripts/integration_test.sh           # End-to-end integration tests
+```
+
+### CI/CD
+
+The project uses three separate workflows (see `.github/workflows/`):
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ ci.yml (Pull Requests)                                      │
+│   Docker Build → E2E Tests (Playwright) → WASM Verification │
+│   ✓ All checks must pass to merge                           │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ cd.yml (Push to Main)                                       │
+│   Docker Build → SBOM → Provenance → Cosign → release-please│
+│   ✓ Creates release PR when ready                           │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ release.yml (Release Published)                             │
+│   Build from tag → Attest → Sign → Deploy to GitHub Pages   │
+│   ✓ Only deploys from signed, attested releases             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**melange + apko for local development:**
+```bash
+melange build melange.yaml --arch x86_64    # Build Wolfi packages
+apko build apko.yaml paranoid:latest out.tar  # Build container image
+```
+
+---
+
+## Troubleshooting
+
+### Local Development Setup (Optional)
+
+For local development without Docker, you may optionally build OpenSSL from source and set up the vendor directory:
+
+```bash
+# Build OpenSSL from official source (produces vendor/openssl/lib/libcrypto.a)
+./scripts/build_openssl_wasm.sh
+
+# Clone test framework for local development
+mkdir -p vendor
+git clone https://github.com/mity/acutest.git vendor/acutest
+cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de
+```
+
+**Note**: For production builds, always use Docker — it clones dependencies automatically at SHA-pinned commits.
+
+### Zig Version Mismatch
+
+```bash
+# Check version
+zig version  # Should be 0.13.0+
+
+# Install specific version
+snap install zig --classic --beta  # Ubuntu
+brew install zig                    # macOS
+```
+
+Note: In production, Zig is provided by Wolfi via melange (built from source).
+
+### SRI Hash Mismatch in Browser
+
+```
+Error: Failed to find a valid digest in the 'integrity' attribute
+```
+
+**Cause**: Cached old version.
+
+**Fix**:
+```bash
+# Rebuild
+make clean && make site
+
+# Hard refresh browser
+Ctrl+Shift+R (Windows/Linux)
+Cmd+Shift+R (macOS)
+```
+
+### WASM Compilation Fails
+
+```
+error: undefined symbol: RAND_bytes
+```
+
+**Cause**: OpenSSL library not found.
+
+**Fix** (local development):
+```bash
+# Verify library exists
+ls -lh vendor/openssl/lib/libcrypto.a
+
+# If missing, build from official source
+./scripts/build_openssl_wasm.sh
+```
+
+**Fix** (production): Use Docker -- it builds OpenSSL from official source automatically.
+
+---
+
+## Status of Previously Planned Enhancements
+
+### 1. Reproducible Builds
+
+- [x] `SOURCE_DATE_EPOCH` support -- DONE (melange sets this)
+- [x] Containerized builds -- DONE (melange + apko replace Docker)
+- [x] Diverse double-compilation (Zig + Clang) -- DONE (scripts/double_compile.sh)
+- [ ] Community verification infrastructure
+
+### 2. Build Attestation
+
+- [x] Cosign keyless signing -- DONE (via Sigstore)
+- [x] Multi-party verification (3-of-5) -- DONE (scripts/multiparty_verify.sh)
+- [ ] Transparency log (public build records)
+- [x] SLSA provenance (Level 3+ compliance) -- DONE
+
+### 3. Supply Chain Hardening
+
+- [x] Dependency SHA verification -- DONE (melange checksums)
+- [x] Automated dependency updates (Dependabot) -- DONE
+- [ ] Vulnerability scanning (Snyk, CodeQL)
+- [x] SBOM generation -- DONE (melange APK includes SBOM)
+
+### 4. Performance
+
+- [ ] Parallel compilation (multiple cores)
+- [x] Incremental builds -- DONE (CMake native support)
+- [ ] Cache optimization (ccache integration)
+
+---
+
+## Conclusion
+
+The build system prioritizes:
+
+1. **Reproducibility** — Same source → same binary
+2. **Auditability** — Every step logged, hashed, signed
+3. **Integrity** — SRI hashes prevent tampering
+4. **Transparency** — Open process, community verification
+
+This is not just a build system — it's a **supply chain security framework** designed to detect and prevent attacks at every stage.
