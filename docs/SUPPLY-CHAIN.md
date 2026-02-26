@@ -590,6 +590,11 @@ Level 4: Highest (two-person review, hermetic builds)
 **Current**: Level 2 (GitHub Actions)  
 **Target**: Level 3 (signed provenance, reproducible)
 
+Containerized attestation path:
+- Builder image must be supplied with a trusted digest (`DEBIAN_IMAGE` arg in Dockerfile) — no implicit tags.
+- Zig toolchain hash is verified before extraction (pinned to the checked-in tarball).
+- Final artifact image is `scratch` with only `/artifact/site` + `paranoid.wasm`; no runtime or package manager remains.
+
 ### Provenance Format
 
 ```json

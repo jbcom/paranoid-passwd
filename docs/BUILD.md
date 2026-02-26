@@ -292,32 +292,51 @@ build/paranoid.wasm: src/paranoid.c
 
 **Effect**: All embedded timestamps use commit time (deterministic).
 
-### Container-Based Builds (Planned)
+### Container-Based Builds (Attested, scratch final)
 
-```dockerfile
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y \
-    zig=0.14.0 \
-    git \
-    openssl
-WORKDIR /build
-COPY . .
-RUN make build
-```
+The repository ships a Dockerfile that:
 
-**Verification**:
+- Uses a builder image supplied **with a required digest** (`DEBIAN_IMAGE`) to avoid unpinned bases.
+- Verifies the Zig toolchain hash (`ZIG_SHA256`) before extraction (matches the checked-in tarball).
+- Builds with BuildKit and copies only `build/site/` + `paranoid.wasm` into a `scratch` final image (no OS, no shell).
+- Fails closed if the OpenSSL submodule is missing.
+
+Build (requires BuildKit):
+
 ```bash
-# Machine A
-docker build -t paranoid-builder .
-docker run paranoid-builder make hash > hash_a.txt
-
-# Machine B (different physical hardware)
-docker build -t paranoid-builder .
-docker run paranoid-builder make hash > hash_b.txt
-
-# Compare
-diff hash_a.txt hash_b.txt  # Should be identical
+DOCKER_BUILDKIT=1 docker build \  # placeholder digest below; command fails until replaced
+  --build-arg DEBIAN_IMAGE=debian:12-slim@sha256:REQUIRE_TRUSTED_DIGEST \
+  --provenance=mode=max \
+  -t paranoid-artifact .
 ```
+Example structure (replace with a verified digest):  
+`--build-arg DEBIAN_IMAGE=debian:12-slim@sha256:<REPLACE_WITH_VERIFIED_DIGEST>` (placeholder only; builds fail until replaced)
+Note: `REQUIRE_TRUSTED_DIGEST` is intentionally invalid; this command is incomplete until a verified digest is supplied (see below).
+
+How to obtain a trusted digest (examples):
+- `skopeo inspect --raw docker://debian:12-slim | jq -r '.digest // ((.manifests[] | select(.platform.arch=="amd64").digest) | first)'` (amd64 == x86_64; substitute the output into `--build-arg DEBIAN_IMAGE=…@<digest>`; ensure exactly one digest is returned)
+- `docker buildx imagetools inspect debian:12-slim --format '{{json .Manifest.digest}}'` for manifest lists (Docker Hub); for single-platform responses use `--format '{{json .Digest}}'` and confirm the output is a 64-hex sha256 digest before using it
+
+Verify the digest you plan to use:
+- Cross-check the digest from two independent registries/mirrors (e.g., docker.io and debian registry) and ensure they match.
+- Validate the manifest signature with Debian's official signing keys (e.g., `skopeo stand-alone-sign` / `cosign verify-blob` if exported).
+- Record the digest in change control alongside the BuildKit provenance envelope.
+
+Obtain attested artifact image (contains only `/artifact/site` and `paranoid.wasm`):
+
+```bash
+docker create --name paranoid-out paranoid-artifact
+docker cp paranoid-out:/artifact ./artifact
+docker rm paranoid-out
+find ./artifact -maxdepth 2 -type f
+```
+
+To prove chain-of-custody:
+
+- Keep the builder base digest in change control (CI should inject it).
+- Preserve the BuildKit provenance envelope (`--provenance=mode=max`).
+- Record the Zig tarball hash (already hard-pinned in the Dockerfile).
+- Compare `artifact/site/BUILD_MANIFEST.json` against the hash emitted by `make hash`.
 
 ### Diverse Double-Compilation (Planned)
 
