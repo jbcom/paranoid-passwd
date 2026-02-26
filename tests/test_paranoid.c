@@ -182,6 +182,7 @@ TEST(chi_squared_uniform) {
     
     /* Create perfectly uniform distribution: 1000 of each char */
     char *passwords = malloc(num_pw * pw_len);
+    ASSERT(passwords != NULL);
     for (int i = 0; i < num_pw * pw_len; i++) {
         passwords[i] = charset[i % charset_len];
     }
@@ -205,6 +206,7 @@ TEST(chi_squared_degrees_of_freedom) {
     int pw_len = 100;
     
     char *passwords = malloc(num_pw * pw_len);
+    ASSERT(passwords != NULL);
     for (int i = 0; i < num_pw * pw_len; i++) {
         passwords[i] = charset[i % charset_len];
     }
