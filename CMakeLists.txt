@@ -49,11 +49,10 @@ set(PARANOID_HEADERS
 )
 
 # ── Vendor dependency paths ──────────────────────────────────
-# OpenSSL for WASM: built from source by scripts/build_openssl_wasm.sh
 # OpenSSL for native: system package (openssl-dev / brew install openssl)
+# WASM target does NOT use OpenSSL (compact SHA-256 + WASI random_get)
 # Acutest: header-only test framework (vendor/acutest)
 
-set(OPENSSL_VENDOR_DIR "${CMAKE_SOURCE_DIR}/vendor/openssl")
 set(ACUTEST_DIR "${CMAKE_SOURCE_DIR}/vendor/acutest")
 
 
@@ -67,12 +66,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
     # ── WASM binary ──
     # paranoid.c uses platform abstraction (paranoid_platform.h).
     # platform_wasm.c provides WASI random_get + compact SHA-256.
-    # wasm_entry.c provides stub main() for Zig's WASI libc linker.
+    # No wasm_entry.c needed — built with --no-entry (reactor module).
     add_executable(paranoid_wasm
         ${PARANOID_CORE_SOURCES}
         src/platform_wasm.c
         src/sha256_compact.c
-        src/wasm_entry.c
     )
 
     # Output as "paranoid.wasm" (not "paranoid_wasm.wasm")

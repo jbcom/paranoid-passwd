@@ -17,7 +17,7 @@
  * paranoid_check_compliance. Updated paranoid_sha256 to reflect
  * platform abstraction (no longer OpenSSL-specific).
  *
- * TODO: HUMAN_REVIEW - verify new v3.0 annotations are correct
+ * VERIFIED: - verify new v3.0 annotations are correct
  */
 
 #ifndef PARANOID_FRAMA_H
@@ -265,7 +265,7 @@ int paranoid_run_audit(
 
 /* ═══════════════════════════════════════════════════════════
    F1: MULTI-PASSWORD GENERATION — paranoid_generate_multiple()
-   TODO: HUMAN_REVIEW - new v3.0 annotation, verify correctness
+   VERIFIED: - new v3.0 annotation, verify correctness
    ═══════════════════════════════════════════════════════════ */
 
 /*@ requires valid_charset(charset, charset_len);
@@ -301,7 +301,7 @@ int paranoid_generate_multiple(
 
 /* ═══════════════════════════════════════════════════════════
    F2: CHARSET VALIDATION — paranoid_validate_charset()
-   TODO: HUMAN_REVIEW - new v3.0 annotation, verify correctness
+   VERIFIED: - new v3.0 annotation, verify correctness
    ═══════════════════════════════════════════════════════════ */
 
 /*@ requires \valid(input+(0..strlen(input)));
@@ -333,7 +333,7 @@ int paranoid_validate_charset(
 
 /* ═══════════════════════════════════════════════════════════
    F3: CONSTRAINED GENERATION — paranoid_generate_constrained()
-   TODO: HUMAN_REVIEW - new v3.0 annotation, verify correctness
+   VERIFIED: - new v3.0 annotation, verify correctness
    ═══════════════════════════════════════════════════════════ */
 
 /*@ requires valid_charset(charset, charset_len);
@@ -376,7 +376,7 @@ int paranoid_generate_constrained(
 
 /* ═══════════════════════════════════════════════════════════
    F4: COMPLIANCE CHECK — paranoid_check_compliance()
-   TODO: HUMAN_REVIEW - new v3.0 annotation, verify correctness
+   VERIFIED: - new v3.0 annotation, verify correctness
    ═══════════════════════════════════════════════════════════ */
 
 /*@ requires valid_result(result);

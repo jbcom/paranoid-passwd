@@ -56,50 +56,42 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────
-# Check 2: OpenSSL built from source (provenance file)
+# Check 2: Platform abstraction layer exists
 # ─────────────────────────────────────────────────────────────
-echo -n "Check 2: OpenSSL from-source provenance... "
+echo -n "Check 2: Platform abstraction layer... "
 
-OPENSSL_VENDOR="$REPO_ROOT/vendor/openssl"
-PROVENANCE_FILE="$OPENSSL_VENDOR/BUILD_PROVENANCE.txt"
+PLATFORM_H="$REPO_ROOT/include/paranoid_platform.h"
+PLATFORM_NATIVE="$REPO_ROOT/src/platform_native.c"
+PLATFORM_WASM="$REPO_ROOT/src/platform_wasm.c"
 
-if [ -f "$PROVENANCE_FILE" ]; then
+if [ -f "$PLATFORM_H" ] && [ -f "$PLATFORM_NATIVE" ] && [ -f "$PLATFORM_WASM" ]; then
     echo -e "${GREEN}PASS${NC}"
-    # Show provenance summary
-    TAG=$(grep "^Tag:" "$PROVENANCE_FILE" | head -1 | awk '{print $2}') || true
-    COMMIT=$(grep "^Commit:" "$PROVENANCE_FILE" | head -1 | awk '{print $2}') || true
-    [ -n "$TAG" ] && echo "    Tag:    $TAG"
-    [ -n "$COMMIT" ] && echo "    Commit: ${COMMIT:0:16}..."
-elif [ -d "$OPENSSL_VENDOR" ]; then
-    echo -e "${YELLOW}WARN${NC}"
-    echo "  vendor/openssl exists but BUILD_PROVENANCE.txt missing."
-    echo "  Cannot verify OpenSSL was built from source."
-    WARNINGS=$((WARNINGS + 1))
+    echo "    paranoid_platform.h, platform_native.c, platform_wasm.c all present"
 else
-    echo -e "${YELLOW}WARN${NC}"
-    echo "  vendor/openssl not found locally."
-    echo "  This is expected — Docker build compiles OpenSSL from source."
-    WARNINGS=$((WARNINGS + 1))
+    echo -e "${RED}FAIL${NC}"
+    echo "  Platform abstraction layer incomplete!"
+    [ ! -f "$PLATFORM_H" ] && echo "    Missing: include/paranoid_platform.h"
+    [ ! -f "$PLATFORM_NATIVE" ] && echo "    Missing: src/platform_native.c"
+    [ ! -f "$PLATFORM_WASM" ] && echo "    Missing: src/platform_wasm.c"
+    FAILED=1
 fi
 
 # ─────────────────────────────────────────────────────────────
-# Check 3: libcrypto.a exists (only in Docker/local builds)
+# Check 3: CMake build system exists
 # ─────────────────────────────────────────────────────────────
-echo -n "Check 3: libcrypto.a exists... "
+echo -n "Check 3: CMake build system... "
 
-LIBCRYPTO="$OPENSSL_VENDOR/lib/libcrypto.a"
-if [ -f "$LIBCRYPTO" ]; then
+CMAKE_FILE="$REPO_ROOT/CMakeLists.txt"
+TOOLCHAIN_FILE="$REPO_ROOT/cmake/wasm32-wasi.cmake"
+if [ -f "$CMAKE_FILE" ] && [ -f "$TOOLCHAIN_FILE" ]; then
     echo -e "${GREEN}PASS${NC}"
-
-    # Also compute and display hash
-    if command -v sha256sum &> /dev/null; then
-        CRYPTO_HASH=$(sha256sum "$LIBCRYPTO" | cut -d' ' -f1)
-        echo "    Hash: ${CRYPTO_HASH:0:16}..."
-    fi
+    echo "    CMakeLists.txt and cmake/wasm32-wasi.cmake present"
 else
-    echo -e "${YELLOW}WARN${NC}"
-    echo "  libcrypto.a not found locally (expected in Docker builds)."
-    WARNINGS=$((WARNINGS + 1))
+    echo -e "${RED}FAIL${NC}"
+    echo "  CMake build system incomplete!"
+    [ ! -f "$CMAKE_FILE" ] && echo "    Missing: CMakeLists.txt"
+    [ ! -f "$TOOLCHAIN_FILE" ] && echo "    Missing: cmake/wasm32-wasi.cmake"
+    FAILED=1
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -161,25 +153,20 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────
-# Check 6: Dockerfile base image pinned
+# Check 6: melange/apko build configs exist
 # ─────────────────────────────────────────────────────────────
-echo -n "Check 6: Dockerfile base image SHA-pinned... "
+echo -n "Check 6: melange/apko build configs... "
 
-DOCKERFILE="$REPO_ROOT/Dockerfile"
-if [ -f "$DOCKERFILE" ]; then
-    # Check for @sha256: in FROM line
-    if grep -q 'FROM.*@sha256:[a-f0-9]\{64\}' "$DOCKERFILE"; then
-        echo -e "${GREEN}PASS${NC}"
-        DIGEST=$(grep 'FROM.*@sha256:' "$DOCKERFILE" | head -1 | sed 's/.*@sha256:\([a-f0-9]\{64\}\).*/\1/')
-        echo "    Digest: ${DIGEST:0:16}..."
-    else
-        echo -e "${RED}FAIL${NC}"
-        echo "  Base image not SHA-pinned!"
-        echo "  Use: FROM alpine:3.21@sha256:<digest>"
-        FAILED=1
-    fi
+MELANGE_YAML="$REPO_ROOT/melange.yaml"
+APKO_YAML="$REPO_ROOT/apko.yaml"
+if [ -f "$MELANGE_YAML" ] && [ -f "$APKO_YAML" ]; then
+    echo -e "${GREEN}PASS${NC}"
+    echo "    melange.yaml and apko.yaml present"
 else
-    echo -e "${YELLOW}SKIP${NC} (Dockerfile not found)"
+    echo -e "${YELLOW}WARN${NC}"
+    [ ! -f "$MELANGE_YAML" ] && echo "    Missing: melange.yaml (needed for CD pipeline)"
+    [ ! -f "$APKO_YAML" ] && echo "    Missing: apko.yaml (needed for OCI image build)"
+    WARNINGS=$((WARNINGS + 1))
 fi
 
 # ─────────────────────────────────────────────────────────────
@@ -188,7 +175,7 @@ fi
 echo -n "Check 7: Core source files exist... "
 
 MISSING=0
-for FILE in "src/paranoid.c" "src/wasm_entry.c" "include/paranoid.h" "Makefile" "patches/01-wasi-config.patch"; do
+for FILE in "src/paranoid.c" "src/platform_wasm.c" "src/platform_native.c" "src/sha256_compact.c" "include/paranoid.h" "include/paranoid_platform.h" "CMakeLists.txt"; do
     if [ ! -f "$REPO_ROOT/$FILE" ]; then
         MISSING=1
         break

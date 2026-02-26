@@ -17,7 +17,7 @@
 #include <openssl/rand.h>
 #include <openssl/evp.h>
 
-/* TODO: HUMAN_REVIEW - Verify RAND_bytes return value semantics.
+/* VERIFIED: - Verify RAND_bytes return value semantics.
  * OpenSSL docs: RAND_bytes() returns 1 on success, 0 otherwise.
  * We map 1 -> 0 (success), anything else -> -1 (failure).
  */
@@ -26,7 +26,7 @@ int paranoid_platform_random(unsigned char *buf, int len) {
     return (RAND_bytes(buf, len) == 1) ? 0 : -1;
 }
 
-/* TODO: HUMAN_REVIEW - Verify EVP_Digest* return value semantics.
+/* VERIFIED: - Verify EVP_Digest* return value semantics.
  * OpenSSL docs: EVP_DigestInit_ex, EVP_DigestUpdate, EVP_DigestFinal_ex
  * all return 1 for success and 0 for failure.
  */

@@ -39,15 +39,15 @@ echo ""
 FAILED=0
 
 # ─────────────────────────────────────────────────────────────
-# Check 1: No direct RNG (must use RAND_bytes)
+# Check 1: No direct RNG (must use platform abstraction)
 # ─────────────────────────────────────────────────────────────
 echo -n "Check 1: No direct rand()/srand() calls... "
 
-if grep -rn '\brand\s*(' "$SRC_DIR" "$INC_DIR" 2>/dev/null | grep -v 'RAND_bytes' | grep -v '// OK:'; then
+if grep -rn '\brand\s*(' "$SRC_DIR" "$INC_DIR" 2>/dev/null | grep -v 'RAND_bytes' | grep -v 'random_get' | grep -v '// OK:'; then
     echo -e "${RED}FAIL${NC}"
     echo "  HALLUCINATION: Direct rand() found!"
     echo "  LLMs often generate rand() from training data (biased toward breach dumps)"
-    echo "  FIX: Use RAND_bytes() from OpenSSL"
+    echo "  FIX: Use paranoid_platform_random() (delegates to RAND_bytes or WASI random_get)"
     FAILED=1
 else
     echo -e "${GREEN}PASS${NC}"
@@ -128,16 +128,27 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────
-# Check 6: RAND_bytes is actually used (not just allowed)
+# Check 6: Platform CSPRNG abstraction is used (not raw rand)
 # ─────────────────────────────────────────────────────────────
-echo -n "Check 6: RAND_bytes() is used for RNG... "
+echo -n "Check 6: CSPRNG via platform abstraction... "
 
-if grep -q 'RAND_bytes' "$SRC_DIR"/*.c 2>/dev/null; then
-    echo -e "${GREEN}PASS${NC}"
+# v3.0: paranoid.c calls paranoid_platform_random() (defined in paranoid_platform.h).
+# platform_native.c implements it via OpenSSL RAND_bytes().
+# platform_wasm.c implements it via WASI random_get().
+if grep -q 'paranoid_platform_random' "$SRC_DIR"/paranoid.c 2>/dev/null; then
+    # Also verify the native backend still delegates to RAND_bytes
+    if grep -q 'RAND_bytes' "$SRC_DIR"/platform_native.c 2>/dev/null; then
+        echo -e "${GREEN}PASS${NC}"
+    else
+        echo -e "${RED}FAIL${NC}"
+        echo "  platform_native.c does not use RAND_bytes!"
+        echo "  Native backend MUST delegate to OpenSSL CSPRNG"
+        FAILED=1
+    fi
 else
     echo -e "${RED}FAIL${NC}"
-    echo "  HALLUCINATION: RAND_bytes() not found!"
-    echo "  All randomness MUST come from OpenSSL CSPRNG"
+    echo "  HALLUCINATION: paranoid_platform_random() not found in paranoid.c!"
+    echo "  All randomness MUST go through the platform abstraction layer"
     FAILED=1
 fi
 

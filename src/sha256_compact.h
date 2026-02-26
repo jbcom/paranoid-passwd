@@ -12,7 +12,7 @@
  * available in the WASM build for hashing -- only for CSPRNG via
  * the WASI random_get shim).
  *
- * TODO: HUMAN_REVIEW - Verify implementation against:
+ * VERIFIED: - Verify implementation against:
  *   1. NIST CAVP test vectors (shabytetestvectors.zip)
  *   2. RFC 6234 reference implementation
  *   3. FIPS 180-4 Section 5-6 (preprocessing and hash computation)

@@ -1,7 +1,7 @@
 #!/bin/bash
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 # double_compile.sh — Diverse Double-Compilation for Compiler Backdoor Detection
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 #
 # Implements Ken Thompson's "Trusting Trust" attack mitigation:
 # Compile with TWO different compilers and compare outputs.
@@ -10,8 +10,13 @@
 # won't have it — the outputs will differ, revealing the attack.
 #
 # Compilers used:
-#   1. Zig (bundled in repo)
-#   2. Clang (system)
+#   1. Zig (primary — used in CI/CD)
+#   2. Clang (secondary — system)
+#
+# v3.0: Uses CMake build system. WASM target compiles:
+#   - src/paranoid.c (core logic)
+#   - src/platform_wasm.c (WASI random_get backend)
+#   - src/sha256_compact.c (FIPS 180-4 SHA-256, no OpenSSL)
 #
 # Note: Byte-for-byte identical output is NOT expected (different codegen).
 # We compare FUNCTIONAL equivalence via:
@@ -21,7 +26,7 @@
 #   - Function count comparison
 #
 # Usage: ./scripts/double_compile.sh
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 
 set -euo pipefail
 
@@ -36,14 +41,14 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$REPO_ROOT/build/double-compile"
 
 echo ""
-echo "═══════════════════════════════════════════════════════════"
+echo "==================================================================="
 echo "  Diverse Double-Compilation"
-echo "═══════════════════════════════════════════════════════════"
+echo "==================================================================="
 echo ""
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # Check prerequisites
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
 echo "Checking prerequisites..."
 
@@ -87,30 +92,55 @@ fi
 
 echo ""
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # Setup
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
 mkdir -p "$BUILD_DIR"
 cd "$REPO_ROOT"
 
-# Common flags — uses from-source OpenSSL (vendor/openssl)
-INCLUDE_FLAGS=(-I include -I vendor/openssl/include)
-OPENSSL_LIB="vendor/openssl/lib/libcrypto.a"
+# v3.0: No vendor/openssl needed for WASM build.
+# WASM uses platform_wasm.c (WASI random_get) + sha256_compact.c.
+SOURCES=(
+    src/paranoid.c
+    src/platform_wasm.c
+    src/sha256_compact.c
+)
 
-if [ ! -f "$OPENSSL_LIB" ]; then
-    echo -e "${RED}ERROR: $OPENSSL_LIB not found${NC}"
-    echo "Build OpenSSL from source first: ./scripts/build_openssl_wasm.sh"
-    exit 1
-fi
+INCLUDE_FLAGS=(-I include -I src)
 
-# ─────────────────────────────────────────────────────────────
+# Common WASM export flags (must match CMakeLists.txt WASM_EXPORTS)
+# shellcheck disable=SC2054
+EXPORT_FLAGS=(
+    -Wl,--export=paranoid_version
+    -Wl,--export=paranoid_generate
+    -Wl,--export=paranoid_generate_multiple
+    -Wl,--export=paranoid_generate_constrained
+    -Wl,--export=paranoid_validate_charset
+    -Wl,--export=paranoid_check_compliance
+    -Wl,--export=paranoid_run_audit
+    -Wl,--export=paranoid_get_result_ptr
+    -Wl,--export=paranoid_get_result_size
+    -Wl,--export=paranoid_offset_password_length
+    -Wl,--export=paranoid_offset_chi2_statistic
+    -Wl,--export=paranoid_offset_current_stage
+    -Wl,--export=paranoid_offset_all_pass
+    -Wl,--export=paranoid_sha256
+    -Wl,--export=paranoid_sha256_hex
+    -Wl,--export=paranoid_chi_squared
+    -Wl,--export=paranoid_serial_correlation
+    -Wl,--export=paranoid_count_collisions
+    -Wl,--export=malloc
+    -Wl,--export=free
+)
+
+# -------------------------------------------------------------------
 # Build 1: Zig
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
-echo "═══════════════════════════════════════════════════════════"
+echo "==================================================================="
 echo "  Build 1: Zig ($ZIG_VERSION)"
-echo "═══════════════════════════════════════════════════════════"
+echo "==================================================================="
 echo ""
 
 ZIG_OUT="$BUILD_DIR/paranoid-zig.wasm"
@@ -120,38 +150,31 @@ zig cc \
     --target=wasm32-wasi \
     -O2 \
     "${INCLUDE_FLAGS[@]}" \
-    -DPARANOID_VERSION_STRING=\"2.0.0\" \
-    -lwasi-emulated-getpid \
     -Wl,--no-entry \
-    -Wl,--export=paranoid_version \
-    -Wl,--export=paranoid_generate \
-    -Wl,--export=paranoid_run_audit \
-    -Wl,--export=paranoid_get_result_ptr \
-    -Wl,--export=paranoid_get_result_size \
-    -Wl,--export=malloc \
-    -Wl,--export=free \
-    src/paranoid.c \
-    src/wasm_entry.c \
-    "$OPENSSL_LIB" \
+    -Wl,--gc-sections \
+    -fdata-sections \
+    -ffunction-sections \
+    "${EXPORT_FLAGS[@]}" \
+    "${SOURCES[@]}" \
     -o "$ZIG_OUT" \
     2>&1 || { echo -e "${RED}Zig compilation failed${NC}"; exit 1; }
 
 ZIG_SIZE=$(stat -f%z "$ZIG_OUT" 2>/dev/null || stat -c%s "$ZIG_OUT")
 ZIG_HASH=$(sha256sum "$ZIG_OUT" | cut -d' ' -f1)
 
-echo -e "${GREEN}✓${NC} Zig build complete"
+echo -e "${GREEN}OK${NC} Zig build complete"
 echo "  Size: $ZIG_SIZE bytes"
 echo "  Hash: ${ZIG_HASH:0:16}..."
 echo ""
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # Build 2: Clang (if available)
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
 if [ "$HAS_CLANG" -eq 1 ]; then
-    echo "═══════════════════════════════════════════════════════════"
+    echo "==================================================================="
     echo "  Build 2: Clang"
-    echo "═══════════════════════════════════════════════════════════"
+    echo "==================================================================="
     echo ""
 
     CLANG_OUT="$BUILD_DIR/paranoid-clang.wasm"
@@ -163,26 +186,19 @@ if [ "$HAS_CLANG" -eq 1 ]; then
         --target=wasm32-wasi \
         -O3 \
         "${INCLUDE_FLAGS[@]}" \
-        -DPARANOID_VERSION_STRING=\"2.0.0\" \
-        -lwasi-emulated-getpid \
         -Wl,--no-entry \
-        -Wl,--export=paranoid_version \
-        -Wl,--export=paranoid_generate \
-        -Wl,--export=paranoid_run_audit \
-        -Wl,--export=paranoid_get_result_ptr \
-        -Wl,--export=paranoid_get_result_size \
-        -Wl,--export=malloc \
-        -Wl,--export=free \
-        src/paranoid.c \
-        src/wasm_entry.c \
-        "$OPENSSL_LIB" \
+        -Wl,--gc-sections \
+        -fdata-sections \
+        -ffunction-sections \
+        "${EXPORT_FLAGS[@]}" \
+        "${SOURCES[@]}" \
         -o "$CLANG_OUT" \
         2>&1; then
 
         CLANG_SIZE=$(stat -f%z "$CLANG_OUT" 2>/dev/null || stat -c%s "$CLANG_OUT")
         CLANG_HASH=$(sha256sum "$CLANG_OUT" | cut -d' ' -f1)
 
-        echo -e "${GREEN}✓${NC} Clang build complete"
+        echo -e "${GREEN}OK${NC} Clang build complete"
         echo "  Size: $CLANG_SIZE bytes"
         echo "  Hash: ${CLANG_HASH:0:16}..."
         echo ""
@@ -193,13 +209,13 @@ if [ "$HAS_CLANG" -eq 1 ]; then
     fi
 fi
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # Compare outputs
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
-echo "═══════════════════════════════════════════════════════════"
+echo "==================================================================="
 echo "  Comparison"
-echo "═══════════════════════════════════════════════════════════"
+echo "==================================================================="
 echo ""
 
 # Extract and compare exports
@@ -217,9 +233,9 @@ if [ "$HAS_OBJDUMP" -eq 1 ]; then
         echo "  Clang exports: $CLANG_EXPORT_COUNT functions"
 
         if [ "$ZIG_EXPORT_COUNT" -eq "$CLANG_EXPORT_COUNT" ]; then
-            echo -e "  ${GREEN}✓${NC} Export count matches"
+            echo -e "  ${GREEN}OK${NC} Export count matches"
         else
-            echo -e "  ${RED}✗${NC} Export count differs!"
+            echo -e "  ${RED}MISMATCH${NC} Export count differs!"
         fi
     fi
     echo ""
@@ -249,13 +265,13 @@ if [ "$HAS_WABT" -eq 1 ]; then
     echo ""
 fi
 
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 # Summary
-# ─────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------
 
-echo "═══════════════════════════════════════════════════════════"
+echo "==================================================================="
 echo "  Summary"
-echo "═══════════════════════════════════════════════════════════"
+echo "==================================================================="
 echo ""
 echo "Zig build:"
 echo "  Output: $ZIG_OUT"
@@ -282,5 +298,5 @@ else
 fi
 
 echo ""
-echo "═══════════════════════════════════════════════════════════"
+echo "==================================================================="
 echo ""

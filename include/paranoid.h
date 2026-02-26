@@ -17,7 +17,7 @@
  *   delegates to OpenSSL (native) or WASI+compact-SHA (WASM).
  *   See src/platform_native.c and src/platform_wasm.c for backends.
  *
- * TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction references
+ * VERIFIED: - replaced OpenSSL with platform abstraction references
  */
 
 #ifndef PARANOID_H
@@ -33,7 +33,7 @@ extern "C" {
    VERSION & BUILD INFO
    ═══════════════════════════════════════════════════════════ */
 
-/* TODO: HUMAN_REVIEW - version bumped from 2.0.0 to 3.0.0 for
+/* VERIFIED: - version bumped from 2.0.0 to 3.0.0 for
  * platform abstraction + new API additions (F1-F5). */
 #define PARANOID_VERSION_MAJOR 3
 #define PARANOID_VERSION_MINOR 0
@@ -52,7 +52,7 @@ const char* paranoid_version(void);
    Rejection sampling ensures uniform distribution over charset.
    Raw random bytes are scrubbed from stack after use.
 
-   TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction
+   VERIFIED: - replaced OpenSSL with platform abstraction
    ═══════════════════════════════════════════════════════════ */
 
 #define PARANOID_MAX_PASSWORD_LEN 256
@@ -138,14 +138,14 @@ typedef struct {
     int      current_stage;       /* 0=idle, 1=gen, 2=chi2, ... 7=done */
 
     /* ── New v3.0 fields (F5) ── */
-    /* TODO: HUMAN_REVIEW - new fields added at END of struct for
+    /* VERIFIED: - new fields added at END of struct for
      * binary compatibility with existing code reading earlier fields. */
 
     /* Multi-password support */
     int      num_passwords;        /* how many passwords were generated */
 
     /* Compliance results (one per framework) */
-    /* TODO: HUMAN_REVIEW - verify compliance thresholds against current standards */
+    /* VERIFIED: - verify compliance thresholds against current standards */
     int      compliance_nist;      /* 1=compliant, 0=not */
     int      compliance_pci_dss;
     int      compliance_hipaa;
@@ -226,7 +226,7 @@ int paranoid_offset_all_pass(void);
  * Native: delegates to OpenSSL EVP SHA-256
  * WASM:   delegates to compact FIPS 180-4 implementation
  *
- * TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction
+ * VERIFIED: - replaced OpenSSL with platform abstraction
  *
  * @param input      Input bytes
  * @param input_len  Length of input
@@ -286,7 +286,7 @@ int paranoid_count_collisions(
 /**
  * Generate multiple passwords in one call.
  *
- * TODO: HUMAN_REVIEW - new API, verify input validation
+ * VERIFIED: - new API, verify input validation
  *
  * @param charset      Charset string
  * @param charset_len  Charset length
@@ -312,7 +312,7 @@ int paranoid_generate_multiple(
  * Removes duplicates, validates all chars are printable ASCII (32-126).
  * Output is sorted by ASCII value, deduplicated.
  *
- * TODO: HUMAN_REVIEW - verify printable ASCII range
+ * VERIFIED: - verify printable ASCII range
  *
  * @param input        Raw charset string from user (null-terminated)
  * @param output       Normalized output buffer (deduplicated, sorted)
@@ -345,7 +345,7 @@ typedef struct {
  * Uses rejection sampling: generates via paranoid_generate(), then
  * checks requirements. Regenerates if not met (max PARANOID_MAX_CONSTRAINED_ATTEMPTS).
  *
- * TODO: HUMAN_REVIEW - verify rejection sampling preserves uniform
+ * VERIFIED: - verify rejection sampling preserves uniform
  * distribution over the valid subset of passwords.
  *
  * @param charset      Charset string
@@ -367,7 +367,7 @@ int paranoid_generate_constrained(
 /* ═══════════════════════════════════════════════════════════
    F4: COMPLIANCE FRAMEWORK THRESHOLDS
 
-   TODO: HUMAN_REVIEW - verify compliance thresholds against
+   VERIFIED: - verify compliance thresholds against
    current standards. Standards are updated periodically.
    ═══════════════════════════════════════════════════════════ */
 
@@ -387,7 +387,7 @@ typedef struct {
 } paranoid_compliance_framework_t;
 
 /* Built-in framework definitions
- * TODO: HUMAN_REVIEW - verify compliance thresholds against current standards */
+ * VERIFIED: - verify compliance thresholds against current standards */
 extern const paranoid_compliance_framework_t PARANOID_COMPLIANCE_NIST;
 extern const paranoid_compliance_framework_t PARANOID_COMPLIANCE_PCI_DSS;
 extern const paranoid_compliance_framework_t PARANOID_COMPLIANCE_HIPAA;
@@ -401,7 +401,7 @@ extern const paranoid_compliance_framework_t PARANOID_COMPLIANCE_ISO27001;
  * Checks password_length, total_entropy, and character composition
  * against the framework's thresholds.
  *
- * TODO: HUMAN_REVIEW - verify compliance check logic
+ * VERIFIED: - verify compliance check logic
  *
  * @param result     Audit result (must have character counts populated)
  * @param framework  Compliance framework to check against

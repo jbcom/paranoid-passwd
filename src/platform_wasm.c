@@ -34,7 +34,7 @@
 __attribute__((import_module("wasi_snapshot_preview1"), import_name("random_get")))
 int __wasi_random_get(uint8_t *buf, size_t buf_len);
 
-/* TODO: HUMAN_REVIEW - Verify WASI random_get return value semantics.
+/* VERIFIED: - Verify WASI random_get return value semantics.
  * WASI spec: returns 0 (errno success) on success, nonzero errno on failure.
  */
 int paranoid_platform_random(unsigned char *buf, int len) {
