@@ -148,6 +148,7 @@ ZIG_OUT="$BUILD_DIR/paranoid-zig.wasm"
 echo "Compiling with Zig..."
 zig cc \
     --target=wasm32-wasi \
+    -mexec-model=reactor \
     -O2 \
     "${INCLUDE_FLAGS[@]}" \
     -Wl,--no-entry \
@@ -184,6 +185,7 @@ if [ "$HAS_CLANG" -eq 1 ]; then
     # This is a best-effort attempt
     if clang \
         --target=wasm32-wasi \
+        -mexec-model=reactor \
         -O3 \
         "${INCLUDE_FLAGS[@]}" \
         -Wl,--no-entry \

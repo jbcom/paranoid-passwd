@@ -69,12 +69,12 @@ jobs:
           sudo apt-get install -y cmake wabt
 
           # Install melange
-          MELANGE_VERSION="0.22.5"
+          MELANGE_VERSION="0.43.3"
           curl -sSL "https://github.com/chainguard-dev/melange/releases/download/v${MELANGE_VERSION}/melange_${MELANGE_VERSION}_linux_amd64.tar.gz" | tar -xz
           sudo mv melange /usr/local/bin/
 
           # Install apko
-          APKO_VERSION="0.24.1"
+          APKO_VERSION="1.1.11"
           curl -sSL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_amd64.tar.gz" | tar -xz
           sudo mv apko /usr/local/bin/
 
@@ -100,7 +100,8 @@ jobs:
           apko build apko.yaml \
             "paranoid-passwd:${RELEASE_VERSION}" \
             output.tar \
-            --keyring-append melange.rsa.pub
+            --keyring-append melange.rsa.pub \
+            --repository-append packages/
 
       - name: Extract release artifacts
         id: extract

@@ -67,7 +67,7 @@ jobs:
       - name: Install melange
         run: |
           # Install melange from Chainguard releases
-          MELANGE_VERSION="0.22.5"
+          MELANGE_VERSION="0.43.3"
           curl -sSL "https://github.com/chainguard-dev/melange/releases/download/v${MELANGE_VERSION}/melange_${MELANGE_VERSION}_linux_amd64.tar.gz" | tar -xz
           sudo mv melange /usr/local/bin/
           melange version
@@ -75,7 +75,7 @@ jobs:
       - name: Install apko
         run: |
           # Install apko from Chainguard releases
-          APKO_VERSION="0.24.1"
+          APKO_VERSION="1.1.11"
           curl -sSL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_amd64.tar.gz" | tar -xz
           sudo mv apko /usr/local/bin/
           apko version
@@ -102,7 +102,8 @@ jobs:
           apko build apko.yaml \
             paranoid-passwd:latest \
             output.tar \
-            --keyring-append melange.rsa.pub
+            --keyring-append melange.rsa.pub \
+            --repository-append packages/
 
           # Extract digest from the built image
           DIGEST=$(crane digest --tarball output.tar 2>/dev/null || echo "local-build")
@@ -290,5 +291,6 @@ jobs:
         id: release
         uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
         with:
+          token: ${{ secrets.CI_GITHUB_TOKEN }}
           release-type: simple
           package-name: paranoid-passwd
