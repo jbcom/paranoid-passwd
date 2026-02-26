@@ -27,7 +27,6 @@ set -euo pipefail
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,7 +107,8 @@ list_submissions() {
     echo ""
     
     local COUNT=0
-    for FILE in "$ATTESTATIONS_DIR"/*.json 2>/dev/null; do
+    shopt -s nullglob
+    for FILE in "$ATTESTATIONS_DIR"/*.json; do
         if [ -f "$FILE" ]; then
             COUNT=$((COUNT + 1))
             BUILDER=$(jq -r '.builder' "$FILE")
@@ -120,13 +120,14 @@ list_submissions() {
             echo ""
         fi
     done
-    
+    shopt -u nullglob
+
     if [ $COUNT -eq 0 ]; then
         echo "No attestations found."
         echo ""
         echo "Submit with: $0 submit <builder_name> <hash>"
     fi
-    
+
     echo "═══════════════════════════════════════════════════════════"
     echo "  Total: $COUNT attestations (threshold: $THRESHOLD)"
     echo "═══════════════════════════════════════════════════════════"
@@ -144,12 +145,13 @@ check_threshold() {
     # Collect all hashes
     local -A HASH_COUNTS
     local TOTAL=0
-    
-    for FILE in "$ATTESTATIONS_DIR"/*.json 2>/dev/null; do
+
+    shopt -s nullglob
+    for FILE in "$ATTESTATIONS_DIR"/*.json; do
         if [ -f "$FILE" ]; then
             HASH=$(jq -r '.wasm_sha256' "$FILE")
             BUILDER=$(jq -r '.builder' "$FILE")
-            
+
             if [ -z "${HASH_COUNTS[$HASH]+x}" ]; then
                 HASH_COUNTS[$HASH]="$BUILDER"
             else
@@ -158,6 +160,7 @@ check_threshold() {
             TOTAL=$((TOTAL + 1))
         fi
     done
+    shopt -u nullglob
     
     if [ $TOTAL -eq 0 ]; then
         echo -e "${YELLOW}No attestations found${NC}"

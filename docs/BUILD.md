@@ -1,6 +1,11 @@
 # Build System Internals
 
-This document describes the build system, reproducible build process, and supply chain security measures.
+This document describes the CMake build system, reproducible build process via
+melange + apko, and supply chain security measures.
+
+**v3.0 changes**: CMake replaces Makefile. melange + apko replace Docker
+multi-stage builds. WASM binary is <100KB (no OpenSSL in WASM -- uses
+platform abstraction with compact FIPS 180-4 SHA-256 and WASI random_get).
 
 ---
 
@@ -22,102 +27,76 @@ This document describes the build system, reproducible build process, and supply
 The build system transforms source files into a deployable website:
 
 ```
-INPUT                           OUTPUT
-─────────────────────          ───────────────────────
-src/paranoid.c                 build/paranoid.wasm (~180KB)
-src/wasm_entry.c
-include/paranoid.h             build/site/
-vendor/openssl/                  ├── index.html (with SRI hashes)
-  lib/libcrypto.a
-www/index.html                   ├── paranoid.wasm
-www/app.js                       ├── app.js
-www/style.css                    ├── style.css
-                                 └── BUILD_MANIFEST.json
+INPUT                                OUTPUT
+─────────────────────               ───────────────────────
+src/paranoid.c                      build/wasm/paranoid.wasm (<100KB)
+src/platform_wasm.c
+src/sha256_compact.c                build/site/
+src/wasm_entry.c                      ├── index.html (with SRI hashes)
+include/paranoid.h                    ├── paranoid.wasm
+include/paranoid_platform.h           ├── app.js
+www/index.html                        ├── style.css
+www/app.js                            └── BUILD_MANIFEST.json
+www/style.css
+                                    (NO OpenSSL in WASM build)
 ```
 
 ---
 
-## Makefile Architecture
+## CMake Build System
 
-### Targets
+### Build Commands
 
-```makefile
-.PHONY: all build site verify hash serve clean info
+```bash
+# WASM build (release):
+cmake -B build/wasm \
+    -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build/wasm
 
-# Default target
-all: site
-
-# Compile WASM only
-build: build/paranoid.wasm
-
-# Assemble site with SRI hashes
-site: build/site/index.html
-
-# Verify WASM exports/imports
-verify: build/paranoid.wasm
-	@command -v wasm-objdump ...
-
-# Print binary hashes
-hash: build/paranoid.wasm
-	@echo "SHA-256: $$(openssl dgst -sha256 ...)"
-
-# Local development server
-serve: site
-	@cd build/site && python3 -m http.server 8080
-
-# Clean build artifacts
-clean:
-	@rm -rf build/
-
-# Show toolchain info
-info:
-	@echo "=== Paranoid Build Info ==="
-	@zig version
-	@openssl version
+# Native build (tests):
+cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/native
+ctest --test-dir build/native --output-on-failure
 ```
 
-### Variables
+### Key Variables (CMakeLists.txt)
 
-```makefile
-ZIG := zig
-OPENSSL_INCLUDE := vendor/openssl/include
-OPENSSL_LIB := vendor/openssl/lib
-WASM_TARGET := wasm32-wasi
-WASM_OUT := build/paranoid.wasm
+```cmake
+project(paranoid VERSION 3.0.0 LANGUAGES C)
+set(CMAKE_C_STANDARD 11)
+
+# WASM build: platform_wasm.c + sha256_compact.c (no OpenSSL)
+# Native build: platform_native.c + system OpenSSL
 ```
 
 ---
 
 ## Compilation Process
 
-### Step 1: Compile C → WASM
+### Step 1: Compile C to WASM (via CMake + Zig)
 
-```makefile
-build/paranoid.wasm: src/paranoid.c include/paranoid.h
-	@mkdir -p build
-	$(ZIG) cc -target $(WASM_TARGET) \
-		-I include \
-		-I $(OPENSSL_INCLUDE) \
-		-L $(OPENSSL_LIB) \
-		-l crypto \
-		-O3 \
-		-flto \
-		-fno-stack-protector \
-		-o $(WASM_OUT) \
-		src/paranoid.c
-```
+CMake uses the `cmake/wasm32-wasi.cmake` toolchain file which configures
+Zig as the C compiler targeting `wasm32-wasi`.
 
-**Compiler flags**:
-- `-target wasm32-wasi` — WebAssembly with WASI support
-- `-I include` — Header search path (paranoid.h)
-- `-I $(OPENSSL_INCLUDE)` — OpenSSL headers
-- `-L $(OPENSSL_LIB)` — OpenSSL library path
-- `-l crypto` — Link against libcrypto.a
-- `-O3` — Maximum optimization
-- `-flto` — Link-time optimization (smaller binary)
-- `-fno-stack-protector` — WASM doesn't need stack canaries
+**Source files for WASM target**:
+- `src/paranoid.c` -- Core computation (generation, stats, audit)
+- `src/platform_wasm.c` -- WASI random_get backend
+- `src/sha256_compact.c` -- FIPS 180-4 SHA-256 (replaces OpenSSL EVP)
+- `src/wasm_entry.c` -- Stub main() for WASI libc linker
 
-**Output**: `build/paranoid.wasm` (~180KB)
+**Key compile options**:
+- `-Wall -Wextra -Werror` -- Strict warnings
+- `-O2` -- Optimization (balanced size/speed)
+- `-fdata-sections -ffunction-sections` -- Enable dead code elimination
+- `-Wl,--gc-sections` -- Remove unreferenced sections
+- `-Wl,--no-entry` -- Reactor (library) mode, no _start entry
+
+**No external library dependencies** -- the WASM target does not link
+against OpenSSL. This eliminates the 1.5MB libcrypto.a and produces
+a <100KB WASM binary.
+
+**Output**: `build/wasm/paranoid.wasm` (<100KB)
 
 ### Step 2: Compute SRI Hashes
 
@@ -293,99 +272,47 @@ build/paranoid.wasm: src/paranoid.c
 
 **Effect**: All embedded timestamps use commit time (deterministic).
 
-### Container-Based Builds (Liquibase-Style Supply Chain Security)
+### Container-Based Builds (melange + apko)
 
-The repository implements the supply chain security practices from [Liquibase's Docker Security Blog](https://www.liquibase.com/blog/docker-supply-chain-security):
+v3.0 replaces the Docker multi-stage build with **melange + apko** from
+the Wolfi ecosystem. This provides bitwise-reproducible builds with
+cryptographic provenance.
 
-**Build Philosophy — All Testing Inside Docker:**
-
-The Dockerfile runs **all tests as a condition of successful build**. If ANY test fails, the Docker build fails — no artifacts are produced.
+**Build Pipeline:**
 
 ```
-╔════════════════════════════════════════════════════════════════════════╗
-║                    DOCKER MULTI-STAGE BUILD PIPELINE                   ║
-╠════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║  STAGE 1: BASE                                                         ║
-║    └── Alpine 3.21 + build tools (gcc, make, git, wabt)               ║
-║                                                                        ║
-║  STAGE 2: BUILD-OPENSSL                                                ║
-║    ├── git clone openssl/openssl @ tag openssl-3.4.0                  ║
-║    ├── Apply patches (WASI config, rand, POSIX I/O)                   ║
-║    ├── Compile with Zig → vendor/openssl/lib/libcrypto.a              ║
-║    └── Record BUILD_PROVENANCE.txt (source tag, commit, patches)      ║
-║                                                                        ║
-║  STAGE 2b: DEPS                                                        ║
-║    └── git clone acutest @ SHA-pinned commit                           ║
-║                                                                        ║
-║  STAGE 3: TEST-NATIVE                                                  ║
-║    └── Run acutest C tests → MUST PASS or build fails                   ║
-║                                                                        ║
-║  STAGE 4: BUILD-ZIG                                                    ║
-║    └── Compile WASM with Zig                                          ║
-║                                                                        ║
-║  STAGE 5: VERIFY                                                       ║
-║    ├── WASM export/import verification                                ║
-║    ├── Hallucination detection                                        ║
-║    ├── Binary size verification                                       ║
-║    └── Site asset verification                                        ║
-║                                                                        ║
-║  STAGE 6: ARTIFACT                                                     ║
-║    └── Collect verified artifacts                                     ║
-║                                                                        ║
-║  FINAL: SCRATCH IMAGE (zero attack surface)                           ║
-║                                                                        ║
-╚════════════════════════════════════════════════════════════════════════╝
+melange.yaml                    apko.yaml
+   |                               |
+   v                               v
+melange build                   apko build
+   |                               |
+   v                               v
+Wolfi APK packages              OCI container image
+(zig, cmake, wabt,              (distroless, <5MB)
+ paranoid-passwd)
 ```
 
-**No Submodules Required:**
+**Key advantages over Docker multi-stage:**
+- **Bitwise reproducible**: melange produces identical APK packages
+  from the same source on any builder
+- **Wolfi-provided Zig**: Zig is built from source via melange (not
+  downloaded as a tarball)
+- **Distroless final image**: apko produces minimal images (no shell,
+  no package manager, no OS utilities)
+- **SBOM built-in**: Every APK package includes an SBOM
+- **Sigstore signing**: Packages are signed via cosign + Sigstore
 
-The Dockerfile builds OpenSSL from official source and clones test dependencies:
-- **OpenSSL**: Official source at tag `openssl-3.4.0` -- compiled from source with our patches and Zig compiler
-- **acutest**: `31751b4089c93b46a9fd8a8183a695f772de66de` (verified 2026-02-26, mity/acutest master)
-
-This makes container builds **fully self-contained** and reproducible without any vendor/ directory or .gitmodules file. OpenSSL is never used as a precompiled binary -- it is always built from official source.
-
-**Base Image Rationale — Alpine Linux:**
-
-We use **Alpine Linux** as the base image for minimal attack surface:
-
-| Metric | Alpine | Debian slim |
-|--------|--------|-------------|
-| Compressed size | ~3.5MB | ~29MB |
-| Base libraries | musl + BusyBox | glibc |
-| Attack surface | Minimal | Larger |
-| Package manager | apk | apt |
-
-Why Alpine over Debian?
-- **~8x smaller** base image (3.5MB vs 29MB compressed)
-- **Minimal footprint** with musl-libc and BusyBox
-- **All required build dependencies available** via apk (make, git, curl, openssl, wabt)
-- **Zig static binary** works on musl-libc without glibc compatibility shims
-
-Note: The Liquibase container itself is Java-based for database migrations. We adopt Liquibase's **security practices** (SHA pinning, SBOM, Cosign signing, SLSA provenance) rather than their runtime image.
-
-**Features:**
-- **SHA256-pinned base image** — `alpine:3.21@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659`
-- **Official OpenSSL source** — Tag `openssl-3.4.0`, compiled from source with Zig
-- **SHA-pinned acutest** — Commit `31751b4089c93b46a9fd8a8183a695f772de66de`
-- **All tests run inside Docker** — Build fails if any test fails
-- **SBOM generation** — Software Bill of Materials attached to every image (`--sbom=true`)
-- **SLSA Level 3 provenance** — Non-falsifiable build attestation (`--provenance=mode=max`)
-- **Cosign keyless signing** — Ephemeral certificates via GitHub OIDC, recorded in Sigstore's Rekor transparency log
-- **Scratch final image** — Zero attack surface (no OS, no shell)
-- **Zig toolchain hash verification** — Tarball hash verified before extraction
-
-**Build (with full attestation):**
+**Build locally:**
 
 ```bash
-DOCKER_BUILDKIT=1 docker build \
-  --sbom=true \
-  --provenance=mode=max \
-  -t paranoid-artifact .
+# Build packages with melange
+melange build melange.yaml --arch x86_64
+
+# Build container image with apko
+apko build apko.yaml paranoid:latest paranoid.tar
 ```
 
-**Verify signature (after push to registry):**
+**Verify Cosign signature (after push):**
 
 ```bash
 cosign verify ghcr.io/jbcom/paranoid-passwd:latest \
@@ -393,40 +320,10 @@ cosign verify ghcr.io/jbcom/paranoid-passwd:latest \
   --certificate-identity-regexp="https://github.com/jbcom/paranoid-passwd/.*"
 ```
 
-**View SBOM:**
+### Diverse Double-Compilation
 
-```bash
-docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
-  --format '{{ json .SBOM }}'
-```
-
-**View SLSA Provenance:**
-
-```bash
-docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
-  --format '{{ json .Provenance }}'
-```
-
-**Extract artifacts from scratch image:**
-
-```bash
-docker create --name paranoid-out paranoid-artifact
-docker cp paranoid-out:/artifact ./artifact
-docker rm paranoid-out
-find ./artifact -maxdepth 2 -type f
-```
-
-**Chain-of-custody verification:**
-
-1. Verify Cosign signature against GitHub OIDC issuer
-2. Inspect SBOM for complete dependency inventory
-3. Verify SLSA provenance matches expected source commit
-4. Compare `artifact/site/BUILD_MANIFEST.json` against `make hash` output
-5. Check Rekor transparency log for signature record
-
-### Diverse Double-Compilation (Planned)
-
-Compile with **two different compilers**, compare outputs:
+Compile with **two different compilers**, compare outputs.
+Implemented in `scripts/double_compile.sh` and wired to CI.
 
 ```bash
 # Build 1: Zig
@@ -499,23 +396,16 @@ RUN git clone --filter=blob:none --no-checkout ${ACUTEST_REPO} acutest && \
 
 **Note**: The vendor/ directory is **only for local development** convenience. There are no git submodules. Docker builds are fully self-contained -- OpenSSL is built from official source and test dependencies are cloned directly at SHA-pinned commits.
 
-### Build Attestation (Planned)
+### Build Attestation (DONE)
 
-Sign build artifacts with GPG:
+Build artifacts are signed via **cosign + Sigstore** (keyless signing
+via GitHub OIDC). This is wired into the CI/CD pipeline.
 
-```bash
-# Generate detached signature
-gpg --armor --detach-sign build/paranoid.wasm
-
-# Verify signature
-gpg --verify paranoid.wasm.asc paranoid.wasm
-```
-
-**Multi-party signing** (3-of-5 threshold):
-- Builder 1 signs (SHA: abc123...)
-- Builder 2 signs (SHA: abc123...)  # Same hash = good
-- Builder 3 signs (SHA: abc123...)
-- Require 3 matching signatures before deploy
+**Multi-party verification** (`scripts/multiparty_verify.sh`):
+- Builder 1 builds and submits hash
+- Builder 2 builds and submits hash
+- Builder 3 builds and submits hash
+- Require 3 matching hashes before deploy (3-of-5 threshold)
 
 ---
 
@@ -686,32 +576,39 @@ This catches:
 
 ## Build Commands Reference
 
-### Development
+### Development (CMake)
 
 ```bash
-make              # Build everything
-make build        # Compile WASM only
-make site         # Assemble site
-make serve        # Local server (http://localhost:8080)
-make clean        # Remove build artifacts
+# WASM build
+cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build/wasm
+
+# Native build (for testing)
+cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/native
 ```
 
 ### Testing
 
 ```bash
-make test         # Run ALL tests (native + integration + checks)
-make test-native  # Run native C unit tests (acutest)
-make integration  # Run browser/WASM integration tests
-make hallucination # LLM hallucination detection
-make supply-chain # Supply chain verification
+# Run all native C tests via CTest
+ctest --test-dir build/native --output-on-failure
+
+# Run individual test binaries
+./build/native/test_native              # Comprehensive acutest suite
+./build/native/test_sha256              # NIST CAVP SHA-256 vectors
+./build/native/test_statistics          # Chi-squared + serial correlation KATs
+./build/native/test_paranoid            # Standalone test framework
 ```
 
-### Verification
+### Verification Scripts
 
 ```bash
-make verify       # Check WASM exports/imports (requires wabt)
-make hash         # Print SHA-256 and SRI hashes
-make info         # Show toolchain configuration
+./scripts/hallucination_check.sh        # LLM hallucination detection
+./scripts/supply_chain_verify.sh        # Supply chain verification
+./scripts/double_compile.sh             # Diverse double-compilation
+./scripts/multiparty_verify.sh check    # Multi-party build verification
+./scripts/integration_test.sh           # End-to-end integration tests
 ```
 
 ### CI/CD
@@ -740,12 +637,10 @@ The project uses three separate workflows (see `.github/workflows/`):
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Docker targets for local development:**
+**melange + apko for local development:**
 ```bash
-make docker-build    # Build with SBOM + provenance
-make docker-extract  # Extract verified artifacts
-make docker-e2e      # Run Playwright E2E tests
-make docker-all      # Full workflow (build → extract → test)
+melange build melange.yaml --arch x86_64    # Build Wolfi packages
+apko build apko.yaml paranoid:latest out.tar  # Build container image
 ```
 
 ---
@@ -772,12 +667,14 @@ cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de
 
 ```bash
 # Check version
-zig version  # Should be 0.13.0
+zig version  # Should be 0.13.0+
 
 # Install specific version
 snap install zig --classic --beta  # Ubuntu
 brew install zig                    # macOS
 ```
+
+Note: In production, Zig is provided by Wolfi via melange (built from source).
 
 ### SRI Hash Mismatch in Browser
 
@@ -818,33 +715,33 @@ ls -lh vendor/openssl/lib/libcrypto.a
 
 ---
 
-## Future Enhancements
+## Status of Previously Planned Enhancements
 
 ### 1. Reproducible Builds
 
-- [ ] `SOURCE_DATE_EPOCH` support
-- [ ] Containerized builds (Docker)
-- [ ] Diverse double-compilation (Zig + Clang)
+- [x] `SOURCE_DATE_EPOCH` support -- DONE (melange sets this)
+- [x] Containerized builds -- DONE (melange + apko replace Docker)
+- [x] Diverse double-compilation (Zig + Clang) -- DONE (scripts/double_compile.sh)
 - [ ] Community verification infrastructure
 
 ### 2. Build Attestation
 
-- [ ] GPG signing of artifacts
-- [ ] Multi-party signature threshold (3-of-5)
+- [x] Cosign keyless signing -- DONE (via Sigstore)
+- [x] Multi-party verification (3-of-5) -- DONE (scripts/multiparty_verify.sh)
 - [ ] Transparency log (public build records)
-- [ ] SLSA provenance (Level 3+ compliance)
+- [x] SLSA provenance (Level 3+ compliance) -- DONE
 
 ### 3. Supply Chain Hardening
 
-- [ ] Dependency commit SHA verification (Docker ARG pinning)
-- [ ] Automated dependency updates (Dependabot)
+- [x] Dependency SHA verification -- DONE (melange checksums)
+- [x] Automated dependency updates (Dependabot) -- DONE
 - [ ] Vulnerability scanning (Snyk, CodeQL)
-- [ ] SBOM generation (Software Bill of Materials)
+- [x] SBOM generation -- DONE (melange APK includes SBOM)
 
 ### 4. Performance
 
 - [ ] Parallel compilation (multiple cores)
-- [ ] Incremental builds (only recompile changed files)
+- [x] Incremental builds -- DONE (CMake native support)
 - [ ] Cache optimization (ccache integration)
 
 ---

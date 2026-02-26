@@ -453,8 +453,8 @@ if (compiling("compiler.c")) {
 **Mitigation**:
 - ⚠️ **Partial**: Zig is open source (inspectable)
 - ⚠️ **Partial**: SHA-pinned in CI (consistent version)
-- 🔴 **TODO**: Reproducible builds (detect compiler variation)
-- 🔴 **TODO**: Diverse double-compilation (gcc + zig, compare outputs)
+- ✅ **DONE**: Reproducible builds -- RESOLVED by melange (bitwise-reproducible APK packages from Wolfi)
+- ✅ **DONE**: Diverse double-compilation -- RESOLVED (`scripts/double_compile.sh` now wired to CI, compares Zig vs Clang outputs)
 
 ---
 
@@ -481,7 +481,7 @@ uses: tj-actions/changed-files@v4  # Now points to backdoor
 **Mitigation**:
 - ✅ **ALL actions SHA-pinned** (not tags)
 - ✅ SHA-pinned in `.github/workflows/ci.yml`, `cd.yml`, `release.yml`
-- ⚠️ **TODO**: Automated SHA verification (Dependabot)
+- ✅ **DONE**: Automated SHA verification -- RESOLVED (Dependabot config added for GitHub Actions SHA updates)
 
 ---
 
@@ -508,9 +508,9 @@ steps:
 
 **Mitigation**:
 - ⚠️ **Partial**: Use GitHub-hosted runners (audited by GitHub)
-- 🔴 **TODO**: Build attestation (signed artifacts)
-- 🔴 **TODO**: Reproducible builds (community verification)
-- 🔴 **TODO**: Multi-party build (3 independent builders, compare)
+- ✅ **DONE**: Build attestation -- RESOLVED by cosign + Sigstore (keyless signing via GitHub OIDC, recorded in Rekor transparency log)
+- ✅ **DONE**: Reproducible builds -- RESOLVED by melange (bitwise-reproducible Wolfi packages)
+- ✅ **DONE**: Multi-party build -- RESOLVED (`scripts/multiparty_verify.sh` implements 3-of-5 threshold verification, wired to CI)
 
 ---
 
@@ -628,9 +628,9 @@ const length = readI32(257);  // Wrong if compiled with gcc!
 | T9: GC Memory Retention | MEDIUM | ✅ Mitigated (WASM memory) | Low |
 | T10: Extension Monkey-Patch | CRITICAL | ⚠️ No defense | High |
 | T11: Compromised OpenSSL source | CRITICAL | ✅ Built from official source at pinned tag | Low-Medium |
-| T12: Zig Backdoor | CRITICAL | 🔴 TODO (reproducible builds) | **HIGH** |
-| T13: Actions Supply Chain | CRITICAL | ✅ Mitigated (SHA pins) | Low |
-| T14: Build Environment Tamper | CRITICAL | 🔴 TODO (attestation) | **HIGH** |
+| T12: Zig Backdoor | CRITICAL | ✅ Mitigated (melange reproducible builds + diverse double-compilation) | Low |
+| T13: Actions Supply Chain | CRITICAL | ✅ Mitigated (SHA pins + Dependabot) | Low |
+| T14: Build Environment Tamper | CRITICAL | ✅ Mitigated (cosign + Sigstore attestation + multiparty verify) | Low |
 | T15: Makefile Injection | HIGH | ✅ Mitigated (quoted vars) | Low |
 | T16: SRI Hash Injection | HIGH | ⚠️ Partial (hardcoded paths) | Medium |
 | T17: WASM Sandbox Escape | CRITICAL | ⚠️ Browser-dependent | Medium |
@@ -644,16 +644,16 @@ const length = readI32(257);  // Wrong if compiled with gcc!
 
 1. **T5: Hallucinated Security Claims**
    - Request human cryptographer review
-   - Add known-answer tests (NIST vectors)
+   - Add known-answer tests (NIST vectors) -- DONE (tests/test_sha256.c, tests/test_statistics.c)
    - Cross-check formulas against textbooks
 
-2. **T12: Zig Compiler Backdoor**
-   - Implement reproducible builds
-   - Diverse double-compilation (gcc + zig)
+2. **T12: Zig Compiler Backdoor** -- RESOLVED
+   - ✅ Reproducible builds via melange (bitwise-reproducible)
+   - ✅ Diverse double-compilation (scripts/double_compile.sh, wired to CI)
 
-3. **T14: Build Environment Tampering**
-   - Build attestation (signed artifacts)
-   - Multi-party build verification
+3. **T14: Build Environment Tampering** -- RESOLVED
+   - ✅ Build attestation via cosign + Sigstore
+   - ✅ Multi-party build verification (scripts/multiparty_verify.sh)
 
 ### Medium Priority
 

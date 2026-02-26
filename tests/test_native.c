@@ -495,7 +495,8 @@ void test_version(void) {
     TEST_CHECK(version != NULL);
     TEST_CHECK(strstr(version, "paranoid") != NULL);
     TEST_MSG("Version string: %s", version);
-    TEST_CHECK(strstr(version, "OpenSSL") != NULL);
+    TEST_CHECK(strstr(version, "3.0.0") != NULL);
+    TEST_CHECK(strstr(version, "platform abstraction") != NULL);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════

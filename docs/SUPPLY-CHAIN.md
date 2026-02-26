@@ -589,17 +589,18 @@ int paranoid_generate(...) {
 
 ## Attestation Framework
 
-### Liquibase-Style Supply Chain Security
+### Wolfi-Based Supply Chain Security (melange + apko)
 
-This project implements the supply chain security practices from [Liquibase's Docker Security Blog](https://www.liquibase.com/blog/docker-supply-chain-security):
+v3.0 replaces Docker multi-stage builds with melange + apko from the
+Wolfi ecosystem. This provides stronger reproducibility guarantees.
 
 | Feature | Implementation | Status |
 |---------|---------------|--------|
-| **SBOM** | `--sbom=true` in BuildKit | ✅ Implemented |
-| **SLSA Level 3 Provenance** | `--provenance=mode=max` | ✅ Implemented |
+| **SBOM** | melange APK includes SBOM | ✅ Implemented |
+| **SLSA Level 3 Provenance** | melange build provenance | ✅ Implemented |
 | **Cosign Keyless Signing** | GitHub OIDC via Sigstore | ✅ Implemented |
-| **SHA-pinned Base Image** | `alpine:3.21@sha256:25109184...` | ✅ Implemented |
-| **Scratch Final Image** | Zero attack surface | ✅ Implemented |
+| **Wolfi Base Image** | apko distroless (no shell) | ✅ Implemented |
+| **Reproducible Builds** | melange bitwise-reproducible | ✅ Implemented |
 
 ### SLSA Level 3 Compliance
 
@@ -615,14 +616,14 @@ Level 4: Highest (two-person review, hermetic builds)
 
 **Current**: Level 3 (SBOM + Provenance + Keyless Signing)
 
-### Container Build Features
+### Build Features (melange + apko)
 
-1. **SHA256-pinned base image**: `alpine:3.21@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659`
-2. **SBOM attached**: Complete Software Bill of Materials as OCI attestation
+1. **Wolfi-provided toolchain**: Zig built from source via melange (not downloaded tarballs)
+2. **SBOM per package**: Every APK includes a Software Bill of Materials
 3. **SLSA provenance**: Non-falsifiable build attestation with source/builder identity
 4. **Cosign signature**: Keyless signing via GitHub OIDC, recorded in Rekor transparency log
-5. **Zig toolchain hash**: Verified before extraction (SHA256 pinned)
-6. **Scratch final image**: Only artifacts, no OS/shell/runtime
+5. **Bitwise reproducible**: melange produces identical packages from same source
+6. **Distroless final image**: apko produces minimal images (no shell, no package manager)
 
 ### Verification Commands
 

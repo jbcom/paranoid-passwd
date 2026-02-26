@@ -4,15 +4,19 @@
  * Every function that touches random data, statistics, or math
  * runs here in WASM linear memory. The JS layer is a display-only
  * bridge that reads the result struct and sets DOM textContent.
+ *
+ * TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction
+ * All CSPRNG and SHA-256 calls now go through paranoid_platform.h,
+ * which delegates to OpenSSL (native) or WASI+compact-SHA (WASM).
  */
 
 #include "paranoid.h"
-#include <openssl/rand.h>
-#include <openssl/evp.h>
+#include "paranoid_platform.h"  /* TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction */
 #include <string.h>
 #include <stddef.h>
 #include <math.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 /* ═══════════════════════════════════════════════════════════
    STATIC RESULT — lives in WASM linear memory
@@ -41,7 +45,8 @@ int paranoid_offset_current_stage(void)   { return (int)offsetof(paranoid_audit_
 int paranoid_offset_all_pass(void)        { return (int)offsetof(paranoid_audit_result_t, all_pass); }
 
 const char* paranoid_version(void) {
-    return "paranoid " PARANOID_VERSION_STRING " (OpenSSL WASM/WASI)";
+    /* TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction */
+    return "paranoid " PARANOID_VERSION_STRING " (platform abstraction)";
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -69,7 +74,10 @@ int paranoid_generate(
         int need = (length - filled) * 2;
         if (need > (int)sizeof(buf)) need = (int)sizeof(buf);
 
-        if (RAND_bytes(buf, need) != 1) {
+        /* TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction
+         * RAND_bytes() returned 1 on success; paranoid_platform_random()
+         * returns 0 on success. The check is inverted accordingly. */
+        if (paranoid_platform_random(buf, need) != 0) {
             memset(output, 0, length + 1);
             memset(buf, 0, sizeof(buf));
             return -1;
@@ -89,7 +97,10 @@ int paranoid_generate(
 }
 
 /* ═══════════════════════════════════════════════════════════
-   SHA-256 via OpenSSL EVP
+   SHA-256 via platform abstraction
+   TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction
+   Native: delegates to OpenSSL EVP SHA-256
+   WASM:   delegates to compact FIPS 180-4 implementation
    ═══════════════════════════════════════════════════════════ */
 
 int paranoid_sha256(
@@ -97,16 +108,9 @@ int paranoid_sha256(
     int input_len,
     unsigned char *output
 ) {
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
-    if (!ctx) return -1;
-
-    unsigned int len = 0;
-    int ok = EVP_DigestInit_ex(ctx, EVP_sha256(), NULL)
-          && EVP_DigestUpdate(ctx, input, input_len)
-          && EVP_DigestFinal_ex(ctx, output, &len);
-
-    EVP_MD_CTX_free(ctx);
-    return ok ? 0 : -1;
+    /* TODO: HUMAN_REVIEW - replaced OpenSSL EVP_MD_CTX_new/DigestInit/Update/Final/free
+     * with single paranoid_platform_sha256() call. Both return 0 on success. */
+    return paranoid_platform_sha256(input, input_len, output);
 }
 
 int paranoid_sha256_hex(const char *input, char *output_hex) {
@@ -288,6 +292,343 @@ static int check_patterns(const char *pw, int len) {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   CHARACTER COMPOSITION HELPERS (F3/F5)
+   ═══════════════════════════════════════════════════════════ */
+
+/**
+ * Count character types in a password string.
+ * TODO: HUMAN_REVIEW - verify character classification matches
+ * the categories used by compliance frameworks.
+ */
+static void count_char_types(
+    const char *pw,
+    int len,
+    int *out_lower,
+    int *out_upper,
+    int *out_digits,
+    int *out_symbols
+) {
+    int lower = 0, upper = 0, digits = 0, symbols = 0;
+    for (int i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)pw[i];
+        if (c >= 'a' && c <= 'z')      lower++;
+        else if (c >= 'A' && c <= 'Z') upper++;
+        else if (c >= '0' && c <= '9') digits++;
+        else                            symbols++;
+    }
+    if (out_lower)   *out_lower   = lower;
+    if (out_upper)   *out_upper   = upper;
+    if (out_digits)  *out_digits  = digits;
+    if (out_symbols) *out_symbols = symbols;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   F1: MULTI-PASSWORD GENERATION
+   ═══════════════════════════════════════════════════════════ */
+
+int paranoid_generate_multiple(
+    const char *charset,
+    int charset_len,
+    int length,
+    int count,
+    char *output
+) {
+    /* TODO: HUMAN_REVIEW - validate all inputs defensively */
+    if (!charset || charset_len <= 0 || charset_len > PARANOID_MAX_CHARSET_LEN)
+        return -2;
+    if (length <= 0 || length > PARANOID_MAX_PASSWORD_LEN)
+        return -2;
+    if (count <= 0 || count > PARANOID_MAX_MULTI_COUNT)
+        return -2;
+    if (!output)
+        return -2;
+
+    for (int i = 0; i < count; i++) {
+        /* Each password occupies (length+1) bytes: password + NUL terminator */
+        int rc = paranoid_generate(charset, charset_len, length,
+                                   output + i * (length + 1));
+        if (rc != 0) {
+            /* Scrub all generated passwords on failure */
+            memset(output, 0, (size_t)count * (size_t)(length + 1));
+            return rc;
+        }
+    }
+
+    return 0;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   F2: CHARSET VALIDATION
+   ═══════════════════════════════════════════════════════════ */
+
+int paranoid_validate_charset(
+    const char *input,
+    char *output,
+    int output_size
+) {
+    /* TODO: HUMAN_REVIEW - verify printable ASCII range matches
+     * the intended character set for password generation. */
+    if (!input || !output || output_size <= 0)
+        return -1;
+
+    int input_len = (int)strlen(input);
+    if (input_len == 0)
+        return -1;
+
+    /* Track which printable ASCII chars appear (32-126) */
+    int seen[128];
+    memset(seen, 0, sizeof(seen));
+
+    int unique_count = 0;
+    for (int i = 0; i < input_len; i++) {
+        unsigned char c = (unsigned char)input[i];
+        /* Validate: must be printable ASCII (32-126 inclusive) */
+        if (c < 32 || c > 126)
+            return -1;  /* Invalid character */
+        if (!seen[c]) {
+            seen[c] = 1;
+            unique_count++;
+        }
+    }
+
+    if (unique_count == 0)
+        return -1;
+    if (unique_count >= output_size)
+        return -1;  /* Output buffer too small */
+    if (unique_count > PARANOID_MAX_CHARSET_LEN)
+        return -1;
+
+    /* Write sorted, deduplicated output */
+    int pos = 0;
+    for (int c = 32; c <= 126; c++) {
+        if (seen[c]) {
+            output[pos++] = (char)c;
+        }
+    }
+    output[pos] = '\0';
+
+    return pos;  /* Return length of normalized charset */
+}
+
+/* ═══════════════════════════════════════════════════════════
+   F3: CONSTRAINED PASSWORD GENERATION
+   ═══════════════════════════════════════════════════════════ */
+
+/**
+ * Check if a charset can possibly satisfy the given requirements.
+ * Returns 0 if possible, -3 if impossible.
+ *
+ * TODO: HUMAN_REVIEW - verify impossibility detection logic.
+ */
+static int check_requirements_possible(
+    const char *charset,
+    int charset_len,
+    int length,
+    const paranoid_char_requirements_t *reqs
+) {
+    /* Sum of minimums must not exceed password length */
+    int total_required = reqs->min_lowercase + reqs->min_uppercase
+                       + reqs->min_digits + reqs->min_symbols;
+    if (total_required > length)
+        return -3;
+
+    /* Check if the charset contains enough of each required type */
+    int has_lower = 0, has_upper = 0, has_digit = 0, has_symbol = 0;
+    for (int i = 0; i < charset_len; i++) {
+        unsigned char c = (unsigned char)charset[i];
+        if (c >= 'a' && c <= 'z')      has_lower = 1;
+        else if (c >= 'A' && c <= 'Z') has_upper = 1;
+        else if (c >= '0' && c <= '9') has_digit = 1;
+        else                            has_symbol = 1;
+    }
+
+    if (reqs->min_lowercase > 0 && !has_lower) return -3;
+    if (reqs->min_uppercase > 0 && !has_upper) return -3;
+    if (reqs->min_digits    > 0 && !has_digit) return -3;
+    if (reqs->min_symbols   > 0 && !has_symbol) return -3;
+
+    return 0;
+}
+
+int paranoid_generate_constrained(
+    const char *charset,
+    int charset_len,
+    int length,
+    const paranoid_char_requirements_t *reqs,
+    char *output
+) {
+    /* TODO: HUMAN_REVIEW - verify constrained generation uses rejection
+     * sampling correctly and does not introduce bias. The approach
+     * generates-then-checks, preserving uniform distribution over the
+     * set of passwords that meet requirements. */
+    if (!charset || charset_len <= 0 || charset_len > PARANOID_MAX_CHARSET_LEN)
+        return -2;
+    if (length <= 0 || length > PARANOID_MAX_PASSWORD_LEN)
+        return -2;
+    if (!reqs || !output)
+        return -2;
+    if (reqs->min_lowercase < 0 || reqs->min_uppercase < 0 ||
+        reqs->min_digits < 0 || reqs->min_symbols < 0)
+        return -2;
+
+    /* Check if requirements are satisfiable */
+    int rc = check_requirements_possible(charset, charset_len, length, reqs);
+    if (rc != 0) return rc;  /* -3: impossible requirements */
+
+    /* Rejection sampling: generate, check, retry up to 100 times.
+     * This preserves uniform distribution over the valid subset. */
+    for (int attempt = 0; attempt < PARANOID_MAX_CONSTRAINED_ATTEMPTS; attempt++) {
+        rc = paranoid_generate(charset, charset_len, length, output);
+        if (rc != 0) return rc;  /* -1: CSPRNG failure */
+
+        /* Check character requirements */
+        int lower = 0, upper = 0, digits = 0, symbols = 0;
+        count_char_types(output, length, &lower, &upper, &digits, &symbols);
+
+        if (lower  >= reqs->min_lowercase &&
+            upper  >= reqs->min_uppercase &&
+            digits >= reqs->min_digits &&
+            symbols >= reqs->min_symbols) {
+            return 0;  /* Success */
+        }
+    }
+
+    /* Exhausted attempts — should be extremely rare for reasonable
+     * requirements, but fail-closed rather than returning a non-compliant
+     * password. Scrub the buffer. */
+    memset(output, 0, (size_t)(length + 1));
+    return -4;  /* TODO: HUMAN_REVIEW - added -4 for "exhausted attempts" */
+}
+
+/* ═══════════════════════════════════════════════════════════
+   F4: COMPLIANCE FRAMEWORKS
+
+   TODO: HUMAN_REVIEW - verify compliance thresholds against
+   current standards. Standards are updated periodically.
+   Last verified: 2026-02-26.
+   ═══════════════════════════════════════════════════════════ */
+
+/* TODO: HUMAN_REVIEW - verify compliance thresholds against current standards */
+
+const paranoid_compliance_framework_t PARANOID_COMPLIANCE_NIST = {
+    /* NIST SP 800-63B (Digital Identity Guidelines, Rev 3/4)
+     * Section 5.1.1.1: Memorized Secrets
+     * - min 8 chars for subscriber-chosen, no max
+     * - No composition rules required
+     * - Entropy: 800-63B does not mandate a minimum, but we check
+     *   30 bits for memorized, 80 bits for high-value per v2 conventions */
+    "NIST SP 800-63B",
+    "US federal standard for digital identity (memorized secrets)",
+    8,      /* min_length */
+    30.0,   /* min_entropy_bits — memorized secret threshold */
+    0,      /* require_mixed_case — NIST explicitly discourages composition rules */
+    0,      /* require_digits — NIST explicitly discourages composition rules */
+    0       /* require_symbols — NIST explicitly discourages composition rules */
+};
+
+const paranoid_compliance_framework_t PARANOID_COMPLIANCE_PCI_DSS = {
+    /* PCI DSS v4.0 (March 2022, mandatory March 2025)
+     * Requirement 8.3.6: min 12 chars (updated from 7 in v3.2.1)
+     * Requirement 8.3.6: must contain both numeric and alphabetic */
+    "PCI DSS 4.0",
+    "Payment card industry data security standard",
+    12,     /* min_length — updated in PCI DSS 4.0 from 7 to 12 */
+    60.0,   /* min_entropy_bits — not explicitly stated, derived from 12-char mixed */
+    1,      /* require_mixed_case */
+    1,      /* require_digits */
+    0       /* require_symbols — not mandatory in PCI DSS 4.0 */
+};
+
+const paranoid_compliance_framework_t PARANOID_COMPLIANCE_HIPAA = {
+    /* HIPAA Security Rule (45 CFR 164.312)
+     * Does not specify exact password requirements, but
+     * HHS guidance and industry standard (HITRUST CSF) recommend:
+     * min 8 chars with complexity */
+    "HIPAA",
+    "US health information privacy (HHS/HITRUST guidance)",
+    8,      /* min_length */
+    50.0,   /* min_entropy_bits — industry standard for healthcare */
+    1,      /* require_mixed_case — HHS guidance recommends */
+    1,      /* require_digits — HHS guidance recommends */
+    1       /* require_symbols — HHS guidance recommends */
+};
+
+const paranoid_compliance_framework_t PARANOID_COMPLIANCE_SOC2 = {
+    /* SOC 2 Type II (AICPA Trust Services Criteria)
+     * CC6.1: Logical access security
+     * Industry standard implementation: min 8 chars, complexity */
+    "SOC 2",
+    "Service organization controls (AICPA Trust Services Criteria)",
+    8,      /* min_length */
+    50.0,   /* min_entropy_bits — industry standard */
+    1,      /* require_mixed_case */
+    1,      /* require_digits */
+    0       /* require_symbols — recommended but not mandatory */
+};
+
+const paranoid_compliance_framework_t PARANOID_COMPLIANCE_GDPR = {
+    /* GDPR Article 32 + ENISA Guidelines
+     * ENISA "Guidelines for SMEs on the security of personal data processing"
+     * recommends min 10 chars, 80+ bits entropy
+     * CNIL (French DPA) recommends min 12 chars or min 8 with additional measures */
+    "GDPR/ENISA",
+    "EU data protection (ENISA technical guidelines)",
+    10,     /* min_length — ENISA guideline */
+    80.0,   /* min_entropy_bits — ENISA recommendation */
+    1,      /* require_mixed_case — ENISA recommendation */
+    1,      /* require_digits — ENISA recommendation */
+    1       /* require_symbols — ENISA recommendation */
+};
+
+const paranoid_compliance_framework_t PARANOID_COMPLIANCE_ISO27001 = {
+    /* ISO/IEC 27001:2022 Annex A Control A.9.4.3
+     * (now renumbered as A.5.17 in 2022 revision)
+     * Requires "authentication information" management
+     * Industry standard: min 12 chars, high complexity, 90+ bits */
+    "ISO 27001",
+    "International information security management (Annex A.5.17)",
+    12,     /* min_length — industry standard for ISO compliance */
+    90.0,   /* min_entropy_bits — recommended for sensitive systems */
+    1,      /* require_mixed_case */
+    1,      /* require_digits */
+    1       /* require_symbols */
+};
+
+int paranoid_check_compliance(
+    const paranoid_audit_result_t *result,
+    const paranoid_compliance_framework_t *framework
+) {
+    /* TODO: HUMAN_REVIEW - verify compliance check logic matches
+     * the actual requirements of each standard. */
+    if (!result || !framework)
+        return 0;
+
+    /* Check minimum length */
+    if (result->password_length < framework->min_length)
+        return 0;
+
+    /* Check minimum entropy */
+    if (result->total_entropy < framework->min_entropy_bits)
+        return 0;
+
+    /* Check character composition requirements against the generated password */
+    if (framework->require_mixed_case) {
+        if (result->count_lowercase == 0 || result->count_uppercase == 0)
+            return 0;
+    }
+    if (framework->require_digits) {
+        if (result->count_digits == 0)
+            return 0;
+    }
+    if (framework->require_symbols) {
+        if (result->count_symbols == 0)
+            return 0;
+    }
+
+    return 1;  /* Compliant */
+}
+
+/* ═══════════════════════════════════════════════════════════
    MAIN AUDIT PIPELINE
    ═══════════════════════════════════════════════════════════ */
 
@@ -307,6 +648,7 @@ int paranoid_run_audit(
     result->charset_size = charset_len;
     result->password_length = pw_length;
     result->batch_size = batch_size;
+    result->num_passwords = 1;  /* TODO: HUMAN_REVIEW - F5 new field */
 
     /* ── Stage 1: Generate primary password ── */
     result->current_stage = 1;
@@ -391,8 +733,24 @@ int paranoid_run_audit(
     result->current_stage = 6;
     result->pattern_issues = check_patterns(result->password, pw_length);
 
-    /* ── Stage 7: Threat assessment (display-only, set for UI) ── */
+    /* ── Stage 7: Threat assessment + compliance (display-only, set for UI) ── */
     result->current_stage = 7;
+
+    /* TODO: HUMAN_REVIEW - F5 new fields: character composition */
+    count_char_types(result->password, pw_length,
+                     &result->count_lowercase,
+                     &result->count_uppercase,
+                     &result->count_digits,
+                     &result->count_symbols);
+
+    /* TODO: HUMAN_REVIEW - F5 new fields: compliance checks against all 6 frameworks.
+     * Verify that each framework's thresholds are correct. */
+    result->compliance_nist     = paranoid_check_compliance(result, &PARANOID_COMPLIANCE_NIST);
+    result->compliance_pci_dss  = paranoid_check_compliance(result, &PARANOID_COMPLIANCE_PCI_DSS);
+    result->compliance_hipaa    = paranoid_check_compliance(result, &PARANOID_COMPLIANCE_HIPAA);
+    result->compliance_soc2     = paranoid_check_compliance(result, &PARANOID_COMPLIANCE_SOC2);
+    result->compliance_gdpr     = paranoid_check_compliance(result, &PARANOID_COMPLIANCE_GDPR);
+    result->compliance_iso27001 = paranoid_check_compliance(result, &PARANOID_COMPLIANCE_ISO27001);
 
     /* ── Final ── */
     result->all_pass = result->chi2_pass

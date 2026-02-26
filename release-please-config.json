@@ -2,11 +2,13 @@
   "packages": {
     ".": {
       "release-type": "simple",
+      "package-name": "paranoid-passwd",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         "Makefile",
+        "CMakeLists.txt",
         "include/paranoid.h"
       ]
     }

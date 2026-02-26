@@ -364,7 +364,8 @@ TEST(version_string) {
     const char *version = paranoid_version();
     ASSERT(version != NULL);
     ASSERT(strstr(version, "paranoid") != NULL);
-    ASSERT(strstr(version, "OpenSSL") != NULL);
+    ASSERT(strstr(version, "3.0.0") != NULL);
+    ASSERT(strstr(version, "platform abstraction") != NULL);
 }
 
 /* ═══════════════════════════════════════════════════════════

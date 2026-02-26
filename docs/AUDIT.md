@@ -1,6 +1,13 @@
 # Statistical Audit Methodology
 
-This document describes the 7-layer statistical audit system used to verify cryptographic randomness in generated passwords.
+This document describes the 7-layer statistical audit system used to verify
+cryptographic randomness in generated passwords.
+
+**v3.0 additions**: Known-answer tests for chi-squared and serial correlation
+(`tests/test_statistics.c`), NIST CAVP SHA-256 test vectors
+(`tests/test_sha256.c`), Frama-C ACSL annotations for formal verification
+(`include/paranoid_frama.h`), compliance framework checking (NIST, PCI-DSS,
+HIPAA, SOC2, GDPR, ISO 27001).
 
 ---
 

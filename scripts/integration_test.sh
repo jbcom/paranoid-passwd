@@ -155,7 +155,7 @@ if command -v wasm-objdump &> /dev/null; then
     else
         echo -e "${RED}FAIL${NC}"
         echo "  Unexpected imports found:"
-        echo "$IMPORTS" | sed 's/^/    /'
+        echo "    ${IMPORTS//$'\n'/$'\n'    }"
         FAILED=$((FAILED + 1))
     fi
 else

@@ -286,14 +286,7 @@ If you are an AI agent from a different ecosystem (GPT, Gemini, Qwen, etc.):
 ---
 ---
 
-# AGENTS.md — paranoid v2
-
-> **A C program that generates cryptographic passwords inside a WASM sandbox,
-> audits them with formal statistical proofs, and treats the LLM that built it
-> as an adversary.**
-
----
-# AGENTS.md — paranoid v2
+# AGENTS.md -- paranoid v3
 
 > **A C program that generates cryptographic passwords inside a WASM sandbox,
 > audits them with formal statistical proofs, and treats the LLM that built it
@@ -303,17 +296,28 @@ If you are an AI agent from a different ecosystem (GPT, Gemini, Qwen, etc.):
 
 ## One-Line Summary
 
-`paranoid` compiles OpenSSL's CSPRNG to WebAssembly via Zig, runs a 7-layer
-statistical audit entirely in C, and exposes results to a display-only JavaScript
-bridge that reads a struct from WASM linear memory and sets `textContent` on
-DOM elements. The browser never touches the random bytes.
+`paranoid` uses a platform abstraction layer (OpenSSL native, compact SHA-256
++ WASI random for WASM) compiled via CMake + Zig, runs a 7-layer statistical
+audit entirely in C, and exposes results to a display-only JavaScript bridge
+that reads a struct from WASM linear memory and sets `textContent` on DOM
+elements. The browser never touches the random bytes. The WASM binary is
+<100KB (no OpenSSL in WASM).
 
 ---
 
-## Why v2 Exists
+## Why v3 Exists
 
 v1 was a monolithic HTML file with 350 lines of JavaScript doing crypto
-math. That created problems:
+math. v2 moved everything to C + OpenSSL compiled to WASM via Zig. v3
+replaces the 1.5MB OpenSSL WASM with a platform abstraction layer: native
+builds still use OpenSSL, but the WASM build uses a compact FIPS 180-4
+SHA-256 implementation and WASI random_get directly, producing a <100KB
+binary. v3 also adds CMake (replacing Makefile), melange + apko
+(replacing Docker multi-stage), and new API functions for multi-password
+generation, charset validation, constrained generation, and compliance
+framework checks.
+
+The original v1 problems that drove v2:
 
 1. **CodeQL couldn't classify the code.** A single `.html` file containing
    CSS, JS, and markup doesn't match any SAST scanner's file-type heuristics.
@@ -329,8 +333,9 @@ math. That created problems:
    implementation if WASM failed to load. This violated the project's own
    threat model — the user believed they had WASM isolation when they didn't.
 
-v2 fixes all three by treating this as what it is: a C project that
-happens to render in a browser.
+v2 fixed all three by treating this as what it is: a C project that
+happens to render in a browser. v3 takes it further by eliminating
+the OpenSSL dependency from the WASM build entirely.
 
 ---
 
@@ -371,7 +376,9 @@ happens to render in a browser.
 │  │  │  ... 30 fields total                   │  │  │
 │  │  └────────────────────────────────────────┘  │  │
 │  │                                              │  │
-│  │  OpenSSL DRBG (AES-256-CTR, NIST SP 800-90A)│  │
+│  │  Platform abstraction layer:                 │  │
+│  │    Native: OpenSSL DRBG + EVP SHA-256       │  │
+│  │    WASM:   WASI random_get + compact SHA-256│  │
 │  │  ↓                                           │  │
 │  │  WASI syscall: random_get(ptr, len)          │  │
 │  └──────────────────────────────────────────────┘  │
@@ -385,13 +392,13 @@ happens to render in a browser.
 ### Entropy Chain
 
 ```
-paranoid.c: RAND_bytes(buf, n)
+paranoid.c: paranoid_platform_random(buf, n)
     ↓
-OpenSSL 3 DRBG (AES-256-CTR, runs in WASM linear memory)
+Platform abstraction (paranoid_platform.h):
+  Native: OpenSSL RAND_bytes → OS CSPRNG
+  WASM:   WASI random_get(ptr, len)
     ↓
-WASI syscall: random_get(ptr, len)
-    ↓
-Browser polyfill: crypto.getRandomValues(buf)     ← 3 lines of JS
+Browser polyfill: crypto.getRandomValues(buf)     <- 3 lines of JS
     ↓
 OS CSPRNG: /dev/urandom / CryptGenRandom / SecRandomCopyBytes
     ↓
@@ -419,29 +426,41 @@ them runs in WASM. Everything below them is the OS kernel.
 ```
 paranoid/
 ├── include/
-│   └── paranoid.h            # Public API — every WASM export
+│   ├── paranoid.h            # Public API — every WASM export
+│   ├── paranoid_platform.h   # Platform abstraction interface
+│   └── paranoid_frama.h      # Frama-C ACSL annotations
 ├── src/
-│   └── paranoid.c            # ALL computation (400 lines)
+│   ├── paranoid.c            # ALL computation (uses platform abstraction)
+│   ├── platform_native.c     # Native backend: OpenSSL RAND_bytes + EVP
+│   ├── platform_wasm.c       # WASM backend: WASI random_get
+│   ├── sha256_compact.c      # FIPS 180-4 SHA-256 (WASM only, no OpenSSL)
+│   ├── sha256_compact.h      # Compact SHA-256 interface
+│   └── wasm_entry.c          # Stub main() for WASI libc linker
 ├── www/
 │   ├── index.html            # Structure only — no inline JS/CSS
 │   ├── style.css             # Visual state — wizard nav, stages
 │   └── app.js                # Display-only WASM bridge
-├── patches/
-│   ├── 01-wasi-config.patch  # WASI platform configuration
-│   ├── 02-rand-wasi.patch    # WASI random entropy source
-│   └── 03-ssl-cert-posix-io.patch # SSL cert POSIX I/O adjustments
+├── cmake/
+│   └── wasm32-wasi.cmake     # CMake toolchain file for Zig WASM
 ├── scripts/
-│   └── build_openssl_wasm.sh # Build OpenSSL from official source
+│   ├── build_openssl_wasm.sh # Build OpenSSL from official source
+│   ├── double_compile.sh     # Diverse double-compilation (Zig + Clang)
+│   ├── hallucination_check.sh # Automated LLM hallucination detection
+│   ├── integration_test.sh   # End-to-end integration tests
+│   ├── multiparty_verify.sh  # 3-of-5 threshold build verification
+│   └── supply_chain_verify.sh # Supply chain verification
+├── tests/
+│   ├── test_native.c         # Comprehensive acutest-based C tests
+│   ├── test_paranoid.c       # Standalone test framework
+│   ├── test_sha256.c         # NIST CAVP SHA-256 test vectors
+│   └── test_statistics.c     # Chi-squared + serial correlation KATs
 ├── vendor/                   # (Built from source / cloned at SHA-pinned commits)
-│   ├── openssl/              # Built from official OpenSSL source (tag openssl-3.4.0)
-│   │   ├── include/openssl/  # Headers from build
-│   │   ├── lib/libcrypto.a   # Compiled for wasm32-wasi
-│   │   └── BUILD_PROVENANCE.txt # Records source tag, commit, compiler, patches
+│   ├── openssl/              # Built from official OpenSSL source (native only)
 │   └── acutest/              # mity/acutest (header-only test framework)
-├── build/                    # make output (gitignored)
-│   ├── paranoid.wasm
-│   └── site/                 # deployed to GitHub Pages
-├── Makefile                  # Build system
+├── build/                    # CMake output (gitignored)
+│   ├── wasm/paranoid.wasm    # <100KB (no OpenSSL)
+│   └── native/               # native test binaries
+├── CMakeLists.txt            # Build system (replaces Makefile)
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml            # PR verification (build + E2E tests)
@@ -454,17 +473,21 @@ paranoid/
 
 ### What Each File Does
 
-| File | Lines | Touches crypto? | Role |
-|------|------:|:---:|------|
-| `include/paranoid.h` | 249 | Defines API | Every exported function signature, the result struct, limits |
-| `src/paranoid.c` | 400 | **YES** | Generation, rejection sampling, chi-squared, serial correlation, collision detection, entropy proofs, birthday paradox, pattern checks, SHA-256 |
-| `www/index.html` | 213 | No | Pure HTML structure. Zero inline scripts or styles. SRI hashes injected at build time |
-| `www/style.css` | 834 | No | CSS-only wizard navigation (radio `:checked`), audit stage animations (`data-stage`), responsive layout |
-| `www/app.js` | 436 | 3 lines | WASI shim (3 lines), struct reader, DOM updates via `textContent` |
-| `Makefile` | 247 | No | `make` / `make site` / `make verify` / `make hash` / `make serve` / `make clean` |
-| `ci.yml` | ~220 | No | PR pipeline: Docker build + E2E tests. All actions SHA-pinned |
-| `cd.yml` | ~240 | No | Main branch: build + SBOM + Cosign signing. SHA-pinned |
-| `release.yml` | ~200 | No | Releases: Pages deploy + attestation. SHA-pinned |
+| File | Touches crypto? | Role |
+|------|:---:|------|
+| `include/paranoid.h` | Defines API | Every exported function signature, the result struct, limits (v3.0) |
+| `include/paranoid_platform.h` | Defines abstraction | Platform-agnostic random + SHA-256 interface |
+| `src/paranoid.c` | **YES** | Generation, rejection sampling, chi-squared, serial correlation, collision detection, entropy proofs, birthday paradox, pattern checks |
+| `src/platform_native.c` | **YES** | OpenSSL RAND_bytes + EVP SHA-256 backend (native builds) |
+| `src/platform_wasm.c` | **YES** | WASI random_get backend (WASM builds) |
+| `src/sha256_compact.c` | **YES** | FIPS 180-4 SHA-256 (WASM only, replaces OpenSSL EVP in WASM) |
+| `www/index.html` | No | Pure HTML structure. Zero inline scripts or styles |
+| `www/style.css` | No | CSS-only wizard navigation, audit stage animations |
+| `www/app.js` | 3 lines | WASI shim (3 lines), struct reader, DOM updates via `textContent` |
+| `CMakeLists.txt` | No | CMake build: native (tests) + WASM (release). Replaces Makefile |
+| `ci.yml` | No | PR pipeline: melange + apko build + E2E tests. All actions SHA-pinned |
+| `cd.yml` | No | Main branch: build + SBOM + Cosign signing. SHA-pinned |
+| `release.yml` | No | Releases: Pages deploy + attestation. SHA-pinned |
 
 ---
 
@@ -503,7 +526,25 @@ int paranoid_sha256(const unsigned char *input, int input_len,
 int paranoid_sha256_hex(const char *input, char *output_hex);
 ```
 
-OpenSSL EVP. Used for collision detection (hash-compare, not strcmp).
+Platform abstraction (OpenSSL EVP native, compact FIPS 180-4 WASM).
+Used for collision detection (hash-compare, not strcmp).
+
+### New v3.0 API
+
+```c
+int paranoid_generate_multiple(const char *charset, int charset_len,
+                               int length, int count, char *output);
+int paranoid_validate_charset(const char *input, char *output, int output_size);
+int paranoid_generate_constrained(const char *charset, int charset_len,
+                                  int length, const paranoid_char_requirements_t *reqs,
+                                  char *output);
+int paranoid_check_compliance(const paranoid_audit_result_t *result,
+                              const paranoid_compliance_framework_t *framework);
+```
+
+Multi-password generation, charset validation/normalization, constrained
+generation with minimum character-type requirements, and compliance
+framework checking (NIST, PCI-DSS, HIPAA, SOC2, GDPR, ISO 27001).
 
 ### Statistics
 
@@ -597,51 +638,53 @@ minified or obfuscated — it exists to be reviewed.
 
 ### Prerequisites
 
-- Zig ≥ 0.13.0 (`brew install zig` / `snap install zig`)
-- OpenSSL (for SRI hash computation during `make site`)
-- wabt (optional, for `make verify`)
+- CMake >= 3.20
+- Zig >= 0.13.0 (`brew install zig` / `snap install zig`)
+- OpenSSL development libraries (for native tests only; not needed for WASM)
+- wabt (optional, for wasm-validate gate)
 
-### Targets
+### CMake Build Commands
 
 ```bash
-make              # Build site (WASM + HTML/CSS/JS with SRI)
-make build        # Compile paranoid.wasm only
-make site         # Assemble site/ with injected SRI hashes
-make verify       # Verify WASM exports and import namespaces
-make hash         # Print SHA-256 and SRI of the binary
-make serve        # Local dev server on :8080
-make clean        # Remove build/
-make info         # Show toolchain versions and paths
+# WASM build (release):
+cmake -B build/wasm \
+    -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build/wasm
+
+# Native build (tests):
+cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/native
+ctest --test-dir build/native --output-on-failure
 ```
 
-### What `make site` Does
+### What the WASM Build Does
 
-1. Compiles `src/paranoid.c` and `src/wasm_entry.c` against `vendor/openssl/lib/libcrypto.a`
-2. Produces `build/paranoid.wasm`
-3. Computes SRI-384 hashes of `.wasm`, `.css`, `.js`
-4. Injects hashes into `index.html` via `sed` (replacing `__WASM_SRI__` etc.)
-5. Writes `BUILD_MANIFEST.json` recording all hashes, compiler version, commit SHA
-6. Copies everything to `build/site/`
+1. Compiles `src/paranoid.c` + `src/platform_wasm.c` + `src/sha256_compact.c`
+   (NO OpenSSL -- compact SHA-256 + WASI random_get)
+2. Produces `build/wasm/paranoid.wasm` (<100KB)
+3. Post-processes with wasm-opt and wasm-strip (if available)
+4. Validates with wasm-validate (hard gate in CI)
 
 ### Dependencies
 
-Docker builds OpenSSL from official source and clones test dependencies.
-The `vendor/` directory is ephemeral and not tracked by git. For local
-development, build OpenSSL from source and clone test framework manually:
+The WASM build has ZERO external dependencies -- it uses only:
+- `platform_wasm.c` (WASI random_get)
+- `sha256_compact.c` (compact FIPS 180-4 SHA-256)
+
+Native builds use system OpenSSL for the `platform_native.c` backend.
+The `vendor/` directory is only needed for local development:
 
 ```bash
-# Build OpenSSL from official source (produces vendor/openssl/lib/libcrypto.a)
-./scripts/build_openssl_wasm.sh
-
-# Clone test framework
+# Clone test framework (for native tests)
 mkdir -p vendor
 git clone https://github.com/mity/acutest.git vendor/acutest
 cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
 ```
 
-The `libcrypto.a` (WASM target) is compiled from official OpenSSL source at tag
-`openssl-3.4.0` with our WASI patches. Build provenance is recorded in
-`vendor/openssl/BUILD_PROVENANCE.txt`.
+Production builds use melange + apko instead of Docker multi-stage.
+Wolfi provides Zig from source via melange, producing bitwise-reproducible
+packages.
 
 ---
 
@@ -846,8 +889,8 @@ looks like, formalizes the LLM threat model, and provides an auditable
 reference implementation.
 
 **Q: Can I use this in production?**
-A: The generation algorithm (OpenSSL CSPRNG + rejection sampling) is
-production-grade. The implementation should be reviewed by a human
+A: The generation algorithm (platform-abstracted CSPRNG + rejection sampling)
+is production-grade. The implementation should be reviewed by a human
 cryptographer first.
 
 **Q: Why is the CSS so verbose?**
@@ -857,7 +900,8 @@ complete state machine that a reviewer can read without running the code.
 A mixin or preprocessor would hide the logic.
 
 **Q: Why C instead of Rust?**
-A: OpenSSL. We compile official OpenSSL source to `wasm32-wasi` using Zig,
-producing `libcrypto.a` with full build provenance. Zig's `cc` can link
-against it directly with zero configuration. A Rust port using `ring` or
+A: Originally OpenSSL -- we compiled official OpenSSL source to `wasm32-wasi`.
+In v3.0, the WASM build no longer depends on OpenSSL (using compact SHA-256
++ WASI random_get), but C remains the language for Zig cross-compilation
+compatibility and Frama-C formal verification. A Rust port using `ring` or
 `rustls` would be viable but would require a different crypto library.

@@ -13,9 +13,11 @@
  *   proofs, and threat assessment runs inside the WASM sandbox.
  *
  * BUILD:
- *   Compiled against official OpenSSL (built from source with our WASI patches)
- *   using Zig cc --target=wasm32-wasi. No precompiled binaries.
- *   See scripts/build_openssl_wasm.sh and Makefile for details.
+ *   Uses a platform abstraction layer (paranoid_platform.h) that
+ *   delegates to OpenSSL (native) or WASI+compact-SHA (WASM).
+ *   See src/platform_native.c and src/platform_wasm.c for backends.
+ *
+ * TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction references
  */
 
 #ifndef PARANOID_H
@@ -31,25 +33,33 @@ extern "C" {
    VERSION & BUILD INFO
    ═══════════════════════════════════════════════════════════ */
 
-#define PARANOID_VERSION_MAJOR 2
+/* TODO: HUMAN_REVIEW - version bumped from 2.0.0 to 3.0.0 for
+ * platform abstraction + new API additions (F1-F5). */
+#define PARANOID_VERSION_MAJOR 3
 #define PARANOID_VERSION_MINOR 0
 #define PARANOID_VERSION_PATCH 0
-#define PARANOID_VERSION_STRING "2.0.0"
+#define PARANOID_VERSION_STRING "3.0.0"
 
 /** Return version string. */
 const char* paranoid_version(void);
 
 /* ═══════════════════════════════════════════════════════════
    PASSWORD GENERATION
-   
-   Uses OpenSSL RAND_bytes() → WASI random_get → browser CSPRNG.
+
+   Uses platform abstraction (paranoid_platform_random) which
+   delegates to OpenSSL RAND_bytes (native) or WASI random_get
+   (WASM) → browser CSPRNG.
    Rejection sampling ensures uniform distribution over charset.
    Raw random bytes are scrubbed from stack after use.
+
+   TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction
    ═══════════════════════════════════════════════════════════ */
 
 #define PARANOID_MAX_PASSWORD_LEN 256
 #define PARANOID_MAX_CHARSET_LEN  128
 #define PARANOID_MAX_BATCH_SIZE   2000
+#define PARANOID_MAX_MULTI_COUNT  10     /* F1: max passwords per generate_multiple call */
+#define PARANOID_MAX_CONSTRAINED_ATTEMPTS 100  /* F3: max rejection sampling attempts */
 
 /**
  * Generate a single password.
@@ -127,6 +137,28 @@ typedef struct {
     /* Stage tracking (JS polls this) */
     int      current_stage;       /* 0=idle, 1=gen, 2=chi2, ... 7=done */
 
+    /* ── New v3.0 fields (F5) ── */
+    /* TODO: HUMAN_REVIEW - new fields added at END of struct for
+     * binary compatibility with existing code reading earlier fields. */
+
+    /* Multi-password support */
+    int      num_passwords;        /* how many passwords were generated */
+
+    /* Compliance results (one per framework) */
+    /* TODO: HUMAN_REVIEW - verify compliance thresholds against current standards */
+    int      compliance_nist;      /* 1=compliant, 0=not */
+    int      compliance_pci_dss;
+    int      compliance_hipaa;
+    int      compliance_soc2;
+    int      compliance_gdpr;
+    int      compliance_iso27001;
+
+    /* Character composition of generated password */
+    int      count_lowercase;
+    int      count_uppercase;
+    int      count_digits;
+    int      count_symbols;
+
 } paranoid_audit_result_t;
 
 /**
@@ -190,7 +222,11 @@ int paranoid_offset_all_pass(void);
    ═══════════════════════════════════════════════════════════ */
 
 /**
- * SHA-256 hash via OpenSSL EVP.
+ * SHA-256 hash via platform abstraction.
+ * Native: delegates to OpenSSL EVP SHA-256
+ * WASM:   delegates to compact FIPS 180-4 implementation
+ *
+ * TODO: HUMAN_REVIEW - replaced OpenSSL with platform abstraction
  *
  * @param input      Input bytes
  * @param input_len  Length of input
@@ -241,6 +277,139 @@ int paranoid_count_collisions(
     const char *passwords,  /* concatenated */
     int num_passwords,
     int pw_length
+);
+
+/* ═══════════════════════════════════════════════════════════
+   F1: MULTI-PASSWORD GENERATION
+   ═══════════════════════════════════════════════════════════ */
+
+/**
+ * Generate multiple passwords in one call.
+ *
+ * TODO: HUMAN_REVIEW - new API, verify input validation
+ *
+ * @param charset      Charset string
+ * @param charset_len  Charset length
+ * @param length       Password length per password
+ * @param count        Number of passwords to generate (1..PARANOID_MAX_MULTI_COUNT)
+ * @param output       Output buffer (must be count * (length+1) bytes)
+ * @return             0 on success, -1 on CSPRNG failure, -2 on invalid args
+ */
+int paranoid_generate_multiple(
+    const char *charset,
+    int charset_len,
+    int length,
+    int count,
+    char *output
+);
+
+/* ═══════════════════════════════════════════════════════════
+   F2: CHARSET VALIDATION
+   ═══════════════════════════════════════════════════════════ */
+
+/**
+ * Validate and normalize a custom charset string.
+ * Removes duplicates, validates all chars are printable ASCII (32-126).
+ * Output is sorted by ASCII value, deduplicated.
+ *
+ * TODO: HUMAN_REVIEW - verify printable ASCII range
+ *
+ * @param input        Raw charset string from user (null-terminated)
+ * @param output       Normalized output buffer (deduplicated, sorted)
+ * @param output_size  Size of output buffer (must be >= unique chars + 1)
+ * @return             Length of normalized charset, or -1 on error
+ */
+int paranoid_validate_charset(
+    const char *input,
+    char *output,
+    int output_size
+);
+
+/* ═══════════════════════════════════════════════════════════
+   F3: CONSTRAINED PASSWORD GENERATION
+   ═══════════════════════════════════════════════════════════ */
+
+/**
+ * Minimum character-type requirements for constrained generation.
+ * Set a field to 0 to impose no requirement for that type.
+ */
+typedef struct {
+    int min_lowercase;    /* minimum [a-z] chars, 0 = no requirement */
+    int min_uppercase;    /* minimum [A-Z] chars */
+    int min_digits;       /* minimum [0-9] chars */
+    int min_symbols;      /* minimum non-alphanumeric chars */
+} paranoid_char_requirements_t;
+
+/**
+ * Generate a password meeting minimum character-type requirements.
+ * Uses rejection sampling: generates via paranoid_generate(), then
+ * checks requirements. Regenerates if not met (max PARANOID_MAX_CONSTRAINED_ATTEMPTS).
+ *
+ * TODO: HUMAN_REVIEW - verify rejection sampling preserves uniform
+ * distribution over the valid subset of passwords.
+ *
+ * @param charset      Charset string
+ * @param charset_len  Charset length
+ * @param length       Password length
+ * @param reqs         Character-type requirements
+ * @param output       Output buffer (must be length+1 bytes)
+ * @return 0 on success, -1 on CSPRNG failure, -2 on invalid args,
+ *         -3 if requirements impossible, -4 if exhausted attempts
+ */
+int paranoid_generate_constrained(
+    const char *charset,
+    int charset_len,
+    int length,
+    const paranoid_char_requirements_t *reqs,
+    char *output
+);
+
+/* ═══════════════════════════════════════════════════════════
+   F4: COMPLIANCE FRAMEWORK THRESHOLDS
+
+   TODO: HUMAN_REVIEW - verify compliance thresholds against
+   current standards. Standards are updated periodically.
+   ═══════════════════════════════════════════════════════════ */
+
+/**
+ * Compliance framework threshold definition.
+ * Each framework specifies minimum requirements that a password
+ * must meet to be considered compliant.
+ */
+typedef struct {
+    const char *name;           /* e.g. "NIST SP 800-63B" */
+    const char *description;    /* e.g. "US federal standard for digital identity" */
+    int min_length;             /* minimum password length */
+    double min_entropy_bits;    /* minimum entropy in bits */
+    int require_mixed_case;     /* 1 if mixed case required */
+    int require_digits;         /* 1 if digits required */
+    int require_symbols;        /* 1 if symbols required */
+} paranoid_compliance_framework_t;
+
+/* Built-in framework definitions
+ * TODO: HUMAN_REVIEW - verify compliance thresholds against current standards */
+extern const paranoid_compliance_framework_t PARANOID_COMPLIANCE_NIST;
+extern const paranoid_compliance_framework_t PARANOID_COMPLIANCE_PCI_DSS;
+extern const paranoid_compliance_framework_t PARANOID_COMPLIANCE_HIPAA;
+extern const paranoid_compliance_framework_t PARANOID_COMPLIANCE_SOC2;
+extern const paranoid_compliance_framework_t PARANOID_COMPLIANCE_GDPR;
+extern const paranoid_compliance_framework_t PARANOID_COMPLIANCE_ISO27001;
+
+/**
+ * Check if audit result meets a compliance framework.
+ *
+ * Checks password_length, total_entropy, and character composition
+ * against the framework's thresholds.
+ *
+ * TODO: HUMAN_REVIEW - verify compliance check logic
+ *
+ * @param result     Audit result (must have character counts populated)
+ * @param framework  Compliance framework to check against
+ * @return           1 if compliant, 0 if not
+ */
+int paranoid_check_compliance(
+    const paranoid_audit_result_t *result,
+    const paranoid_compliance_framework_t *framework
 );
 
 #ifdef __cplusplus

@@ -29,7 +29,6 @@ set -euo pipefail
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -96,7 +95,7 @@ mkdir -p "$BUILD_DIR"
 cd "$REPO_ROOT"
 
 # Common flags — uses from-source OpenSSL (vendor/openssl)
-INCLUDE_FLAGS="-I include -I vendor/openssl/include"
+INCLUDE_FLAGS=(-I include -I vendor/openssl/include)
 OPENSSL_LIB="vendor/openssl/lib/libcrypto.a"
 
 if [ ! -f "$OPENSSL_LIB" ]; then
@@ -120,7 +119,7 @@ echo "Compiling with Zig..."
 zig cc \
     --target=wasm32-wasi \
     -O2 \
-    $INCLUDE_FLAGS \
+    "${INCLUDE_FLAGS[@]}" \
     -DPARANOID_VERSION_STRING=\"2.0.0\" \
     -lwasi-emulated-getpid \
     -Wl,--no-entry \
@@ -163,7 +162,7 @@ if [ "$HAS_CLANG" -eq 1 ]; then
     if clang \
         --target=wasm32-wasi \
         -O3 \
-        $INCLUDE_FLAGS \
+        "${INCLUDE_FLAGS[@]}" \
         -DPARANOID_VERSION_STRING=\"2.0.0\" \
         -lwasi-emulated-getpid \
         -Wl,--no-entry \

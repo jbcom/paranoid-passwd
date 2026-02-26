@@ -1,5 +1,5 @@
 /**
- * app.js — Display-only WASM bridge for paranoid-passwd
+ * app.js -- Display-only WASM bridge for paranoid-passwd
  *
  * This file does ZERO computation. It:
  *   1. Loads paranoid.wasm and provides the WASI random_get shim
@@ -14,32 +14,32 @@
 
 'use strict';
 
-/* ═══════════════════════════════════════════════════════════
+/* ===================================================================
    WASM LOADER + WASI SHIM (fail-closed)
-   ═══════════════════════════════════════════════════════════ */
+   =================================================================== */
 
 let wasm = null;
 let mem  = null;
 
 /**
- * WASI polyfill — the ONLY security-critical JS in this project.
+ * WASI polyfill -- the ONLY security-critical JS in this project.
  * random_get bridges WASI to Web Crypto. Everything else is a stub.
  */
 function createWasiShim() {
   const impl = {
-    /* ── Security-critical: bridges WASI random_get → Web Crypto ── */
+    /* -- Security-critical: bridges WASI random_get -> Web Crypto -- */
     random_get(ptr, len) {
       crypto.getRandomValues(new Uint8Array(mem.buffer, ptr, len));
       return 0;
     },
-    /* ── Clock ── */
+    /* -- Clock -- */
     clock_time_get(clockId, precision, outPtr) {
       const dv = new DataView(mem.buffer);
       const ns = BigInt(Date.now()) * 1000000n;
       dv.setBigUint64(outPtr, ns, true);
       return 0;
     },
-    /* ── Environment ── */
+    /* -- Environment -- */
     environ_sizes_get(countPtr, sizePtr) {
       const dv = new DataView(mem.buffer);
       dv.setUint32(countPtr, 0, true);
@@ -52,7 +52,7 @@ function createWasiShim() {
       dv.setUint32(sizePtr, 0, true);
       return 0;
     },
-    /* ── Process ── */
+    /* -- Process -- */
     proc_exit(code) {
       throw new Error('WASM proc_exit: ' + code);
     },
@@ -86,18 +86,96 @@ async function loadWasm() {
   wasm = instance.exports;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   CHARSETS — built programmatically, not manually by LLM
-   ═══════════════════════════════════════════════════════════ */
+/* ===================================================================
+   CHARSETS -- built programmatically, not manually by LLM
 
-const CHARSETS = {
-  full:  Array.from({ length: 94 }, (_, i) => String.fromCharCode(33 + i)).join(''),
-  alnum: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
-  alpha: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
-  hex:   '0123456789abcdef',
+   The charset builder constructs the effective charset from user
+   checkbox selections at runtime. No hardcoded charset tables.
+   =================================================================== */
+
+const LOWER   = 'abcdefghijklmnopqrstuvwxyz';
+const UPPER   = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const DIGITS  = '0123456789';
+/* Symbols: printable ASCII 33-126 minus letters and digits */
+const SYMBOLS = '!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~';
+/* Ambiguous characters to optionally exclude */
+const AMBIGUOUS = '0OIl1|';
+
+/**
+ * Build the effective charset from current UI settings.
+ * Returns the charset string and its length.
+ */
+function buildCharset() {
+  const customInput = $('cfg-custom-charset');
+  if (customInput && customInput.value.trim().length > 0) {
+    /* Custom charset: deduplicate, sort, filter to printable ASCII */
+    const seen = new Set();
+    let result = '';
+    for (const ch of customInput.value) {
+      const code = ch.charCodeAt(0);
+      if (code >= 32 && code <= 126 && !seen.has(ch)) {
+        seen.add(ch);
+        result += ch;
+      }
+    }
+    return result;
+  }
+
+  let charset = '';
+  if ($('cfg-lower') && $('cfg-lower').checked) charset += LOWER;
+  if ($('cfg-upper') && $('cfg-upper').checked) charset += UPPER;
+  if ($('cfg-digits') && $('cfg-digits').checked) charset += DIGITS;
+  if ($('cfg-symbols') && $('cfg-symbols').checked) charset += SYMBOLS;
+
+  /* Extended printable ASCII: add space (charCode 32) */
+  if ($('cfg-extended') && $('cfg-extended').checked) {
+    if (charset.indexOf(' ') === -1) charset = ' ' + charset;
+  }
+
+  /* Exclude ambiguous characters */
+  if ($('cfg-no-ambiguous') && $('cfg-no-ambiguous').checked) {
+    let filtered = '';
+    for (const ch of charset) {
+      if (AMBIGUOUS.indexOf(ch) === -1) filtered += ch;
+    }
+    charset = filtered;
+  }
+
+  return charset;
+}
+
+/**
+ * Get currently selected compliance frameworks from checkboxes.
+ */
+function getSelectedFrameworks() {
+  const checks = document.querySelectorAll('input[name="compliance"]:checked');
+  const frameworks = [];
+  for (const cb of checks) {
+    frameworks.push(cb.value);
+  }
+  return frameworks;
+}
+
+/* ===================================================================
+   COMPLIANCE FRAMEWORK DEFINITIONS (display-side)
+
+   These thresholds mirror the C-side definitions in paranoid.c
+   but are used here only for the pre-generation strength meter
+   and entropy preview. The actual compliance check runs in C.
+
+   TODO: HUMAN_REVIEW - verify thresholds match C-side definitions
+   =================================================================== */
+
+const FRAMEWORKS = {
+  nist:     { name: 'NIST SP 800-63B',  minLen: 8,  minEntropy: 30,  desc: 'US federal standard' },
+  pci_dss:  { name: 'PCI DSS 4.0',      minLen: 12, minEntropy: 60,  desc: 'Payment card industry' },
+  hipaa:    { name: 'HIPAA',             minLen: 8,  minEntropy: 60,  desc: 'Healthcare privacy' },
+  soc2:     { name: 'SOC 2',             minLen: 8,  minEntropy: 60,  desc: 'SaaS controls' },
+  gdpr:     { name: 'GDPR / ENISA',      minLen: 8,  minEntropy: 80,  desc: 'EU data protection' },
+  iso27001: { name: 'ISO 27001',         minLen: 12, minEntropy: 90,  desc: 'Intl. info security' },
 };
 
-/* ═══════════════════════════════════════════════════════════
+/* ===================================================================
    RESULT STRUCT READER
 
    Reads paranoid_audit_result_t from WASM linear memory.
@@ -105,7 +183,7 @@ const CHARSETS = {
 
    This is the ONLY place where JS interprets WASM memory.
    Every offset is derived from the C struct layout.
-   ═══════════════════════════════════════════════════════════ */
+   =================================================================== */
 
 function readString(ptr, maxLen) {
   const bytes = new Uint8Array(mem.buffer, ptr, maxLen);
@@ -129,7 +207,7 @@ function readResult() {
    * 322     [2 bytes padding]
    * 324     password_length        int
    * 328     charset_size           int
-   * 332     [4 bytes padding → align 8]
+   * 332     [4 bytes padding -> align 8]
    * 336     chi2_statistic         double    dBase+0
    * 344     chi2_df                int       dBase+8
    * 348     [4 bytes padding]
@@ -157,6 +235,18 @@ function readResult() {
    * 472     pattern_issues         int       dBase+136
    * 476     all_pass               int       dBase+140
    * 480     current_stage          int       dBase+144
+   * --- New v3.0 fields ---
+   * 484     num_passwords          int       dBase+148
+   * 488     compliance_nist        int       dBase+152
+   * 492     compliance_pci_dss     int       dBase+156
+   * 496     compliance_hipaa       int       dBase+160
+   * 500     compliance_soc2        int       dBase+164
+   * 504     compliance_gdpr        int       dBase+168
+   * 508     compliance_iso27001    int       dBase+172
+   * 512     count_lowercase        int       dBase+176
+   * 516     count_uppercase        int       dBase+180
+   * 520     count_digits           int       dBase+184
+   * 524     count_symbols          int       dBase+188
    */
 
   const password   = readString(ptr, 257);
@@ -199,6 +289,19 @@ function readResult() {
   const all_pass       = dv.getInt32(dBase + 140, true);
   const current_stage  = dv.getInt32(dBase + 144, true);
 
+  /* v3.0 fields */
+  const num_passwords      = dv.getInt32(dBase + 148, true);
+  const compliance_nist    = dv.getInt32(dBase + 152, true);
+  const compliance_pci_dss = dv.getInt32(dBase + 156, true);
+  const compliance_hipaa   = dv.getInt32(dBase + 160, true);
+  const compliance_soc2    = dv.getInt32(dBase + 164, true);
+  const compliance_gdpr    = dv.getInt32(dBase + 168, true);
+  const compliance_iso27001= dv.getInt32(dBase + 172, true);
+  const count_lowercase    = dv.getInt32(dBase + 176, true);
+  const count_uppercase    = dv.getInt32(dBase + 180, true);
+  const count_digits       = dv.getInt32(dBase + 184, true);
+  const count_symbols      = dv.getInt32(dBase + 188, true);
+
   return {
     password, sha256_hex, pw_length, charset_size,
     chi2_stat, chi2_df, chi2_p, chi2_pass,
@@ -209,12 +312,16 @@ function readResult() {
     collision_prob, pw_for_50,
     rej_max_valid, rej_rate_pct,
     pattern_issues, all_pass, current_stage,
+    num_passwords,
+    compliance_nist, compliance_pci_dss, compliance_hipaa,
+    compliance_soc2, compliance_gdpr, compliance_iso27001,
+    count_lowercase, count_uppercase, count_digits, count_symbols,
   };
 }
 
-/* ═══════════════════════════════════════════════════════════
-   DOM HELPERS — textContent only, no innerHTML
-   ═══════════════════════════════════════════════════════════ */
+/* ===================================================================
+   DOM HELPERS -- textContent only, no innerHTML
+   =================================================================== */
 
 const $ = (id) => document.getElementById(id);
 const txt = (id, v) => { const el = $(id); if (el) el.textContent = String(v); };
@@ -224,10 +331,166 @@ function setStage(name) {
   if (runner) runner.dataset.stage = name;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   THREAT MODEL — static data, defined here not in C
+/* ===================================================================
+   D14: COPY TO CLIPBOARD
+   =================================================================== */
+
+function setupCopyButton(btnId, getText) {
+  const btn = $(btnId);
+  if (!btn) return;
+
+  btn.addEventListener('click', () => {
+    const password = getText();
+    if (!password) return;
+
+    navigator.clipboard.writeText(password).then(() => {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+
+      /* Revert button text after 2 seconds */
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+
+      /* Auto-clear clipboard after 30 seconds */
+      setTimeout(() => {
+        navigator.clipboard.writeText('');
+      }, 30000);
+    });
+  });
+}
+
+/* ===================================================================
+   D15 + D16: STRENGTH METER + ENTROPY PREVIEW
+
+   Calculate entropy from current charset size + password length
+   before generation. Update the strength bar and compliance text.
+   =================================================================== */
+
+function updateEntropyPreview() {
+  const charset = buildCharset();
+  const N = charset.length;
+  const length = parseInt($('cfg-length') ? $('cfg-length').value : '32') || 32;
+
+  const charsetPreview = $('charset-preview');
+  const strengthBar = $('strength-bar');
+  const entropyPreview = $('entropy-preview');
+
+  if (N === 0) {
+    if (charsetPreview) charsetPreview.textContent = 'Effective charset: 0 characters -- select at least one character type';
+    if (strengthBar) strengthBar.className = 'strength-bar';
+    if (entropyPreview) entropyPreview.textContent = 'No characters selected';
+    return;
+  }
+
+  const bitsPerChar = Math.log2(N);
+  const totalEntropy = length * bitsPerChar;
+
+  if (charsetPreview) {
+    charsetPreview.textContent = 'Effective charset: ' + N + ' characters, ' + bitsPerChar.toFixed(2) + ' bits per character';
+  }
+
+  /* Determine compliance status for selected frameworks */
+  const selected = getSelectedFrameworks();
+  let meetsAll = true;
+  let meetsSome = false;
+  let meetsNone = true;
+  const metFrameworks = [];
+  const failedFrameworks = [];
+
+  for (const fwKey of selected) {
+    const fw = FRAMEWORKS[fwKey];
+    if (!fw) continue;
+    const passes = length >= fw.minLen && totalEntropy >= fw.minEntropy;
+    if (passes) {
+      meetsSome = true;
+      meetsNone = false;
+      metFrameworks.push(fw.name);
+    } else {
+      meetsAll = false;
+      failedFrameworks.push(fw.name);
+    }
+  }
+
+  if (selected.length === 0) {
+    meetsAll = true;
+    meetsNone = false;
+  }
+  if (!meetsSome && selected.length > 0) meetsAll = false;
+
+  /* D15: Strength bar color */
+  let strengthClass = 'strength-bar';
+  if (selected.length === 0) {
+    /* No frameworks selected -- base on raw entropy */
+    if (totalEntropy >= 256) strengthClass += ' strength-purple';
+    else if (totalEntropy >= 128) strengthClass += ' strength-green';
+    else if (totalEntropy >= 60) strengthClass += ' strength-yellow';
+    else strengthClass += ' strength-red';
+  } else if (meetsAll && totalEntropy >= 256) {
+    strengthClass += ' strength-purple';
+  } else if (meetsAll) {
+    strengthClass += ' strength-green';
+  } else if (meetsSome) {
+    strengthClass += ' strength-yellow';
+  } else {
+    strengthClass += ' strength-red';
+  }
+
+  if (strengthBar) strengthBar.className = strengthClass;
+
+  /* D16: Entropy preview text */
+  if (entropyPreview) {
+    let previewText = 'Current config: ' + totalEntropy.toFixed(1) + ' bits';
+    if (selected.length > 0) {
+      if (meetsAll && metFrameworks.length > 0) {
+        if (totalEntropy >= 256) {
+          previewText += ' -- exceeds all selected frameworks (post-quantum territory)';
+        } else {
+          previewText += ' -- meets ' + metFrameworks.join(', ');
+        }
+      } else if (meetsSome) {
+        previewText += ' -- meets ' + metFrameworks.join(', ');
+        previewText += ' | fails ' + failedFrameworks.join(', ');
+      } else {
+        previewText += ' -- below all selected frameworks';
+      }
+    }
+    entropyPreview.textContent = previewText;
+  }
+}
+
+/* ===================================================================
+   D8: REQUIREMENTS VALIDATION
+   =================================================================== */
+
+function validateRequirements() {
+  const length = parseInt($('cfg-length') ? $('cfg-length').value : '32') || 32;
+  const minLower = parseInt($('cfg-min-lower') ? $('cfg-min-lower').value : '0') || 0;
+  const minUpper = parseInt($('cfg-min-upper') ? $('cfg-min-upper').value : '0') || 0;
+  const minDigits = parseInt($('cfg-min-digits') ? $('cfg-min-digits').value : '0') || 0;
+  const minSymbols = parseInt($('cfg-min-symbols') ? $('cfg-min-symbols').value : '0') || 0;
+
+  const totalRequired = minLower + minUpper + minDigits + minSymbols;
+  const validation = $('requirements-validation');
+  if (!validation) return;
+
+  if (totalRequired === 0) {
+    validation.textContent = '';
+    validation.className = 'requirements-validation';
+  } else if (totalRequired > length) {
+    validation.textContent = 'Requirements need ' + totalRequired + ' characters total but password length is only ' + length;
+    validation.className = 'requirements-validation validation-error';
+  } else {
+    validation.textContent = 'Requirements: ' + totalRequired + ' of ' + length + ' characters constrained';
+    validation.className = 'requirements-validation validation-ok';
+  }
+}
+
+/* ===================================================================
+   THREAT MODEL -- static data, defined here not in C
    because it's display text, not computation
-   ═══════════════════════════════════════════════════════════ */
+   =================================================================== */
 
 const THREATS = [
   { id: 'T1', name: 'Training Data Leakage',      sev: 'CRITICAL', mit: true,  st: 'Mitigated by CSPRNG' },
@@ -238,9 +501,33 @@ const THREATS = [
   { id: 'T6', name: 'Screen Exposure',             sev: 'HIGH',     mit: false, st: 'Advisory \u2014 clear after use' },
 ];
 
-/* ═══════════════════════════════════════════════════════════
-   AUDIT PIPELINE — calls C, reads struct, updates DOM
-   ═══════════════════════════════════════════════════════════ */
+/* ===================================================================
+   D10: BUILD_MANIFEST.json RUNTIME LOADING
+   =================================================================== */
+
+async function loadBuildManifest() {
+  const manifest = await fetch('BUILD_MANIFEST.json').then(r => r.json()).catch(() => null);
+  if (manifest) {
+    txt('version-tag', 'v' + (manifest.version || '?'));
+    txt('build-sha', manifest.wasm_sha256 || 'unknown');
+    txt('build-sri', manifest.wasm_sri || 'unknown');
+    const timeEl = $('build-time');
+    if (timeEl && manifest.build_time) {
+      timeEl.textContent = manifest.build_time;
+      timeEl.setAttribute('datetime', manifest.build_time);
+    }
+    /* Update page title */
+    document.title = 'paranoid-passwd v' + (manifest.version || '?') + ' \u2014 self-auditing password generator';
+  }
+}
+
+/* ===================================================================
+   AUDIT PIPELINE -- calls C, reads struct, updates DOM
+   =================================================================== */
+
+/* Store the last result and generated passwords for the results page */
+let lastResult = null;
+let extraPasswords = [];
 
 async function launchAudit() {
   if (!wasm) {
@@ -249,10 +536,27 @@ async function launchAudit() {
   }
 
   const length  = parseInt($('cfg-length').value) || 32;
-  const csKey   = $('cfg-charset').value;
-  const charset = CHARSETS[csKey];
+  const charset = buildCharset();
   const batch   = parseInt($('cfg-batch').value) || 500;
+  const count   = Math.max(1, Math.min(10, parseInt($('cfg-count') ? $('cfg-count').value : '1') || 1));
   const N       = charset.length;
+
+  if (N === 0) {
+    alert('No characters selected. Please select at least one character type.');
+    return;
+  }
+
+  /* Check requirements feasibility */
+  const minLower = parseInt($('cfg-min-lower') ? $('cfg-min-lower').value : '0') || 0;
+  const minUpper = parseInt($('cfg-min-upper') ? $('cfg-min-upper').value : '0') || 0;
+  const minDigits = parseInt($('cfg-min-digits') ? $('cfg-min-digits').value : '0') || 0;
+  const minSymbols = parseInt($('cfg-min-symbols') ? $('cfg-min-symbols').value : '0') || 0;
+  const totalRequired = minLower + minUpper + minDigits + minSymbols;
+
+  if (totalRequired > length) {
+    alert('Requirements need ' + totalRequired + ' characters but password length is only ' + length + '.');
+    return;
+  }
 
   /* Switch to audit panel */
   $('step-audit').checked = true;
@@ -267,7 +571,7 @@ async function launchAudit() {
   /* Get result struct pointer */
   const resultPtr = wasm.paranoid_get_result_ptr();
 
-  /* Run the audit — ALL computation happens in C */
+  /* Run the audit -- ALL computation happens in C */
   await new Promise((resolve) => setTimeout(resolve, 50));
 
   /* Poll stage from C during execution (for large batches) */
@@ -281,15 +585,34 @@ async function launchAudit() {
 
   const rc = wasm.paranoid_run_audit(csPtr, N, length, batch, resultPtr);
   clearInterval(pollInterval);
-  wasm.free(csPtr);
 
   if (rc !== 0) {
+    wasm.free(csPtr);
     alert('Audit failed (error ' + rc + '). CSPRNG may be unavailable.');
     return;
   }
 
   /* Read the result struct */
   const r = readResult();
+  lastResult = r;
+
+  /* D3: Generate additional passwords if count > 1 */
+  extraPasswords = [];
+  if (count > 1 && wasm.paranoid_generate_multiple) {
+    const bufSize = count * (length + 1);
+    const outPtr = wasm.malloc(bufSize);
+    const mpRc = wasm.paranoid_generate_multiple(csPtr, N, length, count, outPtr);
+    if (mpRc === 0) {
+      for (let i = 0; i < count; i++) {
+        const pwStr = readString(outPtr + i * (length + 1), length + 1);
+        /* First password from generate_multiple is separate from the audited one */
+        extraPasswords.push(pwStr);
+      }
+    }
+    wasm.free(outPtr);
+  }
+
+  wasm.free(csPtr);
 
   /* Update audit panel results */
   setStage('complete');
@@ -306,7 +629,57 @@ async function launchAudit() {
   /* Wait for CSS transitions */
   await new Promise((resolve) => setTimeout(resolve, 800));
 
-  /* ═══ Populate results panel ═══ */
+  /* === Populate results panel === */
+
+  /* D2: Password on results page */
+  txt('result-password', r.password);
+  txt('result-hash', r.sha256_hex);
+
+  /* D3: Multi-password list */
+  const multiSection = $('multi-passwords');
+  const multiList = $('multi-password-list');
+  if (multiSection && multiList) {
+    /* Clear previous entries using DOM methods (no innerHTML) */
+    while (multiList.firstChild) {
+      multiList.removeChild(multiList.firstChild);
+    }
+
+    if (extraPasswords.length > 1) {
+      multiSection.hidden = false;
+      for (let i = 0; i < extraPasswords.length; i++) {
+        const li = document.createElement('li');
+        li.className = 'multi-password-item';
+
+        const pwSpan = document.createElement('span');
+        pwSpan.className = 'multi-password-text';
+        pwSpan.textContent = extraPasswords[i];
+        li.appendChild(pwSpan);
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'btn-copy btn-copy-small';
+        copyBtn.textContent = 'Copy';
+        copyBtn.type = 'button';
+        copyBtn.setAttribute('aria-label', 'Copy password ' + (i + 1));
+        const pw = extraPasswords[i];
+        copyBtn.addEventListener('click', () => {
+          navigator.clipboard.writeText(pw).then(() => {
+            copyBtn.textContent = 'Copied!';
+            copyBtn.classList.add('copied');
+            setTimeout(() => {
+              copyBtn.textContent = 'Copy';
+              copyBtn.classList.remove('copied');
+            }, 2000);
+            setTimeout(() => { navigator.clipboard.writeText(''); }, 30000);
+          });
+        });
+        li.appendChild(copyBtn);
+
+        multiList.appendChild(li);
+      }
+    } else {
+      multiSection.hidden = true;
+    }
+  }
 
   /* Verdict */
   txt('verdict-icon', r.all_pass ? '\u2713' : '\u26A0');
@@ -315,6 +688,9 @@ async function launchAudit() {
   if (banner) {
     banner.className = 'verdict-banner' + (r.all_pass ? '' : ' verdict-fail');
   }
+
+  /* D4: Compliance results per framework */
+  populateComplianceResults(r);
 
   /* Entropy */
   $('det-entropy-badge').textContent = r.total_entropy.toFixed(0) + ' bits';
@@ -340,16 +716,6 @@ async function launchAudit() {
     'Serial correlation: ' + r.serial_corr.toFixed(6) + (r.serial_pass ? ' \u2014 independent' : ' \u2014 DEPENDENT') + '\n' +
     'Duplicates:         ' + r.duplicates + ' of ' + r.batch_size + (r.collision_pass ? ' \u2014 unique' : ' \u2014 COLLISIONS');
 
-  /* NIST */
-  const nistAll = r.nist_mem && r.nist_high && r.nist_crypto && r.nist_pq;
-  $('det-nist-badge').textContent = nistAll ? 'ALL PASS' : 'PARTIAL';
-  $('det-nist-badge').className = 'details-badge ' + (nistAll ? 'badge-pass' : 'badge-warn');
-  $('det-nist').textContent =
-    (r.nist_mem    ? '\u2713' : '\u2717') + ' Memorized Secret (min 30b)\n' +
-    (r.nist_high   ? '\u2713' : '\u2717') + ' High-value accounts (min 80b)\n' +
-    (r.nist_crypto ? '\u2713' : '\u2717') + ' Cryptographic key equiv. (min 128b)\n' +
-    (r.nist_pq     ? '\u2713' : '\u2717') + ' Post-quantum safe (min 256b)';
-
   /* Uniqueness */
   $('det-unique-badge').textContent = 'PROVEN';
   $('det-unique-badge').className = 'details-badge badge-pass';
@@ -359,7 +725,7 @@ async function launchAudit() {
     'P(collision) \u2248 ' + (r.collision_prob < 1e-300 ? '\u2248 0' : r.collision_prob.toExponential(2)) + '\n' +
     'Need k \u2248 ' + r.pw_for_50.toExponential(2) + ' for 50% collision chance';
 
-  /* Threats — using textContent for each line, no innerHTML */
+  /* Threats -- using textContent for each line, no innerHTML */
   let threatText = '';
   for (const t of THREATS) {
     threatText += t.id + '  ' + t.name + ' (' + t.sev + ')\n';
@@ -374,11 +740,16 @@ async function launchAudit() {
     'Architecture:  FAIL-CLOSED (no JavaScript fallback)\n' +
     'Computation:   ALL in C (src/paranoid.c)\n' +
     'JS role:       Display-only struct reader\n\n' +
-    '\u2713 Charset: ' + r.charset_size + ' chars (charCode 33\u2013126)\n' +
+    '\u2713 Charset: ' + r.charset_size + ' chars\n' +
     '\u2713 Rejection: max_valid=' + r.rej_max_valid + ', rate=' + r.rej_rate_pct.toFixed(1) + '%\n' +
     '\u2713 WASM isolation: DRBG state opaque to JS\n' +
     '\u2713 No network after page load\n' +
     '\u2713 SRI hashes on all assets\n\n' +
+    'Character composition:\n' +
+    '  Lowercase: ' + r.count_lowercase + '\n' +
+    '  Uppercase: ' + r.count_uppercase + '\n' +
+    '  Digits:    ' + r.count_digits + '\n' +
+    '  Symbols:   ' + r.count_symbols + '\n\n' +
     '\u26A0 LLM-AUTHORED CODE\n' +
     'Potential failure points:\n' +
     ' \u2022 Rejection sampling boundary (paranoid.c:60)\n' +
@@ -390,27 +761,145 @@ async function launchAudit() {
   $('step-results').checked = true;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   INIT — load WASM, wire up UI
-   ═══════════════════════════════════════════════════════════ */
+/* ===================================================================
+   D4: COMPLIANCE RESULTS POPULATION
+   =================================================================== */
+
+function populateComplianceResults(r) {
+  const selected = getSelectedFrameworks();
+  const compBadge = $('det-compliance-badge');
+  const compBody = $('det-compliance');
+  const compWrap = $('det-compliance-wrap');
+
+  if (!compBody || !compBadge) return;
+
+  if (selected.length === 0) {
+    compBadge.textContent = 'NONE SELECTED';
+    compBadge.className = 'details-badge badge-info';
+    compBody.textContent = 'No compliance frameworks were selected. Results show NIST tiers only.\n\n' +
+      (r.nist_mem    ? '\u2713' : '\u2717') + ' NIST Memorized Secret (min 30b)\n' +
+      (r.nist_high   ? '\u2713' : '\u2717') + ' NIST High-value accounts (min 80b)\n' +
+      (r.nist_crypto ? '\u2713' : '\u2717') + ' NIST Cryptographic key equiv. (min 128b)\n' +
+      (r.nist_pq     ? '\u2713' : '\u2717') + ' NIST Post-quantum safe (min 256b)';
+    return;
+  }
+
+  /* Map framework keys to result fields */
+  const complianceMap = {
+    nist:     r.compliance_nist,
+    pci_dss:  r.compliance_pci_dss,
+    hipaa:    r.compliance_hipaa,
+    soc2:     r.compliance_soc2,
+    gdpr:     r.compliance_gdpr,
+    iso27001: r.compliance_iso27001,
+  };
+
+  let allPass = true;
+  let somePass = false;
+  let resultText = '';
+
+  for (const fwKey of selected) {
+    const fw = FRAMEWORKS[fwKey];
+    if (!fw) continue;
+    const passes = complianceMap[fwKey] === 1;
+    if (passes) {
+      somePass = true;
+    } else {
+      allPass = false;
+    }
+    resultText += (passes ? '\u2713' : '\u2717') + ' ' + fw.name + ' \u2014 ' + fw.desc;
+    resultText += ' (min ' + fw.minLen + ' chars, ' + fw.minEntropy + ' bits)';
+    resultText += passes ? ' \u2014 COMPLIANT' : ' \u2014 NOT MET';
+    resultText += '\n';
+  }
+
+  resultText += '\nPassword details:\n';
+  resultText += '  Length: ' + r.pw_length + ' chars\n';
+  resultText += '  Entropy: ' + r.total_entropy.toFixed(1) + ' bits\n';
+  resultText += '  Lowercase: ' + r.count_lowercase + ', Uppercase: ' + r.count_uppercase + '\n';
+  resultText += '  Digits: ' + r.count_digits + ', Symbols: ' + r.count_symbols;
+
+  if (allPass) {
+    compBadge.textContent = 'ALL COMPLIANT';
+    compBadge.className = 'details-badge badge-pass';
+  } else if (somePass) {
+    compBadge.textContent = 'PARTIAL';
+    compBadge.className = 'details-badge badge-warn';
+  } else {
+    compBadge.textContent = 'NON-COMPLIANT';
+    compBadge.className = 'details-badge badge-fail';
+  }
+
+  compBody.textContent = resultText;
+}
+
+/* ===================================================================
+   INIT -- load WASM, wire up UI, load manifest
+   =================================================================== */
 
 document.addEventListener('DOMContentLoaded', async () => {
+  /* D10: Load BUILD_MANIFEST.json for version/hash data */
+  loadBuildManifest();
+
   /* Range slider live label */
   const range = $('cfg-length');
   const output = $('cfg-length-val');
   if (range && output) {
-    range.addEventListener('input', () => { output.value = range.value; });
+    range.addEventListener('input', () => {
+      output.value = range.value;
+      updateEntropyPreview();
+      validateRequirements();
+    });
+  }
+
+  /* Wire up all charset/compliance controls to update entropy preview */
+  const charsetIds = ['cfg-lower', 'cfg-upper', 'cfg-digits', 'cfg-symbols', 'cfg-extended', 'cfg-no-ambiguous'];
+  for (const id of charsetIds) {
+    const el = $(id);
+    if (el) el.addEventListener('change', updateEntropyPreview);
+  }
+
+  const customCharset = $('cfg-custom-charset');
+  if (customCharset) {
+    customCharset.addEventListener('input', updateEntropyPreview);
+  }
+
+  /* Compliance checkboxes */
+  const complianceChecks = document.querySelectorAll('input[name="compliance"]');
+  for (const cb of complianceChecks) {
+    cb.addEventListener('change', updateEntropyPreview);
+  }
+
+  /* D8: Requirements validation */
+  const reqIds = ['cfg-min-lower', 'cfg-min-upper', 'cfg-min-digits', 'cfg-min-symbols'];
+  for (const id of reqIds) {
+    const el = $(id);
+    if (el) el.addEventListener('input', validateRequirements);
   }
 
   /* Launch button */
   const btn = $('btn-launch');
   if (btn) btn.addEventListener('click', launchAudit);
 
+  /* D14: Copy buttons */
+  setupCopyButton('btn-copy-audit', () => {
+    const el = $('audit-password');
+    return el ? el.textContent : '';
+  });
+  setupCopyButton('btn-copy-result', () => {
+    const el = $('result-password');
+    return el ? el.textContent : '';
+  });
+
+  /* Initial entropy preview */
+  updateEntropyPreview();
+  validateRequirements();
+
   /* Load WASM */
   try {
     await loadWasm();
 
-    /* ── Verify struct layout matches our hardcoded offsets ── */
+    /* -- Verify struct layout matches our hardcoded offsets -- */
     const expectedOffsets = {
       password_length: 324,
       chi2_statistic:  336,
@@ -438,8 +927,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       throw new Error('Struct layout mismatch \u2014 paranoid.wasm was compiled with different alignment. Refusing to run.');
     }
 
+    /* Update status indicators */
     txt('engine-badge', 'WASI OpenSSL DRBG');
     txt('status-text', 'ready');
+
+    /* Set version from WASM if available */
+    if (wasm.paranoid_version) {
+      const versionPtr = wasm.paranoid_version();
+      if (versionPtr) {
+        const version = readString(versionPtr, 32);
+        if (version) {
+          txt('version-tag', 'v' + version);
+        }
+      }
+    }
   } catch (err) {
     console.error('WASM load failed:', err);
     txt('engine-badge', 'UNAVAILABLE');

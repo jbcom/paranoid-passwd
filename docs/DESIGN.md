@@ -1,6 +1,10 @@
 # Design Decisions
 
-This document explains the key design decisions in `paranoid` and their rationale.
+This document explains the key design decisions in `paranoid` v3.0 and their rationale.
+
+**v3.0 additions**: Platform abstraction layer, CMake build system, melange + apko
+for reproducible builds, new API (multi-password, charset validation, constrained
+generation, compliance frameworks).
 
 ---
 
@@ -96,15 +100,15 @@ This document explains the key design decisions in `paranoid` and their rational
    - Tools like Frama-C can prove correctness (planned)
    - Struct layout is deterministic (with verification)
 
-4. **OpenSSL is battle-tested**:
-   - NIST SP 800-90A certified DRBG
-   - 25+ years of cryptographic engineering
-   - FIPS 140-2 validated (some builds)
-   - Built from official source for WASM (tag `openssl-3.4.0`, with WASI patches)
+4. **Platform abstraction enables flexibility**:
+   - Native: OpenSSL RAND_bytes + EVP SHA-256 (NIST SP 800-90A certified DRBG)
+   - WASM: WASI random_get + compact FIPS 180-4 SHA-256 (<100KB, no OpenSSL)
+   - OpenSSL is battle-tested (25+ years, FIPS 140-2 validated)
+   - Compact SHA-256 is verifiable (single-file, NIST CAVP test vectors)
 
 **Trade-offs**:
 - ❌ Requires build step (cannot edit single HTML file)
-- ❌ Larger initial download (~180KB vs ~10KB for pure JS)
+- ❌ Larger initial download (<100KB vs ~10KB for pure JS)
 - ✅ Cryptographic security guarantees
 - ✅ Formal verification path
 
@@ -545,35 +549,32 @@ paranoid_audit_result_t* result = malloc(sizeof(paranoid_audit_result_t));
 
 ## Design Evolution
 
-| Aspect | v1 | v2 | Rationale |
-|--------|----|----|-----------|
-| Language | JavaScript | C + WASM | Crypto isolation, formal verification path |
-| File structure | Monolithic HTML | Separated files | CodeQL classification |
-| Randomness | `crypto.getRandomValues()` | OpenSSL DRBG | NIST-certified CSPRNG |
-| Distribution | Modulo | Rejection sampling | Eliminate 50% bias |
-| Fallback | Silent JS fallback | Fail-closed | No silent downgrades |
-| Tests | 3 basic | 7-layer audit | Defense in depth |
-| Navigation | JavaScript | CSS `:checked` | Reduce JS surface |
-| Actions | Version tags | SHA pins | Supply chain security |
-| Integrity | None | SRI hashes | Tamper detection |
+| Aspect | v1 | v2 | v3 | Rationale |
+|--------|----|----|-------|-----------|
+| Language | JavaScript | C + WASM | C + WASM | Crypto isolation |
+| Crypto deps | Web Crypto | OpenSSL (WASM) | Platform abstraction | <100KB WASM |
+| Build system | None | Makefile | CMake | Cross-platform |
+| Container | None | Docker multi-stage | melange + apko | Reproducible |
+| WASM size | N/A | ~180KB | <100KB | No OpenSSL in WASM |
+| SHA-256 | Web Crypto | OpenSSL EVP | Compact FIPS 180-4 | Auditable |
+| Distribution | Modulo | Rejection sampling | Rejection sampling | Uniform |
+| API scope | Generate only | Generate + audit | Multi-pw, constraints, compliance | Feature-complete |
+| Tests | 3 basic | 7-layer audit | 7-layer + KATs + Frama-C | Defense in depth |
+| Actions | Tags | SHA pins | SHA pins + Dependabot | Supply chain |
 
 ---
 
 ## Future Design Considerations
 
-### Reproducible Builds
+### Reproducible Builds (DONE)
 
 **Goal**: Bit-for-bit identical WASM from same source.
 
-**Challenges**:
-- Zig embeds timestamps in WASM
-- OpenSSL library path may vary
-- Build machine differences
-
-**Planned approach**:
-- Use `SOURCE_DATE_EPOCH` (deterministic timestamps)
-- Containerized builds (Docker, same environment)
-- Verify build artifacts match across machines
+**Status**: RESOLVED via melange + apko (Wolfi ecosystem).
+melange produces bitwise-reproducible APK packages. `SOURCE_DATE_EPOCH`
+is set automatically. Diverse double-compilation (`scripts/double_compile.sh`)
+and multi-party verification (`scripts/multiparty_verify.sh`) are wired
+to CI.
 
 ### Formal Verification
 

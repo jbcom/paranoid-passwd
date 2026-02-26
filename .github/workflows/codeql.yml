@@ -1,0 +1,56 @@
+# -----------------------------------------------------------------
+# paranoid-passwd -- CodeQL Analysis
+#
+# Scheduled and event-driven security analysis for C/C++ and
+# JavaScript code. Runs on push to main, pull requests, and
+# weekly schedule.
+#
+# This standalone workflow supplements the CodeQL job in ci.yml
+# to provide scheduled scanning and SARIF upload.
+# -----------------------------------------------------------------
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6am UTC
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [c-cpp, javascript]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@f35333b910470a5408cb081b68f0701254a7d27b # v3.28.18
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@f35333b910470a5408cb081b68f0701254a7d27b # v3.28.18
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@f35333b910470a5408cb081b68f0701254a7d27b # v3.28.18
+        with:
+          category: "/language:${{ matrix.language }}"

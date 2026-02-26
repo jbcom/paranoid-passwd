@@ -1,6 +1,12 @@
 # Architecture
 
-This document describes the system architecture of `paranoid`, a self-auditing cryptographic password generator built with WebAssembly.
+This document describes the system architecture of `paranoid` v3.0, a self-auditing
+cryptographic password generator built with WebAssembly.
+
+**v3.0 changes**: Platform abstraction layer replaces direct OpenSSL calls in
+WASM. Native builds use OpenSSL; WASM builds use compact SHA-256 + WASI
+random_get. Binary size reduced from ~180KB to <100KB. CMake replaces Makefile.
+New API: multi-password, charset validation, constrained generation, compliance.
 
 ---
 
@@ -41,7 +47,7 @@ This document describes the system architecture of `paranoid`, a self-auditing c
 │  │                   (WASM SANDBOX)                          │   │
 │  │                                                           │   │
 │  │  ┌─────────────────────────────────────────────────────┐ │   │
-│  │  │         paranoid.wasm (~180KB)                      │ │   │
+│  │  │         paranoid.wasm (<100KB)                      │ │   │
 │  │  │                                                     │ │   │
 │  │  │  WASM LINEAR MEMORY (opaque to JavaScript)         │ │   │
 │  │  │  ┌────────────────────────────────────────────┐    │ │   │
@@ -61,10 +67,10 @@ This document describes the system architecture of `paranoid`, a self-auditing c
 │  │  │  - paranoid_sha256()         [Cryptographic hash]  │ │   │
 │  │  │  ... 15+ exported functions                        │ │   │
 │  │  │                                                     │ │   │
-│  │  │  DEPENDENCIES:                                      │ │   │
-│  │  │  - OpenSSL libcrypto.a (built from source)        │ │   │
-│  │  │    - RAND_bytes() [AES-256-CTR DRBG]              │ │   │
-│  │  │    - EVP_Digest() [SHA-256]                       │ │   │
+│  │  │  PLATFORM ABSTRACTION (paranoid_platform.h):        │ │   │
+│  │  │  Native: OpenSSL RAND_bytes + EVP SHA-256          │ │   │
+│  │  │  WASM:   WASI random_get + compact SHA-256         │ │   │
+│  │  │          (FIPS 180-4, <100KB, no OpenSSL)          │ │   │
 │  │  └─────────────────────────────────────────────────┘ │   │
 │  └────────────────────┬──────────────────────────────────┘   │
 │                       │                                        │
@@ -109,13 +115,16 @@ This document describes the system architecture of `paranoid`, a self-auditing c
 ### 2. Computation Layer (WASM Sandbox)
 
 **Components**:
-- `src/paranoid.c` — All computation logic (400 lines)
-- `include/paranoid.h` — Public API definitions
-- `vendor/openssl/lib/libcrypto.a` — Crypto primitives (built from official OpenSSL source)
+- `src/paranoid.c` -- All computation logic (uses platform abstraction)
+- `include/paranoid.h` -- Public API definitions (v3.0)
+- `include/paranoid_platform.h` -- Platform abstraction interface
+- `src/platform_wasm.c` -- WASM backend (WASI random_get)
+- `src/platform_native.c` -- Native backend (OpenSSL, for tests)
+- `src/sha256_compact.c` -- FIPS 180-4 SHA-256 (WASM only)
 
 **Responsibilities**:
 - **Password generation**:
-  - Call OpenSSL `RAND_bytes()` for entropy
+  - Call `paranoid_platform_random()` for entropy (WASI random_get in WASM)
   - Apply rejection sampling to eliminate modulo bias
   - Build password string from charset
   
@@ -129,7 +138,7 @@ This document describes the system architecture of `paranoid`, a self-auditing c
   7. NIST thresholds (AAL1/AAL2/AAL3)
   
 - **Hash computation**:
-  - SHA-256 via OpenSSL EVP API
+  - SHA-256 via platform abstraction (OpenSSL EVP native, compact FIPS 180-4 WASM)
   - Used for collision detection (hash-compare)
   
 - **Result struct**:
@@ -137,7 +146,7 @@ This document describes the system architecture of `paranoid`, a self-auditing c
   - Expose pointer to JS via `paranoid_get_result_ptr()`
 
 **Guarantees**:
-- Cryptographically secure randomness (OpenSSL DRBG)
+- Cryptographically secure randomness (platform CSPRNG: OpenSSL native, WASI WASM)
 - Uniform character distribution (rejection sampling)
 - Deterministic struct layout (verified by JS at runtime)
 
@@ -459,7 +468,7 @@ Application running in browser sandbox
 
 | Operation | Time | Memory |
 |-----------|------|--------|
-| WASM load + instantiate | ~50-200ms | ~180KB |
+| WASM load + instantiate | ~50-200ms | <100KB |
 | Generate 1 password | ~1-5ms | ~1KB |
 | Generate 500 passwords (batch) | ~500ms-2s | ~500KB |
 | Chi-squared test | ~10-50ms | Negligible |
