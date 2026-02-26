@@ -94,7 +94,8 @@ _N := \033[0m
 # ═══════════════════════════════════════════════════════════
 
 .PHONY: all build site clean verify hash deploy check \
-        check-deps info help test test-native integration hallucination supply-chain
+        check-deps info help test test-native integration hallucination supply-chain \
+        docker-build docker-extract docker-e2e docker-all
 
 ## Default: build everything
 all: site
@@ -292,12 +293,47 @@ supply-chain:
 	@printf "$(_G)▸$(_N) Running supply chain verification\n"
 	@./scripts/supply_chain_verify.sh
 
+# ── Docker Targets ─────────────────────────────────────────
+
+.PHONY: docker-build docker-extract docker-e2e docker-all
+
+## Build Docker image with all tests (RECOMMENDED)
+docker-build:
+	@printf "$(_G)▸$(_N) Building Docker image with SBOM and provenance\n"
+	DOCKER_BUILDKIT=1 docker build \
+		--sbom=true \
+		--provenance=mode=max \
+		-t paranoid-artifact .
+
+## Extract artifacts from Docker image
+docker-extract:
+	@printf "$(_G)▸$(_N) Extracting verified artifacts from Docker image\n"
+	@docker rm -f temp-paranoid 2>/dev/null || true
+	@docker create --name temp-paranoid paranoid-artifact || { printf "$(_R)✗$(_N) Failed to create container. Run 'make docker-build' first.\n"; exit 1; }
+	@mkdir -p artifact
+	@docker cp temp-paranoid:/artifact/. ./artifact/
+	@docker rm temp-paranoid
+	@printf "$(_G)✓$(_N) Artifacts extracted to ./artifact/\n"
+	@ls -la artifact/
+
+## Run E2E tests with Docker Compose + Playwright
+docker-e2e:
+	@printf "$(_G)▸$(_N) Running E2E tests with Docker Compose + Playwright\n"
+	@docker compose up --abort-on-container-exit paranoid-server playwright
+
+## Full Docker workflow: build → extract → E2E test
+docker-all: docker-build docker-extract docker-e2e
+	@printf "$(_G)✓$(_N) Full Docker workflow complete\n"
+
 # ── Clean ──────────────────────────────────────────────────
 
 ## Remove all build artifacts
 clean:
 	@printf "$(_G)▸$(_N) Cleaning build artifacts\n"
 	rm -rf $(BUILD_DIR)
+	rm -rf artifact/
+	rm -rf test-results/
+	rm -rf playwright-report/
 	@printf "$(_G)✓$(_N) Clean\n"
 
 # ── Help ───────────────────────────────────────────────────
@@ -308,7 +344,13 @@ help:
 	@printf "$(_B)$(PROJECT)$(_N) v$(VERSION) — build targets\n"
 	@echo "────────────────────────────────────"
 	@echo ""
-	@echo "  RECOMMENDED: Use Docker for builds"
+	@echo "  RECOMMENDED: Docker-based workflow"
+	@echo "  make docker-build   Build image with tests + attestation"
+	@echo "  make docker-extract Extract verified artifacts"
+	@echo "  make docker-e2e     Run E2E tests with Playwright"
+	@echo "  make docker-all     Full workflow: build → extract → E2E"
+	@echo ""
+	@echo "  Or manually:"
 	@echo "    docker build -t paranoid-artifact ."
 	@echo "    docker create --name temp paranoid-artifact"
 	@echo "    docker cp temp:/artifact ./artifact"

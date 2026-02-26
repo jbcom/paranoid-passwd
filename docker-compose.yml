@@ -10,8 +10,11 @@
 #   All images are SHA-pinned for immutability (consistent with AGENTS.md).
 #
 # USAGE:
-#   # Build and run E2E tests
+#   # Full build and E2E tests
 #   docker compose up --build --abort-on-container-exit
+#
+#   # E2E tests only (uses pre-extracted artifacts in ./artifact/site)
+#   docker compose up paranoid-server playwright --abort-on-container-exit
 #
 #   # Run tests with screenshot capture
 #   docker compose run playwright npx playwright test --project=chromium
@@ -19,8 +22,12 @@
 #   # Interactive testing (connects to MCP)
 #   docker compose run playwright bash
 #
-# The build container extracts artifacts to ./artifact which is
-# mounted into the server container at /www for serving.
+# MODES:
+#   1. Full mode: Run paranoid-build first to build+extract artifacts
+#   2. CI mode: Use pre-extracted artifacts from ./artifact/site (skip build)
+#
+# For CI workflows, artifacts are downloaded from previous job and placed
+# in ./artifact/site before running docker compose.
 # ═══════════════════════════════════════════════════════════════
 
 version: "3.9"
@@ -28,13 +35,15 @@ version: "3.9"
 services:
   # ─────────────────────────────────────────────────────────────
   # Build Stage: Compile and extract verified WASM artifacts
+  # Skip this in CI when artifacts are pre-extracted
   # ─────────────────────────────────────────────────────────────
   paranoid-build:
+    profiles: ["build"]
     build:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - artifact-data:/extract
+      - ./artifact:/extract
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -49,24 +58,27 @@ services:
   # ─────────────────────────────────────────────────────────────
   # HTTP Server: Serve the site for browser testing
   # SHA-pinned Python Alpine image for supply chain security
+  # 
+  # Serves either:
+  #   - Artifacts built by paranoid-build (full mode)
+  #   - Pre-extracted artifacts from CI (./artifact/site)
   # ─────────────────────────────────────────────────────────────
   paranoid-server:
     image: python@sha256:2d91681153dd4b8cdb52d4fd34a17b9edbafa4dd3086143cfd4b6c3a84c1acb0
-    depends_on:
-      paranoid-build:
-        condition: service_completed_successfully
     volumes:
-      - artifact-data:/www:ro
-    working_dir: /www/site
+      # Mount local artifact directory (populated by build job or CI)
+      - ./artifact/site:/www:ro
+    working_dir: /www
     command: ["python", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/"]
+      # Simple shell-based healthcheck (curl/wget not available in python:alpine)
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/')"]
       interval: 5s
       timeout: 3s
-      retries: 5
-      start_period: 5s
+      retries: 10
+      start_period: 10s
     networks:
       - paranoid-net
 
@@ -91,9 +103,6 @@ services:
     command: ["npx", "playwright", "test", "--reporter=html"]
     networks:
       - paranoid-net
-
-volumes:
-  artifact-data:
 
 networks:
   paranoid-net:
