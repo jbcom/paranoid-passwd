@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔐 paranoid-passwd
+# paranoid-passwd
 
 ### The Password Generator That Trusts No One — Not Even Its Own Creator
 
@@ -28,38 +28,41 @@
 <!-- Tech Stack -->
 [![C](https://img.shields.io/badge/C-00599C?style=flat-square&logo=c&logoColor=white)](src/paranoid.c)
 [![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=flat-square&logo=webassembly&logoColor=white)](https://webassembly.org/)
+[![Zig](https://img.shields.io/badge/Zig-F7A41D?style=flat-square&logo=zig&logoColor=white)](https://ziglang.org/)
 [![OpenSSL](https://img.shields.io/badge/OpenSSL-721412?style=flat-square&logo=openssl&logoColor=white)](https://www.openssl.org/)
-[![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](Dockerfile)
-[![Alpine Linux](https://img.shields.io/badge/Alpine-0D597F?style=flat-square&logo=alpinelinux&logoColor=white)](https://alpinelinux.org/)
+[![Wolfi](https://img.shields.io/badge/Wolfi-4A4A55?style=flat-square&logo=linux&logoColor=white)](https://wolfi.dev/)
 
-[**🚀 Live Demo**](https://paranoid-passwd.com) · [**📖 Documentation**](#-documentation) · [**🔒 Security**](SECURITY.md) · [**🐛 Report Bug**](https://github.com/jbcom/paranoid-passwd/issues)
+[**Live Demo**](https://paranoid-passwd.com) · [**Documentation**](#documentation) · [**Security**](SECURITY.md) · [**Report Bug**](https://github.com/jbcom/paranoid-passwd/issues)
 
 </div>
 
 ---
 
-## 🎉 What's New in v2
+## What's New in v3
 
-> **Zero-Trust Password Generation with Full Supply Chain Security**
+> **Zero-Trust Password Generation with Wolfi Supply Chain Security**
 
-This release represents a complete architectural overhaul implementing [Liquibase-style supply chain security](https://www.liquibase.com/blog/docker-supply-chain-security):
+v3 is a complete rearchitecture: Docker multi-stage builds are replaced by [melange](https://github.com/chainguard-dev/melange) + [apko](https://github.com/chainguard-dev/apko) on [Wolfi](https://wolfi.dev/), the 1.5MB OpenSSL WASM dependency is eliminated in favor of a compact FIPS 180-4 SHA-256 implementation + WASI `random_get`, and the build system moves from Makefile to CMake with Zig cross-compilation.
 
 | Feature | Description |
 |---------|-------------|
-| **🐳 Docker-First CI/CD** | All builds run inside verified Docker containers — no local toolchain trust required |
-| **📦 SBOM + SLSA L3** | Software Bill of Materials + non-falsifiable build provenance on every release |
-| **✍️ Cosign Signing** | Keyless signatures via GitHub OIDC, recorded in Sigstore's Rekor transparency log |
-| **🧪 E2E Testing** | Playwright browser tests in isolated containers verify the full HTML→CSS→JS→WASM path |
-| **🏔️ Alpine Base** | 8x smaller attack surface than Debian (~3.5MB vs ~29MB) |
-| **🔬 acutest C Tests** | Native unit tests with NIST FIPS 180-4 known-answer vectors run before WASM compilation |
-| **📝 release-please** | Automated, attested releases with signed artifacts |
+| **Wolfi + melange/apko** | Declarative, reproducible package builds and OCI images — no Dockerfile, no shell-in-shell |
+| **<100KB WASM** | Compact FIPS 180-4 SHA-256 + WASI `random_get` replaces the 1.5MB OpenSSL WASM link |
+| **Platform abstraction** | `paranoid_platform.h` separates native (OpenSSL) and WASM (compact SHA-256 + WASI) backends |
+| **CMake build system** | Native tests via CTest, WASM via Zig cross-compilation toolchain (`cmake/wasm32-wasi.cmake`) |
+| **SBOM + SLSA L3** | Software Bill of Materials + non-falsifiable build provenance on every release |
+| **Cosign signing** | Keyless signatures via GitHub OIDC, recorded in Sigstore's Rekor transparency log |
+| **Playwright E2E** | Browser tests verify the full HTML/CSS/JS/WASM path |
+| **acutest C tests** | Native unit tests with NIST FIPS 180-4 known-answer vectors run before WASM compilation |
+| **release-please** | Automated, attested releases with signed artifacts |
+| **Double compilation** | Ken Thompson defense — Zig and Clang must produce matching WASM binaries |
 
 **Every artifact is:**
-- ✅ Built in a SHA-pinned Alpine container
-- ✅ Tested at the C level AND in the browser
-- ✅ Attested with SBOM + SLSA provenance
-- ✅ Signed with Cosign (keyless)
-- ✅ Deployed only from verified releases
+- Built in a Wolfi environment via melange (declarative, auditable recipe)
+- Tested at the C level (CTest) AND in the browser (Playwright)
+- Attested with SBOM + SLSA provenance
+- Signed with Cosign (keyless)
+- Deployed only from verified releases
 
 ```bash
 # Verify any release
@@ -72,130 +75,152 @@ cosign verify ghcr.io/jbcom/paranoid-passwd:latest \
 
 ## What is paranoid-passwd?
 
-`paranoid-passwd` is a C program compiled to WebAssembly that generates cryptographic passwords inside a WASM sandbox. It runs a comprehensive 7-layer statistical audit entirely in C, using OpenSSL's CSPRNG (Cryptographically Secure Pseudo-Random Number Generator). The browser never touches the random bytes — JavaScript only reads the results from WASM linear memory.
+`paranoid-passwd` is a C program compiled to WebAssembly that generates cryptographic passwords inside a WASM sandbox. It runs a comprehensive 7-layer statistical audit entirely in C, using a platform abstraction layer: OpenSSL RAND_bytes for native builds, WASI `random_get` (backed by Web Crypto `getRandomValues`) for WASM builds. The browser never touches the random bytes — JavaScript only reads the results from WASM linear memory.
 
 **Key Features:**
-- ✅ **OpenSSL CSPRNG** — AES-256-CTR DRBG, NIST SP 800-90A compliant
-- ✅ **Rejection sampling** — Uniform distribution with no modulo bias
-- ✅ **7-layer statistical audit** — Chi-squared, serial correlation, collision detection, entropy proofs, birthday paradox, pattern checks, NIST conformance
-- ✅ **WASM sandbox isolation** — JavaScript cannot modify random bytes
-- ✅ **Fail-closed design** — No JavaScript fallback (intentional)
-- ✅ **Full transparency** — All code auditable, complete threat model disclosed
+- **CSPRNG delegation** — WASI `random_get` in browser (backed by OS CSPRNG), OpenSSL RAND_bytes native
+- **Rejection sampling** — Uniform distribution with no modulo bias
+- **7-layer statistical audit** — Chi-squared, serial correlation, collision detection, entropy proofs, birthday paradox, pattern checks, NIST conformance
+- **WASM sandbox isolation** — JavaScript cannot modify random bytes
+- **Fail-closed design** — No JavaScript fallback (intentional)
+- **<100KB WASM binary** — No OpenSSL in WASM; compact FIPS 180-4 SHA-256 implementation
+- **Full transparency** — All code auditable, complete threat model disclosed
 
 ---
 
-## 🚀 Live Demo
+## Live Demo
 
-🔗 **[Try it now](https://paranoid-passwd.com)** — Deployed from signed releases
+**[Try it now](https://paranoid-passwd.com)** — Deployed from signed releases to GitHub Pages
 
 Generate a 32-character password using 94 printable ASCII characters with **209.75 bits of entropy**. The tool will:
-1. Generate the password using OpenSSL's CSPRNG
+1. Generate the password using the platform CSPRNG
 2. Run 7 statistical tests to verify randomness
 3. Display detailed audit results with visual indicators
 4. Show brute-force resistance calculations
 
 ---
 
-## 💡 Why v2?
+## Why v3?
 
-v1 was a monolithic HTML file with 350 lines of JavaScript doing crypto math. That created problems:
+v1 was a monolithic HTML file with 350 lines of JavaScript doing crypto math. v2 moved everything to C + OpenSSL compiled to WASM via Zig. v3 eliminates the OpenSSL WASM dependency entirely and replaces Docker with Wolfi-based tooling.
 
-| Problem | Impact | v2 Solution |
-|---------|--------|-------------|
-| **CodeQL couldn't classify** | Security-critical logic mixed with DOM manipulation | Separate C/JS/CSS files |
-| **JavaScript is hostile** | Prototype pollution, GC memory retention, extension attacks | All crypto in WASM |
-| **Fallbacks masked failures** | Users thought they had WASM isolation when they didn't | Fail-closed (no JS fallback) |
-| **No supply chain verification** | No way to verify binary provenance | SBOM + SLSA + Cosign |
+| Problem | v2 Approach | v3 Solution |
+|---------|-------------|-------------|
+| **1.5MB WASM binary** | Full OpenSSL `libcrypto.a` compiled to `wasm32-wasi` | Compact FIPS 180-4 SHA-256 (~300 lines of C) + WASI `random_get` produces <100KB |
+| **Docker trust model** | Multi-stage Dockerfile with shell-in-shell builds | melange (declarative Wolfi package) + apko (OCI image from packages) — no shell, fully auditable |
+| **Makefile complexity** | Hand-maintained Makefile with many targets | CMake with native and WASM toolchain files |
+| **OpenSSL WASM patching** | Custom `scripts/build_openssl_wasm.sh` | Eliminated — WASM needs only `sha256_compact.c` and WASI syscalls |
+| **Alpine base image** | Alpine 3.21 (musl libc, limited SBOM tooling) | Wolfi (glibc, built-in SBOM generation, Chainguard supply chain) |
 
-v2 treats this as what it is: **a C project that happens to render in a browser**, with enterprise-grade supply chain security.
+v3 treats this as what it is: **a C project that happens to render in a browser**, with purpose-built supply chain security from [Chainguard](https://www.chainguard.dev/).
 
 ---
 
-## 🛠️ Quick Start
+## Quick Start
 
 ### Option 1: Use the Live Demo (Recommended)
 
 Visit **[paranoid-passwd.com](https://paranoid-passwd.com)** — no installation needed.
 
-### Option 2: Docker (Verified Build)
-
-```bash
-# Build with full supply chain attestation
-docker build -t paranoid-passwd .
-
-# Extract verified artifacts
-docker create --name temp paranoid-passwd
-docker cp temp:/artifact ./artifact
-docker rm temp
-
-# Serve locally
-cd artifact/site && python3 -m http.server 8080
-# Open http://localhost:8080
-```
-
-### Option 3: Full Docker Workflow with E2E Tests
+### Option 2: Local Build with CMake
 
 ```bash
 # Clone repository
 git clone https://github.com/jbcom/paranoid-passwd.git
 cd paranoid-passwd
 
-# Run full E2E test suite (builds + tests in Docker)
-docker compose up --build --abort-on-container-exit
+# --- Native build (tests) ---
+# Prerequisites: CMake >= 3.20, OpenSSL dev libraries
+cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/native
+ctest --test-dir build/native --output-on-failure
 
-# Or use Makefile targets
-make docker-all  # Build → Extract → E2E Test
+# --- WASM build ---
+# Prerequisites: Zig >= 0.13.0, wabt (optional, for wasm-validate)
+cmake -B build/wasm \
+    -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build/wasm
+
+# --- Serve locally ---
+mkdir -p build/site
+cp www/index.html www/style.css www/app.js build/site/
+cp build/wasm/paranoid.wasm build/site/
+cp build/wasm/BUILD_MANIFEST.json build/site/
+python3 -m http.server 8080 --directory build/site
+# Open http://localhost:8080
 ```
 
-### Option 4: Local Development (Advanced)
-
-<details>
-<summary>Click to expand local development setup</summary>
-
-**Prerequisites:**
-- Zig ≥ 0.13.0
-- OpenSSL (for hash computation)
-- wabt (optional, for WASM verification)
+### Option 3: melange/apko (Production Build)
 
 ```bash
-# Build OpenSSL from official source (produces vendor/openssl/lib/libcrypto.a)
-./scripts/build_openssl_wasm.sh
+# Prerequisites: melange v0.43.3, apko v1.1.11
 
-# Clone test framework
-mkdir -p vendor
-git clone https://github.com/mity/acutest.git vendor/acutest
-cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
+# Build Wolfi package
+melange keygen
+melange build melange.yaml \
+  --signing-key melange.rsa \
+  --arch x86_64 \
+  --out-dir packages/
 
-# Build and serve
-make site
-make serve  # http://localhost:8080
+# Build OCI image
+apko build apko.yaml \
+  paranoid-passwd:latest \
+  paranoid-passwd.tar \
+  --keyring-append melange.rsa.pub \
+  --repository-append packages/
+
+# Extract artifacts
+docker load < paranoid-passwd.tar
+docker create --name tmp paranoid-passwd:latest
+docker cp tmp:/usr/share/paranoid-passwd/site ./site
+docker rm tmp
+
+# Serve
+cd site && python3 -m http.server 8080
 ```
-
-**Note:** Local builds are for development only. Production artifacts should always come from verified Docker builds.
-
-</details>
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-paranoid/
-├── src/paranoid.c           # ALL crypto computation (400 lines of C)
-├── include/paranoid.h       # Public C API + struct definitions
+paranoid-passwd/
+├── src/
+│   ├── paranoid.c            # Core crypto logic (~600 lines)
+│   ├── platform_native.c     # Native: OpenSSL RAND_bytes + EVP SHA-256
+│   ├── platform_wasm.c       # WASM: WASI random_get
+│   └── sha256_compact.c      # FIPS 180-4 SHA-256 (WASM only, no OpenSSL)
+├── include/
+│   ├── paranoid.h            # Public API + struct definitions
+│   ├── paranoid_platform.h   # Platform abstraction interface
+│   └── paranoid_frama.h      # Frama-C annotations
 ├── www/
-│   ├── index.html           # Structure only (no inline JS/CSS)
-│   ├── style.css            # CSS-only wizard + animations
-│   └── app.js               # Display-only WASM bridge (reads struct, sets textContent)
+│   ├── index.html            # Structure (CSS-only wizard state machine)
+│   ├── style.css             # Dark theme (navy + emerald)
+│   └── app.js                # WASM bridge (display-only)
 ├── tests/
-│   ├── native/              # Native C unit tests (acutest, NIST vectors, rejection sampling)
-│   └── e2e/                 # Playwright browser tests
-├── Dockerfile               # Multi-stage build with all verification gates
-├── docker-compose.yml       # E2E testing with Playwright
+│   ├── test_native.c         # CTest native unit tests
+│   ├── test_paranoid.c       # Core API tests
+│   ├── test_sha256.c         # NIST CAVP vectors
+│   ├── test_statistics.c     # Statistical test KATs
+│   └── e2e/                  # Playwright browser tests
+├── CMakeLists.txt            # Build system (native + WASM)
+├── cmake/wasm32-wasi.cmake   # Zig cross-compilation toolchain
+├── melange.yaml              # Wolfi package recipe
+├── apko.yaml                 # OCI image assembly
+├── scripts/
+│   ├── double_compile.sh     # Ken Thompson defense (Zig + Clang)
+│   ├── hallucination_check.sh
+│   ├── supply_chain_verify.sh
+│   ├── multiparty_verify.sh
+│   └── integration_test.sh
 └── .github/workflows/
-    ├── ci.yml               # PR verification (Docker build + E2E tests)
-    ├── cd.yml               # Push to main (SBOM + Cosign + release-please)
-    └── release.yml          # Deploy from signed releases
+    ├── ci.yml                # PR verification
+    ├── cd.yml                # Build + sign + release-please
+    ├── release.yml           # Pages deploy from releases
+    ├── codeql.yml            # Static analysis
+    └── scorecard.yml         # OpenSSF Scorecard
 ```
 
 ### The Trust Boundary
@@ -212,56 +237,81 @@ random_get(ptr, len) {
 
 Everything above this runs in WASM linear memory. Everything below is the OS kernel.
 
+### Entropy Chain
+
+```
+paranoid.c: paranoid_platform_random(buf, n)
+    |
+Platform abstraction (paranoid_platform.h):
+  Native: OpenSSL RAND_bytes -> OS CSPRNG
+  WASM:   WASI random_get(ptr, len)
+    |
+Browser polyfill: crypto.getRandomValues(buf)    <- 3 lines of JS
+    |
+OS CSPRNG: /dev/urandom / CryptGenRandom / SecRandomCopyBytes
+    |
+Hardware: RDRAND / RDSEED / interrupt timing
+```
+
 ---
 
-## 🔗 Supply Chain Security
+## Supply Chain Security
 
-This project implements **Liquibase-style supply chain security** with full artifact attestation:
+This project implements supply chain security using [Chainguard](https://www.chainguard.dev/)'s toolchain: melange for reproducible package builds and apko for minimal OCI images, both on [Wolfi](https://wolfi.dev/).
 
 | Layer | Implementation | Status |
 |-------|---------------|--------|
-| **Base Image** | Alpine 3.21 (SHA256-pinned digest) | ✅ |
-| **Dependencies** | SHA-pinned commits (cloned in Dockerfile) | ✅ |
-| **Testing** | acutest C tests + Playwright E2E in Docker | ✅ |
-| **SBOM** | Software Bill of Materials (`--sbom=true`) | ✅ |
-| **Provenance** | SLSA Level 3 (`--provenance=mode=max`) | ✅ |
-| **Signing** | Cosign keyless via GitHub OIDC | ✅ |
-| **Actions** | All SHA-pinned (no tags) | ✅ |
-| **Releases** | release-please with attested artifacts | ✅ |
+| **Base OS** | Wolfi (glibc, Chainguard-maintained, built-in SBOM) | Done |
+| **Package Build** | melange v0.43.3 (declarative YAML recipe, signing key) | Done |
+| **Image Assembly** | apko v1.1.11 (OCI image from packages, automatic SBOM) | Done |
+| **Cross-Compilation** | Zig 0.13.0 via `cmake/wasm32-wasi.cmake` toolchain | Done |
+| **Testing** | acutest C tests (CTest) + Playwright E2E | Done |
+| **SBOM** | Software Bill of Materials (apko automatic generation) | Done |
+| **Provenance** | SLSA Level 3 (`actions/attest-build-provenance`) | Done |
+| **Signing** | Cosign keyless via GitHub OIDC | Done |
+| **Actions** | All SHA-pinned (no tags) | Done |
+| **Reproducibility** | Diverse double-compilation (Zig + Clang) | Done |
+| **Releases** | release-please with attested artifacts | Done |
 
 ### CI/CD Pipeline
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                           PULL REQUEST (ci.yml)                        │
-├────────────────────────────────────────────────────────────────────────┤
-│  Docker Build (all tests inside) → E2E Tests → WASM Verification       │
-│      ↓                                ↓              ↓                 │
-│   acutest C tests               Playwright      wasm-objdump           │
-│   NIST vectors                  screenshots     exports check          │
-│                                                                        │
-│  ✓ ALL CHECKS MUST PASS TO MERGE                                       │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                           PUSH TO MAIN (cd.yml)                        │
-├────────────────────────────────────────────────────────────────────────┤
-│  Docker Build → SBOM → Provenance → Cosign Sign → release-please       │
-│      ↓            ↓         ↓            ↓              ↓              │
-│   Verified    Deps list   SLSA L3    Keyless      Creates PR           │
-│   WASM                               Rekor log    for release          │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                           RELEASE (release.yml)                        │
-├────────────────────────────────────────────────────────────────────────┤
-│  Build from tag → Attest → Sign → Upload Assets → Deploy to Pages      │
-│      ↓             ↓        ↓          ↓              ↓                │
-│   Verified      SLSA    Cosign    WASM + ZIP     GitHub Pages          │
-│   image        provenance        checksums       from release          │
-└────────────────────────────────────────────────────────────────────────┘
++------------------------------------------------------------------------+
+|                       PULL REQUEST (ci.yml)                             |
++------------------------------------------------------------------------+
+|  Native CTest      WASM Build+Validate     CodeQL        SonarCloud   |
+|      |                    |                   |               |        |
+|   acutest C         Zig cross-compile     C + JS scan    Quality gate  |
+|   NIST vectors      wasm-validate                                      |
+|                           |                                            |
+|                     Playwright E2E                                      |
+|                           |                                            |
+|  ShellCheck        Hallucination Check     Supply Chain Verify          |
+|                                                                        |
+|  ALL CHECKS MUST PASS TO MERGE                                         |
++------------------------------------------------------------------------+
+                                |
+                                v
++------------------------------------------------------------------------+
+|                       PUSH TO MAIN (cd.yml)                             |
++------------------------------------------------------------------------+
+|  melange build -> apko image -> Cosign sign -> release-please           |
+|      |                |              |               |                  |
+|   Wolfi pkg       OCI image      Keyless         Creates PR            |
+|   signed APK      with SBOM      Rekor log       for release           |
+|                                                                        |
+|  Double Compilation (Zig + Clang must match)                            |
++------------------------------------------------------------------------+
+                                |
+                                v
++------------------------------------------------------------------------+
+|                       RELEASE (release.yml)                             |
++------------------------------------------------------------------------+
+|  Build from tag -> Attest -> Sign -> Upload Assets -> Deploy to Pages   |
+|      |               |        |           |               |             |
+|   melange/apko    SLSA     Cosign    WASM + ZIP      GitHub Pages       |
+|   from tag       provenance         checksums        paranoid-passwd.com|
++------------------------------------------------------------------------+
 ```
 
 ### Verification Commands
@@ -272,37 +322,35 @@ cosign verify ghcr.io/jbcom/paranoid-passwd:latest \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
   --certificate-identity-regexp="https://github.com/jbcom/paranoid-passwd/.*"
 
-# View SBOM
-docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
-  --format '{{ json .SBOM }}'
+# Run double compilation check locally
+./scripts/double_compile.sh
 
-# View SLSA Provenance
-docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
-  --format '{{ json .Provenance }}'
+# Run supply chain verification
+./scripts/supply_chain_verify.sh
 ```
 
 ---
 
-## 🛡️ Threat Model
+## Threat Model
 
 `paranoid-passwd` treats the LLM that built it as an adversary. Six primary threats:
 
 | ID | Threat | Status |
 |----|--------|--------|
-| **T1** | Training data leakage (passwords biased toward breach dumps) | ✅ Mitigated via CSPRNG delegation |
-| **T2** | Token distribution bias (softmax non-uniformity) | ✅ Mitigated via rejection sampling |
-| **T3** | Deterministic reproduction (same prompt → same password) | ✅ Mitigated via hardware entropy |
-| **T4** | Prompt injection steering | ⚠️ Residual (code is LLM-authored) |
-| **T5** | Hallucinated security claims | ⚠️ **CRITICAL** — verify the math yourself |
-| **T6** | Screen/conversation exposure | ⚠️ Advisory (clear clipboard) |
+| **T1** | Training data leakage (passwords biased toward breach dumps) | Mitigated via CSPRNG delegation |
+| **T2** | Token distribution bias (softmax non-uniformity) | Mitigated via rejection sampling |
+| **T3** | Deterministic reproduction (same prompt -> same password) | Mitigated via hardware entropy |
+| **T4** | Prompt injection steering | Residual (code is LLM-authored) |
+| **T5** | Hallucinated security claims | **CRITICAL** — verify the math yourself |
+| **T6** | Screen/conversation exposure | Advisory (clear clipboard) |
 
 **T5 is the most dangerous** because it makes all other threats invisible. If the chi-squared implementation has a bug, the audit will still "pass."
 
-👉 **Read the full threat model**: [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)
+Read the full threat model: [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)
 
 ---
 
-## 🔒 Security
+## Security
 
 ### Entropy Specifications
 
@@ -311,9 +359,11 @@ docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
 | **Password length** | 32 characters |
 | **Character set** | 94 printable ASCII |
 | **Entropy** | 209.75 bits |
-| **Search space** | 94³² ≈ 1.38 × 10⁶³ |
-| **Brute-force resistance** | 2.19 × 10⁴³ years @ 10¹² hash/s |
-| **Birthday paradox** | ~4.37 × 10³¹ passwords for 50% collision |
+| **Search space** | 94^32 ~ 1.38 x 10^63 |
+| **Brute-force resistance** | 2.19 x 10^43 years @ 10^12 hash/s |
+| **Birthday paradox** | ~4.37 x 10^31 passwords for 50% collision |
+
+> **Note**: These calculations assume the default 32-char, 94-symbol charset. Verify independently: entropy = log2(94) x 32 ≈ 209.75 bits. See [Honest Limitations](#honest-limitations) — this code was written by an LLM.
 
 ### Statistical Audit (7 Layers)
 
@@ -322,7 +372,7 @@ docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
 | 1 | **Chi-Squared** | Verifies character frequency matches expected uniform distribution |
 | 2 | **Serial Correlation** | Checks for positional dependencies (lag-1 autocorrelation) |
 | 3 | **Collision Detection** | Generates 500-password batch, verifies uniqueness via SHA-256 |
-| 4 | **Entropy Proofs** | Calculates log₂(N) × L, validates against NIST standards |
+| 4 | **Entropy Proofs** | Calculates log2(N) x L, validates against NIST standards |
 | 5 | **Birthday Paradox** | Computes collision probability for given batch size |
 | 6 | **Pattern Checks** | Detects runs, cycles, and trivial sequences |
 | 7 | **NIST Conformance** | Validates against SP 800-63B entropy requirements |
@@ -333,13 +383,13 @@ See [SECURITY.md](SECURITY.md) for our security policy and disclosure process.
 
 ---
 
-## ⚠️ Honest Limitations
+## Honest Limitations
 
 > **We believe in radical transparency about what this tool can and cannot guarantee.**
 
-1. **This code was written by an LLM.** The OpenSSL primitives are sound, but the glue code (rejection sampling, chi-squared approximations, struct offsets) could contain subtle errors.
+1. **This code was written by an LLM.** The CSPRNG primitives (WASI `random_get`, OpenSSL `RAND_bytes`) are sound, but the glue code (rejection sampling, chi-squared approximations, struct offsets) could contain subtle errors.
 
-2. **Statistical tests are necessary but not sufficient.** Passing χ² proves consistency with randomness, not randomness itself.
+2. **Statistical tests are necessary but not sufficient.** Passing chi-squared proves consistency with randomness, not randomness itself.
 
 3. **Struct offset assumptions.** The JavaScript reader relies on hardcoded byte offsets. Runtime verification catches compiler mismatches, but if verification itself is wrong, JS reads garbage.
 
@@ -347,11 +397,11 @@ See [SECURITY.md](SECURITY.md) for our security policy and disclosure process.
 
 5. **This threat model is not peer-reviewed.** The 6-threat taxonomy is LLM-derived, not from published research.
 
-👉 **Read all limitations**: [AGENTS.md](AGENTS.md#honest-limitations)
+Read all limitations: [AGENTS.md](AGENTS.md#honest-limitations)
 
 ---
 
-## 📖 Documentation
+## Documentation
 
 | Document | Purpose |
 |----------|---------|
@@ -359,8 +409,8 @@ See [SECURITY.md](SECURITY.md) for our security policy and disclosure process.
 | [SECURITY.md](SECURITY.md) | Security policy, disclosure process, LLM threat model |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Development setup, testing, contributing guidelines |
 | [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
-| [docs/BUILD.md](docs/BUILD.md) | Build system, Docker pipeline, acutest testing |
-| [docs/SUPPLY-CHAIN.md](docs/SUPPLY-CHAIN.md) | SLSA Level 3 attestation, Cosign, SBOM |
+| [docs/BUILD.md](docs/BUILD.md) | Build system, CMake pipeline, acutest testing |
+| [docs/SUPPLY-CHAIN.md](docs/SUPPLY-CHAIN.md) | SLSA Level 3 attestation, Cosign, SBOM, melange/apko |
 | [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | Comprehensive threat analysis (18 threats) |
 | [docs/AUDIT.md](docs/AUDIT.md) | Statistical audit methodology (7 layers) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture diagrams |
@@ -368,38 +418,38 @@ See [SECURITY.md](SECURITY.md) for our security policy and disclosure process.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome:
 
-- **🔬 Cryptographer review** of `src/paranoid.c` (especially rejection sampling and chi-squared)
-- **📐 Struct layout verification** (compare offsets against `wasm-objdump` output)
-- **📊 Additional statistical tests** (NIST SP 800-22, Dieharder)
-- **🛡️ New LLM threat vectors** as the field evolves
-- **♿ Accessibility improvements** to the web frontend
+- **Cryptographer review** of `src/paranoid.c` (especially rejection sampling and chi-squared)
+- **Struct layout verification** (compare offsets against `wasm-objdump` output)
+- **Additional statistical tests** (NIST SP 800-22, Dieharder)
+- **New LLM threat vectors** as the field evolves
+- **Accessibility improvements** to the web frontend
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for development setup and guidelines.
 
 ### Security Policy
 
 Contributions that weaken the security posture will be rejected:
-- ❌ Removing fail-closed behavior
-- ❌ Replacing CSPRNG with PRNG
-- ❌ Removing/weakening statistical tests
-- ❌ Suppressing threat model warnings
-- ❌ Unpinning GitHub Actions from commit SHAs
+- Removing fail-closed behavior
+- Replacing CSPRNG with PRNG
+- Removing/weakening statistical tests
+- Suppressing threat model warnings
+- Unpinning GitHub Actions from commit SHAs
 
 ---
 
-## 📄 License
+## License
 
 MIT License — see [LICENSE](LICENSE) for details.
 
-**However**, read the [Honest Limitations](#️-honest-limitations) section before production use. This tool demonstrates a verifiable generation pipeline and formalizes the LLM threat model, but should be reviewed by a human cryptographer before relying on it for production secrets.
+**However**, read the [Honest Limitations](#honest-limitations) section before production use. This tool demonstrates a verifiable generation pipeline and formalizes the LLM threat model, but should be reviewed by a human cryptographer before relying on it for production secrets.
 
 ---
 
-## ❓ FAQ
+## FAQ
 
 <details>
 <summary><strong>Q: Why not just use a password manager?</strong></summary>
@@ -410,13 +460,13 @@ A: You should! This tool demonstrates what a verifiable generation pipeline look
 <details>
 <summary><strong>Q: Can I use this in production?</strong></summary>
 
-A: The generation algorithm (OpenSSL CSPRNG + rejection sampling) is production-grade. The implementation should be reviewed by a human cryptographer first. The supply chain security (SBOM, SLSA, Cosign) provides enterprise-grade verification.
+A: The generation algorithm (platform-abstracted CSPRNG + rejection sampling) is production-grade. The implementation should be reviewed by a human cryptographer first. The supply chain security (SBOM, SLSA, Cosign) provides enterprise-grade verification.
 </details>
 
 <details>
 <summary><strong>Q: Why C instead of Rust?</strong></summary>
 
-A: OpenSSL. We compile official OpenSSL source to `wasm32-wasi` using Zig, producing `libcrypto.a` with full provenance. Zig's `cc` can link against it with zero configuration. A Rust port using `ring` or `rustls` would be viable but would require a different crypto library.
+A: Originally for OpenSSL — we compiled official OpenSSL source to `wasm32-wasi`. In v3, the WASM build no longer depends on OpenSSL: a compact FIPS 180-4 SHA-256 implementation (`src/sha256_compact.c`, ~300 lines) replaces `libcrypto.a`, and WASI `random_get` replaces `RAND_bytes`. C remains the language for Zig cross-compilation compatibility and Frama-C formal verification. The platform abstraction layer (`include/paranoid_platform.h`) cleanly separates native and WASM backends. A Rust port using `ring` or `rustls` would be viable but would require a different crypto library.
 </details>
 
 <details>
@@ -435,31 +485,46 @@ cosign verify ghcr.io/jbcom/paranoid-passwd:latest \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
   --certificate-identity-regexp="https://github.com/jbcom/paranoid-passwd/.*"
 
-# Local verification
-make verify   # Check WASM exports
-make hash     # Print SHA-256 and SRI hashes
+# Run double compilation check (Zig + Clang must match)
+./scripts/double_compile.sh
+
+# Run supply chain verification
+./scripts/supply_chain_verify.sh
 ```
 </details>
 
 <details>
-<summary><strong>Q: Why Docker for everything?</strong></summary>
+<summary><strong>Q: Why melange/apko instead of Docker?</strong></summary>
 
-A: Supply chain security. Docker builds are:
-- Reproducible (same inputs → same outputs)
-- Isolated (no local toolchain trust)
-- Attestable (SBOM + provenance attached)
-- Verifiable (Cosign signatures)
+A: Supply chain security with better guarantees. melange builds are:
+- **Declarative** — YAML recipe, no shell-in-shell scripting
+- **Reproducible** — same inputs produce identical packages
+- **Signed** — built packages are cryptographically signed
+- **Auditable** — every build step is explicit and visible in `melange.yaml`
+
+apko produces minimal OCI images from those packages with automatic SBOM generation. The entire build chain (Wolfi base OS, melange package, apko image) is maintained by [Chainguard](https://www.chainguard.dev/) with a focus on supply chain security. Docker multi-stage builds mix build logic with shell scripting in ways that are difficult to audit and reproduce.
+</details>
+
+<details>
+<summary><strong>Q: What happened to OpenSSL in WASM?</strong></summary>
+
+A: Eliminated in v3. Compiling OpenSSL to `wasm32-wasi` produced a 1.5MB binary and required custom patches (`scripts/build_openssl_wasm.sh`). The WASM build only needs two things: random bytes (WASI `random_get`, 3 lines) and SHA-256 (compact FIPS 180-4 implementation, ~300 lines of C). Native builds still use OpenSSL via the platform abstraction layer (`include/paranoid_platform.h`).
 </details>
 
 ---
 
 ## Acknowledgments
 
-- **[OpenSSL](https://github.com/openssl/openssl)** — Compiled from official source at tag `openssl-3.4.0` with our WASI patches
-- **Zig** — Modern C/C++ compiler with excellent WebAssembly support
+- **[Zig](https://ziglang.org/)** — Cross-compiles C to `wasm32-wasi` via `cmake/wasm32-wasi.cmake` toolchain
+- **[Wolfi](https://wolfi.dev/)** — Undistro base OS with built-in SBOM and supply chain focus
+- **[melange](https://github.com/chainguard-dev/melange)** — Declarative Wolfi package builder
+- **[apko](https://github.com/chainguard-dev/apko)** — Minimal OCI image assembler with automatic SBOM
+- **[OpenSSL](https://github.com/openssl/openssl)** — RAND_bytes + EVP SHA-256 for native builds
+- **[acutest](https://github.com/mity/acutest)** — Header-only C unit test framework
 - **NIST SP 800-90A** — DRBG specification
 - **NIST SP 800-63B** — Digital identity guidelines (entropy requirements)
+- **NIST FIPS 180-4** — Secure Hash Standard (SHA-256 implementation reference)
 
 ---
 
-**Built with transparency. Audited with paranoia. 🔒**
+**Built with transparency. Audited with paranoia.**

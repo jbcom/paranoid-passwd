@@ -163,17 +163,165 @@ function getSelectedFrameworks() {
    but are used here only for the pre-generation strength meter
    and entropy preview. The actual compliance check runs in C.
 
-   TODO: HUMAN_REVIEW - verify thresholds match C-side definitions
+   TODO: HUMAN_REVIEW — thresholds mirror C-side definitions in paranoid.c
+   (verify minLen, minEntropy, composition booleans match src/paranoid.c)
    =================================================================== */
 
 const FRAMEWORKS = {
-  nist:     { name: 'NIST SP 800-63B',  minLen: 8,  minEntropy: 30,  desc: 'US federal standard' },
-  pci_dss:  { name: 'PCI DSS 4.0',      minLen: 12, minEntropy: 60,  desc: 'Payment card industry' },
-  hipaa:    { name: 'HIPAA',             minLen: 8,  minEntropy: 60,  desc: 'Healthcare privacy' },
-  soc2:     { name: 'SOC 2',             minLen: 8,  minEntropy: 60,  desc: 'SaaS controls' },
-  gdpr:     { name: 'GDPR / ENISA',      minLen: 8,  minEntropy: 80,  desc: 'EU data protection' },
-  iso27001: { name: 'ISO 27001',         minLen: 12, minEntropy: 90,  desc: 'Intl. info security' },
+  nist:     { name: 'NIST SP 800-63B',  minLen: 8,  minEntropy: 30,  mixedCase: false, digits: false, symbols: false, desc: 'US federal standard', source: 'Rev 3 \u00A75.1.1.1 (Rev 4 raises to 15 for single-factor)' },
+  pci_dss:  { name: 'PCI DSS 4.0',      minLen: 12, minEntropy: 60,  mixedCase: true,  digits: true,  symbols: false, desc: 'Payment card industry', source: 'Req 8.3.6: numeric + alphabetic required' },
+  hipaa:    { name: 'HIPAA',             minLen: 8,  minEntropy: 50,  mixedCase: true,  digits: true,  symbols: true,  desc: 'Healthcare (HITRUST guidance)', source: 'HHS defers to NIST; HITRUST CSF adds complexity' },
+  soc2:     { name: 'SOC 2',             minLen: 8,  minEntropy: 50,  mixedCase: true,  digits: true,  symbols: false, desc: 'SaaS org controls', source: 'Principle-based (CC6.1); industry practice' },
+  gdpr:     { name: 'GDPR / ENISA',      minLen: 10, minEntropy: 80,  mixedCase: true,  digits: true,  symbols: true,  desc: 'EU data protection', source: 'CNIL recommends 12 or 8+lockout; ENISA guidelines' },
+  iso27001: { name: 'ISO 27001',         minLen: 12, minEntropy: 90,  mixedCase: true,  digits: true,  symbols: true,  desc: 'Intl. info security', source: 'Risk-based (A.5.17); industry thresholds' },
 };
+
+/* ===================================================================
+   COMPLIANCE ENFORCEMENT — compute combined requirements, enforce UI
+   =================================================================== */
+
+/**
+ * Compute the strictest (max) requirements from all selected frameworks.
+ */
+function computeCombinedRequirements(selected) {
+  let minLen = 0;
+  let minEntropy = 0;
+  let mixedCase = false;
+  let digits = false;
+  let symbols = false;
+
+  for (const fwKey of selected) {
+    const fw = FRAMEWORKS[fwKey];
+    if (!fw) continue;
+    if (fw.minLen > minLen) minLen = fw.minLen;
+    if (fw.minEntropy > minEntropy) minEntropy = fw.minEntropy;
+    if (fw.mixedCase) mixedCase = true;
+    if (fw.digits) digits = true;
+    if (fw.symbols) symbols = true;
+  }
+
+  return { minLen, minEntropy, mixedCase, digits, symbols };
+}
+
+/**
+ * Check whether the current charset selection can satisfy composition requirements.
+ * Returns { ok, missing } where missing lists unsatisfied char type names.
+ */
+function checkCharsetCapability(reqs) {
+  const missing = [];
+  if (reqs.mixedCase) {
+    const lower = $('cfg-lower');
+    const upper = $('cfg-upper');
+    if (lower && !lower.checked) missing.push('lowercase');
+    if (upper && !upper.checked) missing.push('uppercase');
+  }
+  if (reqs.digits) {
+    const d = $('cfg-digits');
+    if (d && !d.checked) missing.push('digits');
+  }
+  if (reqs.symbols) {
+    const s = $('cfg-symbols');
+    if (s && !s.checked) missing.push('symbols');
+  }
+  return { ok: missing.length === 0, missing: missing };
+}
+
+/**
+ * Enforce combined compliance constraints on the configuration UI.
+ * Auto-checks charset boxes, bumps length slider, shows summary.
+ */
+function enforceComplianceConstraints() {
+  const selected = getSelectedFrameworks();
+  const reqs = computeCombinedRequirements(selected);
+
+  const range = $('cfg-length');
+  const output = $('cfg-length-val');
+
+  /* Bump length slider to meet minimum requirement */
+  if (range) {
+    const newMin = Math.max(8, reqs.minLen);
+    range.min = String(newMin);
+    if (Number.parseInt(range.value) < newMin) {
+      range.value = String(newMin);
+      if (output) output.value = String(newMin);
+    }
+    /* Update displayed min label */
+    const minLabel = range.parentElement
+      ? range.parentElement.querySelector('.range-labels span:first-child')
+      : null;
+    if (minLabel) minLabel.textContent = String(newMin);
+  }
+
+  /* Auto-check required charset categories */
+  if (reqs.mixedCase) {
+    const lower = $('cfg-lower');
+    const upper = $('cfg-upper');
+    if (lower && !lower.checked) lower.checked = true;
+    if (upper && !upper.checked) upper.checked = true;
+  }
+  if (reqs.digits) {
+    const d = $('cfg-digits');
+    if (d && !d.checked) d.checked = true;
+  }
+  if (reqs.symbols) {
+    const s = $('cfg-symbols');
+    if (s && !s.checked) s.checked = true;
+  }
+
+  /* Update the applied constraints summary */
+  updateComplianceSummary(selected, reqs);
+
+  /* Recalculate everything */
+  updateEntropyPreview();
+  validateRequirements();
+}
+
+/**
+ * Update the "Applied Constraints" summary panel.
+ */
+function updateComplianceSummary(selected, reqs) {
+  const panel = $('compliance-applied');
+  const body = $('compliance-applied-body');
+  if (!panel || !body) return;
+
+  if (selected.length === 0) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+
+  const parts = [];
+  if (reqs.minLen > 0) parts.push('min ' + reqs.minLen + ' chars');
+  if (reqs.minEntropy > 0) parts.push(reqs.minEntropy + '+ bit entropy');
+
+  const charReqs = [];
+  if (reqs.mixedCase) charReqs.push('mixed case');
+  if (reqs.digits) charReqs.push('digits');
+  if (reqs.symbols) charReqs.push('symbols');
+  if (charReqs.length > 0) {
+    parts.push(charReqs.join(' + ') + ' required');
+  }
+
+  /* Show which frameworks drive which constraint */
+  let driverText = '';
+  if (selected.length > 1) {
+    /* Find which framework drives each max */
+    let lenDriver = '';
+    let entropyDriver = '';
+    for (const fwKey of selected) {
+      const fw = FRAMEWORKS[fwKey];
+      if (!fw) continue;
+      if (fw.minLen === reqs.minLen && !lenDriver) lenDriver = fw.name;
+      if (fw.minEntropy === reqs.minEntropy && !entropyDriver) entropyDriver = fw.name;
+    }
+    const drivers = [];
+    if (lenDriver) drivers.push('length from ' + lenDriver);
+    if (entropyDriver) drivers.push('entropy from ' + entropyDriver);
+    if (drivers.length > 0) driverText = '\nStrictest: ' + drivers.join(', ');
+  }
+
+  body.textContent = parts.join('  \u00B7  ') + driverText;
+}
 
 /* ===================================================================
    RESULT STRUCT READER
@@ -377,17 +525,36 @@ function evaluateCompliance(selected, length, totalEntropy) {
   let meetsSome = false;
   const metFrameworks = [];
   const failedFrameworks = [];
+  const charsetWarnings = [];
 
   for (const fwKey of selected) {
     const fw = FRAMEWORKS[fwKey];
     if (!fw) continue;
-    const passes = length >= fw.minLen && totalEntropy >= fw.minEntropy;
+
+    /* Check length + entropy */
+    const lenOk = length >= fw.minLen;
+    const entropyOk = totalEntropy >= fw.minEntropy;
+
+    /* Check charset can satisfy composition requirements */
+    const charOk = checkCharsetCapability({
+      mixedCase: fw.mixedCase, digits: fw.digits, symbols: fw.symbols
+    });
+
+    const passes = lenOk && entropyOk && charOk.ok;
     if (passes) {
       meetsSome = true;
       metFrameworks.push(fw.name);
     } else {
       meetsAll = false;
-      failedFrameworks.push(fw.name);
+      let reason = fw.name;
+      if (!lenOk) reason += ' (need ' + fw.minLen + ' chars)';
+      else if (!entropyOk) reason += ' (need ' + fw.minEntropy + ' bits)';
+      if (!charOk.ok) reason += ' (missing: ' + charOk.missing.join(', ') + ')';
+      failedFrameworks.push(reason);
+    }
+
+    if (!charOk.ok) {
+      charsetWarnings.push(fw.name + ' requires ' + charOk.missing.join(', '));
     }
   }
 
@@ -398,7 +565,7 @@ function evaluateCompliance(selected, length, totalEntropy) {
     meetsAll = false;
   }
 
-  return { meetsAll, meetsSome, metFrameworks, failedFrameworks };
+  return { meetsAll, meetsSome, metFrameworks, failedFrameworks, charsetWarnings };
 }
 
 /**
@@ -422,7 +589,7 @@ function getStrengthClass(selected, meetsAll, meetsSome, totalEntropy) {
  * D16: Build the entropy preview text string.
  */
 function buildEntropyPreviewText(totalEntropy, compliance) {
-  const { meetsAll, meetsSome, metFrameworks, failedFrameworks } = compliance;
+  const { meetsAll, meetsSome, metFrameworks, failedFrameworks, charsetWarnings } = compliance;
   let text = 'Current config: ' + totalEntropy.toFixed(1) + ' bits';
 
   if (metFrameworks.length === 0 && failedFrameworks.length === 0) {
@@ -437,9 +604,13 @@ function buildEntropyPreviewText(totalEntropy, compliance) {
     }
   } else if (meetsSome) {
     text += ' -- meets ' + metFrameworks.join(', ');
-    text += ' | fails ' + failedFrameworks.join(', ');
+    text += ' | fails ' + failedFrameworks.join('; ');
   } else {
-    text += ' -- below all selected frameworks';
+    text += ' -- fails ' + failedFrameworks.join('; ');
+  }
+
+  if (charsetWarnings && charsetWarnings.length > 0) {
+    text += '\n\u26A0 ' + charsetWarnings.join('; ');
   }
 
   return text;
@@ -580,6 +751,7 @@ async function launchAudit() {
 
   /* Switch to audit panel */
   $('step-audit').checked = true;
+  syncWizardAria();
   setStage('generating');
 
   /* Write charset into WASM memory */
@@ -779,6 +951,7 @@ async function launchAudit() {
 
   /* Switch to results */
   $('step-results').checked = true;
+  syncWizardAria();
 }
 
 /* ===================================================================
@@ -828,7 +1001,12 @@ function populateComplianceResults(r) {
       allPass = false;
     }
     resultText += (passes ? '\u2713' : '\u2717') + ' ' + fw.name + ' \u2014 ' + fw.desc;
-    resultText += ' (min ' + fw.minLen + ' chars, ' + fw.minEntropy + ' bits)';
+    resultText += '\n    min ' + fw.minLen + ' chars, ' + fw.minEntropy + '+ bits';
+    const charReqs = [];
+    if (fw.mixedCase) charReqs.push('mixed case');
+    if (fw.digits) charReqs.push('digits');
+    if (fw.symbols) charReqs.push('symbols');
+    if (charReqs.length > 0) resultText += ', ' + charReqs.join(' + ');
     resultText += passes ? ' \u2014 COMPLIANT' : ' \u2014 NOT MET';
     resultText += '\n';
   }
@@ -854,12 +1032,63 @@ function populateComplianceResults(r) {
 }
 
 /* ===================================================================
+   ARIA TABS -- keep role="tab" state in sync with wizard radios
+   =================================================================== */
+
+const WIZARD_STEPS = ['configure', 'audit', 'results'];
+
+/** Sync aria-selected and tabindex to match the currently checked radio. */
+function syncWizardAria() {
+  for (const step of WIZARD_STEPS) {
+    const radio = $('step-' + step);
+    const tab = $('tab-' + step);
+    if (!radio || !tab) continue;
+    const active = radio.checked;
+    tab.setAttribute('aria-selected', String(active));
+    tab.setAttribute('tabindex', active ? '0' : '-1');
+  }
+}
+
+/** Arrow key navigation for the tablist (WAI-ARIA Tabs Pattern). */
+function initTablistKeyboard() {
+  const tabs = WIZARD_STEPS.map(function(s) { return $('tab-' + s); }).filter(Boolean);
+  for (const tab of tabs) {
+    tab.addEventListener('keydown', function(e) {
+      const idx = tabs.indexOf(e.currentTarget);
+      let next = -1;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        next = (idx + 1) % tabs.length;
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        next = (idx - 1 + tabs.length) % tabs.length;
+      } else if (e.key === 'Home') {
+        next = 0;
+      } else if (e.key === 'End') {
+        next = tabs.length - 1;
+      }
+      if (next >= 0) {
+        e.preventDefault();
+        tabs[next].click();
+        tabs[next].focus();
+      }
+    });
+  }
+}
+
+/* ===================================================================
    INIT -- load WASM, wire up UI, load manifest
    =================================================================== */
 
 document.addEventListener('DOMContentLoaded', async () => {
   /* D10: Load BUILD_MANIFEST.json for version/hash data */
   loadBuildManifest();
+
+  /* ARIA tabs: sync state on radio change + arrow key nav */
+  for (const step of WIZARD_STEPS) {
+    const radio = $('step-' + step);
+    if (radio) radio.addEventListener('change', syncWizardAria);
+  }
+  initTablistKeyboard();
+  syncWizardAria();
 
   /* Range slider live label */
   const range = $('cfg-length');
@@ -884,10 +1113,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     customCharset.addEventListener('input', updateEntropyPreview);
   }
 
-  /* Compliance checkboxes */
+  /* Compliance checkboxes — enforce combined requirements */
   const complianceChecks = document.querySelectorAll('input[name="compliance"]');
   for (const cb of complianceChecks) {
-    cb.addEventListener('change', updateEntropyPreview);
+    cb.addEventListener('change', enforceComplianceConstraints);
   }
 
   /* D8: Requirements validation */
@@ -911,9 +1140,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     return el ? el.textContent : '';
   });
 
-  /* Initial entropy preview */
-  updateEntropyPreview();
-  validateRequirements();
+  /* Initial compliance enforcement + entropy preview */
+  enforceComplianceConstraints();
 
   /* Load WASM */
   try {

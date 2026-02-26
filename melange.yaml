@@ -116,6 +116,7 @@ pipeline:
       cp www/index.html ${{targets.destdir}}/usr/share/paranoid-passwd/site/
       cp www/app.js ${{targets.destdir}}/usr/share/paranoid-passwd/site/
       cp www/style.css ${{targets.destdir}}/usr/share/paranoid-passwd/site/
+      cp www/CNAME ${{targets.destdir}}/usr/share/paranoid-passwd/site/
 
 test:
   pipeline:
@@ -125,4 +126,5 @@ test:
         test -f /usr/share/paranoid-passwd/site/index.html
         test -f /usr/share/paranoid-passwd/site/app.js
         test -f /usr/share/paranoid-passwd/site/style.css
+        test -f /usr/share/paranoid-passwd/site/CNAME
         echo "All artifacts present"

