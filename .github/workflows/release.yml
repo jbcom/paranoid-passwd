@@ -205,28 +205,9 @@ jobs:
           name: paranoid-wasm-release
 
       - name: Attest WASM artifact
-        uses: actions/attest@c32b4b8b198b65d0bd9d63490e847ff7b53989d4 # v4.0.0
+        uses: actions/attest-build-provenance@e4d4f7c39adfa4c260fb5c147f0622000aa14b99 # v4.0.0
         with:
           subject-path: paranoid.wasm
-          predicate-type: https://slsa.dev/provenance/v1
-          predicate: |
-            {
-              "buildType": "https://github.com/jbcom/paranoid-passwd",
-              "builder": {
-                "id": "https://github.com/jbcom/paranoid-passwd/actions"
-              },
-              "invocation": {
-                "configSource": {
-                  "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
-                  "digest": {
-                    "sha1": "${{ github.sha }}"
-                  }
-                }
-              },
-              "metadata": {
-                "wasmSha256": "${{ needs.build-release.outputs.wasm-sha256 }}"
-              }
-            }
 
   # ---------------------------------------------------------------
   # JOB 3: Upload release assets
