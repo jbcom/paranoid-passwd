@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.0.0...paranoid-passwd-v3.1.0) (2026-02-26)
+
+
+### Features
+
+* v3.0 — Wolfi migration, platform abstraction, full UX overhaul ([#1](https://github.com/jbcom/paranoid-passwd/issues/1)) ([ba451af](https://github.com/jbcom/paranoid-passwd/commit/ba451afcc15f627026c1d64b6bb60d6d4d5a6859))
+
+
+### Bug Fixes
+
+* CD pipeline — correct melange/apko versions, add reactor flag, use CI_GITHUB_TOKEN ([a43ddc3](https://github.com/jbcom/paranoid-passwd/commit/a43ddc3b3923b10be0325095c2f9dc67b4eb8f2c))
+* melange build — add --runner docker for GitHub Actions ([bd30a95](https://github.com/jbcom/paranoid-passwd/commit/bd30a95b924c3326990bacfd8670e78a12abb370))
+* melange/apko tar extraction — strip subdirectory from tarballs ([428a4e0](https://github.com/jbcom/paranoid-passwd/commit/428a4e0d3d4a3c9d0db3c954cb087f2d7532e26e))
+* release-please — use config file, fix version tracking ([bc46bd3](https://github.com/jbcom/paranoid-passwd/commit/bc46bd3f5ddd55df6a8f483a5524c260d822ac40))
+* restrict melange/apko to x86_64 only ([a5db163](https://github.com/jbcom/paranoid-passwd/commit/a5db163ecb26d0dbcbb5df25f4ad6be363c01302))
+
 ## [Unreleased]
 
 ### Planned
