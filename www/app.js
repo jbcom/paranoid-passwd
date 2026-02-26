@@ -163,7 +163,8 @@ function getSelectedFrameworks() {
    but are used here only for the pre-generation strength meter
    and entropy preview. The actual compliance check runs in C.
 
-   VERIFIED: thresholds match C-side definitions in paranoid.c
+   TODO: HUMAN_REVIEW — thresholds mirror C-side definitions in paranoid.c
+   (verify minLen, minEntropy, composition booleans match src/paranoid.c)
    =================================================================== */
 
 const FRAMEWORKS = {

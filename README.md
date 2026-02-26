@@ -146,6 +146,7 @@ cmake --build build/wasm
 mkdir -p build/site
 cp www/index.html www/style.css www/app.js build/site/
 cp build/wasm/paranoid.wasm build/site/
+cp build/wasm/BUILD_MANIFEST.json build/site/
 python3 -m http.server 8080 --directory build/site
 # Open http://localhost:8080
 ```
@@ -361,6 +362,8 @@ Read the full threat model: [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)
 | **Search space** | 94^32 ~ 1.38 x 10^63 |
 | **Brute-force resistance** | 2.19 x 10^43 years @ 10^12 hash/s |
 | **Birthday paradox** | ~4.37 x 10^31 passwords for 50% collision |
+
+> **Note**: These calculations assume the default 32-char, 94-symbol charset. Verify independently: entropy = log2(94) x 32 ≈ 209.75 bits. See [Honest Limitations](#honest-limitations) — this code was written by an LLM.
 
 ### Statistical Audit (7 Layers)
 

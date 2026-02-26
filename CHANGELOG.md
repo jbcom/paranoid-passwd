@@ -228,7 +228,7 @@ https://paranoid-passwd.com
 All security advisories are tracked in [SECURITY.md](SECURITY.md).
 
 **Critical advisories**:
-- **CVE-NONE-2025-001**: Modulo bias in v1 (fixed in v2.0.0)
+- **CVE-NONE-2025-001**: Modulo bias in v1 (fixed in v3.0.0)
 
 ---
 
@@ -243,5 +243,5 @@ All security advisories are tracked in [SECURITY.md](SECURITY.md).
 ---
 
 [Unreleased]: https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.1.0...HEAD
-[3.0.0]: https://github.com/jbcom/paranoid-passwd/releases/tag/paranoid-passwd-v3.1.0
+[3.0.0]: https://github.com/jbcom/paranoid-passwd/releases/tag/paranoid-passwd-v3.0.0
 [1.0.0]: https://github.com/jbcom/paranoid-passwd/releases/tag/v1.0.0

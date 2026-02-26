@@ -174,8 +174,9 @@ cd tests/e2e && npm install && npx playwright test
 # 1. Build the WASM
 cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build/wasm
 
-# 2. Copy WASM to www/ for development
+# 2. Copy WASM + manifest to www/ for development
 cp build/wasm/paranoid.wasm www/
+cp build/wasm/BUILD_MANIFEST.json www/
 
 # 3. Start local server
 cd www && python3 -m http.server 8080
@@ -543,6 +544,21 @@ apt-get install libssl-dev
 - MIME type not set (use `cd www && python3 -m http.server 8080` or configure web server)
 - Browser doesn't support WASM (upgrade browser)
 - Mixed content (HTTPS page loading HTTP WASM)
+
+### BUILD_MANIFEST.json Missing or Incorrect
+
+**Error**: "Failed to fetch BUILD_MANIFEST.json" or provenance data shows placeholders
+
+**Debugging**:
+1. Verify the file exists after WASM build: `ls build/wasm/BUILD_MANIFEST.json`
+2. If missing, rebuild WASM — CMake generates it as a post-build step
+3. For local dev, copy it to `www/`: `cp build/wasm/BUILD_MANIFEST.json www/`
+4. In CI, the melange pipeline installs it alongside other site assets
+
+**Common causes**:
+- Forgot to copy `BUILD_MANIFEST.json` alongside `paranoid.wasm` to serving directory
+- Stale build directory (run `rm -rf build/` and rebuild)
+- CORS blocking fetch if serving from `file://` protocol (use `python3 -m http.server`)
 
 ### Build Artifacts Not Cleaned
 
