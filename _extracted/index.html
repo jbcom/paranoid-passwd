@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>paranoid v__VERSION__ — self-auditing password generator</title>
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               style-src 'self' https://fonts.googleapis.com;
+               font-src https://fonts.gstatic.com;
+               script-src 'self' 'wasm-unsafe-eval';
+               connect-src 'self';
+               img-src 'self' data:;">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" integrity="__CSS_SRI__" crossorigin="anonymous">
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+     WIZARD STATE MACHINE — Hidden radios at document root.
+     CSS :checked ~ selectors control ALL navigation.
+     Zero JavaScript needed for panel switching.
+     ═══════════════════════════════════════════════════════ -->
+
+<input type="radio" name="wizard" id="step-configure" class="wizard-radio" checked>
+<input type="radio" name="wizard" id="step-audit"     class="wizard-radio">
+<input type="radio" name="wizard" id="step-results"   class="wizard-radio">
+
+<div class="page-wrapper" id="page">
+
+  <header class="topbar">
+    <div class="topbar-brand">
+      <span class="topbar-name">paranoid</span>
+      <span class="topbar-tag">v__VERSION__</span>
+    </div>
+    <div class="topbar-meta">
+      <code id="engine-badge">loading&hellip;</code>
+      <div class="csprng-badge">
+        <span class="csprng-dot" id="status-dot"></span>
+        <span id="status-text">init</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="global-progress"><div class="global-progress-fill"></div></div>
+
+  <nav class="wizard-nav">
+    <label for="step-configure" class="step-label" data-num="1">Configure</label>
+    <label for="step-audit"     class="step-label" data-num="2">Audit</label>
+    <label for="step-results"   class="step-label" data-num="3">Results</label>
+  </nav>
+
+  <div class="wizard-content">
+
+    <!-- ═══ PANEL 1: CONFIGURE ═══════════════════════════ -->
+    <section class="wizard-panel" id="panel-configure">
+      <div class="config-section">
+        <h2>configure <span>audit</span></h2>
+        <p class="config-subtitle">All generation runs inside WASM linear memory. JavaScript never touches the random bytes.</p>
+
+        <div class="config-grid">
+          <div class="field">
+            <span class="field-label">Charset</span>
+            <select id="cfg-charset">
+              <option value="full">Full printable ASCII (94 chars)</option>
+              <option value="alnum">Alphanumeric (62 chars)</option>
+              <option value="alpha">Letters only (52 chars)</option>
+              <option value="hex">Hexadecimal (16 chars)</option>
+            </select>
+          </div>
+          <div class="field">
+            <span class="field-label">Audit Batch Size</span>
+            <select id="cfg-batch">
+              <option value="200">200 passwords</option>
+              <option value="500" selected>500 passwords</option>
+              <option value="1000">1,000 passwords</option>
+            </select>
+          </div>
+          <div class="field field-full">
+            <span class="field-label">Password Length &mdash; <output id="cfg-length-val">32</output> characters</span>
+            <input type="range" id="cfg-length" min="8" max="128" value="32">
+            <div class="range-labels"><span>8</span><span>128</span></div>
+          </div>
+        </div>
+
+        <button class="btn-launch" id="btn-launch">Generate + Run 7-Layer Audit</button>
+
+        <div class="info-note">
+          <strong>Build:</strong> WASM SHA-256: <code id="build-sha">__WASM_SHA256__</code><br>
+          <strong>SRI:</strong> <code id="build-sri">__WASM_SRI__</code><br>
+          Built <time>__BUILD_TIME__</time>.
+          <a href="BUILD_MANIFEST.json">Full manifest</a>.
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ PANEL 2: AUDIT PROGRESS ══════════════════════ -->
+    <section class="wizard-panel" id="panel-audit">
+      <div class="audit-section" id="audit-runner" data-stage="idle">
+        <h2>7-Layer Cryptographic Audit</h2>
+        <p class="config-subtitle">Watching each verification stage in real-time.</p>
+
+        <div class="password-reveal">
+          <div class="password-reveal-label">Generated Password</div>
+          <div id="audit-password"></div>
+          <div class="password-hash">SHA-256: <code id="audit-hash"></code></div>
+        </div>
+
+        <div class="stage-list">
+          <div class="stage-item stage-generate">
+            <div class="stage-icon" data-num="1"></div>
+            <div class="stage-name">Password Generation<span>CSPRNG + rejection sampling</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-generate">pending</div>
+          </div>
+          <div class="stage-item stage-chi2">
+            <div class="stage-icon" data-num="2"></div>
+            <div class="stage-name">Chi-Squared Uniformity<span>Pearson&rsquo;s &chi;&sup2; test on batch</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-chi2">pending</div>
+          </div>
+          <div class="stage-item stage-serial">
+            <div class="stage-icon" data-num="3"></div>
+            <div class="stage-name">Serial Correlation<span>Adjacent character dependency</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-serial">pending</div>
+          </div>
+          <div class="stage-item stage-collisions">
+            <div class="stage-icon" data-num="4"></div>
+            <div class="stage-name">Collision Detection<span>Duplicate check across batch</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-collisions">pending</div>
+          </div>
+          <div class="stage-item stage-proofs">
+            <div class="stage-icon" data-num="5"></div>
+            <div class="stage-name">Entropy &amp; Uniqueness Proofs<span>Formal mathematical derivation</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-proofs">pending</div>
+          </div>
+          <div class="stage-item stage-patterns">
+            <div class="stage-icon" data-num="6"></div>
+            <div class="stage-name">Pattern Detection<span>Keyboard walks, repeats, sequences</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-patterns">pending</div>
+          </div>
+          <div class="stage-item stage-threats">
+            <div class="stage-icon" data-num="7"></div>
+            <div class="stage-name">LLM Threat Assessment<span>6-vector hallucination model</span></div>
+            <div class="stage-bar"><div class="stage-bar-fill"></div></div>
+            <div class="stage-result" id="res-threats">pending</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ PANEL 3: RESULTS (native <details>) ══════════ -->
+    <section class="wizard-panel" id="panel-results">
+      <div class="results-section">
+        <h2>Audit Complete</h2>
+
+        <div class="verdict-banner" id="verdict-banner">
+          <span id="verdict-icon"></span>
+          <span id="verdict-text"></span>
+        </div>
+
+        <details class="result-details" open>
+          <summary>Entropy Proof <span class="details-badge" id="det-entropy-badge"></span></summary>
+          <div class="result-body" id="det-entropy"></div>
+        </details>
+
+        <details class="result-details">
+          <summary>Statistical Tests <span class="details-badge" id="det-stats-badge"></span></summary>
+          <div class="result-body" id="det-stats"></div>
+        </details>
+
+        <details class="result-details">
+          <summary>NIST SP 800-63B Compliance <span class="details-badge" id="det-nist-badge"></span></summary>
+          <div class="result-body" id="det-nist"></div>
+        </details>
+
+        <details class="result-details">
+          <summary>Uniqueness Proof <span class="details-badge" id="det-unique-badge"></span></summary>
+          <div class="result-body" id="det-unique"></div>
+        </details>
+
+        <details class="result-details">
+          <summary>LLM Threat Model <span class="details-badge badge-info">6 VECTORS</span></summary>
+          <div class="result-body" id="det-threats"></div>
+        </details>
+
+        <details class="result-details">
+          <summary>Self-Audit <span class="details-badge badge-warn">READ THIS</span></summary>
+          <div class="result-body" id="det-self-audit"></div>
+        </details>
+
+        <div class="warning-footer">
+          <strong>Honest Disclosure:</strong> This tool was built by an LLM. The CSPRNG
+          (OpenSSL RAND_bytes via WASM) and statistical tests (chi-squared, serial
+          correlation) run in C inside the WASM sandbox. The display-only JS bridge
+          reads a result struct from WASM linear memory and sets DOM textContent.
+          Have a human cryptographer verify <code>src/paranoid.c</code> before production use.
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script src="app.js" integrity="__JS_SRI__" crossorigin="anonymous"></script>
+
+</body>
+</html>

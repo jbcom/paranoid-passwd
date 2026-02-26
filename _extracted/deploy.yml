@@ -1,0 +1,196 @@
+# ─────────────────────────────────────────────────────────────────
+# paranoid — Transparent Build & Deploy Pipeline
+#
+# SUPPLY CHAIN:
+#   Source:    src/paranoid.c + include/paranoid.h
+#   Crypto:   vendor/openssl-wasm (submodule, pinned commit)
+#   Compiler: Zig (deterministic cross-compilation, pinned version)
+#   Actions:  All pinned to full 40-char commit SHAs
+#   Output:   build/site/ (index.html + style.css + app.js + paranoid.wasm)
+#
+# BUILD:
+#   This workflow runs `make site` which:
+#     1. Compiles paranoid.c → paranoid.wasm via Zig
+#     2. Computes SRI hashes for .wasm, .css, .js
+#     3. Injects hashes into index.html via sed
+#     4. Writes BUILD_MANIFEST.json
+#
+# PIN RATIONALE:
+#   Every `uses:` is pinned to a 40-char commit SHA.
+#   Tags are mutable (see: tj-actions attack, March 2025, 23K repos).
+#   SHAs are immutable — what you pin is what runs.
+# ─────────────────────────────────────────────────────────────────
+
+name: Build, Verify & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'www/**'
+      - 'Makefile'
+      - '.github/workflows/deploy.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ───────────────────────────────────────────────────────────
+  # JOB 1: Build via Makefile
+  # ───────────────────────────────────────────────────────────
+  build:
+    name: make site
+    runs-on: ubuntu-24.04
+
+    outputs:
+      wasm-sha256: ${{ steps.hash.outputs.sha256 }}
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: recursive
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@7d14f16220b57e3e4e02a93c4e5e8dbbdb2a2f7e # v2.1.0
+        with:
+          version: 0.14.0
+
+      - name: Verify toolchain
+        run: |
+          echo "=== Toolchain ==="
+          echo "Zig:     $(zig version)"
+          echo "Runner:  $(lsb_release -ds)"
+          echo "Kernel:  $(uname -r)"
+          echo "Date:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo ""
+          make info
+
+      - name: make site
+        run: make site
+
+      - name: make verify
+        run: |
+          sudo apt-get install -y wabt
+          make verify
+
+      - name: make hash
+        id: hash
+        run: |
+          SHA256=$(sha256sum build/paranoid.wasm | cut -d' ' -f1)
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+          make hash
+
+      - name: Upload site artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: paranoid-site
+          path: build/site/
+          retention-days: 30
+
+      - name: Upload WASM binary (independent verification)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: paranoid-wasm
+          path: build/paranoid.wasm
+          retention-days: 90
+
+  # ───────────────────────────────────────────────────────────
+  # JOB 2: Independent verification in a separate runner
+  # ───────────────────────────────────────────────────────────
+  verify:
+    name: Verify WASM integrity
+    runs-on: ubuntu-24.04
+    needs: build
+
+    steps:
+      - name: Download WASM
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: paranoid-wasm
+
+      - name: Verify SHA-256
+        run: |
+          EXPECTED="${{ needs.build.outputs.wasm-sha256 }}"
+          ACTUAL=$(sha256sum paranoid.wasm | cut -d' ' -f1)
+          echo "Expected: ${EXPECTED}"
+          echo "Actual:   ${ACTUAL}"
+          [ "${EXPECTED}" = "${ACTUAL}" ] || { echo "::error::SHA-256 MISMATCH"; exit 1; }
+          echo "✓ SHA-256 verified"
+
+      - name: Verify WASM structure
+        run: |
+          sudo apt-get install -y wabt
+          echo "=== Required exports ==="
+          for fn in paranoid_version paranoid_generate paranoid_run_audit \
+                    paranoid_get_result_ptr paranoid_get_result_size \
+                    paranoid_sha256 paranoid_sha256_hex \
+                    paranoid_chi_squared paranoid_serial_correlation \
+                    paranoid_count_collisions malloc free; do
+            if wasm-objdump -x paranoid.wasm 2>/dev/null | grep -q "${fn}"; then
+              echo "  ✓ ${fn}"
+            else
+              echo "  ✗ ${fn} — MISSING"; exit 1
+            fi
+          done
+
+          echo ""
+          echo "=== Import namespaces ==="
+          NAMESPACES=$(wasm-objdump -x paranoid.wasm 2>/dev/null | \
+            grep " - func" | grep "import" | \
+            sed 's/.*<\([^.]*\)\..*/\1/' | sort -u)
+          for ns in $NAMESPACES; do
+            if [ "$ns" = "wasi_snapshot_preview1" ]; then
+              echo "  ✓ $ns"
+            else
+              echo "  ✗ $ns — UNEXPECTED"; exit 1
+            fi
+          done
+
+  # ───────────────────────────────────────────────────────────
+  # JOB 3: Deploy to GitHub Pages
+  # ───────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Pages
+    runs-on: ubuntu-24.04
+    needs: [build, verify]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download site
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: paranoid-site
+          path: _site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: _site
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac2b3c603fc # v4.0.5

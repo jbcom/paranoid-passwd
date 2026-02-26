@@ -1,0 +1,834 @@
+/* ═══════════════════════════════════════════════════════════
+   paranoid v2.0 — stylesheet
+   
+   ARCHITECTURE:
+     All visual state is driven by CSS selectors:
+     - Wizard navigation: radio :checked ~ .page-wrapper
+     - Audit progress:    [data-stage="X"] .stage-item
+     - Results:           native <details> + :open
+   
+   No JavaScript manipulates classes for layout/animation.
+   CodeQL can scan this as a standard .css file.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Custom Properties ─────────────────────────────────── */
+
+:root {
+  --bg:        #0a0e17;
+  --bg-card:   #0f1320;
+  --bg-input:  #141829;
+  --border:    #1e2340;
+  --border-hi: #2a3060;
+  --text:      #c5c9e0;
+  --text-dim:  #6b7094;
+  --text-hi:   #e8eaff;
+  --green:     #4ade80;
+  --green-dim: rgba(74, 222, 128, 0.15);
+  --red:       #ff4d6a;
+  --red-dim:   rgba(255, 77, 106, 0.15);
+  --amber:     #fbbf24;
+  --amber-dim: rgba(251, 191, 36, 0.15);
+  --blue:      #60a5fa;
+  --blue-dim:  rgba(96, 165, 250, 0.15);
+  --purple:    #a78bfa;
+  --radius:    8px;
+  --mono:      'IBM Plex Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+/* ── Reset ─────────────────────────────────────────────── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* ── Wizard Radio Buttons (hidden) ─────────────────────── */
+
+.wizard-radio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Page Wrapper ──────────────────────────────────────── */
+
+.page-wrapper {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 0 20px 60px;
+}
+
+/* ── Top Bar ───────────────────────────────────────────── */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 0 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.topbar-name {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-hi);
+  letter-spacing: -0.5px;
+}
+
+.topbar-tag {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.topbar-meta code {
+  font-size: 0.75rem;
+  color: var(--green);
+  background: var(--green-dim);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.csprng-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.csprng-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+/* ── Global Progress Bar ───────────────────────────────── */
+
+.global-progress {
+  height: 2px;
+  background: var(--border);
+  border-radius: 1px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.global-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--green);
+  transition: width 0.4s ease;
+}
+
+#step-configure:checked ~ .page-wrapper .global-progress-fill { width: 0%; }
+#step-audit:checked ~ .page-wrapper .global-progress-fill     { width: 50%; }
+#step-results:checked ~ .page-wrapper .global-progress-fill   { width: 100%; }
+
+/* ── Wizard Navigation ─────────────────────────────────── */
+
+.wizard-nav {
+  display: flex;
+  gap: 0;
+  margin-bottom: 28px;
+  border-bottom: 2px solid var(--border);
+}
+
+.step-label {
+  flex: 1;
+  text-align: center;
+  padding: 10px 0;
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.3s, border-color 0.3s;
+  user-select: none;
+}
+
+.step-label:hover {
+  color: var(--text);
+}
+
+.step-label::before {
+  content: attr(data-num);
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
+  border-radius: 50%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.65rem;
+  margin-right: 6px;
+  text-align: center;
+  vertical-align: middle;
+  transition: all 0.3s;
+}
+
+/* Active step styling — CSS-only via radio :checked */
+#step-configure:checked ~ .page-wrapper .step-label[for="step-configure"],
+#step-audit:checked ~ .page-wrapper .step-label[for="step-audit"],
+#step-results:checked ~ .page-wrapper .step-label[for="step-results"] {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+
+#step-configure:checked ~ .page-wrapper .step-label[for="step-configure"]::before,
+#step-audit:checked ~ .page-wrapper .step-label[for="step-audit"]::before,
+#step-results:checked ~ .page-wrapper .step-label[for="step-results"]::before {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+/* ── Panel Visibility — CSS-only wizard ────────────────── */
+
+.wizard-panel {
+  display: none;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+#step-configure:checked ~ .page-wrapper #panel-configure { display: block; }
+#step-audit:checked ~ .page-wrapper #panel-audit         { display: block; }
+#step-results:checked ~ .page-wrapper #panel-results     { display: block; }
+
+/* ── Configure Panel ───────────────────────────────────── */
+
+.config-section h2 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text-hi);
+  margin-bottom: 4px;
+}
+
+.config-section h2 span {
+  color: var(--green);
+}
+
+.config-subtitle {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  margin-bottom: 24px;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.field-full {
+  grid-column: 1 / -1;
+}
+
+.field-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.field select,
+.field input[type="range"] {
+  width: 100%;
+}
+
+select {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-hi);
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b7094'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+select:hover {
+  border-color: var(--border-hi);
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px var(--green-dim);
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  margin-top: 8px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--green);
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.3);
+}
+
+.range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+.btn-launch {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  background: var(--green);
+  color: var(--bg);
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+
+.btn-launch:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(74, 222, 128, 0.3);
+}
+
+.btn-launch:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-launch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.info-note {
+  margin-top: 20px;
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+.info-note code {
+  font-size: 0.68rem;
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+  word-break: break-all;
+}
+
+.info-note a {
+  color: var(--green);
+  text-decoration: none;
+}
+
+/* ── Audit Panel ───────────────────────────────────────── */
+
+.audit-section h2 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text-hi);
+  margin-bottom: 4px;
+}
+
+.password-reveal {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin: 20px 0;
+}
+
+.password-reveal-label {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+#audit-password {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--green);
+  word-break: break-all;
+  line-height: 1.5;
+  min-height: 1.6em;
+}
+
+.password-hash {
+  margin-top: 8px;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.password-hash code {
+  font-size: 0.68rem;
+  word-break: break-all;
+}
+
+/* ── Stage List ────────────────────────────────────────── */
+
+.stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stage-item {
+  display: grid;
+  grid-template-columns: 32px 1fr 120px auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.3s, background 0.3s;
+}
+
+.stage-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  transition: all 0.3s;
+}
+
+.stage-icon::after {
+  content: attr(data-num);
+}
+
+.stage-name {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.stage-name span {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.stage-bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.stage-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--green);
+  transition: width 0.4s ease;
+}
+
+.stage-result {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-align: right;
+  min-width: 60px;
+}
+
+/* ── Stage Animations via data-stage ───────────────────── 
+   The JS sets ONE data-stage attribute on the audit runner.
+   CSS handles all visual transitions. */
+
+/* Generating */
+[data-stage="generating"] .stage-generate .stage-icon,
+[data-stage="chi2"] .stage-chi2 .stage-icon,
+[data-stage="serial"] .stage-serial .stage-icon,
+[data-stage="collisions"] .stage-collisions .stage-icon,
+[data-stage="proofs"] .stage-proofs .stage-icon,
+[data-stage="patterns"] .stage-patterns .stage-icon,
+[data-stage="threats"] .stage-threats .stage-icon {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: var(--green);
+  animation: stagePulse 1s infinite;
+}
+
+@keyframes stagePulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50%      { box-shadow: 0 0 8px rgba(74, 222, 128, 0.3); }
+}
+
+/* Active stage progress bar fills */
+[data-stage="generating"] .stage-generate .stage-bar-fill,
+[data-stage="chi2"] .stage-chi2 .stage-bar-fill,
+[data-stage="serial"] .stage-serial .stage-bar-fill,
+[data-stage="collisions"] .stage-collisions .stage-bar-fill,
+[data-stage="proofs"] .stage-proofs .stage-bar-fill,
+[data-stage="patterns"] .stage-patterns .stage-bar-fill,
+[data-stage="threats"] .stage-threats .stage-bar-fill {
+  width: 60%;
+  animation: barPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes barPulse {
+  0%, 100% { width: 40%; }
+  50%      { width: 80%; }
+}
+
+/* Completed stages: green check + full bar */
+
+/* When we're past a stage, mark it done */
+[data-stage="chi2"] .stage-generate,
+[data-stage="serial"] .stage-generate,
+[data-stage="serial"] .stage-chi2,
+[data-stage="collisions"] .stage-generate,
+[data-stage="collisions"] .stage-chi2,
+[data-stage="collisions"] .stage-serial,
+[data-stage="proofs"] .stage-generate,
+[data-stage="proofs"] .stage-chi2,
+[data-stage="proofs"] .stage-serial,
+[data-stage="proofs"] .stage-collisions,
+[data-stage="patterns"] .stage-generate,
+[data-stage="patterns"] .stage-chi2,
+[data-stage="patterns"] .stage-serial,
+[data-stage="patterns"] .stage-collisions,
+[data-stage="patterns"] .stage-proofs,
+[data-stage="threats"] .stage-generate,
+[data-stage="threats"] .stage-chi2,
+[data-stage="threats"] .stage-serial,
+[data-stage="threats"] .stage-collisions,
+[data-stage="threats"] .stage-proofs,
+[data-stage="threats"] .stage-patterns,
+[data-stage="complete"] .stage-generate,
+[data-stage="complete"] .stage-chi2,
+[data-stage="complete"] .stage-serial,
+[data-stage="complete"] .stage-collisions,
+[data-stage="complete"] .stage-proofs,
+[data-stage="complete"] .stage-patterns,
+[data-stage="complete"] .stage-threats {
+  border-color: var(--green);
+}
+
+[data-stage="chi2"] .stage-generate .stage-icon,
+[data-stage="serial"] .stage-generate .stage-icon,
+[data-stage="serial"] .stage-chi2 .stage-icon,
+[data-stage="collisions"] .stage-generate .stage-icon,
+[data-stage="collisions"] .stage-chi2 .stage-icon,
+[data-stage="collisions"] .stage-serial .stage-icon,
+[data-stage="proofs"] .stage-generate .stage-icon,
+[data-stage="proofs"] .stage-chi2 .stage-icon,
+[data-stage="proofs"] .stage-serial .stage-icon,
+[data-stage="proofs"] .stage-collisions .stage-icon,
+[data-stage="patterns"] .stage-generate .stage-icon,
+[data-stage="patterns"] .stage-chi2 .stage-icon,
+[data-stage="patterns"] .stage-serial .stage-icon,
+[data-stage="patterns"] .stage-collisions .stage-icon,
+[data-stage="patterns"] .stage-proofs .stage-icon,
+[data-stage="threats"] .stage-generate .stage-icon,
+[data-stage="threats"] .stage-chi2 .stage-icon,
+[data-stage="threats"] .stage-serial .stage-icon,
+[data-stage="threats"] .stage-collisions .stage-icon,
+[data-stage="threats"] .stage-proofs .stage-icon,
+[data-stage="threats"] .stage-patterns .stage-icon,
+[data-stage="complete"] .stage-generate .stage-icon,
+[data-stage="complete"] .stage-chi2 .stage-icon,
+[data-stage="complete"] .stage-serial .stage-icon,
+[data-stage="complete"] .stage-collisions .stage-icon,
+[data-stage="complete"] .stage-proofs .stage-icon,
+[data-stage="complete"] .stage-patterns .stage-icon,
+[data-stage="complete"] .stage-threats .stage-icon {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--bg);
+  animation: none;
+}
+
+[data-stage="chi2"] .stage-generate .stage-icon::after,
+[data-stage="serial"] .stage-generate .stage-icon::after,
+[data-stage="serial"] .stage-chi2 .stage-icon::after,
+[data-stage="collisions"] .stage-generate .stage-icon::after,
+[data-stage="collisions"] .stage-chi2 .stage-icon::after,
+[data-stage="collisions"] .stage-serial .stage-icon::after,
+[data-stage="proofs"] .stage-generate .stage-icon::after,
+[data-stage="proofs"] .stage-chi2 .stage-icon::after,
+[data-stage="proofs"] .stage-serial .stage-icon::after,
+[data-stage="proofs"] .stage-collisions .stage-icon::after,
+[data-stage="patterns"] .stage-generate .stage-icon::after,
+[data-stage="patterns"] .stage-chi2 .stage-icon::after,
+[data-stage="patterns"] .stage-serial .stage-icon::after,
+[data-stage="patterns"] .stage-collisions .stage-icon::after,
+[data-stage="patterns"] .stage-proofs .stage-icon::after,
+[data-stage="threats"] .stage-generate .stage-icon::after,
+[data-stage="threats"] .stage-chi2 .stage-icon::after,
+[data-stage="threats"] .stage-serial .stage-icon::after,
+[data-stage="threats"] .stage-collisions .stage-icon::after,
+[data-stage="threats"] .stage-proofs .stage-icon::after,
+[data-stage="threats"] .stage-patterns .stage-icon::after,
+[data-stage="complete"] .stage-generate .stage-icon::after,
+[data-stage="complete"] .stage-chi2 .stage-icon::after,
+[data-stage="complete"] .stage-serial .stage-icon::after,
+[data-stage="complete"] .stage-collisions .stage-icon::after,
+[data-stage="complete"] .stage-proofs .stage-icon::after,
+[data-stage="complete"] .stage-patterns .stage-icon::after,
+[data-stage="complete"] .stage-threats .stage-icon::after {
+  content: '\2713';
+}
+
+[data-stage="chi2"] .stage-generate .stage-bar-fill,
+[data-stage="serial"] .stage-generate .stage-bar-fill,
+[data-stage="serial"] .stage-chi2 .stage-bar-fill,
+[data-stage="collisions"] .stage-generate .stage-bar-fill,
+[data-stage="collisions"] .stage-chi2 .stage-bar-fill,
+[data-stage="collisions"] .stage-serial .stage-bar-fill,
+[data-stage="proofs"] .stage-generate .stage-bar-fill,
+[data-stage="proofs"] .stage-chi2 .stage-bar-fill,
+[data-stage="proofs"] .stage-serial .stage-bar-fill,
+[data-stage="proofs"] .stage-collisions .stage-bar-fill,
+[data-stage="patterns"] .stage-generate .stage-bar-fill,
+[data-stage="patterns"] .stage-chi2 .stage-bar-fill,
+[data-stage="patterns"] .stage-serial .stage-bar-fill,
+[data-stage="patterns"] .stage-collisions .stage-bar-fill,
+[data-stage="patterns"] .stage-proofs .stage-bar-fill,
+[data-stage="threats"] .stage-generate .stage-bar-fill,
+[data-stage="threats"] .stage-chi2 .stage-bar-fill,
+[data-stage="threats"] .stage-serial .stage-bar-fill,
+[data-stage="threats"] .stage-collisions .stage-bar-fill,
+[data-stage="threats"] .stage-proofs .stage-bar-fill,
+[data-stage="threats"] .stage-patterns .stage-bar-fill,
+[data-stage="complete"] .stage-generate .stage-bar-fill,
+[data-stage="complete"] .stage-chi2 .stage-bar-fill,
+[data-stage="complete"] .stage-serial .stage-bar-fill,
+[data-stage="complete"] .stage-collisions .stage-bar-fill,
+[data-stage="complete"] .stage-proofs .stage-bar-fill,
+[data-stage="complete"] .stage-patterns .stage-bar-fill,
+[data-stage="complete"] .stage-threats .stage-bar-fill {
+  width: 100%;
+  animation: none;
+}
+
+/* ── Results Panel ─────────────────────────────────────── */
+
+.results-section h2 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text-hi);
+  margin-bottom: 16px;
+}
+
+.verdict-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--green-dim);
+  border: 1px solid var(--green);
+  border-radius: var(--radius);
+  margin-bottom: 20px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--green);
+}
+
+.verdict-banner.verdict-fail {
+  background: var(--amber-dim);
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+#verdict-icon {
+  font-size: 1.4rem;
+}
+
+/* ── Result Details (native <details>) ─────────────────── */
+
+.result-details {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 6px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.result-details[open] {
+  border-color: var(--border-hi);
+}
+
+.result-details summary {
+  padding: 12px 16px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+}
+
+.result-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.result-details summary::before {
+  content: '\25B6';
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  transition: transform 0.2s;
+}
+
+.result-details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.result-body {
+  padding: 0 16px 16px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+/* ── Detail Badges ─────────────────────────────────────── */
+
+.details-badge {
+  margin-left: auto;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.badge-pass {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.badge-fail {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.badge-warn {
+  background: var(--amber-dim);
+  color: var(--amber);
+}
+
+.badge-info {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+
+/* ── Warning Footer ────────────────────────────────────── */
+
+.warning-footer {
+  margin-top: 24px;
+  padding: 16px 20px;
+  background: var(--amber-dim);
+  border: 1px solid var(--amber);
+  border-radius: var(--radius);
+  font-size: 0.75rem;
+  color: var(--amber);
+  line-height: 1.7;
+}
+
+.warning-footer code {
+  font-size: 0.72rem;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* ── Responsive ────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+  .stage-item {
+    grid-template-columns: 28px 1fr auto;
+  }
+  .stage-bar {
+    display: none;
+  }
+  .topbar {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+}
