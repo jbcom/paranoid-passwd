@@ -336,8 +336,8 @@ The Dockerfile runs **all tests as a condition of successful build**. If ANY tes
 **No Submodules Required:**
 
 The Dockerfile clones dependencies directly at SHA-pinned commits:
-- **openssl-wasm**: `fe926b5006593ad2825243f97e363823cd56599f`
-- **munit**: `fbbdf1467eb0d04a6ee465def2e529e4c87f2118`
+- **openssl-wasm**: `fe926b5006593ad2825243f97e363823cd56599f` (verified 2026-02-26, jedisct1/openssl-wasm master)
+- **munit**: `fbbdf1467eb0d04a6ee465def2e529e4c87f2118` (verified 2026-02-26, nemequ/munit stable)
 
 This makes container builds **fully self-contained** and reproducible without any vendor/ directory or .gitmodules file.
 

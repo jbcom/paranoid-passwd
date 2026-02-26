@@ -97,12 +97,18 @@ WORKDIR /deps
 RUN git clone --filter=blob:none --no-checkout ${OPENSSL_WASM_REPO} openssl-wasm && \
     cd openssl-wasm && \
     git checkout ${OPENSSL_WASM_COMMIT} && \
+    ACTUAL_SHA=$(git rev-parse HEAD) && \
+    [ "$ACTUAL_SHA" = "${OPENSSL_WASM_COMMIT}" ] || \
+    { echo "ERROR: openssl-wasm commit SHA mismatch! Expected ${OPENSSL_WASM_COMMIT}, got $ACTUAL_SHA"; exit 1; } && \
     echo "✓ openssl-wasm pinned to ${OPENSSL_WASM_COMMIT}"
 
 # Clone munit at pinned commit (no vendor directory needed!)
 RUN git clone --filter=blob:none --no-checkout ${MUNIT_REPO} munit && \
     cd munit && \
     git checkout ${MUNIT_COMMIT} && \
+    ACTUAL_SHA=$(git rev-parse HEAD) && \
+    [ "$ACTUAL_SHA" = "${MUNIT_COMMIT}" ] || \
+    { echo "ERROR: munit commit SHA mismatch! Expected ${MUNIT_COMMIT}, got $ACTUAL_SHA"; exit 1; } && \
     echo "✓ munit pinned to ${MUNIT_COMMIT}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -154,8 +160,15 @@ COPY www/ www/
 COPY scripts/ scripts/
 RUN chmod +x scripts/*.sh
 
-# Create fake .git for scripts that need it (we'll skip git-dependent checks)
-RUN mkdir -p .git && echo "ref: refs/heads/main" > .git/HEAD
+# Copy .git if present for reproducible timestamps and supply chain verification
+# This is optional - CI builds will have .git, local builds may not
+COPY .git* .git/
+RUN if [ -d .git ]; then \
+        echo "✓ .git directory present — SOURCE_DATE_EPOCH will use commit timestamp"; \
+    else \
+        echo "⚠ .git directory missing — using current time for SOURCE_DATE_EPOCH"; \
+        mkdir -p .git && echo "ref: refs/heads/main" > .git/HEAD; \
+    fi
 
 # Build WASM and site
 RUN echo "═══════════════════════════════════════════════════════════" && \
@@ -183,14 +196,14 @@ RUN echo "═══════════════════════�
     ./scripts/hallucination_check.sh && \
     echo "✓ No LLM hallucinations detected"
 
-# Verify binary size is in expected range
+# Verify binary size is in expected range (~180KB ± 20KB per AGENTS.md)
 RUN echo "═══════════════════════════════════════════════════════════" && \
     echo "  STAGE: Binary Size Verification" && \
     echo "═══════════════════════════════════════════════════════════" && \
     SIZE=$(stat -c%s build/paranoid.wasm) && \
     echo "WASM size: $SIZE bytes" && \
-    [ "$SIZE" -gt 100000 ] && [ "$SIZE" -lt 300000 ] || \
-    { echo "ERROR: Binary size $SIZE outside expected range (100KB-300KB)"; exit 1; } && \
+    [ "$SIZE" -gt 160000 ] && [ "$SIZE" -lt 200000 ] || \
+    { echo "ERROR: Binary size $SIZE outside expected range (160KB-200KB)"; exit 1; } && \
     echo "✓ Binary size within expected range"
 
 # Verify site assets exist
@@ -204,12 +217,14 @@ RUN echo "═══════════════════════�
     test -f build/site/BUILD_MANIFEST.json && \
     echo "✓ All site assets present"
 
-# Verify SRI hashes were injected
+# Verify SRI hashes were injected (check explicit placeholder names)
 RUN echo "═══════════════════════════════════════════════════════════" && \
     echo "  STAGE: SRI Hash Verification" && \
     echo "═══════════════════════════════════════════════════════════" && \
     grep -q 'sha384-' build/site/index.html && \
-    ! grep -q '__.*_SRI__' build/site/index.html && \
+    ! grep -qE '__(WASM|CSS|JS)_SRI__' build/site/index.html && \
+    ! grep -q '__WASM_SHA256__' build/site/index.html && \
+    ! grep -q '__VERSION__' build/site/index.html && \
     echo "✓ SRI hashes properly injected"
 
 # Print build summary
