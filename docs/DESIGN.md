@@ -100,7 +100,7 @@ This document explains the key design decisions in `paranoid` and their rational
    - NIST SP 800-90A certified DRBG
    - 25+ years of cryptographic engineering
    - FIPS 140-2 validated (some builds)
-   - Precompiled for WASM by jedisct1
+   - Built from official source for WASM (tag `openssl-3.4.0`, with WASI patches)
 
 **Trade-offs**:
 - ❌ Requires build step (cannot edit single HTML file)
@@ -109,7 +109,7 @@ This document explains the key design decisions in `paranoid` and their rational
 - ✅ Formal verification path
 
 **Alternatives considered**:
-- **Rust**: Excellent choice, but no precompiled OpenSSL WASM (would need to build from source)
+- **Rust**: Excellent choice, but would require a different crypto library (e.g., `ring` or `rustls`)
 - **AssemblyScript**: Too close to JavaScript (inherits some weaknesses)
 - **Go**: Large runtime overhead (~2MB WASM)
 

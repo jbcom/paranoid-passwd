@@ -37,7 +37,7 @@ This is a complete rewrite from v1, treating `paranoid` as what it is: a C proje
   
 - **WASM compilation** via Zig toolchain
   - Compiled to `wasm32-wasi` target
-  - OpenSSL precompiled library (`vendor/openssl-wasm`, Docker-cloned at SHA-pinned commit)
+  - OpenSSL compiled from official source (`vendor/openssl/`, built from tag `openssl-3.4.0` with WASI patches)
   - ~180KB binary size
   
 - **Proper file structure**
@@ -143,7 +143,7 @@ This is a complete rewrite from v1, treating `paranoid` as what it is: a C proje
 - **v1 URLs deprecated** — v1 was a single HTML file; v2 requires WASM support
 - **No JavaScript fallback** — Browsers without WASM support cannot use v2
 - **Build system required** — Cannot be edited as a single file (must run `make`)
-- **Docker-first builds** — Dependencies cloned inside Docker at SHA-pinned commits (no submodules)
+- **Docker-first builds** — OpenSSL built from official source inside Docker; test dependencies cloned at SHA-pinned commits (no submodules)
 
 ### Migration Guide (v1 → v2)
 

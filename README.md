@@ -153,15 +153,16 @@ make docker-all  # Build → Extract → E2E Test
 <summary>Click to expand local development setup</summary>
 
 **Prerequisites:**
-- Zig ≥ 0.14.0
+- Zig ≥ 0.13.0
 - OpenSSL (for hash computation)
 - wabt (optional, for WASM verification)
 
 ```bash
-# Clone dependencies manually (for local builds only)
+# Build OpenSSL from official source (produces vendor/openssl/lib/libcrypto.a)
+./scripts/build_openssl_wasm.sh
+
+# Clone test framework
 mkdir -p vendor
-git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
-cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f && cd ../..
 git clone https://github.com/mity/acutest.git vendor/acutest
 cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
 
@@ -415,7 +416,7 @@ A: The generation algorithm (OpenSSL CSPRNG + rejection sampling) is production-
 <details>
 <summary><strong>Q: Why C instead of Rust?</strong></summary>
 
-A: OpenSSL. `jedisct1/openssl-wasm` provides a maintained, pre-compiled `libcrypto.a` for `wasm32-wasi`. Zig's `cc` can link against it with zero configuration. A Rust port is possible but would require building the crypto library from scratch.
+A: OpenSSL. We compile official OpenSSL source to `wasm32-wasi` using Zig, producing `libcrypto.a` with full provenance. Zig's `cc` can link against it with zero configuration. A Rust port using `ring` or `rustls` would be viable but would require a different crypto library.
 </details>
 
 <details>
@@ -454,7 +455,7 @@ A: Supply chain security. Docker builds are:
 
 ## Acknowledgments
 
-- **OpenSSL WASM** by [jedisct1](https://github.com/jedisct1/openssl-wasm) — Precompiled OpenSSL for WebAssembly
+- **[OpenSSL](https://github.com/openssl/openssl)** — Compiled from official source at tag `openssl-3.4.0` with our WASI patches
 - **Zig** — Modern C/C++ compiler with excellent WebAssembly support
 - **NIST SP 800-90A** — DRBG specification
 - **NIST SP 800-63B** — Digital identity guidelines (entropy requirements)

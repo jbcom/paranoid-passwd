@@ -4,12 +4,15 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Verifies the complete supply chain before build/deploy:
-#   1. Git commit signature
-#   2. Docker-cloned dependency SHAs match expected
-#   3. Dependency library hash verification
+#   1. No uncommitted changes
+#   2. OpenSSL built from source (vendor/openssl with BUILD_PROVENANCE.txt)
+#   3. libcrypto.a exists
 #   4. Zig compiler hash verification (if available)
-#   5. GitHub Actions SHA pinning
-#   6. No uncommitted changes
+#   5. GitHub Actions SHA-pinned
+#   6. Dockerfile base image pinned
+#   7. Source files exist
+#   8. Web assets exist
+#   9. Git metadata available
 #
 # Exit codes:
 #   0 = All verifications passed
@@ -54,17 +57,29 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────
-# Check 2: Dependencies available (Docker-cloned or local vendor/)
+# Check 2: OpenSSL built from source (provenance file)
 # ─────────────────────────────────────────────────────────────
-echo -n "Check 2: OpenSSL WASM dependency available... "
+echo -n "Check 2: OpenSSL from-source provenance... "
 
-OPENSSL_VENDOR="$REPO_ROOT/vendor/openssl-wasm"
-if [ -d "$OPENSSL_VENDOR" ]; then
+OPENSSL_VENDOR="$REPO_ROOT/vendor/openssl"
+PROVENANCE_FILE="$OPENSSL_VENDOR/BUILD_PROVENANCE.txt"
+
+if [ -f "$PROVENANCE_FILE" ]; then
     echo -e "${GREEN}PASS${NC}"
+    # Show provenance summary
+    TAG=$(grep "^Tag:" "$PROVENANCE_FILE" | head -1 | awk '{print $2}') || true
+    COMMIT=$(grep "^Commit:" "$PROVENANCE_FILE" | head -1 | awk '{print $2}') || true
+    [ -n "$TAG" ] && echo "    Tag:    $TAG"
+    [ -n "$COMMIT" ] && echo "    Commit: ${COMMIT:0:16}..."
+elif [ -d "$OPENSSL_VENDOR" ]; then
+    echo -e "${YELLOW}WARN${NC}"
+    echo "  vendor/openssl exists but BUILD_PROVENANCE.txt missing."
+    echo "  Cannot verify OpenSSL was built from source."
+    WARNINGS=$((WARNINGS + 1))
 else
     echo -e "${YELLOW}WARN${NC}"
-    echo "  vendor/openssl-wasm not found locally."
-    echo "  This is expected — Docker build clones it at a SHA-pinned commit."
+    echo "  vendor/openssl not found locally."
+    echo "  This is expected — Docker build compiles OpenSSL from source."
     WARNINGS=$((WARNINGS + 1))
 fi
 
@@ -73,7 +88,7 @@ fi
 # ─────────────────────────────────────────────────────────────
 echo -n "Check 3: libcrypto.a exists... "
 
-LIBCRYPTO="$OPENSSL_VENDOR/precompiled/lib/libcrypto.a"
+LIBCRYPTO="$OPENSSL_VENDOR/lib/libcrypto.a"
 if [ -f "$LIBCRYPTO" ]; then
     echo -e "${GREEN}PASS${NC}"
 
@@ -93,8 +108,8 @@ fi
 # ─────────────────────────────────────────────────────────────
 echo -n "Check 4: Zig tarball hash... "
 
-ZIG_TARBALL="$REPO_ROOT/zig-linux-x86_64-0.14.0.tar.xz"
-EXPECTED_ZIG_HASH="473ec26806133cf4d1918caf1a410f8403a13d979726a9045b421b685031a982"
+ZIG_TARBALL="$REPO_ROOT/zig-linux-x86_64-0.13.0.tar.xz"
+EXPECTED_ZIG_HASH="d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea"
 
 if [ -f "$ZIG_TARBALL" ]; then
     if command -v sha256sum &> /dev/null; then
@@ -161,7 +176,7 @@ if [ -f "$DOCKERFILE" ]; then
     else
         echo -e "${RED}FAIL${NC}"
         echo "  Base image not SHA-pinned!"
-        echo "  Use: FROM debian:12-slim@sha256:<digest>"
+        echo "  Use: FROM alpine:3.21@sha256:<digest>"
         FAILED=1
     fi
 else
@@ -174,7 +189,7 @@ fi
 echo -n "Check 7: Core source files exist... "
 
 MISSING=0
-for FILE in "src/paranoid.c" "include/paranoid.h" "Makefile"; do
+for FILE in "src/paranoid.c" "src/wasm_entry.c" "include/paranoid.h" "Makefile" "patches/01-wasi-config.patch"; do
     if [ ! -f "$REPO_ROOT/$FILE" ]; then
         MISSING=1
         break

@@ -426,8 +426,17 @@ paranoid/
 │   ├── index.html            # Structure only — no inline JS/CSS
 │   ├── style.css             # Visual state — wizard nav, stages
 │   └── app.js                # Display-only WASM bridge
-├── vendor/                   # (Docker-cloned at SHA-pinned commits)
-│   ├── openssl-wasm/         # jedisct1/openssl-wasm
+├── patches/
+│   ├── 01-wasi-config.patch  # WASI platform configuration
+│   ├── 02-rand-wasi.patch    # WASI random entropy source
+│   └── 03-ssl-cert-posix-io.patch # SSL cert POSIX I/O adjustments
+├── scripts/
+│   └── build_openssl_wasm.sh # Build OpenSSL from official source
+├── vendor/                   # (Built from source / cloned at SHA-pinned commits)
+│   ├── openssl/              # Built from official OpenSSL source (tag openssl-3.4.0)
+│   │   ├── include/openssl/  # Headers from build
+│   │   ├── lib/libcrypto.a   # Compiled for wasm32-wasi
+│   │   └── BUILD_PROVENANCE.txt # Records source tag, commit, compiler, patches
 │   └── acutest/              # mity/acutest (header-only test framework)
 ├── build/                    # make output (gitignored)
 │   ├── paranoid.wasm
@@ -588,7 +597,7 @@ minified or obfuscated — it exists to be reviewed.
 
 ### Prerequisites
 
-- Zig ≥ 0.14.0 (`brew install zig` / `snap install zig`)
+- Zig ≥ 0.13.0 (`brew install zig` / `snap install zig`)
 - OpenSSL (for SRI hash computation during `make site`)
 - wabt (optional, for `make verify`)
 
@@ -607,7 +616,7 @@ make info         # Show toolchain versions and paths
 
 ### What `make site` Does
 
-1. Compiles `src/paranoid.c` against `vendor/openssl-wasm/precompiled/lib/libcrypto.a`
+1. Compiles `src/paranoid.c` and `src/wasm_entry.c` against `vendor/openssl/lib/libcrypto.a`
 2. Produces `build/paranoid.wasm`
 3. Computes SRI-384 hashes of `.wasm`, `.css`, `.js`
 4. Injects hashes into `index.html` via `sed` (replacing `__WASM_SRI__` etc.)
@@ -616,19 +625,23 @@ make info         # Show toolchain versions and paths
 
 ### Dependencies
 
-Docker clones dependencies at SHA-pinned commits via Dockerfile ARGs.
+Docker builds OpenSSL from official source and clones test dependencies.
 The `vendor/` directory is ephemeral and not tracked by git. For local
-development, clone manually:
+development, build OpenSSL from source and clone test framework manually:
 
 ```bash
+# Build OpenSSL from official source (produces vendor/openssl/lib/libcrypto.a)
+./scripts/build_openssl_wasm.sh
+
+# Clone test framework
 mkdir -p vendor
-git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
-cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f && cd ../..
 git clone https://github.com/mity/acutest.git vendor/acutest
 cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
 ```
 
-The precompiled `libcrypto.a` (WASM target) is included in the openssl-wasm repo.
+The `libcrypto.a` (WASM target) is compiled from official OpenSSL source at tag
+`openssl-3.4.0` with our WASI patches. Build provenance is recorded in
+`vendor/openssl/BUILD_PROVENANCE.txt`.
 
 ---
 
@@ -844,7 +857,7 @@ complete state machine that a reviewer can read without running the code.
 A mixin or preprocessor would hide the logic.
 
 **Q: Why C instead of Rust?**
-A: OpenSSL. `jedisct1/openssl-wasm` provides a maintained, pre-compiled
-`libcrypto.a` for `wasm32-wasi`. Zig's `cc` can link against it directly
-with zero configuration. A Rust port using `ring` or `rustls` would be
-viable but would require building the crypto library from scratch.
+A: OpenSSL. We compile official OpenSSL source to `wasm32-wasi` using Zig,
+producing `libcrypto.a` with full build provenance. Zig's `cc` can link
+against it directly with zero configuration. A Rust port using `ring` or
+`rustls` would be viable but would require a different crypto library.

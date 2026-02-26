@@ -2,17 +2,22 @@
 # paranoid — Makefile
 #
 # This is a C project that compiles to WASM and deploys to a browser.
-# 
+#
 # RECOMMENDED: Use Docker for builds (handles all dependencies):
 #   docker build -t paranoid-artifact .
 #   docker create --name temp paranoid-artifact
 #   docker cp temp:/artifact ./artifact
 #   docker rm temp
 #
+# PROVENANCE:
+#   OpenSSL is compiled FROM SOURCE inside Docker using our patches.
+#   No precompiled binaries from third parties.
+#   See scripts/build_openssl_wasm.sh for the full build process.
+#
 # LOCAL BUILDS (CI/Docker only):
-#   Local builds require vendor/openssl-wasm and vendor/acutest.
-#   These are cloned automatically inside Docker at SHA-pinned commits.
-#   For local development, use Docker or manually clone dependencies.
+#   Local builds require vendor/openssl and vendor/acutest.
+#   These are built/cloned automatically inside Docker.
+#   For local development, use Docker or manually build OpenSSL.
 # ═══════════════════════════════════════════════════════════════
 
 # ── Configuration ──────────────────────────────────────────
@@ -20,16 +25,28 @@
 PROJECT      := paranoid
 VERSION      := 2.0.0
 
-# Dependency paths (cloned at SHA-pinned commits by Docker)
-OPENSSL_SUB  := vendor/openssl-wasm
-OPENSSL_INC  := $(OPENSSL_SUB)/precompiled/include
-OPENSSL_LIB  := $(OPENSSL_SUB)/precompiled/lib/libcrypto.a
+# OpenSSL for WASM — built from source (not precompiled!)
+# In Docker: compiled by scripts/build_openssl_wasm.sh
+# Locally: must be built manually or extracted from Docker
+OPENSSL_DIR  := vendor/openssl
+OPENSSL_INC  := $(OPENSSL_DIR)/include
+OPENSSL_LIB  := $(OPENSSL_DIR)/lib/libcrypto.a
+
+# Test framework
 ACUTEST_DIR  := vendor/acutest
+
+# Native OpenSSL for test compilation (system package, NOT the WASM vendor lib)
+# The vendor libcrypto.a is compiled for wasm32 — it cannot be linked by native cc.
+# In Docker: `apk add openssl-dev` provides native headers + libcrypto
+# On macOS:  `brew install openssl` (may need PKG_CONFIG_PATH override)
+NATIVE_OPENSSL_CFLAGS ?= $(shell pkg-config --cflags libcrypto 2>/dev/null)
+NATIVE_OPENSSL_LIBS   ?= $(shell pkg-config --libs libcrypto 2>/dev/null || echo "-lcrypto")
 
 # Source
 SRC_DIR      := src
 INC_DIR      := include
 SRC          := $(SRC_DIR)/paranoid.c
+WASM_ENTRY   := $(SRC_DIR)/wasm_entry.c
 HDR          := $(INC_DIR)/paranoid.h
 
 # Web assets (separate files for CodeQL/SAST scanning)
@@ -47,9 +64,15 @@ SITE_DIR     := $(BUILD_DIR)/site
 
 CC           := zig cc
 TARGET       := wasm32-wasi
-CFLAGS       := -Ofast -I$(INC_DIR) -I$(OPENSSL_INC) \
+CFLAGS       := -O2 -fdata-sections -ffunction-sections \
+                -I$(INC_DIR) -I$(OPENSSL_INC) \
                 -DPARANOID_VERSION_STRING=\"$(VERSION)\"
-LDFLAGS      := -lwasi-emulated-getpid -Wl,--no-entry
+# -Wl,--no-entry: tell wasm-ld this is a reactor/library, not a command
+# -lwasi-emulated-getpid: provide getpid shim needed by OpenSSL internals
+# -s: strip debug symbols from WASM binary
+# -Wl,--gc-sections: garbage-collect unreferenced sections
+# Note: wasm_entry.c provides a stub main() for Zig's WASI libc
+LDFLAGS      := -s -lwasi-emulated-getpid -Wl,--no-entry -Wl,--gc-sections
 
 # Hash tools (detect what's available)
 SHA256       := $(shell command -v sha256sum 2>/dev/null || \
@@ -67,6 +90,9 @@ BUILD_TIME   := $(shell if [ -n "$$SOURCE_DATE_EPOCH" ]; then \
 
 # WASM introspection
 WASM_OBJDUMP := $(shell command -v wasm-objdump 2>/dev/null)
+
+# Binaryen optimizer — fixes Zig WASM codegen issues and optimizes size
+WASM_OPT     := $(shell command -v wasm-opt 2>/dev/null)
 
 # ── Exported WASM functions ────────────────────────────────
 # Every public API function from paranoid.h
@@ -116,28 +142,29 @@ info:
 	@printf "$(_B)$(PROJECT)$(_N) v$(VERSION)\n"
 	@echo "────────────────────────────────────"
 	@printf "  Compiler:   $(_D)$(CC) --target=$(TARGET)$(_N)\n"
-	@printf "  OpenSSL:    $(_D)$(OPENSSL_SUB)$(_N)\n"
+	@printf "  OpenSSL:    $(_D)$(OPENSSL_DIR) (from source)$(_N)\n"
 	@printf "  Source:     $(_D)$(SRC)$(_N)\n"
+	@printf "  WASM stub:  $(_D)$(WASM_ENTRY)$(_N)\n"
 	@printf "  Header:     $(_D)$(HDR)$(_N)\n"
 	@printf "  Web:        $(_D)$(WWW_DIR)/{index.html,style.css,app.js}$(_N)\n"
 	@printf "  Output:     $(_D)$(SITE_DIR)/$(_N)\n"
 	@echo ""
 
 # ── Dependencies ───────────────────────────────────────────
-# Dependencies are cloned inside Docker at SHA-pinned commits.
-# For local builds, ensure vendor/ exists (see Docker build or manual clone).
+# OpenSSL is compiled FROM SOURCE inside Docker via build_openssl_wasm.sh.
+# Acutest is cloned inside Docker at a SHA-pinned commit.
 #
-# SHA-pinned commits (must match Dockerfile ARGs):
-OPENSSL_WASM_SHA := fe926b5006593ad2825243f97e363823cd56599f
+# SHA-pinned dependency versions (must match Dockerfile ARGs):
+OPENSSL_TAG      := openssl-3.4.0
 ACUTEST_SHA      := 31751b4089c93b46a9fd8a8183a695f772de66de
 
 ## Check if vendor dependencies exist
 check-deps:
 	@if [ ! -f $(OPENSSL_LIB) ]; then \
-		printf "$(_R)✗$(_N) vendor/openssl-wasm not found\n"; \
-		printf "  Use Docker build (recommended) or manually clone at pinned SHA:\n"; \
-		printf "    git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm\n"; \
-		printf "    cd vendor/openssl-wasm && git checkout $(OPENSSL_WASM_SHA)\n"; \
+		printf "$(_R)✗$(_N) vendor/openssl not found\n"; \
+		printf "  Use Docker build (recommended) or build OpenSSL from source:\n"; \
+		printf "    git clone --depth=1 --branch $(OPENSSL_TAG) https://github.com/openssl/openssl.git /tmp/openssl-src\n"; \
+		printf "    ./scripts/build_openssl_wasm.sh /tmp/openssl-src vendor/openssl patches\n"; \
 		exit 1; \
 	fi
 	@if [ ! -f $(ACUTEST_DIR)/include/acutest.h ]; then \
@@ -157,13 +184,23 @@ build: $(WASM)
 $(BUILD_DIR):
 	@mkdir -p $@
 
-$(WASM): $(SRC) $(HDR) $(OPENSSL_LIB)
+WASM_STRIP   := $(shell command -v wasm-strip 2>/dev/null)
+
+$(WASM): $(SRC) $(HDR) $(WASM_ENTRY) $(OPENSSL_LIB)
 	@mkdir -p $(BUILD_DIR)
-	@printf "$(_G)▸$(_N) Compiling $(SRC) → $@\n"
+	@printf "$(_G)▸$(_N) Compiling $(SRC) + $(WASM_ENTRY) → $@\n"
 	$(CC) --target=$(TARGET) $(CFLAGS) \
-	    $(SRC) $(OPENSSL_LIB) \
+	    $(SRC) $(WASM_ENTRY) $(OPENSSL_LIB) \
 	    $(LDFLAGS) $(EXPORT_FLAGS) \
 	    -o $@
+ifdef WASM_OPT
+	@printf "$(_G)▸$(_N) Post-processing with wasm-opt (fixes Zig codegen + optimizes size)\n"
+	$(WASM_OPT) -O2 --enable-bulk-memory -o $@ $@
+endif
+ifdef WASM_STRIP
+	@printf "$(_G)▸$(_N) Stripping WASM binary\n"
+	$(WASM_STRIP) $@
+endif
 	@printf "$(_G)✓$(_N) $@ ($$(du -h $@ | cut -f1))\n"
 
 # ── Assemble site ──────────────────────────────────────────
@@ -195,7 +232,8 @@ site: $(WASM) $(HTML) $(CSS) $(JS)
 	@printf '  "version": "$(VERSION)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
 	@printf '  "build_time": "$(BUILD_TIME)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
 	@printf '  "zig_version": "$(shell zig version 2>/dev/null || echo unknown)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
-	@printf '  "openssl_commit": "$(shell git -C $(OPENSSL_SUB) rev-parse HEAD 2>/dev/null || echo unknown)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
+	@printf '  "openssl_tag": "$(OPENSSL_TAG)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
+	@printf '  "openssl_provenance": "from-source",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
 	@printf '  "source_sha256": "$(shell $(SHA256) $(SRC) | cut -d" " -f1)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
 	@printf '  "wasm_sha256": "$(WASM_SHA)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
 	@printf '  "wasm_sri": "$(WASM_SRI)",\n' >> $(SITE_DIR)/BUILD_MANIFEST.json
@@ -224,8 +262,8 @@ ifdef WASM_OBJDUMP
 	@printf "\n$(_G)▸$(_N) Import namespaces:\n"
 	@UNEXPECTED=0; \
 	for ns in $$($(WASM_OBJDUMP) -x $(WASM) 2>/dev/null | \
-	    grep "import" | \
-	    sed 's/.*<\(.*\)\..*/\1/' | \
+	    grep ' <- ' | \
+	    sed 's/.*<- \([^.]*\)\..*/\1/' | \
 	    sort -u); do \
 	    if [ "$$ns" = "wasi_snapshot_preview1" ]; then \
 	        printf "  $(_G)✓$(_N) $$ns (expected)\n"; \
@@ -268,8 +306,9 @@ TEST_SRC        := tests/test_native.c
 TEST_BIN        := $(BUILD_DIR)/test_native
 
 # Native compiler (system CC for running tests locally)
+# Uses system OpenSSL (openssl-dev), NOT the WASM vendor library
 NATIVE_CC       := cc
-NATIVE_CFLAGS   := -O2 -Wall -Wextra -I$(INC_DIR) -I$(OPENSSL_INC) -I$(ACUTEST_DIR)/include \
+NATIVE_CFLAGS   := -O2 -Wall -Wextra -I$(INC_DIR) $(NATIVE_OPENSSL_CFLAGS) -I$(ACUTEST_DIR)/include \
                    -DPARANOID_VERSION_STRING=\"$(VERSION)\"
 
 ## Run all tests (native C tests first, then integration)
@@ -282,12 +321,14 @@ test-native: $(TEST_BIN)
 	@$(TEST_BIN)
 
 ## Build native test binary (acutest is header-only — no extra .c file needed)
-$(TEST_BIN): $(TEST_SRC) $(SRC) $(OPENSSL_LIB)
+## Links against system OpenSSL (openssl-dev), NOT the WASM vendor libcrypto.a
+## Note: wasm_entry.c is NOT included here — it's only for WASM builds
+$(TEST_BIN): $(TEST_SRC) $(SRC)
 	@mkdir -p $(BUILD_DIR)
 	@printf "$(_G)▸$(_N) Compiling native test binary (acutest)\n"
 	$(NATIVE_CC) $(NATIVE_CFLAGS) \
 	    $(TEST_SRC) $(SRC) \
-	    $(OPENSSL_LIB) \
+	    $(NATIVE_OPENSSL_LIBS) \
 	    -lm -lpthread -ldl \
 	    -o $(TEST_BIN)
 	@printf "$(_G)✓$(_N) Native test binary ready: $(TEST_BIN)\n"

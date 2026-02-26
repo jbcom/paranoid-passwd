@@ -402,18 +402,19 @@ crypto.getRandomValues = function(buffer) {
 
 ## Supply Chain Threats
 
-### T11: Compromised OpenSSL WASM
+### T11: Compromised OpenSSL Source
 
-**Threat**: Upstream `jedisct1/openssl-wasm` repository compromised.
+**Threat**: Official OpenSSL repository compromised, or our WASI patches introduce vulnerabilities.
 
 **Attack vector**:
 ```bash
-# Attacker gains access to jedisct1's GitHub account
-# Pushes malicious commit to openssl-wasm
-git push origin backdoor-branch
+# Scenario 1: Attacker compromises official OpenSSL repository
+# Pushes malicious commit, creates new tag
+# If our pinned tag is updated without verification, builds pull backdoored code
 
-# If Dockerfile ARG is updated without verification:
-ARG OPENSSL_WASM_COMMIT=<malicious-sha>  # Pulls backdoored code
+# Scenario 2: Our WASI patches (patches/*.patch) introduce a vulnerability
+# Patches modify build config, random entropy source, and I/O handling
+# A subtle patch change could weaken the CSPRNG
 ```
 
 **Impact**: CRITICAL
@@ -421,10 +422,12 @@ ARG OPENSSL_WASM_COMMIT=<malicious-sha>  # Pulls backdoored code
 - Attacker-controlled entropy
 
 **Mitigation**:
-- ✅ Dockerfile ARG pins dependency to specific commit SHA
-- ✅ Docker builds clone at exact SHA (no branch tracking)
-- ⚠️ **TODO**: Verify dependency commit hash against known-good registry
-- 🔴 **MANUAL**: Inspect dependency commits before updating ARG SHAs
+- ✅ OpenSSL built from official source at pinned tag (`openssl-3.4.0`) -- not from third-party precompiled binaries
+- ✅ Provenance chain: Official source -> Auditable patches -> Zig compiler -> WASM
+- ✅ `vendor/openssl/BUILD_PROVENANCE.txt` records exact source tag, commit SHA, compiler version, and patches applied
+- ✅ Patches are small, auditable, and checked into the repository (`patches/01-wasi-config.patch`, `patches/02-rand-wasi.patch`, `patches/03-ssl-cert-posix-io.patch`)
+- ⚠️ **TODO**: Verify OpenSSL source tag signature against known-good GPG key
+- 🔴 **MANUAL**: Review patches before accepting changes to `patches/` directory
 
 ---
 
@@ -624,7 +627,7 @@ const length = readI32(257);  // Wrong if compiled with gcc!
 | T8: Prototype Pollution | HIGH | ✅ Mitigated (WASM isolation) | Low |
 | T9: GC Memory Retention | MEDIUM | ✅ Mitigated (WASM memory) | Low |
 | T10: Extension Monkey-Patch | CRITICAL | ⚠️ No defense | High |
-| T11: Compromised OpenSSL | CRITICAL | ⚠️ Partial (Docker ARG SHA pin) | Medium |
+| T11: Compromised OpenSSL source | CRITICAL | ✅ Built from official source at pinned tag | Low-Medium |
 | T12: Zig Backdoor | CRITICAL | 🔴 TODO (reproducible builds) | **HIGH** |
 | T13: Actions Supply Chain | CRITICAL | ✅ Mitigated (SHA pins) | Low |
 | T14: Build Environment Tamper | CRITICAL | 🔴 TODO (attestation) | **HIGH** |
@@ -654,9 +657,10 @@ const length = readI32(257);  // Wrong if compiled with gcc!
 
 ### Medium Priority
 
-4. **T11: Compromised OpenSSL**
-   - Verify Docker ARG-pinned commit SHA against known-good registry
-   - Automated verification against known-good
+4. **T11: Compromised OpenSSL Source**
+   - Verify OpenSSL source tag signature against official GPG key
+   - Review WASI patches (`patches/`) for any security implications
+   - Verify BUILD_PROVENANCE.txt consistency
 
 5. **T16: SRI Hash Injection**
    - Independent hash verification in CI Job 2
@@ -685,7 +689,7 @@ Before deploying any change:
 - [ ] Human cryptographer reviewed C code
 - [ ] SRI hashes verified independently
 - [ ] GitHub Actions still SHA-pinned
-- [ ] Docker ARG-pinned dependency SHAs haven't changed unexpectedly
+- [ ] OpenSSL source tag hasn't changed unexpectedly; BUILD_PROVENANCE.txt is consistent
 - [ ] Build output is bit-for-bit identical (reproducible)
 - [ ] No new WASI imports (only `random_get`)
 

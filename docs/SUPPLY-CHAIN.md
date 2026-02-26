@@ -27,7 +27,7 @@
 UNTRUSTED ZONE          VERIFICATION BARRIER          TRUSTED ZONE
 ───────────────         ────────────────────          ────────────
 LLM-authored code    →  Human cryptographer review  →  Audited code
-Docker-cloned deps   →  Commit SHA verification     →  Pinned dependencies
+Source-built deps    →  Tag + commit SHA verification →  Pinned dependencies
 Zig compiler         →  Reproducible builds         →  Verified binary
 GitHub Actions       →  SHA-pinned actions          →  Immutable workflow
 Build artifacts      →  Multi-party attestation     →  Signed WASM
@@ -82,24 +82,30 @@ Deployed assets      →  SRI hash verification       →  Tamper-proof site
   },
   
   "dependencies": {
-    "openssl-wasm": {
-      "type": "docker_arg_pinned",
-      "url": "https://github.com/jedisct1/openssl-wasm.git",
-      "commit": "d4e5f6g7h8i9...",
-      "commit_date": "2025-12-15T10:30:00Z",
-      "verified_against": "known_good_sha256_list.txt",
+    "openssl": {
+      "type": "source_built",
+      "url": "https://github.com/openssl/openssl.git",
+      "tag": "openssl-3.4.0",
+      "commit_date": "2024-10-22T00:00:00Z",
+      "patches": [
+        "patches/01-wasi-config.patch",
+        "patches/02-rand-wasi.patch",
+        "patches/03-ssl-cert-posix-io.patch"
+      ],
+      "build_script": "scripts/build_openssl_wasm.sh",
+      "provenance": "vendor/openssl/BUILD_PROVENANCE.txt",
       "sha256": {
-        "precompiled/lib/libcrypto.a": "e5f6g7h8i9j0..."
+        "lib/libcrypto.a": "e5f6g7h8i9j0..."
       }
     }
   },
   
   "tools": {
     "zig": {
-      "version": "0.14.0",
+      "version": "0.13.0",
       "binary_path": "/usr/bin/zig",
       "sha256": "f6g7h8i9j0k1...",
-      "verified_against": "https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz.sha256"
+      "verified_against": "https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz.sha256"
     },
     "openssl": {
       "version": "3.0.8",
@@ -119,7 +125,7 @@ Deployed assets      →  SRI hash verification       →  Tamper-proof site
   },
   
   "compilation": {
-    "command": "zig cc -target wasm32-wasi -I include -I vendor/openssl-wasm/precompiled/include -L vendor/openssl-wasm/precompiled/lib -l crypto -O3 -flto -fno-stack-protector -o build/paranoid.wasm src/paranoid.c",
+    "command": "zig cc -target wasm32-wasi -I include -I vendor/openssl/include -L vendor/openssl/lib -l crypto -O3 -flto -fno-stack-protector -o build/paranoid.wasm src/paranoid.c src/wasm_entry.c",
     "flags": ["-target", "wasm32-wasi", "-O3", "-flto"],
     "duration_ms": 4523,
     "peak_memory_mb": 256,
@@ -178,13 +184,13 @@ Deployed assets      →  SRI hash verification       →  Tamper-proof site
     {
       "stage": "dependency_clone",
       "timestamp": "2026-02-26T02:59:30Z",
-      "action": "Docker ARG-pinned git clone at SHA-pinned commits",
+      "action": "Build OpenSSL from official source at pinned tag",
       "result": "success"
     },
     {
       "stage": "dependency_verification",
       "timestamp": "2026-02-26T02:59:45Z",
-      "action": "verify openssl-wasm commit SHA",
+      "action": "verify OpenSSL source tag and commit SHA",
       "result": "success",
       "expected": "d4e5f6g7h8i9...",
       "actual": "d4e5f6g7h8i9..."
@@ -263,12 +269,10 @@ git verify-commit HEAD
 # Verify no local modifications
 git diff --exit-code || { echo "Uncommitted changes!"; exit 1; }
 
-# Verify dependency SHA (Docker ARG-pinned commits handle this automatically)
-# For local development, verify vendor/ checkouts match expected SHAs
-cd vendor/openssl-wasm
-EXPECTED_SHA="fe926b5006593ad2825243f97e363823cd56599f"
-ACTUAL_SHA=$(git rev-parse HEAD)
-[ "$ACTUAL_SHA" = "$EXPECTED_SHA" ] || { echo "Dependency SHA mismatch!"; exit 1; }
+# Verify OpenSSL provenance (Docker builds record this automatically)
+# For local development, check vendor/openssl/BUILD_PROVENANCE.txt
+cat vendor/openssl/BUILD_PROVENANCE.txt
+# Should show: source tag openssl-3.4.0, applied patches, Zig compiler version
 ```
 
 #### 3. Tool Verification
@@ -279,8 +283,8 @@ ZIG_HASH=$(sha256sum /usr/bin/zig | cut -d' ' -f1)
 EXPECTED_ZIG_HASH="f6g7h8i9j0k1..."
 [ "$ZIG_HASH" = "$EXPECTED_ZIG_HASH" ] || { echo "Zig compiler mismatch!"; exit 1; }
 
-# Verify OpenSSL library hash
-CRYPTO_HASH=$(sha256sum vendor/openssl-wasm/precompiled/lib/libcrypto.a | cut -d' ' -f1)
+# Verify OpenSSL library hash (built from source)
+CRYPTO_HASH=$(sha256sum vendor/openssl/lib/libcrypto.a | cut -d' ' -f1)
 EXPECTED_CRYPTO_HASH="e5f6g7h8i9j0..."
 [ "$CRYPTO_HASH" = "$EXPECTED_CRYPTO_HASH" ] || { echo "libcrypto.a mismatch!"; exit 1; }
 ```
@@ -389,30 +393,36 @@ Threshold: 3/5 required ✅ MET
 
 ## Dependency Verification
 
-### OpenSSL WASM Dependency
+### OpenSSL Dependency (Built from Official Source)
 
-**Threat**: Upstream repository compromised.
+**Threat**: Upstream OpenSSL source compromised, or patches introduce vulnerabilities.
 
 **Mitigation**:
 
+OpenSSL is compiled FROM OFFICIAL SOURCE inside Docker -- no precompiled binaries are used.
+
+The provenance chain is: Official OpenSSL source (pinned tag) -> Our patches -> Zig compiler -> WASM
+
 ```dockerfile
-# Pin to specific commit via Docker ARG (in Dockerfile)
-ARG OPENSSL_WASM_REPO=https://github.com/jedisct1/openssl-wasm.git
-ARG OPENSSL_WASM_COMMIT=fe926b5006593ad2825243f97e363823cd56599f
-RUN git clone --filter=blob:none --no-checkout ${OPENSSL_WASM_REPO} openssl-wasm && \
-    cd openssl-wasm && git checkout ${OPENSSL_WASM_COMMIT}
+# In Dockerfile: clone official OpenSSL at pinned tag
+ARG OPENSSL_TAG=openssl-3.4.0
+RUN git clone --depth=1 --branch=${OPENSSL_TAG} https://github.com/openssl/openssl.git && \
+    cd openssl && \
+    git apply /build/patches/01-wasi-config.patch && \
+    git apply /build/patches/02-rand-wasi.patch && \
+    git apply /build/patches/03-ssl-cert-posix-io.patch
+# Then compile with Zig to produce vendor/openssl/lib/libcrypto.a
+# Build provenance recorded in vendor/openssl/BUILD_PROVENANCE.txt
 ```
 
 ```bash
-# Verify on every build (Docker handles this via ARG pinning)
-# For local development, verify vendor/ checkouts:
-EXPECTED_COMMIT="fe926b5006593ad2825243f97e363823cd56599f"
-ACTUAL_COMMIT=$(cd vendor/openssl-wasm && git rev-parse HEAD)
-[ "$ACTUAL_COMMIT" = "$EXPECTED_COMMIT" ] || exit 1
+# Verify provenance after build
+cat vendor/openssl/BUILD_PROVENANCE.txt
+# Records: source tag, commit SHA, compiler version, patches applied
 
 # Verify library hash
 EXPECTED_LIB_HASH="e5f6g7h8i9j0..."
-ACTUAL_LIB_HASH=$(sha256sum vendor/openssl-wasm/precompiled/lib/libcrypto.a | cut -d' ' -f1)
+ACTUAL_LIB_HASH=$(sha256sum vendor/openssl/lib/libcrypto.a | cut -d' ' -f1)
 [ "$ACTUAL_LIB_HASH" = "$EXPECTED_LIB_HASH" ] || exit 1
 ```
 
@@ -421,10 +431,10 @@ ACTUAL_LIB_HASH=$(sha256sum vendor/openssl-wasm/precompiled/lib/libcrypto.a | cu
 **File**: `known-good-hashes.txt`
 
 ```
-# OpenSSL WASM libcrypto.a (commit d4e5f6g7...)
-e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0  vendor/openssl-wasm/precompiled/lib/libcrypto.a
+# OpenSSL libcrypto.a (built from official source at tag openssl-3.4.0)
+e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0  vendor/openssl/lib/libcrypto.a
 
-# Zig 0.14.0 (linux-x86_64)
+# Zig 0.13.0 (linux-x86_64)
 f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0  /usr/bin/zig
 
 # (Add all critical dependencies)
@@ -475,8 +485,8 @@ diff <(grep -E '^\s+(i32|f64|call)' zig.wat | sort) \
 
 **Alternative: Bootstrap from older compiler**:
 ```bash
-# Use Zig 0.13.0 to compile Zig 0.14.0
-# If 0.13.0 is clean, 0.14.0 should be clean
+# Use Zig 0.12.0 to compile Zig 0.13.0
+# If 0.12.0 is clean, 0.13.0 should be clean
 # Compare hashes across bootstrap chain
 ```
 
@@ -683,8 +693,8 @@ rekor-cli search --email "github-actions@github.com" \
         "digest": {"sha1": "<commit-sha>"}
       },
       {
-        "uri": "git+https://github.com/jedisct1/openssl-wasm",
-        "digest": {"sha1": "<dependency-sha>"}
+        "uri": "git+https://github.com/openssl/openssl@openssl-3.4.0",
+        "digest": {"sha1": "<openssl-source-commit-sha>"}
       },
       {
         "uri": "docker://alpine:3.21",
@@ -726,7 +736,8 @@ Before ANY deployment:
 ### Source Verification
 - [ ] All commits GPG-signed by known developers
 - [ ] No uncommitted local changes
-- [ ] Docker ARG-pinned dependency commits match expected SHAs
+- [ ] OpenSSL built from official source at pinned tag (openssl-3.4.0)
+- [ ] BUILD_PROVENANCE.txt records correct source tag, commit, and patches
 - [ ] Dependency library hashes match known-good registry
 
 ### Tool Verification

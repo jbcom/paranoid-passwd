@@ -62,7 +62,7 @@ This document describes the system architecture of `paranoid`, a self-auditing c
 │  │  │  ... 15+ exported functions                        │ │   │
 │  │  │                                                     │ │   │
 │  │  │  DEPENDENCIES:                                      │ │   │
-│  │  │  - OpenSSL libcrypto.a (18MB, precompiled)        │ │   │
+│  │  │  - OpenSSL libcrypto.a (built from source)        │ │   │
 │  │  │    - RAND_bytes() [AES-256-CTR DRBG]              │ │   │
 │  │  │    - EVP_Digest() [SHA-256]                       │ │   │
 │  │  └─────────────────────────────────────────────────┘ │   │
@@ -111,7 +111,7 @@ This document describes the system architecture of `paranoid`, a self-auditing c
 **Components**:
 - `src/paranoid.c` — All computation logic (400 lines)
 - `include/paranoid.h` — Public API definitions
-- `vendor/openssl-wasm/precompiled/lib/libcrypto.a` — Crypto primitives
+- `vendor/openssl/lib/libcrypto.a` — Crypto primitives (built from official OpenSSL source)
 
 **Responsibilities**:
 - **Password generation**:
@@ -446,7 +446,7 @@ Application running in browser sandbox
 
 | Attack Vector | Impact | Likelihood | Mitigation |
 |---------------|--------|------------|------------|
-| Compromised OpenSSL WASM | CRITICAL | LOW | Docker ARG SHA pin, manual inspection |
+| Compromised OpenSSL source | CRITICAL | LOW | Built from official source at pinned tag, patches auditable |
 | Zig compiler backdoor | CRITICAL | VERY LOW | SHA-pinned in CI, reproducible builds |
 | GitHub Actions supply chain | HIGH | LOW | SHA-pinned (all actions) |
 | CDN/proxy MitM | MEDIUM | MEDIUM | SRI hashes (all assets) |

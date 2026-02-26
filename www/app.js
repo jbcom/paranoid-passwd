@@ -26,26 +26,50 @@ let mem  = null;
  * random_get bridges WASI to Web Crypto. Everything else is a stub.
  */
 function createWasiShim() {
-  return {
+  const impl = {
+    /* ── Security-critical: bridges WASI random_get → Web Crypto ── */
     random_get(ptr, len) {
       crypto.getRandomValues(new Uint8Array(mem.buffer, ptr, len));
       return 0;
     },
-    fd_write()            { return 0; },
-    fd_close()            { return 0; },
-    fd_seek()             { return 0; },
-    fd_read()             { return 0; },
-    environ_get()         { return 0; },
+    /* ── Clock ── */
+    clock_time_get(clockId, precision, outPtr) {
+      const dv = new DataView(mem.buffer);
+      const ns = BigInt(Date.now()) * 1000000n;
+      dv.setBigUint64(outPtr, ns, true);
+      return 0;
+    },
+    /* ── Environment ── */
     environ_sizes_get(countPtr, sizePtr) {
       const dv = new DataView(mem.buffer);
       dv.setUint32(countPtr, 0, true);
       dv.setUint32(sizePtr, 0, true);
       return 0;
     },
+    args_sizes_get(countPtr, sizePtr) {
+      const dv = new DataView(mem.buffer);
+      dv.setUint32(countPtr, 0, true);
+      dv.setUint32(sizePtr, 0, true);
+      return 0;
+    },
+    /* ── Process ── */
     proc_exit(code) {
       throw new Error('WASM proc_exit: ' + code);
     },
+    /* fd_prestat_get returns errno 8 (EBADF) to signal no preopened dirs */
+    fd_prestat_get()      { return 8; },
+    fd_prestat_dir_name() { return 8; },
   };
+
+  /* Proxy auto-stubs any missing WASI import as () => 0.
+     This prevents LinkError when Zig/OpenSSL import WASI syscalls
+     that aren't needed at runtime (e.g. fd_filestat_get, poll_oneoff). */
+  return new Proxy(impl, {
+    get(target, prop) {
+      if (prop in target) return target[prop];
+      return () => 0;
+    },
+  });
 }
 
 async function loadWasm() {

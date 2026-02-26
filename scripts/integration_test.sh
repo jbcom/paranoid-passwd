@@ -4,13 +4,14 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Tests the complete build pipeline:
-#   1. Build WASM from source
-#   2. Verify exports
-#   3. Verify imports
-#   4. Check binary size
-#   5. Verify SRI hash generation
-#   6. Run hallucination checks
-#   7. Run supply chain verification
+#   1. Source files exist
+#   2. Build WASM from source
+#   3. Verify exports
+#   4. Verify imports
+#   5. Check binary size
+#   6. Verify SRI hash generation
+#   7. Run hallucination checks
+#   8. Run supply chain verification
 #
 # Usage: ./scripts/integration_test.sh
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -38,9 +39,9 @@ FAILED=0
 run_test() {
     local NAME="$1"
     local CMD="$2"
-    
+
     echo -n "TEST: $NAME... "
-    
+
     if eval "$CMD" > /dev/null 2>&1; then
         echo -e "${GREEN}PASS${NC}"
         PASSED=$((PASSED + 1))
@@ -59,12 +60,14 @@ echo "Pre-flight checks:"
 echo ""
 
 run_test "Source file exists" "test -f $REPO_ROOT/src/paranoid.c"
+run_test "WASM entry stub exists" "test -f $REPO_ROOT/src/wasm_entry.c"
 run_test "Header file exists" "test -f $REPO_ROOT/include/paranoid.h"
 run_test "Makefile exists" "test -f $REPO_ROOT/Makefile"
 run_test "Web assets exist" "test -f $REPO_ROOT/www/index.html"
-run_test "OpenSSL WASM available" "test -d $REPO_ROOT/vendor/openssl-wasm/precompiled"
-run_test "libcrypto.a exists" "test -f $REPO_ROOT/vendor/openssl-wasm/precompiled/lib/libcrypto.a"
+run_test "OpenSSL WASM available" "test -d $REPO_ROOT/vendor/openssl"
+run_test "libcrypto.a exists" "test -f $REPO_ROOT/vendor/openssl/lib/libcrypto.a"
 run_test "Acutest available" "test -f $REPO_ROOT/vendor/acutest/include/acutest.h"
+run_test "WASI patches exist" "test -f $REPO_ROOT/patches/01-wasi-config.patch"
 
 echo ""
 
@@ -119,11 +122,11 @@ WASM="$REPO_ROOT/build/paranoid.wasm"
 
 run_test "WASM file exists" "test -f $WASM"
 
-# Check binary size (should be ~180KB ± 50KB)
+# Check binary size (wider range for from-source OpenSSL builds)
 echo -n "TEST: Binary size in range... "
 if [ -f "$WASM" ]; then
     SIZE=$(stat -f%z "$WASM" 2>/dev/null || stat -c%s "$WASM")
-    if [ "$SIZE" -gt 100000 ] && [ "$SIZE" -lt 300000 ]; then
+    if [ "$SIZE" -gt 100000 ] && [ "$SIZE" -lt 500000 ]; then
         echo -e "${GREEN}PASS${NC} ($SIZE bytes)"
         PASSED=$((PASSED + 1))
     else
@@ -138,11 +141,11 @@ fi
 # Check exports (if wabt available)
 if command -v wasm-objdump &> /dev/null; then
     REQUIRED_EXPORTS="paranoid_version paranoid_generate paranoid_run_audit paranoid_get_result_ptr malloc free"
-    
+
     for EXPORT in $REQUIRED_EXPORTS; do
         run_test "Export: $EXPORT" "wasm-objdump -x $WASM 2>/dev/null | grep -q '$EXPORT'"
     done
-    
+
     # Check imports (should only be wasi_snapshot_preview1)
     echo -n "TEST: Only WASI imports... "
     IMPORTS=$(wasm-objdump -x "$WASM" 2>/dev/null | grep "import" | grep -v "wasi_snapshot_preview1" || true)

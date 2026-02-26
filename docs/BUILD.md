@@ -25,9 +25,10 @@ The build system transforms source files into a deployable website:
 INPUT                           OUTPUT
 ─────────────────────          ───────────────────────
 src/paranoid.c                 build/paranoid.wasm (~180KB)
-include/paranoid.h             
-vendor/openssl-wasm/           build/site/
-  precompiled/lib/libcrypto.a    ├── index.html (with SRI hashes)
+src/wasm_entry.c
+include/paranoid.h             build/site/
+vendor/openssl/                  ├── index.html (with SRI hashes)
+  lib/libcrypto.a
 www/index.html                   ├── paranoid.wasm
 www/app.js                       ├── app.js
 www/style.css                    ├── style.css
@@ -79,8 +80,8 @@ info:
 
 ```makefile
 ZIG := zig
-OPENSSL_INCLUDE := vendor/openssl-wasm/precompiled/include
-OPENSSL_LIB := vendor/openssl-wasm/precompiled/lib
+OPENSSL_INCLUDE := vendor/openssl/include
+OPENSSL_LIB := vendor/openssl/lib
 WASM_TARGET := wasm32-wasi
 WASM_OUT := build/paranoid.wasm
 ```
@@ -184,7 +185,7 @@ build/site/index.html: www/index.html build/paranoid.wasm
 {
   "timestamp": "2026-02-26T03:00:00Z",
   "commit": "bc727e2a1f3e4b5c6d7e8f9a0b1c2d3e4f5a6b7c",
-  "zig_version": "0.14.0",
+  "zig_version": "0.13.0",
   "wasm_sha256": "3a2b1c4d5e6f7g8h9i0j1k2l3m4n5o6p...",
   "wasm_sri": "sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K...",
   "js_sri": "sha384-9rGHJkLpMnOqRsTuVwXyZ0123456789A...",
@@ -276,7 +277,7 @@ Cryptographic record of build provenance:
 | Timestamps in binary | Different hashes | `SOURCE_DATE_EPOCH` |
 | File paths embedded | Different hashes | Relative paths only |
 | Build machine differences | Different hashes | Containerized builds |
-| Compiler version drift | Different hashes | Pin version (Zig 0.14.0) |
+| Compiler version drift | Different hashes | Pin version (Zig 0.13.0) |
 | Non-deterministic linking | Different hashes | Reproducible linker flags |
 
 ### SOURCE_DATE_EPOCH
@@ -308,10 +309,14 @@ The Dockerfile runs **all tests as a condition of successful build**. If ANY tes
 ║  STAGE 1: BASE                                                         ║
 ║    └── Alpine 3.21 + build tools (gcc, make, git, wabt)               ║
 ║                                                                        ║
-║  STAGE 2: DEPS                                                         ║
-║    ├── git clone openssl-wasm @ SHA-pinned commit                     ║
-║    └── git clone acutest @ SHA-pinned commit                            ║
-║    (NO SUBMODULES NEEDED!)                                            ║
+║  STAGE 2: BUILD-OPENSSL                                                ║
+║    ├── git clone openssl/openssl @ tag openssl-3.4.0                  ║
+║    ├── Apply patches (WASI config, rand, POSIX I/O)                   ║
+║    ├── Compile with Zig → vendor/openssl/lib/libcrypto.a              ║
+║    └── Record BUILD_PROVENANCE.txt (source tag, commit, patches)      ║
+║                                                                        ║
+║  STAGE 2b: DEPS                                                        ║
+║    └── git clone acutest @ SHA-pinned commit                           ║
 ║                                                                        ║
 ║  STAGE 3: TEST-NATIVE                                                  ║
 ║    └── Run acutest C tests → MUST PASS or build fails                   ║
@@ -335,11 +340,11 @@ The Dockerfile runs **all tests as a condition of successful build**. If ANY tes
 
 **No Submodules Required:**
 
-The Dockerfile clones dependencies directly at SHA-pinned commits:
-- **openssl-wasm**: `fe926b5006593ad2825243f97e363823cd56599f` (verified 2026-02-26, jedisct1/openssl-wasm master)
+The Dockerfile builds OpenSSL from official source and clones test dependencies:
+- **OpenSSL**: Official source at tag `openssl-3.4.0` -- compiled from source with our patches and Zig compiler
 - **acutest**: `31751b4089c93b46a9fd8a8183a695f772de66de` (verified 2026-02-26, mity/acutest master)
 
-This makes container builds **fully self-contained** and reproducible without any vendor/ directory or .gitmodules file.
+This makes container builds **fully self-contained** and reproducible without any vendor/ directory or .gitmodules file. OpenSSL is never used as a precompiled binary -- it is always built from official source.
 
 **Base Image Rationale — Alpine Linux:**
 
@@ -362,7 +367,7 @@ Note: The Liquibase container itself is Java-based for database migrations. We a
 
 **Features:**
 - **SHA256-pinned base image** — `alpine:3.21@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659`
-- **SHA-pinned openssl-wasm** — Commit `fe926b5006593ad2825243f97e363823cd56599f`
+- **Official OpenSSL source** — Tag `openssl-3.4.0`, compiled from source with Zig
 - **SHA-pinned acutest** — Commit `31751b4089c93b46a9fd8a8183a695f772de66de`
 - **All tests run inside Docker** — Build fails if any test fails
 - **SBOM generation** — Software Bill of Materials attached to every image (`--sbom=true`)
@@ -462,13 +467,17 @@ diff zig.wat clang.wat
 
 ### Dependency Pinning
 
-**OpenSSL WASM** (cloned directly in Dockerfile, no submodule):
+**OpenSSL** (built from official source in Dockerfile):
 ```dockerfile
 # In Dockerfile
-ARG OPENSSL_WASM_COMMIT=fe926b5006593ad2825243f97e363823cd56599f
-RUN git clone --filter=blob:none --no-checkout ${OPENSSL_WASM_REPO} openssl-wasm && \
-    cd openssl-wasm && \
-    git checkout ${OPENSSL_WASM_COMMIT}
+ARG OPENSSL_TAG=openssl-3.4.0
+RUN git clone --depth=1 --branch=${OPENSSL_TAG} https://github.com/openssl/openssl.git && \
+    cd openssl && \
+    # Apply WASI patches
+    git apply /build/patches/01-wasi-config.patch && \
+    git apply /build/patches/02-rand-wasi.patch && \
+    git apply /build/patches/03-ssl-cert-posix-io.patch
+# Then compile with Zig to produce vendor/openssl/lib/libcrypto.a
 ```
 
 **acutest testing framework** (cloned directly in Dockerfile):
@@ -485,10 +494,10 @@ RUN git clone --filter=blob:none --no-checkout ${ACUTEST_REPO} acutest && \
 - name: Setup Zig
   uses: mlugg/setup-zig@7d14f16220b57e3e4e02a93c4e5e8dbbdb2a2f7e  # SHA-pinned
   with:
-    version: 0.14.0  # Exact version
+    version: 0.13.0  # Exact version
 ```
 
-**Note**: The vendor/ directory is **only for local development** convenience. There are no git submodules. Docker builds are fully self-contained and clone dependencies directly at SHA-pinned commits.
+**Note**: The vendor/ directory is **only for local development** convenience. There are no git submodules. Docker builds are fully self-contained -- OpenSSL is built from official source and test dependencies are cloned directly at SHA-pinned commits.
 
 ### Build Attestation (Planned)
 
@@ -745,14 +754,14 @@ make docker-all      # Full workflow (build → extract → test)
 
 ### Local Development Setup (Optional)
 
-For local development without Docker, you may optionally set up the vendor directory:
+For local development without Docker, you may optionally build OpenSSL from source and set up the vendor directory:
 
 ```bash
-# Clone dependencies for local development
+# Build OpenSSL from official source (produces vendor/openssl/lib/libcrypto.a)
+./scripts/build_openssl_wasm.sh
+
+# Clone test framework for local development
 mkdir -p vendor
-git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
-cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f
-cd ../..
 git clone https://github.com/mity/acutest.git vendor/acutest
 cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de
 ```
@@ -763,7 +772,7 @@ cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de
 
 ```bash
 # Check version
-zig version  # Should be 0.14.0
+zig version  # Should be 0.13.0
 
 # Install specific version
 snap install zig --classic --beta  # Ubuntu
@@ -799,15 +808,13 @@ error: undefined symbol: RAND_bytes
 **Fix** (local development):
 ```bash
 # Verify library exists
-ls -lh vendor/openssl-wasm/precompiled/lib/libcrypto.a
+ls -lh vendor/openssl/lib/libcrypto.a
 
-# If missing, clone the dependency
-mkdir -p vendor
-git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
-cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f
+# If missing, build from official source
+./scripts/build_openssl_wasm.sh
 ```
 
-**Fix** (production): Use Docker — it handles all dependencies automatically.
+**Fix** (production): Use Docker -- it builds OpenSSL from official source automatically.
 
 ---
 

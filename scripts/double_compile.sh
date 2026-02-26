@@ -95,9 +95,15 @@ echo ""
 mkdir -p "$BUILD_DIR"
 cd "$REPO_ROOT"
 
-# Common flags
-INCLUDE_FLAGS="-I include -I vendor/openssl-wasm/precompiled/include"
-OPENSSL_LIB="vendor/openssl-wasm/precompiled/lib/libcrypto.a"
+# Common flags — uses from-source OpenSSL (vendor/openssl)
+INCLUDE_FLAGS="-I include -I vendor/openssl/include"
+OPENSSL_LIB="vendor/openssl/lib/libcrypto.a"
+
+if [ ! -f "$OPENSSL_LIB" ]; then
+    echo -e "${RED}ERROR: $OPENSSL_LIB not found${NC}"
+    echo "Build OpenSSL from source first: ./scripts/build_openssl_wasm.sh"
+    exit 1
+fi
 
 # ─────────────────────────────────────────────────────────────
 # Build 1: Zig
@@ -113,7 +119,7 @@ ZIG_OUT="$BUILD_DIR/paranoid-zig.wasm"
 echo "Compiling with Zig..."
 zig cc \
     --target=wasm32-wasi \
-    -Ofast \
+    -O2 \
     $INCLUDE_FLAGS \
     -DPARANOID_VERSION_STRING=\"2.0.0\" \
     -lwasi-emulated-getpid \
@@ -126,6 +132,7 @@ zig cc \
     -Wl,--export=malloc \
     -Wl,--export=free \
     src/paranoid.c \
+    src/wasm_entry.c \
     "$OPENSSL_LIB" \
     -o "$ZIG_OUT" \
     2>&1 || { echo -e "${RED}Zig compilation failed${NC}"; exit 1; }
@@ -147,9 +154,9 @@ if [ "$HAS_CLANG" -eq 1 ]; then
     echo "  Build 2: Clang"
     echo "═══════════════════════════════════════════════════════════"
     echo ""
-    
+
     CLANG_OUT="$BUILD_DIR/paranoid-clang.wasm"
-    
+
     echo "Compiling with Clang..."
     # Note: Clang WASM compilation requires wasi-sdk or similar
     # This is a best-effort attempt
@@ -168,13 +175,14 @@ if [ "$HAS_CLANG" -eq 1 ]; then
         -Wl,--export=malloc \
         -Wl,--export=free \
         src/paranoid.c \
+        src/wasm_entry.c \
         "$OPENSSL_LIB" \
         -o "$CLANG_OUT" \
         2>&1; then
-        
+
         CLANG_SIZE=$(stat -f%z "$CLANG_OUT" 2>/dev/null || stat -c%s "$CLANG_OUT")
         CLANG_HASH=$(sha256sum "$CLANG_OUT" | cut -d' ' -f1)
-        
+
         echo -e "${GREEN}✓${NC} Clang build complete"
         echo "  Size: $CLANG_SIZE bytes"
         echo "  Hash: ${CLANG_HASH:0:16}..."
@@ -198,17 +206,17 @@ echo ""
 # Extract and compare exports
 if [ "$HAS_OBJDUMP" -eq 1 ]; then
     echo "Comparing exports..."
-    
+
     ZIG_EXPORTS=$(wasm-objdump -x "$ZIG_OUT" 2>/dev/null | grep "export" | sort)
     ZIG_EXPORT_COUNT=$(echo "$ZIG_EXPORTS" | wc -l)
-    
+
     echo "  Zig exports: $ZIG_EXPORT_COUNT functions"
-    
+
     if [ "$HAS_CLANG" -eq 1 ] && [ -f "$CLANG_OUT" ]; then
         CLANG_EXPORTS=$(wasm-objdump -x "$CLANG_OUT" 2>/dev/null | grep "export" | sort)
         CLANG_EXPORT_COUNT=$(echo "$CLANG_EXPORTS" | wc -l)
         echo "  Clang exports: $CLANG_EXPORT_COUNT functions"
-        
+
         if [ "$ZIG_EXPORT_COUNT" -eq "$CLANG_EXPORT_COUNT" ]; then
             echo -e "  ${GREEN}✓${NC} Export count matches"
         else
@@ -221,19 +229,19 @@ fi
 # Disassemble and compare (if wabt available)
 if [ "$HAS_WABT" -eq 1 ]; then
     echo "Disassembling to WAT..."
-    
+
     ZIG_WAT="$BUILD_DIR/paranoid-zig.wat"
     wasm2wat "$ZIG_OUT" -o "$ZIG_WAT" 2>/dev/null || true
-    
+
     if [ -f "$ZIG_WAT" ]; then
         ZIG_FUNCS=$(grep -c '(func ' "$ZIG_WAT" || echo "0")
         echo "  Zig: $ZIG_FUNCS functions"
     fi
-    
+
     if [ "$HAS_CLANG" -eq 1 ] && [ -f "$CLANG_OUT" ]; then
         CLANG_WAT="$BUILD_DIR/paranoid-clang.wat"
         wasm2wat "$CLANG_OUT" -o "$CLANG_WAT" 2>/dev/null || true
-        
+
         if [ -f "$CLANG_WAT" ]; then
             CLANG_FUNCS=$(grep -c '(func ' "$CLANG_WAT" || echo "0")
             echo "  Clang: $CLANG_FUNCS functions"
@@ -262,7 +270,7 @@ if [ "$HAS_CLANG" -eq 1 ] && [ -f "$CLANG_OUT" ]; then
     echo "  Size:   $CLANG_SIZE bytes"
     echo "  Hash:   $CLANG_HASH"
     echo ""
-    
+
     if [ "$ZIG_HASH" = "$CLANG_HASH" ]; then
         echo -e "${GREEN}IDENTICAL HASHES${NC} (unexpected but good)"
     else

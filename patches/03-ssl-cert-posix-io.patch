@@ -1,0 +1,19 @@
+diff --git a/ssl/ssl_cert.c b/ssl/ssl_cert.c
+--- a/ssl/ssl_cert.c
++++ b/ssl/ssl_cert.c
+@@ -829,6 +829,7 @@
+     return ret;
+ }
+
++#ifndef OPENSSL_NO_POSIX_IO
+ int SSL_add_dir_cert_subjects_to_stack(STACK_OF(X509_NAME) *stack,
+                                        const char *dir)
+ {
+@@ -876,6 +877,7 @@
+
+     return ret;
+ }
++#endif
+
+ static int add_uris_recursive(STACK_OF(X509_NAME) *stack,
+                               const char *uri, int depth)

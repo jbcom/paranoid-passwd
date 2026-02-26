@@ -21,7 +21,7 @@ Welcome to the `paranoid` development guide! This document covers development se
 ### Prerequisites
 
 **Required**:
-- **Zig ≥ 0.14.0** — C/C++ compiler with WebAssembly support
+- **Zig ≥ 0.13.0** — C/C++ compiler with WebAssembly support
   - macOS: `brew install zig`
   - Ubuntu/Debian: `snap install zig --classic --beta`
   - Windows: Download from https://ziglang.org/download/
@@ -46,13 +46,17 @@ Welcome to the `paranoid` development guide! This document covers development se
 git clone https://github.com/jbcom/paranoid-passwd.git
 cd paranoid-passwd
 
-# For Docker builds (recommended): dependencies are cloned automatically
+# For Docker builds (recommended): OpenSSL is built from official source automatically
 docker build -t paranoid-passwd .
 
-# For local development: clone dependencies manually
+# For local development: build OpenSSL from source and clone test framework
+# OpenSSL is compiled from official source using the build script:
+./scripts/build_openssl_wasm.sh
+# This clones openssl/openssl at tag openssl-3.4.0, applies patches, and
+# compiles with Zig to produce vendor/openssl/lib/libcrypto.a
+
+# Clone test framework manually at the pinned commit:
 mkdir -p vendor
-git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
-cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f && cd ../..
 git clone https://github.com/mity/acutest.git vendor/acutest
 cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
 ```
@@ -66,10 +70,10 @@ make info
 **Expected output**:
 ```
 === Paranoid Build Info ===
-Zig version: 0.14.0
+Zig version: 0.13.0
 OpenSSL version: OpenSSL 3.x.x
 Zig CC: /usr/local/bin/zig cc
-OpenSSL library: vendor/openssl-wasm/precompiled/lib/libcrypto.a (18M)
+OpenSSL library: vendor/openssl/lib/libcrypto.a (built from source)
 wabt installed: yes
 ```
 
@@ -106,10 +110,10 @@ When you run `make site`, the build system:
 
 1. **Compiles C → WASM**
    ```bash
-   zig cc -target wasm32-wasi src/paranoid.c \
+   zig cc -target wasm32-wasi src/paranoid.c src/wasm_entry.c \
      -I include \
-     -I vendor/openssl-wasm/precompiled/include \
-     -L vendor/openssl-wasm/precompiled/lib \
+     -I vendor/openssl/include \
+     -L vendor/openssl/lib \
      -l crypto \
      -o build/paranoid.wasm
    ```
@@ -401,11 +405,17 @@ paranoid/
 │   └── paranoid.h                 # Public C API (249 lines)
 ├── src/
 │   └── paranoid.c                 # All computation (400 lines)
+├── patches/
+│   ├── 01-wasi-config.patch       # WASI platform configuration
+│   ├── 02-rand-wasi.patch         # WASI random entropy source
+│   └── 03-ssl-cert-posix-io.patch # SSL cert POSIX I/O adjustments
+├── scripts/
+│   └── build_openssl_wasm.sh      # Build OpenSSL from official source
 ├── vendor/
-│   └── openssl-wasm/              # Docker-cloned (jedisct1)
-│       └── precompiled/
-│           ├── include/openssl/   # OpenSSL headers
-│           └── lib/libcrypto.a    # Precompiled for wasm32-wasi
+│   └── openssl/                   # Built from official OpenSSL source (openssl-3.4.0)
+│       ├── include/openssl/       # OpenSSL headers (from build)
+│       ├── lib/libcrypto.a        # Compiled for wasm32-wasi
+│       └── BUILD_PROVENANCE.txt   # Records source tag, commit, compiler, patches
 ├── www/
 │   ├── index.html                 # Structure only (213 lines)
 │   ├── style.css                  # CSS-only wizard (834 lines)
@@ -434,6 +444,7 @@ paranoid/
 | Component | Role | Touches Crypto? |
 |-----------|------|:---------------:|
 | `src/paranoid.c` | **ALL** computation | ✅ YES |
+| `src/wasm_entry.c` | WASM entry point | No |
 | `include/paranoid.h` | C API definitions | No |
 | `www/app.js` | WASM bridge (3-line shim + struct reader) | ⚠️ 3 lines |
 | `www/index.html` | HTML structure | No |
@@ -468,18 +479,21 @@ snap install zig --classic --beta
 
 ### Dependencies Not Available
 
-**Error**: `vendor/openssl-wasm/precompiled/lib/libcrypto.a: No such file`
+**Error**: `vendor/openssl/lib/libcrypto.a: No such file`
 
-**Solution** (recommended): Use Docker — it clones dependencies at SHA-pinned commits automatically:
+**Solution** (recommended): Use Docker — it builds OpenSSL from official source automatically:
 ```bash
 docker build -t paranoid-passwd .
 ```
 
-**Solution** (local development): Clone dependencies manually at the pinned commits:
+**Solution** (local development): Build OpenSSL from source using the build script:
 ```bash
+./scripts/build_openssl_wasm.sh
+# This clones official OpenSSL at tag openssl-3.4.0, applies patches,
+# and compiles with Zig to produce vendor/openssl/lib/libcrypto.a
+
+# Clone test framework:
 mkdir -p vendor
-git clone https://github.com/jedisct1/openssl-wasm.git vendor/openssl-wasm
-cd vendor/openssl-wasm && git checkout fe926b5006593ad2825243f97e363823cd56599f && cd ../..
 git clone https://github.com/mity/acutest.git vendor/acutest
 cd vendor/acutest && git checkout 31751b4089c93b46a9fd8a8183a695f772de66de && cd ../..
 ```
@@ -643,7 +657,7 @@ ls -lh build/paranoid.wasm
 ## Resources
 
 - **Zig Documentation**: https://ziglang.org/documentation/
-- **OpenSSL WASM**: https://github.com/jedisct1/openssl-wasm
+- **OpenSSL**: https://github.com/openssl/openssl
 - **WebAssembly Spec**: https://webassembly.github.io/spec/
 - **WASI Spec**: https://github.com/WebAssembly/WASI
 - **NIST SP 800-90A**: https://csrc.nist.gov/publications/detail/sp/800-90a/rev-1/final

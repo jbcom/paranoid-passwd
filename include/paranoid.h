@@ -13,8 +13,9 @@
  *   proofs, and threat assessment runs inside the WASM sandbox.
  *
  * BUILD:
- *   Compiled against jedisct1/openssl-wasm (Docker-cloned at SHA-pinned commit) with Zig.
- *   See Makefile for targets.
+ *   Compiled against official OpenSSL (built from source with our WASI patches)
+ *   using Zig cc --target=wasm32-wasi. No precompiled binaries.
+ *   See scripts/build_openssl_wasm.sh and Makefile for details.
  */
 
 #ifndef PARANOID_H

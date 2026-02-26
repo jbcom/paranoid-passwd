@@ -139,7 +139,7 @@ make hash      # Binary integrity verification
 | Dependency | Version | SHA-256 | Supply Chain Risk | Mitigation |
 |------------|---------|---------|-------------------|------------|
 | OpenSSL WASM | Docker-cloned | N/A | Upstream compromise | SHA-pinned commit in Dockerfile ARG, verified at clone time |
-| Zig | ≥ 0.14.0 | N/A | Compiler backdoor | SHA-pinned in CI, reproducible builds |
+| Zig | ≥ 0.13.0 | N/A | Compiler backdoor | SHA-pinned in CI, reproducible builds |
 | GitHub Actions | Various | Various | Action compromise | **ALL actions SHA-pinned** (see `.github/workflows/ci.yml`, `cd.yml`, `release.yml`) |
 
 **GitHub Actions SHA Pinning**:
