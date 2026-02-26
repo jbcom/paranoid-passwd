@@ -7,8 +7,15 @@
 ## This Dockerfile implements the supply chain security practices from:
 ## https://www.liquibase.com/blog/docker-supply-chain-security
 ##
+## NOTE: We use debian:12-slim as the base image (not the Liquibase image itself)
+## because this is a C/WASM build environment requiring Zig, make, git, etc.
+## The Liquibase container is designed for Java-based database migrations.
+## We adopt Liquibase's SECURITY PRACTICES (SHA pinning, SBOM, Cosign, provenance)
+## rather than their runtime image.
+##
 ## Features:
 ##   - SHA256-pinned base image (immutable, auditable)
+##   - SHA-pinned openssl-wasm dependency (no submodule in container)
 ##   - SBOM generation via BuildKit (--sbom=true)
 ##   - SLSA Level 3 provenance (--provenance=mode=max)
 ##   - Cosign keyless signing via GitHub OIDC
@@ -40,6 +47,15 @@
 # To update: pull new image, verify signature, update digest below
 # ═══════════════════════════════════════════════════════════════════════════════
 FROM debian:12-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421 AS builder
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OPENSSL-WASM — SHA-pinned commit (no submodule dependency in container)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Source: https://github.com/jedisct1/openssl-wasm
+# This pins the exact commit for reproducible builds inside the container.
+# For local development, the submodule in vendor/openssl-wasm is used instead.
+ARG OPENSSL_WASM_REPO=https://github.com/jedisct1/openssl-wasm.git
+ARG OPENSSL_WASM_COMMIT=fe926b5006593ad2825243f97e363823cd56599f
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ZIG TOOLCHAIN — SHA256-pinned (committed tarball)
@@ -78,12 +94,21 @@ RUN dpkg --print-architecture | grep -q "^amd64$" || \
 WORKDIR /src
 COPY . .
 
-# Require git metadata for submodule verification and reproducible timestamps
+# Require git metadata for reproducible timestamps
 RUN test -d .git || \
-    { echo "ERROR: .git directory missing; required for submodule verification"; exit 1; }
+    { echo "ERROR: .git directory missing; required for reproducible SOURCE_DATE_EPOCH"; exit 1; }
 
-# Initialize submodules (fails closed if missing)
-RUN git submodule update --init --recursive
+# ═══════════════════════════════════════════════════════════════════════════════
+# OPENSSL-WASM DEPENDENCY — Clone at pinned commit (no submodule needed)
+# ═══════════════════════════════════════════════════════════════════════════════
+# This makes the container build fully self-contained and reproducible.
+# The commit is SHA-pinned above for supply chain security.
+RUN mkdir -p vendor && \
+    git clone --depth 1 ${OPENSSL_WASM_REPO} vendor/openssl-wasm && \
+    cd vendor/openssl-wasm && \
+    git fetch --depth 1 origin ${OPENSSL_WASM_COMMIT} && \
+    git checkout ${OPENSSL_WASM_COMMIT} && \
+    echo "✓ openssl-wasm pinned to ${OPENSSL_WASM_COMMIT}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ZIG TOOLCHAIN VERIFICATION
