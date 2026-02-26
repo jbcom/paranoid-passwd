@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.1](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.1.0...paranoid-passwd-v3.1.1) (2026-02-26)
+
+
+### Bug Fixes
+
+* comprehensive copy/docs/UX update for v3 Wolfi architecture ([#6](https://github.com/jbcom/paranoid-passwd/issues/6)) ([9a8f7e8](https://github.com/jbcom/paranoid-passwd/commit/9a8f7e84f752779c5f0e4011c6519f8688426e5a))
+* release attest — use attest-build-provenance action ([aff6922](https://github.com/jbcom/paranoid-passwd/commit/aff6922bea86d866b822052ff93034a4ac066807))
+
 ## [3.1.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.0.0...paranoid-passwd-v3.1.0) (2026-02-26)
 
 
