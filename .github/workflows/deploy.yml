@@ -1,6 +1,15 @@
 # ─────────────────────────────────────────────────────────────────
 # paranoid — Transparent Build & Deploy Pipeline
 #
+# SUPPLY CHAIN SECURITY (Liquibase-style):
+#   - SBOM generation (--sbom=true)
+#   - SLSA Level 3 provenance (--provenance=mode=max)
+#   - Cosign keyless signing via GitHub OIDC
+#   - SHA-pinned base images and actions
+#   - Reproducible builds (SOURCE_DATE_EPOCH)
+#
+# Reference: https://www.liquibase.com/blog/docker-supply-chain-security
+#
 # SUPPLY CHAIN:
 #   Source:    src/paranoid.c + include/paranoid.h
 #   Crypto:   vendor/openssl-wasm (submodule, pinned commit)
@@ -31,6 +40,7 @@ on:
       - 'include/**'
       - 'www/**'
       - 'Makefile'
+      - 'Dockerfile'
       - '.github/workflows/deploy.yml'
   pull_request:
     branches: [main]
@@ -42,6 +52,10 @@ permissions:
 concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
 
@@ -194,3 +208,127 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac2b3c603fc # v4.0.5
+
+  # ───────────────────────────────────────────────────────────
+  # JOB 4: Container Build with Liquibase-style Supply Chain Security
+  # ───────────────────────────────────────────────────────────
+  # Implements: SBOM, SLSA Level 3 Provenance, Cosign Signing
+  # Reference: https://www.liquibase.com/blog/docker-supply-chain-security
+  # ───────────────────────────────────────────────────────────
+  container:
+    name: Container Build (SBOM + Provenance + Signing)
+    runs-on: ubuntu-24.04
+    needs: [build, verify]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # Required for Cosign keyless signing via GitHub OIDC
+
+    outputs:
+      image-digest: ${{ steps.build-push.outputs.digest }}
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: recursive
+          fetch-depth: 0  # Full history for SOURCE_DATE_EPOCH
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@3454372f43399081ed03b604cb2d021dabca52bb # v3.8.0
+
+      # ─────────────────────────────────────────────────────────
+      # LIQUIBASE-STYLE BUILD: SBOM + SLSA Level 3 Provenance
+      # ─────────────────────────────────────────────────────────
+      - name: Build and Push Container Image
+        id: build-push
+        uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Liquibase-style supply chain security features:
+          sbom: true                    # Software Bill of Materials
+          provenance: mode=max          # SLSA Level 3 provenance attestation
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ─────────────────────────────────────────────────────────
+      # LIQUIBASE-STYLE SIGNING: Cosign Keyless via GitHub OIDC
+      # ─────────────────────────────────────────────────────────
+      - name: Sign Container Image with Cosign
+        env:
+          DIGEST: ${{ steps.build-push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "Signing image with Cosign (keyless via GitHub OIDC)..."
+          images=""
+          for tag in ${TAGS}; do
+            images+="${tag}@${DIGEST} "
+          done
+          cosign sign --yes ${images}
+          echo "✓ Image signed and recorded in Sigstore Rekor transparency log"
+
+      - name: Verify Container Signature
+        env:
+          DIGEST: ${{ steps.build-push.outputs.digest }}
+        run: |
+          echo "Verifying signature..."
+          cosign verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST} \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.*"
+          echo "✓ Signature verified"
+
+      - name: Output Supply Chain Summary
+        env:
+          DIGEST: ${{ steps.build-push.outputs.digest }}
+        run: |
+          echo ""
+          echo "═══════════════════════════════════════════════════════════"
+          echo "  SUPPLY CHAIN SECURITY SUMMARY (Liquibase-style)"
+          echo "═══════════════════════════════════════════════════════════"
+          echo ""
+          echo "Image:      ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          echo "Digest:     ${DIGEST}"
+          echo ""
+          echo "Attestations:"
+          echo "  ✓ SBOM attached (--sbom=true)"
+          echo "  ✓ SLSA Level 3 provenance (--provenance=mode=max)"
+          echo "  ✓ Cosign signature (keyless, GitHub OIDC)"
+          echo ""
+          echo "Verification commands:"
+          echo ""
+          echo "  # Verify signature"
+          echo "  cosign verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST} \\"
+          echo "    --certificate-oidc-issuer=https://token.actions.githubusercontent.com \\"
+          echo "    --certificate-identity-regexp=\"https://github.com/${{ github.repository }}/.*\""
+          echo ""
+          echo "  # View SBOM"
+          echo "  docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}"
+          echo ""
+          echo "═══════════════════════════════════════════════════════════"

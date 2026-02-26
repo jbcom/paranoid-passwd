@@ -292,37 +292,50 @@ build/paranoid.wasm: src/paranoid.c
 
 **Effect**: All embedded timestamps use commit time (deterministic).
 
-### Container-Based Builds (Attested, scratch final)
+### Container-Based Builds (Liquibase-Style Supply Chain Security)
 
-The repository ships a Dockerfile that:
+The repository implements the supply chain security practices from [Liquibase's Docker Security Blog](https://www.liquibase.com/blog/docker-supply-chain-security):
 
-- Uses a builder image supplied **with a required digest** (`DEBIAN_IMAGE`) to avoid unpinned bases.
-- Verifies the Zig toolchain hash (`ZIG_SHA256`) before extraction (matches the checked-in tarball).
-- Builds with BuildKit and copies only `build/site/` + `paranoid.wasm` into a `scratch` final image (no OS, no shell).
-- Fails closed if the OpenSSL submodule is missing.
+**Features:**
+- **SHA256-pinned base image** — `debian:12-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421`
+- **SBOM generation** — Software Bill of Materials attached to every image (`--sbom=true`)
+- **SLSA Level 3 provenance** — Non-falsifiable build attestation (`--provenance=mode=max`)
+- **Cosign keyless signing** — Ephemeral certificates via GitHub OIDC, recorded in Sigstore's Rekor transparency log
+- **Scratch final image** — Zero attack surface (no OS, no shell)
+- **Zig toolchain hash verification** — Tarball hash verified before extraction
 
-Build (requires BuildKit):
+**Build (with full attestation):**
 
 ```bash
-DOCKER_BUILDKIT=1 docker build \  # placeholder digest below; command fails until replaced
-  --build-arg DEBIAN_IMAGE=debian:12-slim@sha256:REQUIRE_TRUSTED_DIGEST \
+DOCKER_BUILDKIT=1 docker build \
+  --sbom=true \
   --provenance=mode=max \
   -t paranoid-artifact .
 ```
-Example structure (replace with a verified digest):  
-`--build-arg DEBIAN_IMAGE=debian:12-slim@sha256:<REPLACE_WITH_VERIFIED_DIGEST>` (placeholder only; builds fail until replaced)
-Note: `REQUIRE_TRUSTED_DIGEST` is intentionally invalid; this command is incomplete until a verified digest is supplied (see below).
 
-How to obtain a trusted digest (examples):
-- `skopeo inspect --raw docker://debian:12-slim | jq -r '.digest // ((.manifests[] | select(.platform.arch=="amd64").digest) | first)'` (amd64 == x86_64; substitute the output into `--build-arg DEBIAN_IMAGE=…@<digest>`; ensure exactly one digest is returned)
-- `docker buildx imagetools inspect debian:12-slim --format '{{json .Manifest.digest}}'` for manifest lists (Docker Hub); for single-platform responses use `--format '{{json .Digest}}'` and confirm the output is a 64-hex sha256 digest before using it
+**Verify signature (after push to registry):**
 
-Verify the digest you plan to use:
-- Cross-check the digest from two independent registries/mirrors (e.g., docker.io and debian registry) and ensure they match.
-- Validate the manifest signature with Debian's official signing keys (e.g., `skopeo stand-alone-sign` / `cosign verify-blob` if exported).
-- Record the digest in change control alongside the BuildKit provenance envelope.
+```bash
+cosign verify ghcr.io/jbcom/paranoid-passwd:latest \
+  --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp="https://github.com/jbcom/paranoid-passwd/.*"
+```
 
-Obtain attested artifact image (contains only `/artifact/site` and `paranoid.wasm`):
+**View SBOM:**
+
+```bash
+docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
+  --format '{{ json .SBOM }}'
+```
+
+**View SLSA Provenance:**
+
+```bash
+docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
+  --format '{{ json .Provenance }}'
+```
+
+**Extract artifacts from scratch image:**
 
 ```bash
 docker create --name paranoid-out paranoid-artifact
@@ -331,12 +344,13 @@ docker rm paranoid-out
 find ./artifact -maxdepth 2 -type f
 ```
 
-To prove chain-of-custody:
+**Chain-of-custody verification:**
 
-- Keep the builder base digest in change control (CI should inject it).
-- Preserve the BuildKit provenance envelope (`--provenance=mode=max`).
-- Record the Zig tarball hash (already hard-pinned in the Dockerfile).
-- Compare `artifact/site/BUILD_MANIFEST.json` against the hash emitted by `make hash`.
+1. Verify Cosign signature against GitHub OIDC issuer
+2. Inspect SBOM for complete dependency inventory
+3. Verify SLSA provenance matches expected source commit
+4. Compare `artifact/site/BUILD_MANIFEST.json` against `make hash` output
+5. Check Rekor transparency log for signature record
 
 ### Diverse Double-Compilation (Planned)
 

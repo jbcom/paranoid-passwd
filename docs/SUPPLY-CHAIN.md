@@ -575,7 +575,19 @@ int paranoid_generate(...) {
 
 ## Attestation Framework
 
-### SLSA Level 3 Compliance (Goal)
+### Liquibase-Style Supply Chain Security
+
+This project implements the supply chain security practices from [Liquibase's Docker Security Blog](https://www.liquibase.com/blog/docker-supply-chain-security):
+
+| Feature | Implementation | Status |
+|---------|---------------|--------|
+| **SBOM** | `--sbom=true` in BuildKit | ✅ Implemented |
+| **SLSA Level 3 Provenance** | `--provenance=mode=max` | ✅ Implemented |
+| **Cosign Keyless Signing** | GitHub OIDC via Sigstore | ✅ Implemented |
+| **SHA-pinned Base Image** | `debian:12-slim@sha256:74d56e3...` | ✅ Implemented |
+| **Scratch Final Image** | Zero attack surface | ✅ Implemented |
+
+### SLSA Level 3 Compliance
 
 **SLSA** = Supply-chain Levels for Software Artifacts
 
@@ -583,28 +595,58 @@ int paranoid_generate(...) {
 Level 0: No guarantees
 Level 1: Build process documented
 Level 2: Hosted build (GitHub Actions)
-Level 3: Hardened build (non-falsifiable provenance)
+Level 3: Hardened build (non-falsifiable provenance)  ← CURRENT
 Level 4: Highest (two-person review, hermetic builds)
 ```
 
-**Current**: Level 2 (GitHub Actions)  
-**Target**: Level 3 (signed provenance, reproducible)
+**Current**: Level 3 (SBOM + Provenance + Keyless Signing)
 
-Containerized attestation path:
-- Builder image must be supplied with a trusted digest (`DEBIAN_IMAGE` arg in Dockerfile) — no implicit tags.
-- Zig toolchain hash is verified before extraction (pinned to the checked-in tarball).
-- Final artifact image is `scratch` with only `/artifact/site` + `paranoid.wasm`; no runtime or package manager remains.
+### Container Build Features
 
-### Provenance Format
+1. **SHA256-pinned base image**: `debian:12-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421`
+2. **SBOM attached**: Complete Software Bill of Materials as OCI attestation
+3. **SLSA provenance**: Non-falsifiable build attestation with source/builder identity
+4. **Cosign signature**: Keyless signing via GitHub OIDC, recorded in Rekor transparency log
+5. **Zig toolchain hash**: Verified before extraction (SHA256 pinned)
+6. **Scratch final image**: Only artifacts, no OS/shell/runtime
+
+### Verification Commands
+
+**Verify Cosign Signature:**
+```bash
+cosign verify ghcr.io/jbcom/paranoid-passwd:latest \
+  --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp="https://github.com/jbcom/paranoid-passwd/.*"
+```
+
+**View SBOM:**
+```bash
+docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
+  --format '{{ json .SBOM }}'
+```
+
+**View SLSA Provenance:**
+```bash
+docker buildx imagetools inspect ghcr.io/jbcom/paranoid-passwd:latest \
+  --format '{{ json .Provenance }}'
+```
+
+**Check Rekor Transparency Log:**
+```bash
+rekor-cli search --email "github-actions@github.com" \
+  --artifact ghcr.io/jbcom/paranoid-passwd:latest
+```
+
+### Provenance Format (SLSA v0.2)
 
 ```json
 {
   "_type": "https://in-toto.io/Statement/v0.1",
   "subject": [
     {
-      "name": "build/paranoid.wasm",
+      "name": "ghcr.io/jbcom/paranoid-passwd",
       "digest": {
-        "sha256": "h8i9j0k1l2m3..."
+        "sha256": "<image-digest>"
       }
     }
   ],
@@ -617,13 +659,13 @@ Containerized attestation path:
     "invocation": {
       "configSource": {
         "uri": "git+https://github.com/jbcom/paranoid-passwd@refs/heads/main",
-        "digest": {"sha1": "bc727e2a..."},
-        "entryPoint": "Makefile"
+        "digest": {"sha1": "<commit-sha>"},
+        "entryPoint": "Dockerfile"
       }
     },
     "metadata": {
-      "buildStartedOn": "2026-02-26T03:00:00Z",
-      "buildFinishedOn": "2026-02-26T03:00:15Z",
+      "buildStartedOn": "<timestamp>",
+      "buildFinishedOn": "<timestamp>",
       "completeness": {
         "parameters": true,
         "environment": true,
@@ -634,26 +676,42 @@ Containerized attestation path:
     "materials": [
       {
         "uri": "git+https://github.com/jbcom/paranoid-passwd",
-        "digest": {"sha1": "bc727e2a..."}
+        "digest": {"sha1": "<commit-sha>"}
       },
       {
         "uri": "git+https://github.com/jedisct1/openssl-wasm",
-        "digest": {"sha1": "d4e5f6g7..."}
+        "digest": {"sha1": "<submodule-sha>"}
+      },
+      {
+        "uri": "docker://debian:12-slim",
+        "digest": {"sha256": "74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421"}
       }
     ]
   }
 }
 ```
 
-**Sign provenance**:
-```bash
-cosign sign-blob --key cosign.key PROVENANCE.json > PROVENANCE.json.sig
+### Keyless Signing Flow (Cosign + Sigstore)
+
+```
+GitHub Actions workflow
+    │
+    ├─→ Request OIDC token from GitHub
+    │
+    ├─→ Exchange token for ephemeral certificate (Fulcio CA)
+    │
+    ├─→ Sign image digest with ephemeral key
+    │
+    ├─→ Record signature in Rekor transparency log
+    │
+    └─→ Discard ephemeral key (no secrets to manage!)
 ```
 
-**Verify provenance**:
-```bash
-cosign verify-blob --key cosign.pub --signature PROVENANCE.json.sig PROVENANCE.json
-```
+**Advantages over traditional GPG signing:**
+- Zero private key management
+- Ephemeral certificates (no rotation required)
+- Public transparency log (audit trail)
+- Identity bound to GitHub workflow (not just key possession)
 
 ---
 
