@@ -686,11 +686,36 @@ make info         # Show toolchain configuration
 
 ### CI/CD
 
+The project uses three separate workflows (see `.github/workflows/`):
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ ci.yml (Pull Requests)                                      │
+│   Docker Build → E2E Tests (Playwright) → WASM Verification │
+│   ✓ All checks must pass to merge                           │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ cd.yml (Push to Main)                                       │
+│   Docker Build → SBOM → Provenance → Cosign → release-please│
+│   ✓ Creates release PR when ready                           │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ release.yml (Release Published)                             │
+│   Build from tag → Attest → Sign → Deploy to GitHub Pages   │
+│   ✓ Only deploys from signed, attested releases             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Docker targets for local development:**
 ```bash
-make site         # Job 1: Build
-make test-native  # Job 1.5: Native C tests
-make verify       # Job 2: Verify WASM structure
-# Job 3: Deploy build/site/ to GitHub Pages
+make docker-build    # Build with SBOM + provenance
+make docker-extract  # Extract verified artifacts
+make docker-e2e      # Run Playwright E2E tests
+make docker-all      # Full workflow (build → extract → test)
 ```
 
 ---

@@ -1,5 +1,5 @@
 /**
- * app.js — Display-only WASM bridge for paranoid
+ * app.js — Display-only WASM bridge for paranoid-passwd
  *
  * This file does ZERO computation. It:
  *   1. Loads paranoid.wasm and provides the WASI random_get shim

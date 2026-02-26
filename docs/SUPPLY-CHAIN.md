@@ -584,7 +584,7 @@ This project implements the supply chain security practices from [Liquibase's Do
 | **SBOM** | `--sbom=true` in BuildKit | ✅ Implemented |
 | **SLSA Level 3 Provenance** | `--provenance=mode=max` | ✅ Implemented |
 | **Cosign Keyless Signing** | GitHub OIDC via Sigstore | ✅ Implemented |
-| **SHA-pinned Base Image** | `debian:12-slim@sha256:74d56e3...` | ✅ Implemented |
+| **SHA-pinned Base Image** | `alpine:3.21@sha256:25109184...` | ✅ Implemented |
 | **Scratch Final Image** | Zero attack surface | ✅ Implemented |
 
 ### SLSA Level 3 Compliance
@@ -603,7 +603,7 @@ Level 4: Highest (two-person review, hermetic builds)
 
 ### Container Build Features
 
-1. **SHA256-pinned base image**: `debian:12-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421`
+1. **SHA256-pinned base image**: `alpine:3.21@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659`
 2. **SBOM attached**: Complete Software Bill of Materials as OCI attestation
 3. **SLSA provenance**: Non-falsifiable build attestation with source/builder identity
 4. **Cosign signature**: Keyless signing via GitHub OIDC, recorded in Rekor transparency log
