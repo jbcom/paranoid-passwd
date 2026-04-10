@@ -1,3 +1,10 @@
+---
+title: Statistical Audit Methodology
+updated: 2026-04-09
+status: current
+domain: technical
+---
+
 # Statistical Audit Methodology
 
 This document describes the 7-layer statistical audit system used to verify

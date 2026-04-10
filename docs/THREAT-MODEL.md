@@ -1,6 +1,13 @@
+---
+title: Threat Model
+updated: 2026-04-09
+status: current
+domain: technical
+---
+
 # Threat Model
 
-This document provides a comprehensive threat analysis for the `paranoid` password generator, with special focus on **LLM-as-adversary** scenarios.
+This document provides a comprehensive threat analysis for the `paranoid` password generator, with special focus on LLM-as-adversary scenarios.
 
 ---
 

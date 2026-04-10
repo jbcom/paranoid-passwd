@@ -1,3 +1,10 @@
+---
+title: Design
+updated: 2026-04-09
+status: current
+domain: product
+---
+
 # Design Decisions
 
 This document explains the key design decisions in `paranoid` v3.0 and their rationale.
