@@ -1,0 +1,32 @@
+# =================================================================
+# paranoid-passwd builder — Docker container action
+#
+# Use from any workflow:
+#
+#     - name: Build CLI
+#       uses: ./.github/actions/builder
+#       with:
+#         run: |
+#           cmake -B build/cli -DCMAKE_BUILD_TYPE=Release
+#           cmake --build build/cli --target paranoid_cli
+#
+# GitHub Actions builds the Dockerfile per-job from this directory,
+# bind-mounts $GITHUB_WORKSPACE into the container at /github/workspace
+# (which is also cwd), and runs the entrypoint with INPUT_RUN set to
+# the `run:` value above.
+#
+# No registry. No image push. The Dockerfile is the source of truth;
+# any change to it ships atomically with the PR that touches it.
+# =================================================================
+
+name: 'paranoid-passwd builder'
+description: 'Run a step inside the Wolfi-pinned toolchain container.'
+
+inputs:
+  run:
+    description: 'Bash script body to execute inside the builder container.'
+    required: true
+
+runs:
+  using: docker
+  image: Dockerfile

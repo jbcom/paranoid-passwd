@@ -39,11 +39,10 @@ Three files with named purposes are easier to audit and harder to break.
 ## Scope
 
 In scope:
-- New `builder/` directory containing the Wolfi builder image recipe
-- New `builder.yml` workflow that builds + signs + pushes the image to
-  `ghcr.io/jbcom/paranoid-passwd-builder:<sha>` on push to main
+- New `.github/actions/builder/` directory: Dockerfile + entrypoint.sh
+  + action.yml (Docker container action, no registry push)
 - Switch `ci.yml`, `release.yml` (was `cli-release.yml`), and the build
-  steps inside `cd.yml` to use that image as their `container:`
+  steps inside `cd.yml` to use the action via `uses: ./.github/actions/builder`
 - Consolidate 6 workflows → 3 (`ci.yml`, `release.yml`, `cd.yml`)
 - Delete `codeql.yml`, `scorecard.yml`, `cli-release.yml`
 - Move CodeQL into the `ci.yml` matrix (not a separate file)
@@ -59,36 +58,64 @@ Out of scope:
 
 ## Architecture
 
-### The builder image
+### The builder action (Pattern D — chosen)
+
+A **Docker container action living in-repo** at `.github/actions/builder/`,
+NOT a published image. Three files:
 
 ```
-ghcr.io/jbcom/paranoid-passwd-builder
-├── built FROM cgr.dev/chainguard/wolfi-base
-├── apk add: zig (0.14.1), cmake (3.31.7), bash (5.2.37),
-│            wabt (for wasm-validate), binaryen (for wasm-opt),
-│            curl (for any SHA-verified downloads needed),
-│            git (for git rev-parse in workflows),
-│            tar, gzip, coreutils
-├── tagged: <sha-of-builder-recipe>, latest
-└── signed: cosign keyless via sigstore OIDC (same chain as cli-release)
+.github/actions/builder/
+├── action.yml       runs.using: docker, image: Dockerfile
+├── Dockerfile       FROM cgr.dev/chainguard/wolfi-base + apk add zig 0.14.1, cmake, wabt, binaryen, bash, openssl-dev, ninja, git, curl, tar, gzip, coreutils
+└── entrypoint.sh    exec bash on $INPUT_RUN with strict flags
 ```
 
-The image recipe lives at `builder/Dockerfile` (a single FROM + apk add
-+ minimal labels). A separate `builder/melange.yaml` is NOT used —
-melange builds Wolfi packages, but our builder is a Wolfi *consumer*
-that needs an image, which `apko` can produce. We use a Dockerfile
-because the input is just "wolfi-base + a few apks" and Dockerfile is
-clearer than apko's YAML for that simple case.
+GitHub Actions builds the Dockerfile per-job from this directory, bind-mounts
+`$GITHUB_WORKSPACE` into the container, and runs the entrypoint with
+`INPUT_RUN` set from the workflow step's `with: run:`.
+
+Use from any workflow:
+
+```yaml
+- name: Build CLI
+  uses: ./.github/actions/builder
+  with:
+    run: |
+      cmake -B build/cli -DCMAKE_BUILD_TYPE=Release
+      cmake --build build/cli --target paranoid_cli
+```
+
+**Why Pattern D (chosen) over a published ghcr image (rejected):**
+
+- **No registry, no push step, no signing infrastructure.** The
+  Dockerfile in the repo IS the source of truth.
+- **No digest tracking.** A change to the toolchain is a change to the
+  Dockerfile is a normal PR diff. The PR that touches the Dockerfile is
+  the PR that adopts the new toolchain — atomically.
+- **Eliminates trust roots.** No ghcr.io. No cosign signature chain.
+  No "is this digest the one we signed?" verification dance. Just
+  Wolfi (via `cgr.dev/chainguard/wolfi-base`) and the Dockerfile in
+  this repo.
+- **Local reproducibility.** `cd .github/actions/builder && docker build .`
+  reproduces exactly what CI runs.
+
+**Trade-off accepted:** GitHub-hosted runners are ephemeral, so each cold
+job pulls `wolfi-base` and runs `apk add` again. ~30–60s per cold job.
+Worth it for the simpler trust model.
 
 ### The new workflow shape
 
 ```
-.github/workflows/
-├── builder.yml          NEW: builds + signs + pushes the builder image
-├── ci.yml               REWRITTEN: jobs run inside builder image
-├── release.yml          RENAMED from cli-release.yml: cross-compile + sigstore
-└── cd.yml               UPDATED: build steps run inside builder image
+.github/
+├── actions/builder/     NEW: Docker container action (Pattern D)
+└── workflows/
+    ├── ci.yml           REWRITTEN: steps run via uses: ./.github/actions/builder
+    ├── release.yml      RENAMED from cli-release.yml: cross-compile + sigstore
+    └── cd.yml           UPDATED: build steps via uses: ./.github/actions/builder
 ```
+
+NO `builder.yml` workflow exists. The action's Dockerfile is built
+per-job by GitHub Actions when a workflow uses it.
 
 Files DELETED:
 - `codeql.yml` → its full job (init / autobuild / analyze / upload-sarif
@@ -108,37 +135,33 @@ Files DELETED:
 
 | Workflow | Triggers | Jobs |
 |---|---|---|
-| `builder.yml` | push:main on `builder/**` paths; manual | build → cosign-sign → push to ghcr |
 | `ci.yml` | pull_request; push:main | native-build, wasm-build, e2e, codeql, sonarcloud, shellcheck, hallucination, supply-chain, scorecard (push:main only) |
 | `release.yml` | release:published filter `paranoid-passwd-v*`; manual | cross-compile matrix → tarballs → sigstore attest → upload |
 | `cd.yml` | push:main | wolfi-melange-build, release-please, pages-deploy |
 
-### Container usage
+### Action usage
 
-Every job that compiles or tests our code uses:
+Every step that compiles or tests our code uses:
 
 ```yaml
-jobs:
-  whatever:
-    runs-on: ubuntu-24.04
-    container:
-      image: ghcr.io/jbcom/paranoid-passwd-builder@sha256:<digest>
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.CI_GITHUB_TOKEN }}
+- name: Build CLI
+  uses: ./.github/actions/builder
+  with:
+    run: |
+      cmake -B build/cli -DCMAKE_BUILD_TYPE=Release
+      cmake --build build/cli --target paranoid_cli
 ```
 
-The image is pinned by sha256 digest, not tag — same approach as our
-GitHub Actions SHA pinning. The digest is updated via dependabot once
-we configure dependabot to track Docker image deps.
+No `container:` job-level config. No image digest. The action handles
+container creation per step; subsequent non-builder steps run on the
+host runner as usual.
 
-### Why container: instead of a custom runner
+### Why action-per-step instead of job-level container:
 
-GitHub-hosted runners with a `container:` directive give us:
-- Hermetic builds (everything happens inside the image)
-- The `ubuntu-24.04` host is just an orchestrator providing Docker
-- Cached image pulls between jobs (huge speedup)
-- No infrastructure to manage (no self-hosted runner pool)
+The GitHub Actions `container:` directive at the JOB level requires
+the image to live in a registry — a locally-built `image: Dockerfile`
+isn't accepted. To avoid the registry, we make the builder a per-step
+action and accept that each compile-step builds (cached) the Dockerfile.
 
 We do NOT switch to self-hosted runners. The risk surface there
 (physical hardware compromise, agent-update push) is worse than what
@@ -146,15 +169,14 @@ we have now.
 
 ## Implementation plan (high level)
 
-1. **`builder/`** — Dockerfile + cosign-sign workflow. Push initial
-   image to ghcr. Verify locally with `cosign verify`.
-2. **`builder.yml`** — only triggers on `builder/**` changes + manual.
-3. **Switch one workflow at a time, in safety order:**
+1. **`.github/actions/builder/`** — Dockerfile + entrypoint.sh +
+   action.yml. No registry, no separate workflow.
+2. **Switch one workflow at a time, in safety order:**
    - `release.yml` (formerly `cli-release.yml`) first — currently broken
      anyway after the v3.2.0 partial release, so a rewrite is least risky
    - `ci.yml` second — folding in CodeQL + Scorecard
    - `cd.yml` last — folds in the `release.yml` Pages-deploy logic
-4. **Delete the three obsolete files** in the same PR as the third switch.
+3. **Delete the three obsolete files** in the same PR as the third switch.
 
 Each switch is an independent PR. Do not bundle.
 
@@ -171,8 +193,8 @@ Zig in the builder image (build from source via melange) or wait for
 
 ## Testing
 
-- `cosign verify` against the published builder image
-- `gh workflow run ci.yml` on a feature branch with the builder image swap
+- Local smoke: `cd .github/actions/builder && docker build .` succeeds
+- `gh workflow run ci.yml` on a feature branch using the new action
 - WASM binary diff before/after Zig version bump (acceptance: same imports,
   same exports, runtime tests still pass)
 - E2E Playwright suite passes
@@ -184,16 +206,16 @@ Zig in the builder image (build from source via melange) or wait for
 | Risk | Mitigation |
 |---|---|
 | Zig 0.14.1 produces a broken WASM | wasm-validate gate in ci.yml catches at PR time |
-| Builder image becomes a single point of failure | Pinned by sha256 digest; rebuilds reproducible |
-| ghcr image compromise | cosign-signed; verify on every pull |
-| Wolfi-base unmaintained / disappears | Vendor the apk index SHA in the builder recipe; same as any pinned dep |
+| Per-job Docker build slows pipelines | Acceptable trade for trust-model simplicity. Worst case ~60s/cold-job. Buildx cache on the runner can mitigate if needed. |
+| `cgr.dev/chainguard/wolfi-base` unavailable | Same single-vendor risk as Wolfi itself; if we lose Wolfi we have bigger problems. Mirror via apko build if it ever happens. |
 | Existing release.yml deletion loses the Pages deploy | Pages-deploy logic moves into cd.yml in the same PR — no gap |
 | CodeQL + Scorecard inside ci.yml change cadence | Scorecard already runs weekly via cron; keep that. Change only the `push:main` path |
 
 ## Definition of Done
 
-- `ghcr.io/jbcom/paranoid-passwd-builder:<sha>` exists and is cosign-verifiable
-- All three workflows (`ci.yml`, `release.yml`, `cd.yml`) use the builder image
+- `.github/actions/builder/{action.yml,Dockerfile,entrypoint.sh}` exist
+- All three workflows (`ci.yml`, `release.yml`, `cd.yml`) use
+  `uses: ./.github/actions/builder` for every compile/test step
 - The three deleted files are gone from `.github/workflows/`
 - A passing `release.yml` run produces all 4 CLI tarballs + checksums + attestations
 - Zero `apt-get install` or `curl https://ziglang.org` lines remain in any
