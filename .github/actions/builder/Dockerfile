@@ -20,6 +20,12 @@
 FROM cgr.dev/chainguard/wolfi-base:latest
 
 # Install all toolchain packages from Wolfi in one layer.
+# Notes on package names (Wolfi-specific):
+#   - `ninja-build` (not `ninja`) is the package name in Wolfi.
+#   - `tar` and `gzip` are provided by the busybox already in wolfi-base.
+#     Only added explicitly when GNU coreutils-tar is needed.
+#   - `coreutils` provides GNU sha256sum/stat/install used by build scripts.
+#   - `make` is needed for the default cmake generator (Unix Makefiles).
 RUN apk add --no-cache \
         bash \
         binaryen \
@@ -27,10 +33,9 @@ RUN apk add --no-cache \
         coreutils \
         curl \
         git \
-        gzip \
-        ninja \
+        make \
+        ninja-build \
         openssl-dev \
-        tar \
         wabt \
         zig
 
