@@ -12,6 +12,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.1.1...paranoid-passwd-v3.2.0) (2026-04-14)
+
+
+### Features
+
+* paranoid-passwd CLI with attested cross-platform releases ([#14](https://github.com/jbcom/paranoid-passwd/issues/14)) ([8311494](https://github.com/jbcom/paranoid-passwd/commit/8311494b8f3f9db7dc0d9fd6f80770ebef02b81d))
+* Wolfi CLI subpackage + supply-chain SHA fixes + CD bash ([#19](https://github.com/jbcom/paranoid-passwd/issues/19)) ([231e156](https://github.com/jbcom/paranoid-passwd/commit/231e15631f34f46bf7ff2b795ec6737ebb75040d))
+
+
+### Bug Fixes
+
+* add release-please version markers to extra-files ([#22](https://github.com/jbcom/paranoid-passwd/issues/22)) ([46f251c](https://github.com/jbcom/paranoid-passwd/commit/46f251c88b95a909af1b3e3bd49acb2f7c18a5f2))
+* cli-release tarball must contain LICENSE and README ([#16](https://github.com/jbcom/paranoid-passwd/issues/16)) ([64f533f](https://github.com/jbcom/paranoid-passwd/commit/64f533ff86c84e4957fa243eb243d843e8dfb228))
+* cli.c delegates fully to library audit + secure scrubbing ([#17](https://github.com/jbcom/paranoid-passwd/issues/17)) ([5aff8ee](https://github.com/jbcom/paranoid-passwd/commit/5aff8ee528a63ba2038994b58ee035d7942cf039))
+* tests use PARANOID_VERSION_STRING macro instead of hardcoded "3.0.0" ([#23](https://github.com/jbcom/paranoid-passwd/issues/23)) ([d32e90b](https://github.com/jbcom/paranoid-passwd/commit/d32e90b7548890f5cf5576b7d4ccc3860340376b))
+* third imposter SHA (codeql-action) + melange subpkgdir variable ([#20](https://github.com/jbcom/paranoid-passwd/issues/20)) ([7e7ac12](https://github.com/jbcom/paranoid-passwd/commit/7e7ac12e2da8209635df41281ea3162d57bdf032))
+
 ## [Unreleased]
 
 ### Planned
