@@ -159,7 +159,7 @@ jobs:
           echo "artifact=${tarball}" >> "$GITHUB_OUTPUT"
 
       - name: Upload intermediate artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cli-${{ matrix.target_os }}-${{ matrix.target_arch }}
           path: |
@@ -201,13 +201,13 @@ jobs:
           cat checksums.txt
 
       - name: Attest build provenance (all tarballs)
-        uses: actions/attest-build-provenance@e4d4f7c39adfa4c260fb5c147f0622000aa14b99 # v4.0.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: |
             cli-dist/*.tar.gz
 
       - name: Attest build provenance (checksums.txt)
-        uses: actions/attest-build-provenance@e4d4f7c39adfa4c260fb5c147f0622000aa14b99 # v4.0.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: cli-dist/checksums.txt
 
