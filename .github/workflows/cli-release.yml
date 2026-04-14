@@ -201,13 +201,13 @@ jobs:
           cat checksums.txt
 
       - name: Attest build provenance (all tarballs)
-        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v3.0.0
+        uses: actions/attest-build-provenance@e4d4f7c39adfa4c260fb5c147f0622000aa14b99 # v4.0.0
         with:
           subject-path: |
             cli-dist/*.tar.gz
 
       - name: Attest build provenance (checksums.txt)
-        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v3.0.0
+        uses: actions/attest-build-provenance@e4d4f7c39adfa4c260fb5c147f0622000aa14b99 # v4.0.0
         with:
           subject-path: cli-dist/checksums.txt
 
