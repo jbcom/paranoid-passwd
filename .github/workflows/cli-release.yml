@@ -9,13 +9,21 @@
 #          attest build provenance via sigstore (SLSA), and attach
 #          everything to the release.
 #
-# SUPPLY CHAIN SECURITY:
+# SUPPLY CHAIN MODEL:
+#   Toolchain runs inside the Wolfi-pinned builder action at
+#   .github/actions/builder/. No apt-get, no curl-from-ziglang.org.
+#   One trust root: Wolfi (via cgr.dev/chainguard/wolfi-base).
+#
+#   Other guarantees:
 #   - All GitHub Actions pinned by commit SHA (not tag)
-#   - Zig toolchain version pinned via env var
 #   - Binary is fully static (musl) for Linux; libSystem-dynamic on macOS
 #   - Attestations are sigstore-signed and rekor-logged
 #   - All untrusted inputs go through env: with quoted shell access
 #   - Checksums published alongside artifacts
+#
+# (This file will be renamed to release.yml in a follow-up PR that
+#  also folds the existing release.yml's Pages-deploy logic into
+#  cd.yml. Renaming now would create a gap in Pages deploys.)
 # -----------------------------------------------------------------
 
 name: CLI Release
@@ -26,25 +34,15 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to build (e.g. paranoid-passwd-v3.2.0)'
+        description: 'Release tag to build (e.g. paranoid-passwd-v3.2.1)'
         required: true
         type: string
 
 permissions: {}
 
-env:
-  # Same Zig version as ci.yml to keep toolchain consistent.
-  ZIG_VERSION: "0.13.0"
-  # SHA-256 of zig-linux-x86_64-${ZIG_VERSION}.tar.xz, published by
-  # ziglang.org at https://ziglang.org/download/index.json. Pinned
-  # here so a compromised mirror or MITM cannot inject a different
-  # toolchain. Update in lockstep with ZIG_VERSION.
-  ZIG_SHA256: "d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea"
-
 jobs:
   build:
     name: Build ${{ matrix.target_os }}/${{ matrix.target_arch }}
-    # Skip when this workflow is triggered by a release that isn't ours.
     if: >
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.release.tag_name, 'paranoid-passwd-v')
@@ -77,23 +75,6 @@ jobs:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
 
-      - name: Install Zig (SHA-verified)
-        env:
-          ZIG_VERSION_ENV: ${{ env.ZIG_VERSION }}
-          ZIG_SHA256_ENV: ${{ env.ZIG_SHA256 }}
-        run: |
-          archive="zig-linux-x86_64-${ZIG_VERSION_ENV}.tar.xz"
-          curl -sSLO "https://ziglang.org/download/${ZIG_VERSION_ENV}/${archive}"
-          echo "${ZIG_SHA256_ENV}  ${archive}" | sha256sum -c -
-          tar -xJf "${archive}"
-          rm "${archive}"
-          echo "$PWD/zig-linux-x86_64-${ZIG_VERSION_ENV}" >> "$GITHUB_PATH"
-
-      - name: Install CMake
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake
-
       - name: Extract version from tag
         id: ver
         env:
@@ -113,19 +94,19 @@ jobs:
           sha=$(git rev-parse HEAD)
           echo "sha=${sha}" >> "$GITHUB_OUTPUT"
 
-      - name: Configure (CMake via Zig cross-toolchain)
+      - name: Cross-compile CLI inside Wolfi builder
+        uses: ./.github/actions/builder
         env:
           ZIG_TRIPLE: ${{ matrix.zig_triple }}
           BUILD_COMMIT: ${{ steps.commit.outputs.sha }}
-        run: |
-          cmake -B build/cli \
-              -DCMAKE_TOOLCHAIN_FILE=cmake/zig-cross.cmake \
-              -DPARANOID_TARGET="${ZIG_TRIPLE}" \
-              -DPARANOID_BUILD_COMMIT="${BUILD_COMMIT}" \
-              -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build CLI
-        run: cmake --build build/cli --target paranoid_cli
+        with:
+          run: |
+            cmake -B build/cli \
+                -DCMAKE_TOOLCHAIN_FILE=cmake/zig-cross.cmake \
+                -DPARANOID_TARGET="${ZIG_TRIPLE}" \
+                -DPARANOID_BUILD_COMMIT="${BUILD_COMMIT}" \
+                -DCMAKE_BUILD_TYPE=Release
+            cmake --build build/cli --target paranoid_cli
 
       - name: Verify binary
         env:
