@@ -33,13 +33,8 @@ extern "C" {
    VERSION & BUILD INFO
    ═══════════════════════════════════════════════════════════ */
 
-/* Version constants. Rewritten by release-please on each release via
- * the markers below; do not edit by hand. The MAJOR/MINOR/PATCH macros
- * are kept in sync by release-please using its `extra-files` config in
- * release-please-config.json. */
-#define PARANOID_VERSION_MAJOR 3
-#define PARANOID_VERSION_MINOR 0
-#define PARANOID_VERSION_PATCH 0
+/* Version constant. release-please rewrites the literal below via the
+ * marker comment on each release; do not edit by hand. */
 #define PARANOID_VERSION_STRING "3.3.0" // x-release-please-version
 
 /** Return version string. */
