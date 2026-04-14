@@ -1,12 +1,15 @@
 # -----------------------------------------------------------------
 # paranoid-passwd -- Dependabot Configuration
 #
-# Automated dependency updates for GitHub Actions.
-# Groups all action updates into a single PR for easier review.
+# Automated dependency updates for:
+#   - GitHub Actions (root) — every workflow's pinned-by-SHA actions
+#   - npm (tests/e2e) — Playwright's transitive deps
 #
-# Note: This project has minimal external dependencies by design.
-# The only ecosystem tracked is GitHub Actions since all other
-# dependencies are vendored or built from source.
+# Both ecosystems group all updates into a single PR per ecosystem
+# per week for easier review.
+#
+# Other "dependencies" in this project are pinned-by-source-SHA in
+# build recipes (acutest in vendor/, Wolfi packages via melange).
 # -----------------------------------------------------------------
 
 version: 2
@@ -26,3 +29,19 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+
+  - package-ecosystem: npm
+    directory: /tests/e2e
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Etc/UTC"
+    groups:
+      e2e-deps:
+        patterns: ["*"]
+    commit-message:
+      prefix: "test"
+    labels:
+      - "dependencies"
+      - "test"
