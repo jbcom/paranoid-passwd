@@ -35,31 +35,14 @@
 #include <string.h>
 #include <stdarg.h>
 
-/* explicit_bzero / memset_s availability varies by platform.
- * We use a portable volatile-pointer fallback that the compiler is
- * not allowed to optimize away. The fallback is correct everywhere;
- * the libc routines are typically faster, so prefer them when
- * available. */
-#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
-    #include <strings.h>   /* explicit_bzero */
-    #define HAVE_EXPLICIT_BZERO 1
-#elif defined(__APPLE__)
-    #include <strings.h>
-    /* Apple added explicit_bzero in macOS 10.13. Use it unconditionally
-     * since we target modern darwin. */
-    #define HAVE_EXPLICIT_BZERO 1
-#endif
-
+/* Portable scrub that the compiler cannot dead-store-eliminate.
+ * The standard guarantees stores through a volatile pointer survive
+ * optimization even when the underlying object is about to be freed.
+ * Uniformly correct across glibc, musl, macOS libSystem, and *BSD
+ * without libc feature-detection gymnastics. */
 static void secure_zero(void *p, size_t n) {
-#ifdef HAVE_EXPLICIT_BZERO
-    explicit_bzero(p, n);
-#else
-    /* Volatile-pointer fallback: the standard guarantees stores
-     * through a volatile pointer cannot be optimized away, even when
-     * the underlying object is about to be freed. */
     volatile unsigned char *vp = (volatile unsigned char *)p;
     while (n--) *vp++ = 0;
-#endif
 }
 
 #ifndef PARANOID_CLI_VERSION
@@ -151,9 +134,14 @@ static void stage_ok(int n, int total, const char *name, const char *fmt, ...) {
     fputc('\n', stderr);
 }
 
-static void stage_fail(int n, int total, const char *name, const char *reason) {
+static void stage_fail(int n, int total, const char *name, const char *fmt, ...) {
     if (g_quiet) return;
-    fprintf(stderr, "[%d/%d] %-16s FAIL  %s\n", n, total, name, reason);
+    fprintf(stderr, "[%d/%d] %-16s FAIL  ", n, total, name);
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
 }
 
 /* ═══════════════════════════════════════════════════════════
