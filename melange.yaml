@@ -118,6 +118,26 @@ pipeline:
       cp www/style.css ${{targets.destdir}}/usr/share/paranoid-passwd/site/
       cp www/CNAME ${{targets.destdir}}/usr/share/paranoid-passwd/site/
 
+# ── Subpackage: paranoid-passwd-cli ─────────────────────────────
+# Ships only the native CLI binary (built from the same source as the
+# WASM artifact above). The CLI uses platform_posix.c + sha256_compact.c
+# (no OpenSSL link). Install with: apk add paranoid-passwd-cli
+subpackages:
+  - name: paranoid-passwd-cli
+    description: "paranoid-passwd CLI -- statically-linked password generator"
+    pipeline:
+      - runs: |
+          mkdir -p ${{subpkgdir}}/usr/bin
+          install -m 0755 output/paranoid-passwd ${{subpkgdir}}/usr/bin/paranoid-passwd
+    test:
+      pipeline:
+        - runs: |
+            paranoid-passwd --version
+            # Smoke test: generate one password and confirm it's the expected length
+            pw=$(paranoid-passwd --length 32 --no-audit --quiet)
+            test "${#pw}" -eq 32
+            echo "paranoid-passwd-cli: OK"
+
 test:
   pipeline:
     - runs: |

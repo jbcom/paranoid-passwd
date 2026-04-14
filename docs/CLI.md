@@ -54,8 +54,13 @@ the tap install chain inherits the upstream provenance guarantee.
 
 ### Wolfi apk
 
-For Wolfi-based container images, the existing `melange.yaml` + `apko.yaml`
-pipeline produces the same binary in apk form alongside the WASM artifact.
+```bash
+apk add paranoid-passwd-cli
+```
+
+The melange recipe builds a `paranoid-passwd-cli` subpackage from the
+same source that produces the WASM artifact, alongside the main
+`paranoid-passwd` package which ships the web UI bundle.
 
 ## Usage
 
