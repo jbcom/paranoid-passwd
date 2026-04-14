@@ -18,22 +18,26 @@ provenance.
 ### Verify, then extract (recommended)
 
 ```bash
-# 1. Download the tarball and checksums for your platform
-gh release download paranoid-passwd-v3.2.0 \
-    --repo jbcom/paranoid-passwd \
-    -p 'paranoid-passwd-3.2.0-darwin-arm64.tar.gz' \
-    -p 'checksums.txt'
+# Pick your platform: linux-amd64 | linux-arm64 | darwin-amd64 | darwin-arm64
+PLATFORM=darwin-arm64
+
+# 1. Resolve the latest release tag and download the tarball + checksums
+TAG=$(gh release view --repo jbcom/paranoid-passwd --json tagName --jq .tagName)
+VERSION="${TAG#paranoid-passwd-v}"
+TARBALL="paranoid-passwd-${VERSION}-${PLATFORM}.tar.gz"
+
+gh release download "$TAG" --repo jbcom/paranoid-passwd \
+    -p "$TARBALL" -p 'checksums.txt'
 
 # 2. Verify the sigstore-signed provenance attestation
-gh attestation verify paranoid-passwd-3.2.0-darwin-arm64.tar.gz \
-    --owner jbcom
+gh attestation verify "$TARBALL" --owner jbcom
 
 # 3. Verify SHA-256 matches the published checksums
-grep 'paranoid-passwd-3.2.0-darwin-arm64.tar.gz' checksums.txt | shasum -a 256 -c -
+grep "$TARBALL" checksums.txt | shasum -a 256 -c -
 
 # 4. Extract and run
-tar xzf paranoid-passwd-3.2.0-darwin-arm64.tar.gz
-./paranoid-passwd-3.2.0-darwin-arm64/paranoid-passwd --version
+tar xzf "$TARBALL"
+"./paranoid-passwd-${VERSION}-${PLATFORM}/paranoid-passwd" --version
 ```
 
 The `gh attestation verify` step fails unless the tarball was built by
