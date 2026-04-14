@@ -1,0 +1,116 @@
+# -----------------------------------------------------------------
+# paranoid-passwd -- Builder Image
+#
+# Builds the Wolfi-based CI/CD builder image used by every other
+# workflow that compiles or tests our code.
+#
+# Triggered by:
+#   - push to main on changes under builder/**
+#   - manual workflow_dispatch (for forced rebuilds)
+#
+# Outputs:
+#   - ghcr.io/jbcom/paranoid-passwd-builder:latest
+#   - ghcr.io/jbcom/paranoid-passwd-builder:<git sha>
+#   - cosign keyless signature on both (verifiable via
+#     cosign verify ... --certificate-identity <workflow ref>)
+#
+# Consuming workflows pin the image by sha256 digest, not tag, the
+# same way we pin GitHub Actions by commit SHA.
+# -----------------------------------------------------------------
+
+name: Builder Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - builder/**
+      - .github/workflows/builder.yml
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/paranoid-passwd-builder
+
+jobs:
+  build-and-push:
+    name: Build, sign, push
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      packages: write       # ghcr push
+      id-token: write       # cosign keyless OIDC
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
+        run: |
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
+      - name: Build image
+        env:
+          IMG: ${{ env.IMAGE_NAME }}
+          SHA: ${{ github.sha }}
+        run: |
+          docker build \
+              --tag "${IMG}:latest" \
+              --tag "${IMG}:${SHA}" \
+              --label "org.opencontainers.image.revision=${SHA}" \
+              --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              builder/
+
+      - name: Push image
+        id: push
+        env:
+          IMG: ${{ env.IMAGE_NAME }}
+          SHA: ${{ github.sha }}
+        run: |
+          docker push "${IMG}:${SHA}"
+          docker push "${IMG}:latest"
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${IMG}:${SHA}" | sed 's/.*@//')
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Image digest: ${digest}"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+
+      - name: Sign image (cosign keyless)
+        env:
+          IMG: ${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign sign --yes "${IMG}@${DIGEST}"
+
+      - name: Print pin instructions
+        env:
+          IMG: ${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cat <<MSG
+
+          ────────────────────────────────────────────────────────────
+          Builder image published.
+
+          Pin in consuming workflows as:
+
+              container:
+                image: ${IMG}@${DIGEST}
+                credentials:
+                  username: \${{ github.actor }}
+                  password: \${{ secrets.CI_GITHUB_TOKEN }}
+
+          Verify locally:
+              cosign verify ${IMG}@${DIGEST} \\
+                  --certificate-identity-regexp '^https://github.com/jbcom/paranoid-passwd/' \\
+                  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          ────────────────────────────────────────────────────────────
+          MSG
