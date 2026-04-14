@@ -32,9 +32,16 @@
 #if defined(__linux__)
     #include <sys/random.h>
     /* getrandom available since glibc 2.25 (2017), kernel 3.17 (2014). */
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#elif defined(__APPLE__)
+    /* macOS: getentropy is declared in <sys/random.h> as of the SDK
+     * shipped with Zig's libc. <unistd.h> alone is not enough — the
+     * cross-compile sysroot does not put getentropy there.
+     * Documented: https://developer.apple.com/documentation/kernel/3201648-getentropy
+     */
+    #include <sys/random.h>
+#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
     #include <unistd.h>
-    /* getentropy(3): macOS 10.12+, FreeBSD 12+, OpenBSD since forever. */
+    /* getentropy(3): FreeBSD 12+, OpenBSD since forever. */
 #else
     #error "Unsupported platform: no getrandom/getentropy available"
 #endif
