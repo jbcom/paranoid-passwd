@@ -819,6 +819,56 @@ Before ANY deployment:
 
 ---
 
+## CLI Release Attestation
+
+The `paranoid-passwd` CLI ships as four cross-compiled tarballs per
+release. Each artifact carries a sigstore-signed SLSA build provenance
+attestation produced by `actions/attest-build-provenance` during the
+`cli-release.yml` workflow.
+
+### Chain of custody
+
+```
+source commit (git SHA)
+    ↓  checked out by workflow at the release-please tag
+CMake + Zig cross-compile (toolchain pinned by SHA in env)
+    ↓  produces paranoid-passwd binary per target
+tar.gz packaging
+    ↓  sha256sum → checksums.txt
+actions/attest-build-provenance (sigstore OIDC)
+    ↓  publishes to Rekor transparency log
+GitHub Release asset upload
+```
+
+### User verification
+
+```
+gh attestation verify <tarball> --owner jbcom
+```
+
+`gh` walks the attestation back to the sigstore certificate, checks
+the subject hash matches the downloaded file, confirms the workflow
+ref matches `jbcom/paranoid-passwd/.github/workflows/cli-release.yml`,
+and confirms the build was logged to Rekor. Tampering — substituting
+a binary, rewriting the checksums file, replaying an old attestation —
+fails this check.
+
+### Artifact contract
+
+```
+paranoid-passwd-${VERSION}-linux-amd64.tar.gz
+paranoid-passwd-${VERSION}-linux-arm64.tar.gz
+paranoid-passwd-${VERSION}-darwin-amd64.tar.gz
+paranoid-passwd-${VERSION}-darwin-arm64.tar.gz
+checksums.txt  (SHA-256 of all four tarballs, also attested)
+```
+
+Downstream packagers (Homebrew tap, Wolfi apk) consume this contract
+directly. Any change to the naming scheme is a breaking change for
+the tap and requires a major version bump with notice.
+
+---
+
 ## Conclusion
 
 This supply chain security framework is designed to:
