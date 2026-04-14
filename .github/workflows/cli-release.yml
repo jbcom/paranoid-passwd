@@ -147,8 +147,10 @@ jobs:
           stage="paranoid-passwd-${VERSION}-${TARGET_OS}-${TARGET_ARCH}"
           mkdir -p "stage/${stage}"
           cp build/cli/paranoid-passwd "stage/${stage}/"
-          [ -f LICENSE ] && cp LICENSE "stage/${stage}/" || true
-          [ -f README.md ] && cp README.md "stage/${stage}/" || true
+          # LICENSE and README must be present in every release tarball.
+          # Failing here is the right outcome if either is missing.
+          cp LICENSE "stage/${stage}/"
+          cp README.md "stage/${stage}/"
 
           tarball="${stage}.tar.gz"
           tar -C stage -czf "${tarball}" "${stage}"
