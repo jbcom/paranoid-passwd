@@ -1,25 +1,32 @@
 # -----------------------------------------------------------------
-# paranoid-passwd -- CI Pipeline (Pull Requests)
+# paranoid-passwd -- CI Pipeline
 #
-# RUNS ON: All pull requests to main
-# PURPOSE: Full verification including native tests, WASM build,
-#          E2E tests with Playwright, static analysis, and
-#          hallucination/supply-chain checks.
+# RUNS ON: All pull requests AND push:main
+# PURPOSE: Full verification including native tests, WASM build, E2E,
+#          static analysis (CodeQL, SonarCloud, ShellCheck), LLM
+#          hallucination detection, supply-chain checks, and OpenSSF
+#          Scorecard (push:main only).
 #
-# SUPPLY CHAIN SECURITY:
+# SUPPLY CHAIN MODEL:
+#   Toolchain runs inside the Wolfi-pinned builder action at
+#   .github/actions/builder/. No apt-get for cmake/wabt/zig. One trust
+#   root: Wolfi (via cgr.dev/chainguard/wolfi-base).
+#
+#   Other guarantees:
 #   - All GitHub Actions SHA-pinned (not tags)
-#   - CMake-based build with Zig cross-compilation
-#   - Native tests via CTest + acutest
-#   - WASM validation with wasm-validate (wabt)
-#   - CodeQL, SonarCloud, and shellcheck static analysis
+#   - acutest pinned by commit SHA
+#   - CodeQL + SonarCloud + ShellCheck static analysis
 #   - LLM hallucination detection
 #   - Supply chain verification
+#   - OpenSSF Scorecard on push:main (formerly a separate workflow)
 # -----------------------------------------------------------------
 
 name: CI
 
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
   workflow_dispatch:
 
@@ -30,18 +37,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ZIG_VERSION: "0.13.0"
-  # SHA-256 of zig-linux-x86_64-${ZIG_VERSION}.tar.xz from ziglang.org.
-  # Pinned to defend against compromised mirror or MITM. Update in
-  # lockstep with ZIG_VERSION.
-  ZIG_SHA256: "d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea"
   # acutest v1.7.5 (2024-01-14) — pinned by SHA for supply chain security
   ACUTEST_SHA: "31751b4089c93b46a9fd8a8183a695f772de66de"
 
 jobs:
 
   # ---------------------------------------------------------------
-  # JOB 1: Native Build + Tests (CMake + CTest)
+  # JOB 1: Native Build + Tests (CMake + CTest, inside Wolfi)
   # ---------------------------------------------------------------
   native-test:
     name: Native Build + Tests
@@ -56,28 +58,24 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev cmake
-
-      - name: Clone acutest
+      - name: Clone acutest (SHA-pinned)
+        env:
+          ACUTEST_SHA_ENV: ${{ env.ACUTEST_SHA }}
         run: |
           mkdir -p vendor
           git clone https://github.com/mity/acutest.git vendor/acutest
-          cd vendor/acutest && git checkout "$ACUTEST_SHA"
+          cd vendor/acutest && git checkout "${ACUTEST_SHA_ENV}"
 
-      - name: Configure (CMake native)
-        run: cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
-
-      - name: Build
-        run: cmake --build build/native
-
-      - name: Test (CTest)
-        run: ctest --test-dir build/native --output-on-failure
+      - name: Native build + CTest inside Wolfi builder
+        uses: ./.github/actions/builder
+        with:
+          run: |
+            cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
+            cmake --build build/native
+            ctest --test-dir build/native --output-on-failure
 
   # ---------------------------------------------------------------
-  # JOB 2: WASM Build (CMake + wasm32-wasi via Zig)
+  # JOB 2: WASM Build (CMake + wasm32-wasi via Zig, inside Wolfi)
   # ---------------------------------------------------------------
   wasm-build:
     name: WASM Build + Validate
@@ -93,75 +91,54 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Zig (SHA-verified)
-        run: |
-          archive="zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
-          curl -sSLO "https://ziglang.org/download/${ZIG_VERSION}/${archive}"
-          echo "${ZIG_SHA256}  ${archive}" | sha256sum -c -
-          tar -xJf "${archive}"
-          rm "${archive}"
-          echo "$PWD/zig-linux-x86_64-${ZIG_VERSION}" >> "$GITHUB_PATH"
+      - name: WASM build + validate inside Wolfi builder
+        uses: ./.github/actions/builder
+        with:
+          run: |
+            cmake -B build/wasm \
+                -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
+                -DCMAKE_BUILD_TYPE=Release
+            cmake --build build/wasm
 
-      - name: Install wabt
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wabt
-
-      - name: Configure (CMake WASM)
-        run: |
-          cmake -B build/wasm \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
-            -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build WASM
-        run: |
-          cmake --build build/wasm
-          # Normalize output name: -mexec-model=reactor may produce
-          # "paranoid" without .wasm extension on some Zig versions
-          if [ -f build/wasm/paranoid ] && [ ! -f build/wasm/paranoid.wasm ]; then
-            mv build/wasm/paranoid build/wasm/paranoid.wasm
-          fi
-
-      - name: Validate WASM binary
-        run: |
-          echo "Validating WASM binary..."
-          wasm-validate build/wasm/paranoid.wasm
-          echo "WASM binary is valid."
-
-      - name: Verify WASM exports
-        run: |
-          echo "=== Required exports ==="
-          for fn in paranoid_version paranoid_generate paranoid_run_audit \
-                    paranoid_get_result_ptr paranoid_get_result_size \
-                    paranoid_sha256 paranoid_sha256_hex \
-                    paranoid_chi_squared paranoid_serial_correlation \
-                    paranoid_count_collisions malloc free; do
-            if wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | grep -q "<${fn}>"; then
-              echo "  OK: ${fn}"
-            else
-              echo "  MISSING: ${fn}"; exit 1
+            # Normalize output name: -mexec-model=reactor may produce
+            # "paranoid" without .wasm extension on some Zig versions.
+            if [ -f build/wasm/paranoid ] && [ ! -f build/wasm/paranoid.wasm ]; then
+                mv build/wasm/paranoid build/wasm/paranoid.wasm
             fi
-          done
 
-          echo ""
-          echo "=== Import namespaces ==="
-          NAMESPACES=$(wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | \
-            grep " <- " | \
-            sed 's/.*<- \([^.]*\)\..*/\1/' | sort -u)
-          for ns in $NAMESPACES; do
-            if [ "$ns" = "wasi_snapshot_preview1" ]; then
-              echo "  OK: $ns"
-            else
-              echo "  UNEXPECTED: $ns"; exit 1
-            fi
-          done
+            echo "=== Validating WASM binary ==="
+            wasm-validate build/wasm/paranoid.wasm
 
-      - name: Report binary size
-        run: |
-          SIZE=$(stat -c%s build/wasm/paranoid.wasm)
-          echo "WASM binary size: ${SIZE} bytes"
-          SHA=$(sha256sum build/wasm/paranoid.wasm | cut -d' ' -f1)
-          echo "WASM SHA-256: ${SHA}"
+            echo "=== Required exports ==="
+            for fn in paranoid_version paranoid_generate paranoid_run_audit \
+                      paranoid_get_result_ptr paranoid_get_result_size \
+                      paranoid_sha256 paranoid_sha256_hex \
+                      paranoid_chi_squared paranoid_serial_correlation \
+                      paranoid_count_collisions malloc free; do
+                if wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | grep -q "<${fn}>"; then
+                    echo "  OK: ${fn}"
+                else
+                    echo "  MISSING: ${fn}"; exit 1
+                fi
+            done
+
+            echo "=== Import namespaces ==="
+            NAMESPACES=$(wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | \
+                grep " <- " | \
+                sed 's/.*<- \([^.]*\)\..*/\1/' | sort -u)
+            for ns in $NAMESPACES; do
+                if [ "$ns" = "wasi_snapshot_preview1" ]; then
+                    echo "  OK: $ns"
+                else
+                    echo "  UNEXPECTED: $ns"; exit 1
+                fi
+            done
+
+            echo "=== Binary size ==="
+            SIZE=$(stat -c%s build/wasm/paranoid.wasm)
+            echo "WASM binary size: ${SIZE} bytes"
+            SHA=$(sha256sum build/wasm/paranoid.wasm | cut -d' ' -f1)
+            echo "WASM SHA-256: ${SHA}"
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -172,6 +149,10 @@ jobs:
 
   # ---------------------------------------------------------------
   # JOB 3: E2E Tests (Playwright)
+  #
+  # Runs on the host (not Wolfi) because Playwright bundles its own
+  # browser binaries via setup-node + npx. Wolfi doesn't materially
+  # help here — the trust chain is npm + Playwright.
   # ---------------------------------------------------------------
   e2e-test:
     name: E2E Tests (Playwright)
@@ -213,14 +194,14 @@ jobs:
       - name: Start server and run E2E tests
         working-directory: tests/e2e
         run: |
-          # Start a static file server in the background
+          # Static file server in the background.
           python3 -m http.server 8080 --directory ../../build/site &
           SERVER_PID=$!
           sleep 2
 
-          # Run Playwright tests (chromium only in CI)
+          # Run Playwright tests (chromium only in CI).
           npx playwright test --project chromium \
-            || { kill $SERVER_PID 2>/dev/null; exit 1; }
+              || { kill $SERVER_PID 2>/dev/null; exit 1; }
 
           kill $SERVER_PID 2>/dev/null || true
 
@@ -236,6 +217,9 @@ jobs:
 
   # ---------------------------------------------------------------
   # JOB 4: CodeQL Analysis
+  #
+  # Folded in from the standalone codeql.yml workflow (now deleted).
+  # Single CodeQL run per PR/push, with SARIF upload to Code Scanning.
   # ---------------------------------------------------------------
   codeql:
     name: CodeQL
@@ -319,14 +303,14 @@ jobs:
           echo "Running ShellCheck on scripts/*.sh..."
           FAILED=0
           for script in scripts/*.sh; do
-            echo "  Checking $script..."
-            if ! shellcheck -x "$script"; then
-              FAILED=1
-            fi
+              echo "  Checking $script..."
+              if ! shellcheck -x "$script"; then
+                  FAILED=1
+              fi
           done
           if [ "$FAILED" -ne 0 ]; then
-            echo "ShellCheck found issues."
-            exit 1
+              echo "ShellCheck found issues."
+              exit 1
           fi
           echo "All scripts passed ShellCheck."
 
@@ -367,3 +351,46 @@ jobs:
 
       - name: Run supply chain verification
         run: ./scripts/supply_chain_verify.sh
+
+  # ---------------------------------------------------------------
+  # JOB 9: OpenSSF Scorecard (push:main only)
+  #
+  # Folded in from the standalone scorecard.yml workflow (now deleted).
+  # Skipped on PRs because the upload step requires the repo's OIDC
+  # identity that PRs don't have, and the upload would fail with
+  # HTTP 400 on every PR.
+  # ---------------------------------------------------------------
+  scorecard:
+    name: OpenSSF Scorecard
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload Scorecard results artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 14
+
+      - name: Upload SARIF to Code Scanning
+        uses: github/codeql-action/upload-sarif@ff0a06e83cb2de871e5a09832bc6a81e7276941f # v3.28.18
+        with:
+          sarif_file: results.sarif
