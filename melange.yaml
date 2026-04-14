@@ -128,8 +128,8 @@ subpackages:
     description: "paranoid-passwd CLI -- statically-linked password generator"
     pipeline:
       - runs: |
-          mkdir -p ${{subpkgdir}}/usr/bin
-          install -m 0755 output/paranoid-passwd ${{subpkgdir}}/usr/bin/paranoid-passwd
+          mkdir -p ${{targets.subpkgdir}}/usr/bin
+          install -m 0755 output/paranoid-passwd ${{targets.subpkgdir}}/usr/bin/paranoid-passwd
     test:
       pipeline:
         - runs: |
