@@ -33,13 +33,15 @@ extern "C" {
    VERSION & BUILD INFO
    ═══════════════════════════════════════════════════════════ */
 
-/* Version constants. Rewritten by release-please on each release via
- * the markers below; do not edit by hand. The MAJOR/MINOR/PATCH macros
- * are kept in sync by release-please using its `extra-files` config in
- * release-please-config.json. */
-#define PARANOID_VERSION_MAJOR 3
-#define PARANOID_VERSION_MINOR 0
-#define PARANOID_VERSION_PATCH 0
+/* Version constant. release-please rewrites the literal below via the
+ * marker comment on each release; do not edit by hand.
+ * TODO: HUMAN_REVIEW - PARANOID_VERSION_MAJOR/MINOR/PATCH were
+ * previously defined here but had zero callers anywhere in src/,
+ * include/, tests/, or www/. release-please's `simple` release-type
+ * only rewrites one value per file via a marker comment, so the
+ * MAJOR/MINOR/PATCH macros silently drifted from VERSION_STRING after
+ * every release (e.g. v3.2.1 left them at 3/0/0 while VERSION_STRING
+ * advanced). Deleted to remove the lie surface — see issue #24. */
 #define PARANOID_VERSION_STRING "3.2.1" // x-release-please-version
 
 /** Return version string. */
