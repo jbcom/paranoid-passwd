@@ -120,16 +120,26 @@ pipeline:
       cp www/CNAME ${{targets.destdir}}/usr/share/paranoid-passwd/site/
 
 # ── Subpackage: paranoid-passwd-cli ─────────────────────────────
-# Ships only the native CLI binary (built from the same source as the
-# WASM artifact above). The CLI uses platform_posix.c + sha256_compact.c
-# (no OpenSSL link). Install with: apk add paranoid-passwd-cli
+# Ships the CLI binary built via the SAME Zig cross-compile path that
+# release.yml uses for published release tarballs. This makes the
+# subpackage binary produced here match the released binary byte-for-byte
+# (modulo Zig version drift), and enables a reproducible-build
+# cross-check between the two pipelines.
+#
+# The CLI uses platform_posix.c + sha256_compact.c (no OpenSSL link).
+# Install with: apk add paranoid-passwd-cli
 subpackages:
   - name: paranoid-passwd-cli
     description: "paranoid-passwd CLI -- statically-linked password generator"
     pipeline:
       - runs: |
+          cmake -B build/cli \
+              -DCMAKE_TOOLCHAIN_FILE=cmake/zig-cross.cmake \
+              -DPARANOID_TARGET=x86_64-linux-musl \
+              -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/cli --target paranoid_cli
           mkdir -p ${{targets.subpkgdir}}/usr/bin
-          install -m 0755 output/paranoid-passwd ${{targets.subpkgdir}}/usr/bin/paranoid-passwd
+          install -m 0755 build/cli/paranoid-passwd ${{targets.subpkgdir}}/usr/bin/paranoid-passwd
     test:
       pipeline:
         - runs: |
