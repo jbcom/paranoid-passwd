@@ -40,7 +40,7 @@ extern "C" {
 #define PARANOID_VERSION_MAJOR 3
 #define PARANOID_VERSION_MINOR 0
 #define PARANOID_VERSION_PATCH 0
-#define PARANOID_VERSION_STRING "3.2.0" // x-release-please-version
+#define PARANOID_VERSION_STRING "3.2.1" // x-release-please-version
 
 /** Return version string. */
 const char* paranoid_version(void);
