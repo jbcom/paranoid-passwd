@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.1](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.2.0...paranoid-passwd-v3.2.1) (2026-04-14)
+
+
+### Bug Fixes
+
+* include sys/random.h on macOS for getentropy ([#25](https://github.com/jbcom/paranoid-passwd/issues/25)) ([9f8270a](https://github.com/jbcom/paranoid-passwd/commit/9f8270ac04706edddf8d3c86d2abe69b6a9a5e96))
+
 ## [3.2.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.1.1...paranoid-passwd-v3.2.0) (2026-04-14)
 
 
