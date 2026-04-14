@@ -1,6 +1,14 @@
+---
+title: Supply Chain Security
+updated: 2026-04-09
+status: current
+domain: technical
+---
+
 # Supply Chain Security & Build Provenance
 
-**CRITICAL: This document describes the COMPLETE supply chain security framework for paranoid, designed to detect and prevent attacks at EVERY stage of compilation, with ZERO trust assumptions.**
+This document describes the supply chain security framework for paranoid, designed
+to detect and prevent attacks at every stage of compilation.
 
 ---
 

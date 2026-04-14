@@ -1,9 +1,24 @@
+---
+title: Changelog
+updated: 2026-04-09
+status: current
+domain: technical
+---
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Planned
+- NIST SP 800-22 statistical test suite integration
+- Dieharder test battery integration
+- Third-party security audit
+- Formal verification of rejection sampling
 
 ---
 
@@ -31,19 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * release-please — use config file, fix version tracking ([bc46bd3](https://github.com/jbcom/paranoid-passwd/commit/bc46bd3f5ddd55df6a8f483a5524c260d822ac40))
 * restrict melange/apko to x86_64 only ([a5db163](https://github.com/jbcom/paranoid-passwd/commit/a5db163ecb26d0dbcbb5df25f4ad6be363c01302))
 
-## [Unreleased]
-
-### Planned
-- NIST SP 800-22 statistical test suite integration
-- Dieharder test battery integration
-- Third-party security audit
-- Formal verification of rejection sampling
-
 ---
 
 ## [3.0.0] - 2026-02-26
 
-### 🎉 Major Rewrite — Complete Architectural Overhaul
+### Major Rewrite — Complete Architectural Overhaul
 
 This is a complete rewrite from v1, treating `paranoid-passwd` as what it is: a C project that happens to render in a browser.
 
@@ -112,12 +119,13 @@ This is a complete rewrite from v1, treating `paranoid-passwd` as what it is: a 
 - **README.md** — Comprehensive project overview
 - **SECURITY.md** — Security policy, threat model, audit trail
 - **CHANGELOG.md** — Version history (this file)
-- **DEVELOPMENT.md** — Development setup and contributing guidelines
+- **STANDARDS.md** — Code quality rules, style conventions
 - **docs/** directory:
   - `ARCHITECTURE.md` — System architecture
   - `DESIGN.md` — Design decisions
   - `THREAT-MODEL.md` — Threat analysis
   - `AUDIT.md` — Statistical methodology
+  - `TESTING.md` — Test strategy and coverage
   - `BUILD.md` — Build system internals
 
 #### LLM Threat Model
@@ -246,7 +254,7 @@ All security advisories are tracked in [SECURITY.md](SECURITY.md).
 - **Live Demo**: https://paranoid-passwd.com
 - **Documentation**: See [AGENTS.md](AGENTS.md)
 - **Security Policy**: See [SECURITY.md](SECURITY.md)
-- **Development Guide**: See [DEVELOPMENT.md](DEVELOPMENT.md)
+- **Development Guide**: See [docs/TESTING.md](docs/TESTING.md)
 
 ---
 

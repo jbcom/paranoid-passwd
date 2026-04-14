@@ -1,3 +1,10 @@
+---
+title: Build System Internals
+updated: 2026-04-09
+status: current
+domain: technical
+---
+
 # Build System Internals
 
 This document describes the CMake build system, reproducible build process via

@@ -1,3 +1,10 @@
+---
+title: Architecture
+updated: 2026-04-09
+status: current
+domain: technical
+---
+
 # Architecture
 
 This document describes the system architecture of `paranoid` v3.0, a self-auditing

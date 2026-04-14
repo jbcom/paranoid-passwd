@@ -78,6 +78,7 @@ jobs:
   wasm-build:
     name: WASM Build + Validate
     runs-on: ubuntu-24.04
+    needs: native-test
 
     permissions:
       contents: read
