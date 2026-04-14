@@ -33,12 +33,14 @@ extern "C" {
    VERSION & BUILD INFO
    ═══════════════════════════════════════════════════════════ */
 
-/* VERIFIED: - version bumped from 2.0.0 to 3.0.0 for
- * platform abstraction + new API additions (F1-F5). */
+/* Version constants. Rewritten by release-please on each release via
+ * the markers below; do not edit by hand. The MAJOR/MINOR/PATCH macros
+ * are kept in sync by release-please using its `extra-files` config in
+ * release-please-config.json. */
 #define PARANOID_VERSION_MAJOR 3
 #define PARANOID_VERSION_MINOR 0
 #define PARANOID_VERSION_PATCH 0
-#define PARANOID_VERSION_STRING "3.0.0"
+#define PARANOID_VERSION_STRING "3.0.0" // x-release-please-version
 
 /** Return version string. */
 const char* paranoid_version(void);

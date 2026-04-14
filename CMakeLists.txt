@@ -25,7 +25,7 @@
 # ================================================================
 
 cmake_minimum_required(VERSION 3.20)
-project(paranoid VERSION 3.0.0 LANGUAGES C)
+project(paranoid VERSION 3.0.0 LANGUAGES C) # x-release-please-version
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
