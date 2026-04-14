@@ -275,6 +275,10 @@ jobs:
   sonarcloud:
     name: SonarCloud
     runs-on: ubuntu-24.04
+    # Dependabot PRs do not receive repository secrets, so SONAR_TOKEN
+    # is empty and the scan fails. Skip SonarCloud for Dependabot
+    # actor — CodeQL still runs and provides static-analysis coverage.
+    if: github.actor != 'dependabot[bot]'
 
     permissions:
       contents: read
