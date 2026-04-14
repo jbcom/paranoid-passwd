@@ -10,8 +10,8 @@ domain: quality
 ## Overview
 
 Testing runs in three phases: native C unit tests, WASM build verification, then
-browser E2E tests. The sequence is enforced in CI — WASM is not compiled until
-native tests pass.
+browser E2E tests. The sequence is enforced in CI via job dependencies —
+`wasm-build needs: native-test` and `e2e-test needs: wasm-build`.
 
 ```
 src/*.c  →  cmake native build  →  CTest  →  cmake WASM build  →  Playwright E2E
@@ -144,7 +144,11 @@ All checks must pass before a PR may be merged.
 ## Known Limitations
 
 - Chi-squared Wilson-Hilferty p-value approximation is conservative for small
-  samples. For L=32 passwords, this is not a practical issue (df=93).
+  samples. For L=32 passwords against a charset of N=94 the expected per-bucket
+  count is E_i ≈ 0.34, well below the conventional ≥5 rule. The audit
+  detects only catastrophic bias at single-password length; longer passwords
+  or batched audits give the test meaningful power. See `docs/AUDIT.md` for
+  full discussion.
 - Serial correlation only tests lag-1. Longer-range patterns are not tested.
 - Collision test batch size (500) is too small to catch near-misses. It only
   catches catastrophic PRNG failures.

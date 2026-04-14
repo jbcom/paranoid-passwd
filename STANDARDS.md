@@ -9,12 +9,22 @@ domain: technical
 
 ## Non-Negotiable Constraints
 
-1. Max 300 lines per file (all languages).
-2. No `TODO` or stub bodies — every function must be implemented.
-3. All crypto changes require `// TODO: HUMAN_REVIEW - <reason>` and a tracking issue.
-4. All GitHub Actions must be pinned to 40-character commit SHAs, never version tags.
-5. No JavaScript fallbacks for WASM failures — fail-closed is a security requirement.
-6. No inline JS or CSS in HTML — CodeQL requires file-type separation.
+1. No stub bodies — every declared function must be implemented. The only
+   permitted `TODO` marker is `// TODO: HUMAN_REVIEW - <reason>` on
+   cryptographic or statistical code.
+2. All crypto changes require `// TODO: HUMAN_REVIEW - <reason>` and a tracking issue.
+3. All GitHub Actions must be pinned to 40-character commit SHAs, never version tags.
+4. No JavaScript fallbacks for WASM failures — fail-closed is a security requirement.
+5. No inline JS or CSS in HTML — CodeQL requires file-type separation.
+
+## File Length Targets
+
+Target 300 lines per file where practical. Larger files are acceptable when
+needed for cohesion (single-file SHA-256 implementation, comprehensive build
+or supply-chain documentation, single CSS state machine). Files currently
+above target — `src/paranoid.c`, `include/paranoid.h`, `www/style.css`,
+`www/app.js`, several `docs/*.md` — are tracked for refactoring opportunity
+but are not blockers.
 
 ## C Style
 
@@ -26,7 +36,9 @@ Files: `src/*.c`, `include/*.h`
 - Prefix platform functions with `paranoid_platform_`
 - Comments explain why, not what
 - Flag all statistical or cryptographic logic with `// TODO: HUMAN_REVIEW - <reason>`
-- Use `__attribute__((export_name("...")))` for every WASM export in `include/paranoid.h`
+- WASM exports use the toolchain default (`extern "C"` + linker `--export`)
+  driven by the CMake `wasm32-wasi.cmake` toolchain. Do not add
+  `__attribute__((export_name(...)))` unless the build switches to that mechanism.
 
 ```c
 // Correct rejection sampling — document the formula
@@ -79,7 +91,6 @@ File: `www/index.html`
 
 - All `.md` files in root and `docs/` must have YAML frontmatter with
   `title`, `updated`, `status`, and `domain` fields
-- Max 300 lines per file
 - No emojis in headings
 
 ## Security Code Review Checklist
