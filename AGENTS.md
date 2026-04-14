@@ -20,6 +20,7 @@ Before making ANY change, complete this self-audit:
 - [ ] I will not claim formulas are correct without textbook citation
 - [ ] I will not modify `src/paranoid.c` or `include/paranoid.h` without flagging for human review
 - [ ] I will not add JavaScript fallbacks (fail-closed design is intentional)
+- [ ] I will not add cryptographic code to `src/cli.c` — it is a display-only consumer of `paranoid.h`, analogous to `www/app.js`
 - [ ] Rejection sampling uses `max_valid = (256/N)*N - 1` (the `-1` is critical)
 - [ ] I will flag statistical code with `// TODO: HUMAN_REVIEW - <reason>`
 

@@ -201,6 +201,61 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
 # ================================================================
 # NATIVE TARGET — system cc + system OpenSSL (for tests)
 # ================================================================
+elseif(PARANOID_CROSS_CLI)
+    message(STATUS "Building CLI cross-compile target: ${PARANOID_TARGET}")
+    message(STATUS "  Using platform_posix.c + sha256_compact.c (no OpenSSL)")
+
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+    add_library(paranoid_cli_core STATIC
+        ${PARANOID_CORE_SOURCES}
+        src/platform_posix.c
+        src/sha256_compact.c
+    )
+
+    target_include_directories(paranoid_cli_core PUBLIC
+        include
+        src
+    )
+
+    target_link_libraries(paranoid_cli_core PUBLIC m)
+
+    target_compile_options(paranoid_cli_core PRIVATE
+        -Wall -Wextra -Werror -O2
+        -fdata-sections -ffunction-sections
+    )
+
+    add_executable(paranoid_cli src/cli.c)
+
+    set_target_properties(paranoid_cli PROPERTIES
+        OUTPUT_NAME paranoid-passwd
+    )
+
+    target_link_libraries(paranoid_cli PRIVATE paranoid_cli_core)
+
+    if(NOT DEFINED PARANOID_BUILD_COMMIT)
+        set(PARANOID_BUILD_COMMIT "unknown")
+    endif()
+    if(NOT DEFINED PARANOID_BUILD_DATE)
+        string(TIMESTAMP PARANOID_BUILD_DATE "%Y-%m-%dT%H:%M:%SZ" UTC)
+    endif()
+
+    target_compile_definitions(paranoid_cli PRIVATE
+        PARANOID_CLI_VERSION="${PROJECT_VERSION}"
+        PARANOID_CLI_BUILD_COMMIT="${PARANOID_BUILD_COMMIT}"
+        PARANOID_CLI_BUILD_DATE="${PARANOID_BUILD_DATE}"
+    )
+
+    target_compile_options(paranoid_cli PRIVATE
+        -Wall -Wextra -Werror -O2
+    )
+
+    target_link_options(paranoid_cli PRIVATE
+        -Wl,--gc-sections
+    )
+
+    install(TARGETS paranoid_cli RUNTIME DESTINATION bin)
+
 else()
     message(STATUS "Building native target (with system OpenSSL via platform abstraction)")
 
@@ -408,5 +463,77 @@ else()
 
     # ── CTest integration ────────────────────────────────────
     enable_testing()
+
+    # ================================================================
+    # CLI TARGET — self-contained, no OpenSSL
+    # ================================================================
+    # paranoid-passwd CLI links a separate static library that uses
+    # platform_posix.c (getrandom/getentropy) + sha256_compact.c.
+    # This produces a standalone binary with zero external runtime
+    # dependencies, suitable for cross-compilation via Zig.
+    #
+    # Intentionally kept separate from paranoid_core (OpenSSL) so that
+    # test_native continues to cross-validate SHA-256 compact against
+    # OpenSSL, AND the CLI binary we ship has no OpenSSL link.
+    option(PARANOID_BUILD_CLI "Build the paranoid-passwd CLI" ON)
+
+    if(PARANOID_BUILD_CLI AND EXISTS "${CMAKE_SOURCE_DIR}/src/sha256_compact.c"
+                        AND EXISTS "${CMAKE_SOURCE_DIR}/src/platform_posix.c"
+                        AND EXISTS "${CMAKE_SOURCE_DIR}/src/cli.c")
+
+        add_library(paranoid_cli_core STATIC
+            ${PARANOID_CORE_SOURCES}
+            src/platform_posix.c
+            src/sha256_compact.c
+        )
+
+        target_include_directories(paranoid_cli_core PUBLIC
+            include
+            src
+        )
+
+        target_link_libraries(paranoid_cli_core PUBLIC m)
+
+        target_compile_options(paranoid_cli_core PRIVATE
+            -Wall -Wextra -Werror
+        )
+
+        add_executable(paranoid_cli src/cli.c)
+
+        set_target_properties(paranoid_cli PROPERTIES
+            OUTPUT_NAME paranoid-passwd
+        )
+
+        target_link_libraries(paranoid_cli PRIVATE paranoid_cli_core)
+
+        # Build metadata injected from CI or command line.
+        if(NOT DEFINED PARANOID_BUILD_COMMIT)
+            set(PARANOID_BUILD_COMMIT "unknown")
+        endif()
+        if(NOT DEFINED PARANOID_BUILD_DATE)
+            string(TIMESTAMP PARANOID_BUILD_DATE "%Y-%m-%dT%H:%M:%SZ" UTC)
+        endif()
+
+        target_compile_definitions(paranoid_cli PRIVATE
+            PARANOID_CLI_VERSION="${PROJECT_VERSION}"
+            PARANOID_CLI_BUILD_COMMIT="${PARANOID_BUILD_COMMIT}"
+            PARANOID_CLI_BUILD_DATE="${PARANOID_BUILD_DATE}"
+        )
+
+        target_compile_options(paranoid_cli PRIVATE
+            -Wall -Wextra -Werror
+        )
+
+        install(TARGETS paranoid_cli RUNTIME DESTINATION bin)
+
+        # CLI tests — bash-based exercise of the binary.
+        if(EXISTS "${CMAKE_SOURCE_DIR}/tests/test_cli.sh")
+            add_test(
+                NAME cli_tests
+                COMMAND bash "${CMAKE_SOURCE_DIR}/tests/test_cli.sh"
+                        "$<TARGET_FILE:paranoid_cli>"
+            )
+        endif()
+    endif()
 
 endif()

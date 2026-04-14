@@ -113,7 +113,28 @@ Generate a 32-character password using 94 printable ASCII characters with **209.
 
 Visit **[paranoid-passwd.com](https://paranoid-passwd.com)** — no installation needed.
 
-### Option 2: Local Build with CMake
+### Option 2: CLI — verified install from attested GitHub Releases
+
+```bash
+# Download tarball + checksums for your platform (example: darwin-arm64)
+gh release download paranoid-passwd-v3.2.0 --repo jbcom/paranoid-passwd \
+    -p 'paranoid-passwd-3.2.0-darwin-arm64.tar.gz' -p 'checksums.txt'
+
+# Verify sigstore-signed provenance — fails if not built by our release workflow
+gh attestation verify paranoid-passwd-3.2.0-darwin-arm64.tar.gz --owner jbcom
+
+# Run it
+tar xzf paranoid-passwd-3.2.0-darwin-arm64.tar.gz
+./paranoid-passwd-3.2.0-darwin-arm64/paranoid-passwd --length 32
+```
+
+No `curl | bash`. The attestation chain walks from the GitHub Release
+tarball → sigstore → Rekor transparency log → the exact workflow run
+that produced the binary. See **[docs/CLI.md](docs/CLI.md)** for full
+CLI usage, flag reference, exit codes, and the Homebrew tap / Wolfi apk
+install paths.
+
+### Option 3: Local Build with CMake
 
 ```bash
 # Clone repository
