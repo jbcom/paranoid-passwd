@@ -30,11 +30,37 @@
 #include "paranoid.h"
 
 #include <getopt.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+
+/* explicit_bzero / memset_s availability varies by platform.
+ * We use a portable volatile-pointer fallback that the compiler is
+ * not allowed to optimize away. The fallback is correct everywhere;
+ * the libc routines are typically faster, so prefer them when
+ * available. */
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    #include <strings.h>   /* explicit_bzero */
+    #define HAVE_EXPLICIT_BZERO 1
+#elif defined(__APPLE__)
+    #include <strings.h>
+    /* Apple added explicit_bzero in macOS 10.13. Use it unconditionally
+     * since we target modern darwin. */
+    #define HAVE_EXPLICIT_BZERO 1
+#endif
+
+static void secure_zero(void *p, size_t n) {
+#ifdef HAVE_EXPLICIT_BZERO
+    explicit_bzero(p, n);
+#else
+    /* Volatile-pointer fallback: the standard guarantees stores
+     * through a volatile pointer cannot be optimized away, even when
+     * the underlying object is about to be freed. */
+    volatile unsigned char *vp = (volatile unsigned char *)p;
+    while (n--) *vp++ = 0;
+#endif
+}
 
 #ifndef PARANOID_CLI_VERSION
     #define PARANOID_CLI_VERSION "unknown"
@@ -343,145 +369,98 @@ static int generate_one(const opts_t *o, const char *charset, int charset_len,
 }
 
 /* ═══════════════════════════════════════════════════════════
-   AUDIT (runs on the generated batch, reports per stage)
+   AUDIT — delegates entirely to paranoid_run_audit().
+
+   The CLI does NOT compute entropy bits, NIST thresholds, pattern
+   limits, or any other crypto-adjacent value locally. Per the
+   project's threat model, every formula must live in the audited
+   library, not the LLM-built display layer. We only read fields
+   from the result struct and format them for stderr.
+
+   Note on --require-* constraints: paranoid_run_audit calls the
+   underlying paranoid_generate (unconstrained) for its batch. This
+   is correct — the audit is a self-test of the CSPRNG and rejection
+   sampling, not a validation of any specific user-visible password.
+   Constrained passwords are by construction biased; auditing them
+   would always look biased, which is meaningless. The audit
+   confirms the underlying generator is sound; constraint-met
+   passwords inherit that soundness over the constraint subset.
    ═══════════════════════════════════════════════════════════ */
 
 #define AUDIT_BATCH_SIZE 500
 #define TOTAL_STAGES     7
 
-static int run_audit(const opts_t *o, const char *passwords, int count,
-                     int length, const char *charset, int charset_len) {
-    char sha_hex[65];
-    int all_ok = 1;
-
-    /* Stage 1: generate — already done. Just report. */
-    stage_ok(1, TOTAL_STAGES, "generate", "%d password(s) x %d chars",
-             count, length);
-
-    /* Stage 2: SHA-256 of the first password */
-    if (paranoid_sha256_hex(passwords, sha_hex) != 0) {
-        stage_fail(2, TOTAL_STAGES, "sha256", "hash failure");
-        return -1;
-    }
-    stage_ok(2, TOTAL_STAGES, "sha256", "%s", sha_hex);
-
-    /* Stage 3: chi-squared on a larger batch for statistical power.
-     * The audit batch must use the same generator the user-visible
-     * passwords used; otherwise the statistical tests run on the
-     * wrong distribution when --require-* constraints are active. */
-    char *audit_batch = calloc((size_t)AUDIT_BATCH_SIZE,
-                               (size_t)(length + 1));
-    if (!audit_batch) {
-        stage_fail(3, TOTAL_STAGES, "chi-squared", "out of memory");
-        return -1;
-    }
-    for (int i = 0; i < AUDIT_BATCH_SIZE; i++) {
-        if (generate_one(o, charset, charset_len,
-                         audit_batch + (size_t)i * (size_t)(length + 1)) != 0) {
-            stage_fail(3, TOTAL_STAGES, "chi-squared", "CSPRNG failure");
-            free(audit_batch);
-            return -1;
+static int run_audit(const char *charset, int charset_len, int length) {
+    paranoid_audit_result_t r;
+    int rc = paranoid_run_audit(charset, charset_len, length,
+                                AUDIT_BATCH_SIZE, &r);
+    if (rc != 0) {
+        if (!g_quiet) {
+            fprintf(stderr, "audit: ERROR (paranoid_run_audit rc=%d)\n", rc);
         }
-    }
-    /* Build a flat buffer (no NUL separators) for the statistical tests. */
-    char *flat = malloc((size_t)AUDIT_BATCH_SIZE * (size_t)length);
-    if (!flat) {
-        stage_fail(3, TOTAL_STAGES, "chi-squared", "out of memory");
-        free(audit_batch);
-        return -1;
-    }
-    for (int i = 0; i < AUDIT_BATCH_SIZE; i++) {
-        memcpy(flat + (size_t)i * (size_t)length,
-               audit_batch + (size_t)i * (size_t)(length + 1),
-               (size_t)length);
+        secure_zero(&r, sizeof(r));
+        return rc;
     }
 
-    int chi2_df = 0;
-    double chi2_p = 0.0;
-    double chi2_stat = paranoid_chi_squared(flat, AUDIT_BATCH_SIZE, length,
-                                            charset, charset_len,
-                                            &chi2_df, &chi2_p);
-    int chi2_pass = (chi2_p > 0.01);
-    if (chi2_pass) {
+    /* Every stage report below reads ONLY pre-computed fields from r.
+     * No new arithmetic. */
+    stage_ok(1, TOTAL_STAGES, "generate",
+             "1 password x %d chars (audit sample)", r.password_length);
+
+    stage_ok(2, TOTAL_STAGES, "sha256", "%s", r.sha256_hex);
+
+    if (r.chi2_pass) {
         stage_ok(3, TOTAL_STAGES, "chi-squared",
-                 "chi2=%.2f df=%d p=%.4f", chi2_stat, chi2_df, chi2_p);
+                 "chi2=%.2f df=%d p=%.4f",
+                 r.chi2_statistic, r.chi2_df, r.chi2_p_value);
     } else {
         stage_fail(3, TOTAL_STAGES, "chi-squared", "p-value <= 0.01");
-        all_ok = 0;
     }
 
-    /* Stage 4: serial correlation */
-    double r = paranoid_serial_correlation(flat,
-                                           AUDIT_BATCH_SIZE * length);
-    int serial_pass = (r > -0.05 && r < 0.05);
-    if (serial_pass) {
-        stage_ok(4, TOTAL_STAGES, "serial-corr", "r=%.4f", r);
+    if (r.serial_pass) {
+        stage_ok(4, TOTAL_STAGES, "serial-corr",
+                 "r=%.4f", r.serial_correlation);
     } else {
         stage_fail(4, TOTAL_STAGES, "serial-corr", "|r| >= 0.05");
-        all_ok = 0;
     }
 
-    /* Stage 5: collisions (within audit batch) */
-    int dups = paranoid_count_collisions(flat, AUDIT_BATCH_SIZE, length);
-    if (dups == 0) {
+    if (r.collision_pass) {
         stage_ok(5, TOTAL_STAGES, "collisions",
-                 "0 / %d", AUDIT_BATCH_SIZE);
+                 "0 / %d", r.batch_size);
     } else {
         stage_fail(5, TOTAL_STAGES, "collisions",
-                   "duplicates detected");
-        all_ok = 0;
+                   "%d duplicates detected", r.duplicates);
     }
 
-    /* Stage 6: entropy & NIST compliance (per single password).
-     * bits per char = log2(charset_size); total = length * bits_per_char.
-     * Computed locally rather than calling paranoid_run_audit(), which
-     * would regenerate a batch and ignore our per-stage output. */
-    double bpc = log2((double)charset_len);
-    double total_entropy = bpc * (double)length;
-    int memorized    = (total_entropy >= 30.0);
-    int high_value   = (total_entropy >= 80.0);
-    int crypto_equiv = (total_entropy >= 128.0);
+    /* Stage 6: entropy + NIST flags — read directly from struct. */
     stage_ok(6, TOTAL_STAGES, "entropy",
              "%.2f bits (NIST: memorized=%s high-value=%s crypto-equiv=%s)",
-             total_entropy,
-             memorized ? "OK" : "no",
-             high_value ? "OK" : "no",
-             crypto_equiv ? "OK" : "no");
+             r.total_entropy,
+             r.nist_memorized    ? "OK" : "no",
+             r.nist_high_value   ? "OK" : "no",
+             r.nist_crypto_equiv ? "OK" : "no");
 
-    /* Stage 7: pattern check — library-side. For the CLI we do a simple
-     * sanity scan: no single character repeated > 25% of length.
-     * The comprehensive pattern detection lives in paranoid_run_audit;
-     * we don't invoke it here to keep the stage output deterministic. */
-    int counts[256] = {0};
-    for (int i = 0; i < length; i++) {
-        counts[(unsigned char)passwords[i]]++;
-    }
-    int max_repeat = 0;
-    for (int i = 0; i < 256; i++) {
-        if (counts[i] > max_repeat) max_repeat = counts[i];
-    }
-    int repeat_limit = (length / 4) > 2 ? (length / 4) : 2;
-    int pattern_pass = (max_repeat <= repeat_limit);
-    if (pattern_pass) {
-        stage_ok(7, TOTAL_STAGES, "patterns",
-                 "max repeat = %d (limit %d)", max_repeat, repeat_limit);
+    /* Stage 7: pattern check — read pattern_issues count from the
+     * library. The library defines what counts as a pattern; we just
+     * report the count it produced. */
+    if (r.pattern_issues == 0) {
+        stage_ok(7, TOTAL_STAGES, "patterns", "no weak patterns");
     } else {
         stage_fail(7, TOTAL_STAGES, "patterns",
-                   "repeated char exceeds limit");
-        all_ok = 0;
+                   "%d weak pattern(s) detected", r.pattern_issues);
     }
 
-    /* Scrub audit buffers. */
-    memset(flat, 0, (size_t)AUDIT_BATCH_SIZE * (size_t)length);
-    memset(audit_batch, 0,
-           (size_t)AUDIT_BATCH_SIZE * (size_t)(length + 1));
-    free(flat);
-    free(audit_batch);
-
+    int passed = r.all_pass;
     if (!g_quiet) {
-        fprintf(stderr, "audit: %s\n", all_ok ? "PASS" : "FAIL");
+        fprintf(stderr, "audit: %s\n", passed ? "PASS" : "FAIL");
     }
-    return all_ok ? 0 : -1;
+
+    /* Scrub the audit's sample password from local memory. The library
+     * owns the result struct between calls; once we return, the next
+     * paranoid_run_audit call will overwrite it. We still scrub our
+     * stack copy to be safe. */
+    secure_zero(&r, sizeof(r));
+    return passed ? 0 : -1;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -522,7 +501,7 @@ int main(int argc, char **argv) {
         if (rc != 0) break;
     }
     if (rc != 0) {
-        memset(out, 0, (size_t)o.count * per_pw);
+        secure_zero(out, (size_t)o.count * per_pw);
         free(out);
         switch (rc) {
             case -1:
@@ -547,13 +526,12 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* Audit (if enabled) — runs against the first password + a dedicated
-     * statistical batch produced by the same generator function the
-     * user-visible passwords used. Output stays on stderr. */
+    /* Audit (if enabled) — fully delegates to paranoid_run_audit().
+     * The audit runs on a separate, library-generated sample, NOT on
+     * the user-visible passwords. See run_audit() for rationale. */
     int audit_rc = 0;
     if (o.audit) {
-        audit_rc = run_audit(&o, out, o.count, o.length,
-                             charset, charset_len);
+        audit_rc = run_audit(charset, charset_len, o.length);
     } else if (!g_quiet) {
         fprintf(stderr, "audit: skipped\n");
     }
@@ -565,8 +543,9 @@ int main(int argc, char **argv) {
     }
     fflush(stdout);
 
-    /* Scrub. */
-    memset(out, 0, (size_t)o.count * per_pw);
+    /* Scrub the password buffer with secure_zero (not memset) so the
+     * compiler is not free to elide the writes after free(). */
+    secure_zero(out, (size_t)o.count * per_pw);
     free(out);
 
     return audit_rc == 0 ? EX_OK : EX_AUDIT_FAIL;

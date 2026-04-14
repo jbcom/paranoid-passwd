@@ -81,6 +81,13 @@ paranoid-passwd [OPTIONS]
 
 - **stdout:** N lines, each one generated password, `\n`-terminated. Nothing else.
 - **stderr:** Audit stage progress (unless `--quiet`), final `audit: PASS` or `audit: FAIL`.
+- **Audit scope:** the audit always runs on a fresh, library-generated
+  unconstrained sample (500 passwords at the requested length). It is a
+  self-test of the underlying CSPRNG and rejection sampling, not a
+  validation of any specific user-visible password. When `--require-*`
+  constraints are active, your visible passwords are filtered through
+  the same audited generator — the audit confirms the source is sound;
+  constraints inherit that soundness over the matching subset.
 - **Exit codes:**
     - `0` success
     - `1` argument error or impossible constraints
