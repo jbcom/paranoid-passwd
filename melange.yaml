@@ -38,6 +38,7 @@ environment:
       - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
     packages:
       - build-base
+      - bash         # required by tests/test_cli.sh (CTest invokes it)
       - cmake
       - openssl
       - openssl-dev
