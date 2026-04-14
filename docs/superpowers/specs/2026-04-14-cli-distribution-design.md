@@ -151,10 +151,11 @@ Exactly this. Nothing else goes here. `paranoid-passwd > pw.txt` works.
 audit: PASS
 ```
 
-On audit failure: same format through the failing stage, then
-`audit: FAIL (chi-squared)` or similar, then exit 3. The password still
-goes to stdout because the user asked for one — but the exit code and
-stderr make the failure unmissable.
+On audit failure: same format through each stage (failing stages print
+`FAIL` in the OK column with a short reason), then a final
+`audit: FAIL` line, then exit 3. The password still goes to stdout
+because the user asked for one — but the exit code and stderr make the
+failure unmissable.
 
 `--count N` runs the audit on the batch (as the web app does), not per
 password.
@@ -181,9 +182,11 @@ Fields populated at build time via `-D` defines passed from CMake.
 | Code | Meaning |
 |---|---|
 | 0 | Success, audit pass (or `--no-audit` used) |
-| 1 | Argument error (e.g. `--length 0`, unknown flag) |
-| 2 | CSPRNG failure (maps to `paranoid_generate` returning -1) |
-| 3 | Audit failed |
+| 1 | Argument error or impossible constraints (`paranoid_generate*` returning -2 or -3) |
+| 2 | OS CSPRNG failure (`paranoid_generate*` returning -1) |
+| 3 | Statistical audit detected bias |
+| 4 | Internal error (allocation failure, unexpected library return code) |
+| 5 | Exhausted attempts meeting `--require-*` constraints (`paranoid_generate_constrained` returning -4) |
 
 ## Build System
 

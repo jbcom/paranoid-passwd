@@ -81,7 +81,13 @@ paranoid-passwd [OPTIONS]
 
 - **stdout:** N lines, each one generated password, `\n`-terminated. Nothing else.
 - **stderr:** Audit stage progress (unless `--quiet`), final `audit: PASS` or `audit: FAIL`.
-- **Exit codes:** `0` success · `1` argument error · `2` CSPRNG failure · `3` audit failed.
+- **Exit codes:**
+    - `0` success
+    - `1` argument error or impossible constraints
+    - `2` OS CSPRNG failure
+    - `3` statistical audit detected bias
+    - `4` internal error (e.g. out of memory)
+    - `5` exhausted attempts meeting `--require-*` constraints
 
 Because the password is only written to stdout, `paranoid-passwd > pw.txt`
 captures it cleanly while leaving the audit trail visible on the terminal.
@@ -135,7 +141,11 @@ with the binary, `LICENSE`, and `README.md`.
 ## Build from source
 
 ```bash
-# Native for your current platform (uses OpenSSL for test cross-validation)
+# Native for your current platform.
+# The CLI binary itself links platform_posix.c + sha256_compact.c —
+# zero OpenSSL dependency. The native test_native binary additionally
+# links OpenSSL so the SHA-256 implementations are cross-validated
+# against NIST CAVP vectors in CI.
 cmake -B build/native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/native --target paranoid_cli
 ./build/native/paranoid-passwd --version

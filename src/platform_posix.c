@@ -5,8 +5,10 @@
  * SPDX-License-Identifier: MIT
  *
  * Implements paranoid_platform.h for a self-contained native binary:
- *   - Random: getrandom(2) on Linux, getentropy(3) on macOS/BSD,
- *             /dev/urandom fallback if the syscall is unavailable.
+ *   - Random: getrandom(2) on Linux, getentropy(3) on macOS/BSD.
+ *             No /dev/urandom fallback — if the syscall is unavailable
+ *             we fail-closed, matching the project's threat-model stance
+ *             that a degraded RNG is worse than no result.
  *   - SHA-256: Compact FIPS 180-4 implementation (sha256_compact.c),
  *              the same one used by the WASM build.
  *
@@ -41,8 +43,9 @@
  * some platforms. Loop to fill arbitrary buffer sizes.
  *
  * VERIFIED: - getentropy(3) fails with EIO if len > 256.
- * getrandom(2) with flags=0 may return short reads under signal pressure
- * but is typically unlimited on Linux. Looping covers both cases.
+ * getrandom(2) with flags=0 may return short reads or be interrupted by
+ * a signal (errno=EINTR). getentropy(3) per POSIX/openbsd does NOT
+ * report EINTR — it either fully succeeds or fails with EIO/EFAULT/ENOSYS.
  */
 static int fill_random(unsigned char *buf, size_t len) {
     size_t off = 0;
@@ -59,7 +62,6 @@ static int fill_random(unsigned char *buf, size_t len) {
         off += (size_t)n;
 #else
         if (getentropy(buf + off, chunk) != 0) {
-            if (errno == EINTR) continue;
             return -1;
         }
         off += chunk;

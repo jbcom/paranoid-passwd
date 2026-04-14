@@ -250,9 +250,9 @@ elseif(PARANOID_CROSS_CLI)
         -Wall -Wextra -Werror -O2
     )
 
-    target_link_options(paranoid_cli PRIVATE
-        -Wl,--gc-sections
-    )
+    if(PARANOID_LINKER_GC)
+        target_link_options(paranoid_cli PRIVATE ${PARANOID_LINKER_GC})
+    endif()
 
     install(TARGETS paranoid_cli RUNTIME DESTINATION bin)
 

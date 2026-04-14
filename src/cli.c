@@ -10,13 +10,19 @@
  *
  * Responsibilities:
  *   1. Parse command-line flags into library call arguments.
- *   2. Invoke library functions: paranoid_generate_multiple (or
- *      paranoid_generate_constrained), paranoid_run_audit.
- *   3. Print stage progress to stderr.
- *   4. Print the generated password(s) to stdout.
- *   5. Map library return codes to process exit codes.
+ *   2. Invoke library functions: paranoid_generate (with optional
+ *      constraints via paranoid_generate_constrained) once per
+ *      requested password, then a separate audit batch through the
+ *      same generator function the user-visible passwords used so the
+ *      statistical tests reflect the real distribution.
+ *   3. Run individual statistical helpers (chi-squared, serial
+ *      correlation, collisions) against the audit batch.
+ *   4. Compute entropy locally from charset_len and length.
+ *   5. Print stage progress to stderr.
+ *   6. Print the generated password(s) to stdout.
+ *   7. Map library return codes to process exit codes.
  *
- * All entropy, statistics, and SHA-256 computation happens inside the
+ * All entropy bytes, hashing, and statistical math happen inside the
  * library (which links platform_posix.c + sha256_compact.c for this
  * build).
  */
@@ -43,10 +49,12 @@
 /* ═══════════════════════════════════════════════════════════
    EXIT CODES (contract; documented in docs/CLI.md)
    ═══════════════════════════════════════════════════════════ */
-#define EX_OK          0
-#define EX_USAGE       1
-#define EX_CSPRNG      2
-#define EX_AUDIT_FAIL  3
+#define EX_OK             0
+#define EX_USAGE          1   /* invalid args, impossible constraints */
+#define EX_CSPRNG         2   /* OS RNG failure */
+#define EX_AUDIT_FAIL     3   /* statistical audit detected bias */
+#define EX_INTERNAL       4   /* OOM or other internal error */
+#define EX_CONSTRAINTS    5   /* exhausted attempts meeting --require-* */
 
 /* ═══════════════════════════════════════════════════════════
    BUILT-IN CHARSETS (resolved before calling library)
@@ -341,8 +349,8 @@ static int generate_one(const opts_t *o, const char *charset, int charset_len,
 #define AUDIT_BATCH_SIZE 500
 #define TOTAL_STAGES     7
 
-static int run_audit(const char *passwords, int count, int length,
-                     const char *charset, int charset_len) {
+static int run_audit(const opts_t *o, const char *passwords, int count,
+                     int length, const char *charset, int charset_len) {
     char sha_hex[65];
     int all_ok = 1;
 
@@ -358,8 +366,9 @@ static int run_audit(const char *passwords, int count, int length,
     stage_ok(2, TOTAL_STAGES, "sha256", "%s", sha_hex);
 
     /* Stage 3: chi-squared on a larger batch for statistical power.
-     * Generate a dedicated batch (not exposed) to run the uniformity
-     * test against. */
+     * The audit batch must use the same generator the user-visible
+     * passwords used; otherwise the statistical tests run on the
+     * wrong distribution when --require-* constraints are active. */
     char *audit_batch = calloc((size_t)AUDIT_BATCH_SIZE,
                                (size_t)(length + 1));
     if (!audit_batch) {
@@ -367,8 +376,8 @@ static int run_audit(const char *passwords, int count, int length,
         return -1;
     }
     for (int i = 0; i < AUDIT_BATCH_SIZE; i++) {
-        if (paranoid_generate(charset, charset_len, length,
-                              audit_batch + (size_t)i * (size_t)(length + 1)) != 0) {
+        if (generate_one(o, charset, charset_len,
+                         audit_batch + (size_t)i * (size_t)(length + 1)) != 0) {
             stage_fail(3, TOTAL_STAGES, "chi-squared", "CSPRNG failure");
             free(audit_batch);
             return -1;
@@ -503,7 +512,7 @@ int main(int argc, char **argv) {
     char *out = calloc((size_t)o.count, per_pw);
     if (!out) {
         fprintf(stderr, "error: out of memory\n");
-        return EX_CSPRNG;
+        return EX_INTERNAL;
     }
 
     int rc = 0;
@@ -531,18 +540,20 @@ int main(int argc, char **argv) {
                 fprintf(stderr,
                         "error: exhausted attempts meeting character "
                         "requirements\n");
-                return EX_AUDIT_FAIL;
+                return EX_CONSTRAINTS;
             default:
                 fprintf(stderr, "error: generation failed (rc=%d)\n", rc);
-                return EX_CSPRNG;
+                return EX_INTERNAL;
         }
     }
 
     /* Audit (if enabled) — runs against the first password + a dedicated
-     * statistical batch. Output stays on stderr. */
+     * statistical batch produced by the same generator function the
+     * user-visible passwords used. Output stays on stderr. */
     int audit_rc = 0;
     if (o.audit) {
-        audit_rc = run_audit(out, o.count, o.length, charset, charset_len);
+        audit_rc = run_audit(&o, out, o.count, o.length,
+                             charset, charset_len);
     } else if (!g_quiet) {
         fprintf(stderr, "audit: skipped\n");
     }

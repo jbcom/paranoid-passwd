@@ -27,6 +27,12 @@ on:
 permissions:
   contents: read
 
+env:
+  ZIG_VERSION: "0.13.0"
+  # SHA-256 of zig-linux-x86_64-${ZIG_VERSION}.tar.xz from ziglang.org.
+  # Update in lockstep with ZIG_VERSION.
+  ZIG_SHA256: "d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea"
+
 jobs:
 
   # ---------------------------------------------------------------
@@ -57,10 +63,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Zig
+      - name: Install Zig (SHA-verified)
         run: |
-          ZIG_VERSION="0.13.0"
-          curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" | tar -xJ
+          archive="zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
+          curl -sSLO "https://ziglang.org/download/${ZIG_VERSION}/${archive}"
+          echo "${ZIG_SHA256}  ${archive}" | sha256sum -c -
+          tar -xJf "${archive}"
+          rm "${archive}"
           echo "$PWD/zig-linux-x86_64-${ZIG_VERSION}" >> "$GITHUB_PATH"
 
       - name: Install build tools

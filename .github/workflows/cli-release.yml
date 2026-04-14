@@ -35,6 +35,11 @@ permissions: {}
 env:
   # Same Zig version as ci.yml to keep toolchain consistent.
   ZIG_VERSION: "0.13.0"
+  # SHA-256 of zig-linux-x86_64-${ZIG_VERSION}.tar.xz, published by
+  # ziglang.org at https://ziglang.org/download/index.json. Pinned
+  # here so a compromised mirror or MITM cannot inject a different
+  # toolchain. Update in lockstep with ZIG_VERSION.
+  ZIG_SHA256: "d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea"
 
 jobs:
   build:
@@ -72,11 +77,16 @@ jobs:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
 
-      - name: Install Zig
+      - name: Install Zig (SHA-verified)
         env:
           ZIG_VERSION_ENV: ${{ env.ZIG_VERSION }}
+          ZIG_SHA256_ENV: ${{ env.ZIG_SHA256 }}
         run: |
-          curl -sSL "https://ziglang.org/download/${ZIG_VERSION_ENV}/zig-linux-x86_64-${ZIG_VERSION_ENV}.tar.xz" | tar -xJ
+          archive="zig-linux-x86_64-${ZIG_VERSION_ENV}.tar.xz"
+          curl -sSLO "https://ziglang.org/download/${ZIG_VERSION_ENV}/${archive}"
+          echo "${ZIG_SHA256_ENV}  ${archive}" | sha256sum -c -
+          tar -xJf "${archive}"
+          rm "${archive}"
           echo "$PWD/zig-linux-x86_64-${ZIG_VERSION_ENV}" >> "$GITHUB_PATH"
 
       - name: Install CMake
@@ -93,10 +103,20 @@ jobs:
           version="${RAW_TAG#paranoid-passwd-v}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve checked-out commit
+        id: commit
+        # github.sha refers to the workflow trigger commit, which on a
+        # `release: published` event is the release commit, not always
+        # the tag's underlying commit. Read HEAD directly so the binary
+        # reports the SHA of the source it was actually built from.
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
       - name: Configure (CMake via Zig cross-toolchain)
         env:
           ZIG_TRIPLE: ${{ matrix.zig_triple }}
-          BUILD_COMMIT: ${{ github.sha }}
+          BUILD_COMMIT: ${{ steps.commit.outputs.sha }}
         run: |
           cmake -B build/cli \
               -DCMAKE_TOOLCHAIN_FILE=cmake/zig-cross.cmake \
