@@ -2,6 +2,7 @@ FROM cgr.dev/chainguard/wolfi-base:latest@sha256:1af610c4a70668dad46159ee178b203
 
 ARG RUST_APK_PACKAGE=rust-1.88
 ARG RUST_APK_VERSION=1.88.0-r0
+ARG SPHINX_RUSTDOCGEN_VERSION=1.1.0
 ARG TOX_VERSION=4.53.0
 
 RUN apk add --no-cache \
@@ -20,8 +21,11 @@ RUN apk add --no-cache \
 
 RUN python3 -m pip install --break-system-packages --no-cache-dir "tox==${TOX_VERSION}"
 
+RUN cargo install --locked "sphinx-rustdocgen@${SPHINX_RUSTDOCGEN_VERSION}"
+
 RUN bash --version >/dev/null \
  && cargo --version >/dev/null \
+ && command -v sphinx-rustdocgen >/dev/null \
  && rustc --version >/dev/null \
  && pkgconf --modversion openssl >/dev/null \
  && python3 --version >/dev/null \
