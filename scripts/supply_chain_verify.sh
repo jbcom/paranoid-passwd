@@ -132,20 +132,29 @@ TOTAL_PINNED=0
 if [ -d "$WORKFLOWS" ]; then
     for WF in "$WORKFLOWS"/*.yml; do
         [ -f "$WF" ] || continue
-        USES_COUNT=$(grep -cE '^\s*uses:' "$WF" 2>/dev/null || echo "0")
-        SHA_PINNED=$(grep -cE '^\s*uses:.*@[a-f0-9]{40}' "$WF" 2>/dev/null || echo "0")
+        # Total `uses:` lines, EXCLUDING local-path actions (uses: ./...).
+        # Local-path actions are versioned with the repo commit itself,
+        # so SHA-pinning them is meaningless. Excluding them from both
+        # totals keeps the pass/fail check correct.
+        USES_TOTAL=$(grep -cE '^\s*uses:' "$WF" 2>/dev/null) || USES_TOTAL=0
+        USES_LOCAL=$(grep -cE '^\s*uses:[[:space:]]+\./' "$WF" 2>/dev/null) || USES_LOCAL=0
+        SHA_PINNED=$(grep -cE '^\s*uses:.*@[a-f0-9]{40}' "$WF" 2>/dev/null) || SHA_PINNED=0
+        USES_COUNT=$((USES_TOTAL - USES_LOCAL))
         TOTAL_USES=$((TOTAL_USES + USES_COUNT))
         TOTAL_PINNED=$((TOTAL_PINNED + SHA_PINNED))
     done
 
     if [ "$TOTAL_USES" -eq "$TOTAL_PINNED" ] && [ "$TOTAL_USES" -gt 0 ]; then
-        echo -e "${GREEN}PASS${NC} ($TOTAL_PINNED/$TOTAL_USES actions pinned across all workflows)"
+        echo -e "${GREEN}PASS${NC} ($TOTAL_PINNED/$TOTAL_USES external actions pinned; local-path actions excluded)"
     else
         echo -e "${RED}FAIL${NC}"
         echo "  Not all actions are SHA-pinned!"
-        echo "  Pinned: $TOTAL_PINNED / $TOTAL_USES"
+        echo "  Pinned: $TOTAL_PINNED / $TOTAL_USES (external)"
         echo "  Unpinned actions:"
-        grep -rE '^\s*uses:' "$WORKFLOWS"/*.yml | grep -v '@[a-f0-9]\{40\}' | sed 's/^/    /'
+        grep -rE '^\s*uses:' "$WORKFLOWS"/*.yml \
+            | grep -v '@[a-f0-9]\{40\}' \
+            | grep -v 'uses:[[:space:]]\+\./' \
+            | sed 's/^/    /'
         FAILED=1
     fi
 else
