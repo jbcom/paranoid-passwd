@@ -353,13 +353,15 @@ jobs:
         run: |
           ./scripts/generate_pkg_manifests.sh "${VERSION}" checksums.txt out/
 
-      - name: Push to jbcom/pkgs
+      - name: Open PR against jbcom/pkgs
         env:
-          TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          git clone "https://x-access-token:${TOKEN}@github.com/jbcom/pkgs.git" pkgs
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/jbcom/pkgs.git" pkgs
           cd pkgs
+          branch="paranoid-passwd/bump-${VERSION}"
+          git checkout -b "${branch}"
           mkdir -p Formula bucket choco/paranoid-passwd/tools
           cp ../out/paranoid-passwd.rb Formula/
           cp ../out/paranoid-passwd.json bucket/
@@ -370,25 +372,48 @@ jobs:
           git config user.email 'noreply@jonbogaty.com'
           git add Formula/paranoid-passwd.rb bucket/paranoid-passwd.json \
                   choco/paranoid-passwd
-          git diff --cached --quiet || \
-              git commit -m "feat(paranoid-passwd): bump to ${VERSION}"
-          git push
+          if git diff --cached --quiet; then
+            echo "No manifest changes for ${VERSION} — skipping PR"
+            exit 0
+          fi
+          git commit -m "feat(paranoid-passwd): bump to ${VERSION}"
+          git push -u origin "${branch}"
+          gh pr create \
+              --repo jbcom/pkgs \
+              --base main \
+              --head "${branch}" \
+              --title "feat(paranoid-passwd): bump to ${VERSION}" \
+              --body "Auto-generated from paranoid-passwd release pipeline for v${VERSION}." || true
+          # Enable auto-merge so pkgs's validate-packages.yml gate + squash-merge happen without manual work
+          gh pr merge --repo jbcom/pkgs --auto --squash "${branch}" || true
 
-      - name: Push Homebrew tap mirror to jbcom/homebrew-tap
+      - name: Open PR against jbcom/homebrew-tap
         env:
-          TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          git clone "https://x-access-token:${TOKEN}@github.com/jbcom/homebrew-tap.git" tap
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/jbcom/homebrew-tap.git" tap
           cd tap
+          branch="paranoid-passwd/bump-${VERSION}"
+          git checkout -b "${branch}"
           mkdir -p Formula
           cp ../out/paranoid-passwd.rb Formula/
           git config user.name  'jbcom-bot'
           git config user.email 'noreply@jonbogaty.com'
           git add Formula/paranoid-passwd.rb
-          git diff --cached --quiet || \
-              git commit -m "feat(paranoid-passwd): bump to ${VERSION}"
-          git push
+          if git diff --cached --quiet; then
+            echo "No formula changes for ${VERSION} — skipping PR"
+            exit 0
+          fi
+          git commit -m "feat(paranoid-passwd): bump to ${VERSION}"
+          git push -u origin "${branch}"
+          gh pr create \
+              --repo jbcom/homebrew-tap \
+              --base main \
+              --head "${branch}" \
+              --title "feat(paranoid-passwd): bump to ${VERSION}" \
+              --body "Auto-generated Homebrew formula bump for paranoid-passwd v${VERSION}." || true
+          gh pr merge --repo jbcom/homebrew-tap --auto --squash "${branch}" || true
 
   # ─── Install smoke test (linux-amd64) ──────────────────────────
   install-smoke-test:
