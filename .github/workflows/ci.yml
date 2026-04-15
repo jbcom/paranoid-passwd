@@ -101,7 +101,7 @@ jobs:
                       paranoid_sha256 paranoid_sha256_hex \
                       paranoid_chi_squared paranoid_serial_correlation \
                       paranoid_count_collisions malloc free; do
-                if printf '%s\n' "$EXPORTS" | grep -qE "-> \"${fn}\""; then
+                if printf '%s\n' "$EXPORTS" | grep -qE -- "-> \"${fn}\""; then
                     echo "  OK: ${fn}"
                 else
                     echo "  MISSING: ${fn}"; exit 1
