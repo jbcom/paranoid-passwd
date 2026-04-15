@@ -218,7 +218,16 @@ elseif(PARANOID_CROSS_CLI)
         src
     )
 
-    target_link_libraries(paranoid_cli_core PUBLIC m)
+    # POSIX targets need libm for math. Windows (MSVCRT/mingw) links it
+     # automatically and lacks a standalone -lm.
+    if(NOT WIN32)
+        target_link_libraries(paranoid_cli_core PUBLIC m)
+    endif()
+
+    # Windows needs bcrypt.lib for BCryptGenRandom in platform_posix.c.
+    if(WIN32)
+        target_link_libraries(paranoid_cli_core PUBLIC bcrypt)
+    endif()
 
     target_compile_options(paranoid_cli_core PRIVATE
         -Wall -Wextra -Werror -O2

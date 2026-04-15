@@ -29,7 +29,22 @@
 #include <stddef.h>
 #include <errno.h>
 
-#if defined(__linux__)
+#if defined(_WIN32) || defined(_WIN64)
+    /* Windows: BCryptGenRandom from bcrypt.lib. BCRYPT_USE_SYSTEM_PREFERRED_RNG
+     * reads from the OS CSPRNG without requiring an algorithm handle.
+     * Available Vista+ (2007). Documented:
+     * https://learn.microsoft.com/windows/win32/api/bcrypt/nf-bcrypt-bcryptgenrandom
+     *
+     * VERIFIED: BCryptGenRandom with BCRYPT_USE_SYSTEM_PREFERRED_RNG
+     * is the OS-blessed CSPRNG on Windows. CryptGenRandom is deprecated.
+     */
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+    #include <bcrypt.h>
+    #ifndef STATUS_SUCCESS
+        #define STATUS_SUCCESS ((NTSTATUS)0x00000000L)
+    #endif
+#elif defined(__linux__)
     #include <sys/random.h>
     /* getrandom available since glibc 2.25 (2017), kernel 3.17 (2014). */
 #elif defined(__APPLE__)
@@ -43,7 +58,7 @@
     #include <unistd.h>
     /* getentropy(3): FreeBSD 12+, OpenBSD since forever. */
 #else
-    #error "Unsupported platform: no getrandom/getentropy available"
+    #error "Unsupported platform: no getrandom/getentropy/BCryptGenRandom available"
 #endif
 
 /* getentropy and getrandom both cap single-call reads at 256 bytes on
@@ -60,7 +75,16 @@ static int fill_random(unsigned char *buf, size_t len) {
         size_t chunk = len - off;
         if (chunk > 256) chunk = 256;
 
-#if defined(__linux__)
+#if defined(_WIN32) || defined(_WIN64)
+        /* BCryptGenRandom has no documented max-read cap (unlike
+         * getentropy's 256-byte limit), but we keep the chunked loop
+         * for uniformity and so the failure mode matches the other
+         * backends. */
+        NTSTATUS rc = BCryptGenRandom(NULL, buf + off, (ULONG)chunk,
+                                      BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+        if (rc != STATUS_SUCCESS) return -1;
+        off += chunk;
+#elif defined(__linux__)
         ssize_t n = getrandom(buf + off, chunk, 0);
         if (n < 0) {
             if (errno == EINTR) continue;
