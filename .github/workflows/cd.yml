@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------
 # paranoid-passwd — CD (push to main)
 #
-# RUNS ON: push to main, weekly Scorecard schedule.
+# RUNS ON: push to main, weekly CodeQL schedule.
 # PURPOSE: deploy what release.yml has already built and shipped.
 #
 # Topology: ci → release → cd.
@@ -10,7 +10,10 @@
 #   site artifact and deploys it to GitHub Pages.
 #
 # Also folds in the release-please action (so a merge to main opens
-# or updates the release PR) and OpenSSF Scorecard (weekly + on push).
+# or updates the release PR) and scheduled CodeQL on main. OpenSSF
+# Scorecard lives in scorecard.yml of its own — the Scorecard webapp
+# rejects workflows where any other job has id-token: write, which
+# the Pages deploy below needs.
 # -----------------------------------------------------------------
 
 name: CD
@@ -19,7 +22,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '0 6 * * 1'  # weekly Monday 6am UTC — Scorecard
+    - cron: '0 6 * * 1'  # weekly Monday 6am UTC — CodeQL on main
   workflow_dispatch:
 
 permissions: {}
@@ -88,9 +91,14 @@ jobs:
           TAG: ${{ steps.latest.outputs.tag }}
         run: |
           ver="${TAG#paranoid-passwd-v}"
-          gh release download "${TAG}" \
-              --repo "${GH_REPO}" \
-              -p "paranoid-site-${ver}.zip"
+          # New shape (release.yml post-consolidation): paranoid-site-3.4.3.zip
+          # Legacy shape (pre-consolidation release.yml): paranoid-site-paranoid-passwd-v3.4.2.zip
+          # Try new first; fall back to legacy so we can still deploy
+          # pre-#60 tags until they age out.
+          if ! gh release download "${TAG}" --repo "${GH_REPO}" -p "paranoid-site-${ver}.zip" 2>/dev/null; then
+            gh release download "${TAG}" --repo "${GH_REPO}" -p "paranoid-site-${TAG}.zip"
+            mv "paranoid-site-${TAG}.zip" "paranoid-site-${ver}.zip"
+          fi
           mkdir -p _site
           unzip -q "paranoid-site-${ver}.zip" -d _site
 
@@ -108,39 +116,6 @@ jobs:
         if: steps.latest.outputs.skip != 'true'
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
-
-  # ─── OpenSSF Scorecard ─────────────────────────────────────────
-  scorecard:
-    name: OpenSSF Scorecard
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      security-events: write
-      id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Run
-        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
-        with:
-          results_file: results.sarif
-          results_format: sarif
-          publish_results: true
-
-      - name: Upload SARIF artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: scorecard-results
-          path: results.sarif
-          retention-days: 14
-
-      - name: Upload SARIF to Code Scanning
-        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
-        with:
-          sarif_file: results.sarif
 
   # ─── CodeQL on main (scheduled) ────────────────────────────────
   codeql:
