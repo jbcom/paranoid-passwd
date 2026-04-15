@@ -1,4 +1,5 @@
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::SaltString};
+use bip39::{Language, Mnemonic};
 use openssl::{
     cms::{CMSOptions, CmsContentInfo},
     hash::MessageDigest,
@@ -30,9 +31,13 @@ const DEFAULT_MEMORY_COST_KIB: u32 = 65_536;
 const DEFAULT_ITERATIONS: u32 = 3;
 const DEFAULT_PARALLELISM: u32 = 1;
 const PASSWORD_WRAP_ALGORITHM: &str = "argon2id+aes-256-gcm";
+const MNEMONIC_WRAP_ALGORITHM: &str = "bip39-entropy+aes-256-gcm";
 const CERTIFICATE_WRAP_ALGORITHM: &str = "cms-envelope+aes-256-cbc";
 const DEVICE_WRAP_ALGORITHM: &str = "os-keyring+aes-256-gcm-check";
 const DEVICE_KEYRING_SERVICE: &str = "com.paranoid-passwd.vault";
+const MNEMONIC_LANGUAGE: &str = "english";
+const MNEMONIC_WORD_COUNT: u8 = 24;
+const MNEMONIC_AAD_PREFIX: &[u8] = b"paranoid-passwd::vault::mnemonic-slot::";
 const DEVICE_AAD_PREFIX: &[u8] = b"paranoid-passwd::vault::device-slot::";
 const DEVICE_CHECK_PLAINTEXT: &[u8] = b"paranoid-passwd::device-bound::v1";
 
@@ -82,6 +87,7 @@ pub struct VaultKdfParams {
 pub enum VaultKeyslotKind {
     #[serde(alias = "Password")]
     PasswordRecovery,
+    MnemonicRecovery,
     #[serde(alias = "Device")]
     DeviceBound,
     CertificateWrapped,
@@ -91,6 +97,7 @@ impl VaultKeyslotKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::PasswordRecovery => "password_recovery",
+            Self::MnemonicRecovery => "mnemonic_recovery",
             Self::DeviceBound => "device_bound",
             Self::CertificateWrapped => "certificate_wrapped",
         }
@@ -113,9 +120,19 @@ pub struct VaultKeyslot {
     #[serde(default)]
     pub certificate_fingerprint_sha256: Option<String>,
     #[serde(default)]
+    pub mnemonic_language: Option<String>,
+    #[serde(default)]
+    pub mnemonic_words: Option<u8>,
+    #[serde(default)]
     pub device_service: Option<String>,
     #[serde(default)]
     pub device_account: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MnemonicRecoveryEnrollment {
+    pub keyslot: VaultKeyslot,
+    pub mnemonic: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,6 +262,8 @@ impl UnlockedVault {
             tag_hex: String::new(),
             encrypted_master_key_hex: hex_encode(wrapped.as_slice()),
             certificate_fingerprint_sha256: Some(fingerprint),
+            mnemonic_language: None,
+            mnemonic_words: None,
             device_service: None,
             device_account: None,
         };
@@ -252,6 +271,45 @@ impl UnlockedVault {
         self.header.keyslots.push(slot.clone());
         self.persist_header()?;
         Ok(slot)
+    }
+
+    pub fn add_mnemonic_keyslot(
+        &mut self,
+        label: Option<String>,
+    ) -> Result<MnemonicRecoveryEnrollment, VaultError> {
+        let slot_id = format!("mnemonic-{}", random_hex_id(8)?);
+        let mnemonic_entropy = Zeroizing::new(random_bytes(MASTER_KEY_LEN)?);
+        let mnemonic = Mnemonic::from_entropy_in(Language::English, mnemonic_entropy.as_slice())
+            .map_err(|error| VaultError::InvalidArguments(error.to_string()))?;
+        let wrapped = encrypt_blob(
+            mnemonic_entropy.as_slice(),
+            &mnemonic_slot_aad(slot_id.as_str()),
+            self.master_key.as_slice(),
+        )?;
+        // TODO: HUMAN_REVIEW - confirm using 24-word BIP39 entropy directly as the AES-256-GCM wrapping key for mnemonic recovery slots is the right recovery construction.
+        let keyslot = VaultKeyslot {
+            id: slot_id,
+            kind: VaultKeyslotKind::MnemonicRecovery,
+            label,
+            wrapped_by_os_keystore: false,
+            wrap_algorithm: MNEMONIC_WRAP_ALGORITHM.to_string(),
+            salt_hex: String::new(),
+            nonce_hex: hex_encode(wrapped.nonce.as_slice()),
+            tag_hex: hex_encode(wrapped.tag.as_slice()),
+            encrypted_master_key_hex: hex_encode(wrapped.ciphertext.as_slice()),
+            certificate_fingerprint_sha256: None,
+            mnemonic_language: Some(MNEMONIC_LANGUAGE.to_string()),
+            mnemonic_words: Some(MNEMONIC_WORD_COUNT),
+            device_service: None,
+            device_account: None,
+        };
+
+        self.header.keyslots.push(keyslot.clone());
+        self.persist_header()?;
+        Ok(MnemonicRecoveryEnrollment {
+            keyslot,
+            mnemonic: mnemonic.to_string(),
+        })
     }
 
     pub fn add_device_keyslot(
@@ -283,6 +341,8 @@ impl UnlockedVault {
             tag_hex: hex_encode(check_blob.tag.as_slice()),
             encrypted_master_key_hex: hex_encode(check_blob.ciphertext.as_slice()),
             certificate_fingerprint_sha256: None,
+            mnemonic_language: None,
+            mnemonic_words: None,
             device_service: Some(DEVICE_KEYRING_SERVICE.to_string()),
             device_account: Some(device_account.clone()),
         };
@@ -570,6 +630,8 @@ pub fn init_vault(
             tag_hex: hex_encode(&wrapped.tag),
             encrypted_master_key_hex: hex_encode(&wrapped.ciphertext),
             certificate_fingerprint_sha256: None,
+            mnemonic_language: None,
+            mnemonic_words: None,
             device_service: None,
             device_account: None,
         }],
@@ -666,6 +728,46 @@ pub fn unlock_vault_with_certificate(
     let master_key =
         unwrap_master_key_with_certificate(wrapped.as_slice(), &certificate, &private_key)
             .map_err(|_| VaultError::UnlockFailed)?;
+
+    Ok(UnlockedVault {
+        path: path.to_path_buf(),
+        conn,
+        header,
+        master_key: Zeroizing::new(master_key),
+    })
+}
+
+pub fn unlock_vault_with_mnemonic(
+    path: impl AsRef<Path>,
+    mnemonic_phrase: &str,
+    slot_id: Option<&str>,
+) -> Result<UnlockedVault, VaultError> {
+    let path = path.as_ref();
+    if !path.exists() {
+        return Err(VaultError::VaultNotFound(path.display().to_string()));
+    }
+
+    let conn = Connection::open(path)?;
+    configure_connection(&conn)?;
+    let header = read_header(&conn)?;
+    let keyslot = select_mnemonic_keyslot(&header, slot_id)?;
+    let mnemonic = Mnemonic::parse_in(Language::English, mnemonic_phrase)
+        .map_err(|_| VaultError::UnlockFailed)?;
+    let mnemonic_entropy = mnemonic.to_entropy();
+    if mnemonic_entropy.len() != MASTER_KEY_LEN {
+        return Err(VaultError::UnlockFailed);
+    }
+
+    let master_key = decrypt_blob(
+        mnemonic_entropy.as_slice(),
+        &mnemonic_slot_aad(keyslot.id.as_str()),
+        EncryptedBlob {
+            nonce: hex_decode(keyslot.nonce_hex.as_str())?,
+            tag: hex_decode(keyslot.tag_hex.as_str())?,
+            ciphertext: hex_decode(keyslot.encrypted_master_key_hex.as_str())?,
+        },
+    )
+    .map_err(|_| VaultError::UnlockFailed)?;
 
     Ok(UnlockedVault {
         path: path.to_path_buf(),
@@ -967,6 +1069,12 @@ fn device_slot_aad(id: &str) -> Vec<u8> {
     aad
 }
 
+fn mnemonic_slot_aad(id: &str) -> Vec<u8> {
+    let mut aad = MNEMONIC_AAD_PREFIX.to_vec();
+    aad.extend_from_slice(id.as_bytes());
+    aad
+}
+
 fn unix_epoch_now() -> Result<i64, VaultError> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -977,6 +1085,35 @@ fn unix_epoch_now() -> Result<i64, VaultError> {
 
 fn default_password_wrap_algorithm() -> String {
     PASSWORD_WRAP_ALGORITHM.to_string()
+}
+
+fn select_mnemonic_keyslot<'a>(
+    header: &'a VaultHeader,
+    slot_id: Option<&str>,
+) -> Result<&'a VaultKeyslot, VaultError> {
+    let mnemonic_slots = header
+        .keyslots
+        .iter()
+        .filter(|slot| slot.kind == VaultKeyslotKind::MnemonicRecovery)
+        .collect::<Vec<_>>();
+    match slot_id {
+        Some(slot_id) => mnemonic_slots
+            .into_iter()
+            .find(|slot| slot.id == slot_id)
+            .ok_or_else(|| {
+                VaultError::InvalidArguments(format!("unknown mnemonic keyslot: {slot_id}"))
+            }),
+        None => match mnemonic_slots.as_slice() {
+            [] => Err(VaultError::InvalidArguments(
+                "vault has no mnemonic recovery keyslot".to_string(),
+            )),
+            [slot] => Ok(*slot),
+            _ => Err(VaultError::InvalidArguments(
+                "vault has multiple mnemonic recovery keyslots; pass --mnemonic-slot ID"
+                    .to_string(),
+            )),
+        },
+    }
 }
 
 fn select_device_keyslot<'a>(
@@ -1256,6 +1393,93 @@ mod tests {
             Some("vault-pass"),
         )
         .expect("unlock with encrypted key");
+    }
+
+    #[test]
+    fn mnemonic_keyslot_unlock_round_trip() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let enrollment = vault
+            .add_mnemonic_keyslot(Some("offline-recovery".to_string()))
+            .expect("add mnemonic keyslot");
+        assert_eq!(enrollment.keyslot.kind, VaultKeyslotKind::MnemonicRecovery);
+        assert_eq!(
+            enrollment.keyslot.mnemonic_language.as_deref(),
+            Some(MNEMONIC_LANGUAGE)
+        );
+        assert_eq!(enrollment.keyslot.mnemonic_words, Some(MNEMONIC_WORD_COUNT));
+        assert_eq!(
+            enrollment.mnemonic.split_whitespace().count(),
+            usize::from(MNEMONIC_WORD_COUNT)
+        );
+
+        let unlocked = unlock_vault_with_mnemonic(
+            &path,
+            enrollment.mnemonic.as_str(),
+            Some(enrollment.keyslot.id.as_str()),
+        )
+        .expect("unlock with mnemonic");
+        let item = unlocked
+            .add_login(NewLoginRecord {
+                title: "Mnemonic Login".to_string(),
+                username: "jon@example.com".to_string(),
+                password: "Sup3r$ecret!".to_string(),
+                url: None,
+                notes: None,
+            })
+            .expect("add login");
+        assert_eq!(unlocked.get_item(&item.id).expect("get item").id, item.id);
+    }
+
+    #[test]
+    fn mnemonic_unlock_requires_explicit_slot_when_multiple_exist() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let first = vault
+            .add_mnemonic_keyslot(Some("paper-1".to_string()))
+            .expect("add first mnemonic keyslot");
+        vault
+            .add_mnemonic_keyslot(Some("paper-2".to_string()))
+            .expect("add second mnemonic keyslot");
+
+        let error = unlock_vault_with_mnemonic(&path, first.mnemonic.as_str(), None)
+            .expect_err("unlock should require slot id");
+        assert!(
+            matches!(error, VaultError::InvalidArguments(message) if message.contains("multiple mnemonic recovery keyslots"))
+        );
+    }
+
+    #[test]
+    fn wrong_mnemonic_fails_closed() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let enrollment = vault
+            .add_mnemonic_keyslot(Some("paper".to_string()))
+            .expect("add mnemonic keyslot");
+        let mut words = enrollment
+            .mnemonic
+            .split_whitespace()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        words[0] = "abandon".to_string();
+        let wrong_phrase = words.join(" ");
+
+        let error = unlock_vault_with_mnemonic(
+            &path,
+            wrong_phrase.as_str(),
+            Some(enrollment.keyslot.id.as_str()),
+        )
+        .expect_err("unlock should fail");
+        assert!(matches!(error, VaultError::UnlockFailed));
     }
 
     #[test]

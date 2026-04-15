@@ -37,10 +37,13 @@ That is an intentional product decision, not a placeholder:
 - Keyslots wrap that master key.
 - The current keyslot model is:
   - `password_recovery`
+  - `mnemonic_recovery`
   - `certificate_wrapped`
   - `device_bound`
 
-The current shipped recovery slot is password-derived with Argon2id and `AES-256-GCM`.
+The current shipped password recovery slot is password-derived with Argon2id and `AES-256-GCM`.
+
+Mnemonic recovery slots use a 24-word English BIP39 phrase as a wallet-style recovery encoding for a random 256-bit recovery key. That recovery key wraps the same vault master key with OpenSSL-backed `AES-256-GCM`.
 
 Certificate slots wrap the same master key with an X.509 recipient certificate using OpenSSL CMS envelope encryption. This preserves one vault format while allowing multiple unlock paths.
 
@@ -70,9 +73,9 @@ Raw JSON, CBOR, or custom binary containers would force the project to reinvent 
 
 ## Recovery Direction
 
-The long-term recovery target is **wallet-style mnemonic recovery**, but not by changing the vault file format again.
+The current wallet-style recovery implementation uses a single 24-word BIP39 phrase. The vault file format does not need to change again to support stronger future recovery.
 
-If the project adopts a wallet-style recovery scheme, the likely direction is **SLIP-0039 style split recovery** rather than a plain BIP-39 phrase. The vault format does not need to change for that; only the recovery keyslot type changes.
+If the project adopts split recovery later, the likely direction is **SLIP-0039 style split recovery** rather than replacing the underlying SQLite format. That would change the recovery keyslot type, not encrypted item storage.
 
 The storage format remains:
 

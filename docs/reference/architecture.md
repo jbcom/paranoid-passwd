@@ -56,9 +56,11 @@ The shared report model is split between:
 - A random master key encrypts vault items.
 - Keyslots unwrap that master key:
   - `password_recovery` is the current recovery path
+  - `mnemonic_recovery` is the current wallet-style recovery phrase path
   - `certificate_wrapped` is the current certificate-based unwrap path
   - `device_bound` is the current passwordless local-unlock path via platform secure storage
 - Argon2id derives the recovery KEK.
+- BIP39 encodes a 24-word recovery phrase for mnemonic recovery slots.
 - OpenSSL-backed AES-256-GCM encrypts item payloads.
 - OpenSSL CMS envelope encryption wraps the master key for certificate slots.
 - Device-bound slots store the unwrap secret in OS secure storage and keep only verification metadata in SQLite.

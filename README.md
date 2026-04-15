@@ -55,8 +55,10 @@ export PARANOID_MASTER_PASSWORD='correct horse battery staple'
 cargo run -p paranoid-cli -- vault init
 cargo run -p paranoid-cli -- vault generate-store --title GitHub --username jon@example.com --length 24
 cargo run -p paranoid-cli -- vault keyslots
+cargo run -p paranoid-cli -- vault add-mnemonic-slot --label paper-backup
 cargo run -p paranoid-cli -- vault add-device-slot --label daily
 cargo run -p paranoid-cli -- vault add-cert-slot --cert recipient-cert.pem --label laptop
+cargo run -p paranoid-cli -- vault --recovery-phrase-env PARANOID_RECOVERY_PHRASE list
 cargo run -p paranoid-cli -- vault list   # falls back to the sole device slot if PARANOID_MASTER_PASSWORD is unset
 cargo run -p paranoid-cli -- vault --device-slot device-0123456789abcdef list
 cargo run -p paranoid-cli -- vault --cert recipient-cert.pem --key recipient-key.pem list
@@ -113,7 +115,7 @@ The currently shipped release artifact is `paranoid-passwd`, which contains the 
 - Rejection sampling still uses the critical boundary `(256 / N) * N - 1`.
 - Chi-squared tail probabilities use `statrs` instead of the old handwritten approximation.
 - Vault encryption uses Argon2id plus OpenSSL-backed AES-256-GCM.
-- Vault storage is standardized on a local SQLite file with application-layer encryption and multiple master-key keyslots for recovery, device-bound unlock, and certificate wrapping.
+- Vault storage is standardized on a local SQLite file with application-layer encryption and multiple master-key keyslots for password recovery, wallet-style mnemonic recovery, device-bound unlock, and certificate wrapping.
 - Cargo dependencies are vendored and CI runs Cargo in locked, frozen, offline mode.
 - Security verification scripts assert the Rust-native invariants and workflow pinning.
 - The browser/WASM runtime path is gone from the product surface.

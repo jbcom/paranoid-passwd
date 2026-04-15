@@ -1,7 +1,7 @@
 use paranoid_core::{CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, VERSION};
 use paranoid_vault::{
     NewLoginRecord, UpdateLoginRecord, init_vault, read_vault_header, unlock_vault,
-    unlock_vault_with_certificate, unlock_vault_with_device,
+    unlock_vault_with_certificate, unlock_vault_with_device, unlock_vault_with_mnemonic,
 };
 use std::{
     env,
@@ -99,6 +99,14 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             );
             Ok(0)
         }
+        VaultCommand::AddMnemonicSlot { label } => {
+            let mut vault = unlock_vault_for_invocation(&invocation)?;
+            let enrollment = vault.add_mnemonic_keyslot(label.clone())?;
+            println!("slot_id\t{}", enrollment.keyslot.id);
+            println!("wrap_algorithm\t{}", enrollment.keyslot.wrap_algorithm);
+            println!("mnemonic\t{}", enrollment.mnemonic);
+            Ok(0)
+        }
         VaultCommand::AddDeviceSlot { label } => {
             let mut vault = unlock_vault_for_invocation(&invocation)?;
             let keyslot = vault.add_device_keyslot(label.clone())?;
@@ -143,6 +151,8 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
 struct VaultInvocation {
     path: PathBuf,
     auth: VaultAuth,
+    mnemonic_phrase_env: Option<String>,
+    mnemonic_slot: Option<String>,
     device_slot: Option<String>,
     command: VaultCommand,
 }
@@ -187,6 +197,9 @@ enum VaultCommand {
         cert_path: PathBuf,
         label: Option<String>,
     },
+    AddMnemonicSlot {
+        label: Option<String>,
+    },
     AddDeviceSlot {
         label: Option<String>,
     },
@@ -206,6 +219,8 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
     let mut cert_path = None;
     let mut key_path = None;
     let mut key_passphrase_env = None;
+    let mut mnemonic_phrase_env = None;
+    let mut mnemonic_slot = None;
     let mut device_slot = None;
     let mut command: Option<String> = None;
     let mut command_args = Vec::new();
@@ -249,6 +264,18 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
                         .ok_or_else(|| anyhow::anyhow!("--key-passphrase-env requires a value"))?,
                 );
             }
+            "--recovery-phrase-env" if command.is_none() => {
+                mnemonic_phrase_env =
+                    Some(iter.next().ok_or_else(|| {
+                        anyhow::anyhow!("--recovery-phrase-env requires a value")
+                    })?);
+            }
+            "--mnemonic-slot" if command.is_none() => {
+                mnemonic_slot = Some(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("--mnemonic-slot requires a value"))?,
+                );
+            }
             "--device-slot" if command.is_none() => {
                 device_slot = Some(
                     iter.next()
@@ -272,6 +299,7 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
         "update" => parse_update(command_args.as_slice())?,
         "delete" => parse_delete(command_args.as_slice())?,
         "add-cert-slot" => parse_add_cert_slot(command_args.as_slice())?,
+        "add-mnemonic-slot" => parse_add_mnemonic_slot(command_args.as_slice())?,
         "add-device-slot" => parse_add_device_slot(command_args.as_slice())?,
         "generate-store" => parse_generate_store(command_args.as_slice())?,
         other => return Err(anyhow::anyhow!("unknown vault subcommand: {other}")),
@@ -280,6 +308,16 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
     if device_slot.is_some() && cert_path.is_some() {
         return Err(anyhow::anyhow!(
             "--device-slot cannot be combined with certificate-backed unlock"
+        ));
+    }
+    if mnemonic_slot.is_some() && mnemonic_phrase_env.is_none() {
+        return Err(anyhow::anyhow!(
+            "--mnemonic-slot requires --recovery-phrase-env"
+        ));
+    }
+    if mnemonic_phrase_env.is_some() && cert_path.is_some() {
+        return Err(anyhow::anyhow!(
+            "--recovery-phrase-env cannot be combined with certificate-backed unlock"
         ));
     }
 
@@ -300,6 +338,8 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
     Ok(VaultInvocation {
         path,
         auth,
+        mnemonic_phrase_env,
+        mnemonic_slot,
         device_slot,
         command,
     })
@@ -441,6 +481,29 @@ fn parse_add_cert_slot(args: &[String]) -> anyhow::Result<VaultCommand> {
             .ok_or_else(|| anyhow::anyhow!("vault add-cert-slot requires --cert"))?,
         label,
     })
+}
+
+fn parse_add_mnemonic_slot(args: &[String]) -> anyhow::Result<VaultCommand> {
+    let mut label = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--label" => {
+                label = Some(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("--label requires a value"))?
+                        .to_string(),
+                );
+            }
+            other => {
+                return Err(anyhow::anyhow!(
+                    "unexpected vault add-mnemonic-slot argument: {other}"
+                ));
+            }
+        }
+    }
+
+    Ok(VaultCommand::AddMnemonicSlot { label })
 }
 
 fn parse_add_device_slot(args: &[String]) -> anyhow::Result<VaultCommand> {
@@ -664,6 +727,16 @@ fn read_optional_env(env_name: &str) -> anyhow::Result<Option<String>> {
 fn unlock_vault_for_invocation(
     invocation: &VaultInvocation,
 ) -> anyhow::Result<paranoid_vault::UnlockedVault> {
+    if let Some(env_name) = invocation.mnemonic_phrase_env.as_deref() {
+        let mnemonic = read_master_password(env_name)?;
+        return unlock_vault_with_mnemonic(
+            &invocation.path,
+            mnemonic.as_str(),
+            invocation.mnemonic_slot.as_deref(),
+        )
+        .map_err(anyhow::Error::from);
+    }
+
     if let Some(slot_id) = invocation.device_slot.as_deref() {
         return unlock_vault_with_device(&invocation.path, Some(slot_id))
             .map_err(anyhow::Error::from);
@@ -732,7 +805,7 @@ fn print_usage(mut out: impl Write) -> io::Result<()> {
 paranoid-passwd {VERSION}
 
 Usage:
-  paranoid-passwd vault [--path FILE] [--password-env VAR] [--device-slot ID] [--cert CERT.pem --key KEY.pem [--key-passphrase-env VAR]] <subcommand> [OPTIONS]
+  paranoid-passwd vault [--path FILE] [--password-env VAR] [--recovery-phrase-env VAR [--mnemonic-slot ID]] [--device-slot ID] [--cert CERT.pem --key KEY.pem [--key-passphrase-env VAR]] <subcommand> [OPTIONS]
 
 Subcommands:
   init
@@ -743,12 +816,14 @@ Subcommands:
   update --id ID [--title TITLE] [--username USER] [--password SECRET] [--url URL|--clear-url] [--notes NOTES|--clear-notes]
   delete --id ID
   add-cert-slot --cert CERT.pem [--label LABEL]
+  add-mnemonic-slot [--label LABEL]
   add-device-slot [--label LABEL]
   generate-store [generator flags...] --title TITLE --username USER [--url URL] [--notes NOTES]
 
 Unlock sources:
   By default vault commands read the recovery secret from PARANOID_MASTER_PASSWORD.
   Override with --password-env VAR.
+  Wallet-style recovery uses --recovery-phrase-env VAR and optionally --mnemonic-slot ID.
   If the recovery secret is absent and the vault has exactly one device-bound keyslot, commands fall back to passwordless device unlock.
   Use --device-slot ID to select a specific device-bound keyslot explicitly.
   Certificate-backed unlock requires --cert and --key together before the subcommand.
@@ -840,6 +915,23 @@ mod tests {
     }
 
     #[test]
+    fn parse_add_mnemonic_slot_supports_label() {
+        let command = parse_vault_args(&[
+            OsString::from("add-mnemonic-slot"),
+            OsString::from("--label"),
+            OsString::from("paper"),
+        ])
+        .expect("parse");
+
+        match command.command {
+            VaultCommand::AddMnemonicSlot { label } => {
+                assert_eq!(label.as_deref(), Some("paper"));
+            }
+            _ => panic!("expected add-mnemonic-slot command"),
+        }
+    }
+
+    #[test]
     fn parse_add_device_slot_supports_label() {
         let command = parse_vault_args(&[
             OsString::from("add-device-slot"),
@@ -866,6 +958,25 @@ mod tests {
         .expect("parse");
 
         assert_eq!(invocation.device_slot.as_deref(), Some("device-abc123"));
+        assert!(matches!(invocation.command, VaultCommand::List));
+    }
+
+    #[test]
+    fn parse_vault_args_supports_mnemonic_unlock() {
+        let invocation = parse_vault_args(&[
+            OsString::from("--recovery-phrase-env"),
+            OsString::from("PARANOID_RECOVERY_PHRASE"),
+            OsString::from("--mnemonic-slot"),
+            OsString::from("mnemonic-abc123"),
+            OsString::from("list"),
+        ])
+        .expect("parse");
+
+        assert_eq!(
+            invocation.mnemonic_phrase_env.as_deref(),
+            Some("PARANOID_RECOVERY_PHRASE")
+        );
+        assert_eq!(invocation.mnemonic_slot.as_deref(), Some("mnemonic-abc123"));
         assert!(matches!(invocation.command, VaultCommand::List));
     }
 }
