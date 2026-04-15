@@ -19,8 +19,6 @@ packages/
 Thumbs.db
 _codeql_detected_source_root
 
-# Session memory (local only)
-.remember/
 
 # Playwright
 test-results/

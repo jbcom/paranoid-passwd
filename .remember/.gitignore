@@ -1,0 +1,6 @@
+# Ephemeral runtime state for save-session helper (pids, lock files)
+tmp/
+
+# Error logs from broken save-session runs. Memory lives in remember.md;
+# these are tooling noise.
+logs/
