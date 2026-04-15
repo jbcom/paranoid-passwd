@@ -113,35 +113,65 @@ Generate a 32-character password using 94 printable ASCII characters with **209.
 
 Visit **[paranoid-passwd.com](https://paranoid-passwd.com)** — no installation needed.
 
-### Option 2: CLI — verified install from attested GitHub Releases
+### Option 2: Package Managers
+
+**Homebrew (macOS / Linux / WSL):**
 
 ```bash
-# Pick your platform: linux-amd64 | linux-arm64 | darwin-amd64 | darwin-arm64
+brew tap jbcom/tap
+brew install paranoid-passwd
+```
+
+**Scoop (Windows):**
+
+```powershell
+scoop bucket add jbcom https://github.com/jbcom/pkgs
+scoop install paranoid-passwd
+```
+
+**Chocolatey (Windows):**
+
+```powershell
+choco install paranoid-passwd
+```
+
+Each package pulls the same sigstore-attested tarball/zip the next
+option downloads directly. The Homebrew tap and Scoop bucket live in
+[`jbcom/pkgs`](https://github.com/jbcom/pkgs); the Chocolatey package
+is published to the community feed.
+
+### Option 3: CLI — verified install from attested GitHub Releases
+
+```bash
+# Pick your platform: linux-amd64 | linux-arm64 | darwin-amd64 | darwin-arm64 | windows-amd64
 PLATFORM=darwin-arm64
 
 # Resolve the latest release tag (avoids hardcoding a stale version)
 TAG=$(gh release view --repo jbcom/paranoid-passwd --json tagName --jq .tagName)
 VERSION="${TAG#paranoid-passwd-v}"
 
-# Download tarball + checksums
+# Windows ships as .zip; all others as .tar.gz
+if [ "$PLATFORM" = "windows-amd64" ]; then EXT=zip; else EXT=tar.gz; fi
+
+# Download archive + checksums
 gh release download "$TAG" --repo jbcom/paranoid-passwd \
-    -p "paranoid-passwd-${VERSION}-${PLATFORM}.tar.gz" -p "checksums.txt"
+    -p "paranoid-passwd-${VERSION}-${PLATFORM}.${EXT}" -p "checksums.txt"
 
 # Verify sigstore-signed provenance — fails if not built by our release workflow
-gh attestation verify "paranoid-passwd-${VERSION}-${PLATFORM}.tar.gz" --owner jbcom
+gh attestation verify "paranoid-passwd-${VERSION}-${PLATFORM}.${EXT}" --owner jbcom
 
-# Run it
-tar xzf "paranoid-passwd-${VERSION}-${PLATFORM}.tar.gz"
+# Run it (POSIX; Windows: unzip and run paranoid-passwd.exe)
+tar xzf "paranoid-passwd-${VERSION}-${PLATFORM}.${EXT}"
 "./paranoid-passwd-${VERSION}-${PLATFORM}/paranoid-passwd" --length 32
 ```
 
 No `curl | bash`. The attestation chain walks from the GitHub Release
-tarball → sigstore → Rekor transparency log → the exact workflow run
+archive → sigstore → Rekor transparency log → the exact workflow run
 that produced the binary. See **[docs/CLI.md](docs/CLI.md)** for full
 CLI usage, flag reference, exit codes, and the Homebrew tap / Wolfi apk
 install paths.
 
-### Option 3: Local Build with CMake
+### Option 4: Local Build with CMake
 
 ```bash
 # Clone repository
