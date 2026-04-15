@@ -6,7 +6,6 @@ ARG TOX_VERSION=4.53.0
 RUN apk add --no-cache \
         bash \
         build-base \
-        cargo=${RUST_APK_VERSION} \
         coreutils \
         curl \
         git \

@@ -71,7 +71,6 @@ if [ -f "$builder" ] \
   && rg -q 'pkgconf' "$builder" \
   && rg -q 'python3' "$builder" \
   && rg -q 'rust=' "$builder" \
-  && rg -q 'cargo=' "$builder" \
   && rg -q 'tox==' "$builder"; then
   pass "builder image is digest-pinned and contains the expected Rust/OpenSSL/docs toolchain"
 else
