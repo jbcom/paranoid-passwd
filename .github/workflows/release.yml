@@ -324,7 +324,7 @@ jobs:
   publish-packages:
     name: Publish to jbcom/pkgs
     needs: attest-and-publish
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -337,14 +337,14 @@ jobs:
       - name: Resolve version
         id: ver
         env:
-          RAW_TAG: ${{ github.event.release.tag_name }}
+          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: echo "version=${RAW_TAG#paranoid-passwd-v}" >> "$GITHUB_OUTPUT"
 
       - name: Download checksums
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: gh release download "${TAG}" -p checksums.txt --repo "${GH_REPO}"
 
       - name: Generate manifests
@@ -394,7 +394,7 @@ jobs:
   install-smoke-test:
     name: Install Smoke Test (linux-amd64)
     needs: attest-and-publish
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -404,7 +404,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RAW_TAG: ${{ github.event.release.tag_name }}
+          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
           OWNER: ${{ github.repository_owner }}
         run: |
           ver="${RAW_TAG#paranoid-passwd-v}"
