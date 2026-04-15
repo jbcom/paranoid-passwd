@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.3.0...paranoid-passwd-v3.4.0) (2026-04-15)
+
+
+### Features
+
+* add end-to-end install smoke test to CLI release pipeline ([#47](https://github.com/jbcom/paranoid-passwd/issues/47)) ([7e316e4](https://github.com/jbcom/paranoid-passwd/commit/7e316e4b071336578531f3caaeaad76dbca11ca9)), closes [#45](https://github.com/jbcom/paranoid-passwd/issues/45)
+
 ## [3.3.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.2.1...paranoid-passwd-v3.3.0) (2026-04-14)
 
 
