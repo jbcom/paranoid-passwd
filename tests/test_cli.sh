@@ -48,18 +48,18 @@ t_version() {
 }
 check "--version prints version line" t_version
 
-# --- Test 3: bare invocation produces a 32-char password on stdout
+# --- Test 3: scriptable invocation produces a 32-char password on stdout
 t_bare_len() {
     local pw
-    pw="$("$BIN" --no-audit --quiet)"
+    pw="$("$BIN" --cli --no-audit --quiet)"
     [[ ${#pw} -eq 32 ]]
 }
-check "bare invocation -> 32 chars" t_bare_len
+check "scriptable invocation -> 32 chars" t_bare_len
 
 # --- Test 4: --length 16 --count 3 produces 3 lines of 16 chars
 t_multi() {
     local out
-    out="$("$BIN" --length 16 --count 3 --no-audit --quiet)"
+    out="$("$BIN" --cli --length 16 --count 3 --no-audit --quiet)"
     local n
     n=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
     [[ "$n" -eq 3 ]] || return 1
@@ -72,7 +72,7 @@ check "--length 16 --count 3 -> 3x16" t_multi
 # --- Test 5: --charset hex --length 64 produces only [0-9a-f]
 t_hex() {
     local pw
-    pw="$("$BIN" --charset hex --length 64 --no-audit --quiet)"
+    pw="$("$BIN" --cli --charset hex --length 64 --no-audit --quiet)"
     [[ ${#pw} -eq 64 ]] || return 1
     [[ "$pw" =~ ^[0-9a-f]+$ ]]
 }
@@ -81,7 +81,7 @@ check "--charset hex -> [0-9a-f]" t_hex
 # --- Test 6: --length 4 --require-lower 5 exits 1 (impossible)
 t_impossible() {
     local rc=0
-    "$BIN" --length 4 --require-lower 5 --no-audit --quiet >/dev/null 2>&1 || rc=$?
+    "$BIN" --cli --length 4 --require-lower 5 --no-audit --quiet >/dev/null 2>&1 || rc=$?
     [[ "$rc" -eq 1 ]]
 }
 check "impossible requirements -> exit 1" t_impossible
@@ -89,7 +89,7 @@ check "impossible requirements -> exit 1" t_impossible
 # --- Test 7: --length 0 exits 1
 t_zero_len() {
     local rc=0
-    "$BIN" --length 0 --quiet >/dev/null 2>&1 || rc=$?
+    "$BIN" --cli --length 0 --quiet >/dev/null 2>&1 || rc=$?
     [[ "$rc" -eq 1 ]]
 }
 check "--length 0 -> exit 1" t_zero_len
@@ -97,7 +97,7 @@ check "--length 0 -> exit 1" t_zero_len
 # --- Test 8: --count 11 exits 1 (over max)
 t_over_count() {
     local rc=0
-    "$BIN" --count 11 --quiet >/dev/null 2>&1 || rc=$?
+    "$BIN" --cli --count 11 --quiet >/dev/null 2>&1 || rc=$?
     [[ "$rc" -eq 1 ]]
 }
 check "--count 11 -> exit 1" t_over_count
@@ -105,7 +105,7 @@ check "--count 11 -> exit 1" t_over_count
 # --- Test 9: --no-audit suppresses audit stage lines
 t_no_audit() {
     local err
-    err="$("$BIN" --no-audit --quiet 2>&1 >/dev/null)"
+    err="$("$BIN" --cli --no-audit --quiet 2>&1 >/dev/null)"
     [[ -z "$err" ]]
 }
 check "--no-audit --quiet -> empty stderr" t_no_audit
@@ -113,7 +113,7 @@ check "--no-audit --quiet -> empty stderr" t_no_audit
 # --- Test 10: --quiet still produces stdout
 t_quiet_stdout() {
     local pw
-    pw="$("$BIN" --quiet 2>/dev/null)"
+    pw="$("$BIN" --cli --quiet 2>/dev/null)"
     [[ ${#pw} -ge 1 ]]
 }
 check "--quiet keeps stdout" t_quiet_stdout
@@ -121,7 +121,7 @@ check "--quiet keeps stdout" t_quiet_stdout
 # --- Test 11: audit enabled by default produces stage lines
 t_default_audit() {
     local err
-    err="$("$BIN" --length 16 2>&1 >/dev/null)"
+    err="$("$BIN" --cli --length 16 2>&1 >/dev/null)"
     [[ "$err" == *"chi-squared"* ]]
 }
 check "default run audits (mentions chi-squared)" t_default_audit
@@ -129,7 +129,7 @@ check "default run audits (mentions chi-squared)" t_default_audit
 # --- Test 12: --require-lower 2 produces password with 2+ lowercase
 t_require_lower() {
     local pw
-    pw="$("$BIN" --length 16 --require-lower 5 --no-audit --quiet)"
+    pw="$("$BIN" --cli --length 16 --require-lower 5 --no-audit --quiet)"
     local n
     n=$(printf '%s' "$pw" | tr -cd 'a-z' | wc -c | tr -d ' ')
     [[ "$n" -ge 5 ]]

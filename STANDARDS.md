@@ -1,6 +1,6 @@
 ---
 title: Standards
-updated: 2026-04-09
+updated: 2026-04-15
 status: current
 domain: technical
 ---
@@ -9,97 +9,52 @@ domain: technical
 
 ## Non-Negotiable Constraints
 
-1. No stub bodies — every declared function must be implemented. The only
-   permitted `TODO` marker is `// TODO: HUMAN_REVIEW - <reason>` on
-   cryptographic or statistical code.
-2. All crypto changes require `// TODO: HUMAN_REVIEW - <reason>` and a tracking issue.
-3. All GitHub Actions must be pinned to 40-character commit SHAs, never version tags.
-4. No JavaScript fallbacks for WASM failures — fail-closed is a security requirement.
-5. No inline JS or CSS in HTML — CodeQL requires file-type separation.
+1. Keep security-sensitive logic in `crates/paranoid-core`.
+2. Do not reintroduce browser, WASM, JavaScript, or webview runtime surfaces.
+3. All GitHub Actions must remain pinned to 40-character commit SHAs.
+4. Cargo commands in CI and documented workflows must use `--locked --frozen --offline`.
+5. The only allowed security/math TODO marker is `TODO: HUMAN_REVIEW - <reason>`.
+6. Do not add `unsafe` Rust without explicit human approval.
 
-## File Length Targets
+## Workspace Responsibilities
 
-Target 300 lines per file where practical. Larger files are acceptable when
-needed for cohesion (single-file SHA-256 implementation, comprehensive build
-or supply-chain documentation, single CSS state machine). Files currently
-above target — `src/paranoid.c`, `include/paranoid.h`, `www/style.css`,
-`www/app.js`, several `docs/*.md` — are tracked for refactoring opportunity
-but are not blockers.
+| Crate | Responsibility |
+|------|----------------|
+| `paranoid-core` | generation, rejection sampling, OpenSSL-backed RNG/SHA-256, statistical audit, compliance |
+| `paranoid-cli` | scriptable CLI and TUI |
+| `paranoid-gui` | desktop GUI scaffold and follow-on parity work |
 
-## C Style
+## Rust Style
 
-Files: `src/*.c`, `include/*.h`
+Files: `crates/**/*.rs`
 
-- Indentation: 4 spaces, no tabs
-- Naming: `snake_case` for functions and variables, `ALL_CAPS` for macros and constants
-- Prefix all public API functions with `paranoid_`
-- Prefix platform functions with `paranoid_platform_`
-- Comments explain why, not what
-- Flag all statistical or cryptographic logic with `// TODO: HUMAN_REVIEW - <reason>`
-- WASM exports use the toolchain default (`extern "C"` + linker `--export`)
-  driven by the CMake `wasm32-wasi.cmake` toolchain. Do not add
-  `__attribute__((export_name(...)))` unless the build switches to that mechanism.
+- Use `snake_case` for functions and variables, `UpperCamelCase` for types.
+- Prefer small typed structs over unstructured maps or tuples for user-facing results.
+- Comments should explain security or design intent, not restate obvious code.
+- Keep UI crates as consumers of typed results; do not duplicate audit logic outside `paranoid-core`.
+- Avoid `unwrap()` in production code.
 
-```c
-// Correct rejection sampling — document the formula
-int max_valid = (256 / charset_len) * charset_len - 1;  // uniform over [0, max_valid]
-uint8_t byte;
-do {
-    paranoid_platform_random(&byte, 1);
-} while (byte > max_valid);
-output[i] = charset[byte % charset_len];
-```
+## Security Invariants
 
-## JavaScript Style
+- Rejection sampling boundary must remain `(256 / N) * N - 1`.
+- Chi-squared pass condition must remain `p > 0.01`.
+- Chi-squared degrees of freedom must remain `N - 1`.
+- RNG and SHA-256 must remain delegated to OpenSSL through Rust bindings.
+- Distribution/special-function math should use `statrs` instead of handwritten approximations where practical.
 
-File: `www/app.js`
+## Documentation
 
-- Indentation: 2 spaces
-- Naming: `camelCase` for functions and variables, `UPPER_CASE` for constants
-- `const` by default, `let` only when reassignment is required, never `var`
-- `async`/`await`, never `.then()` chains
-- JSDoc on all exported or significant functions
-- `app.js` must not contain any cryptographic logic — reading struct offsets and
-  calling `textContent` only
+- Public docs live in `docs/` and must reflect the Rust-native CLI/TUI/docs-site architecture.
+- `README.md`, `SECURITY.md`, `AGENTS.md`, and `CLAUDE.md` must not describe the retired web/WASM product as current.
 
-## CSS Style
+## CI and Release
 
-File: `www/style.css`
-
-- Indentation: 2 spaces
-- Naming: `kebab-case` for class and ID names
-- Alphabetical property order within a rule block
-- Comment complex selectors, especially CSS state machine transitions
-
-## HTML Style
-
-File: `www/index.html`
-
-- No inline `<style>` or `<script>` blocks
-- All external assets loaded via `<link rel="stylesheet">` and `<script src="...">`
-- Semantic HTML5 elements (`<main>`, `<section>`, `<header>`, etc.)
-
-## Git and CI
-
-- Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`
-- All PRs require at least one human review before merge
-- Required CI checks: `native-test`, `wasm-build`, `e2e-test`, `codeql`
-- Never force-push to `main`
-- Squash-merge PRs
-
-## Markdown
-
-- All `.md` files in root and `docs/` must have YAML frontmatter with
-  `title`, `updated`, `status`, and `domain` fields
-- No emojis in headings
-
-## Security Code Review Checklist
-
-Before merging any PR that touches C files:
-
-- [ ] `rand()` or `srand()` absent from all new code
-- [ ] Rejection sampling: `max_valid = (256/N)*N - 1`
-- [ ] Chi-squared p-value: `pass = (p > 0.01)`, df = N-1
-- [ ] No new OpenSSL calls in WASM-targeted source files
-- [ ] No new direct calls to `random_get` outside `src/platform_wasm.c`
-- [ ] Struct offsets: any new fields have corresponding `paranoid_offset_*()` exports
+- `make ci` is the local baseline before merge.
+- Required verification includes:
+  - `cargo fmt --check`
+  - `cargo clippy --workspace --all-targets --locked --frozen --offline -- -D warnings`
+  - `cargo test --workspace --locked --frozen --offline`
+  - `bash tests/test_cli.sh target/debug/paranoid-passwd`
+  - `bash scripts/hallucination_check.sh`
+  - `bash scripts/supply_chain_verify.sh`
+  - `python3 -m tox -e docs`

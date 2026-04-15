@@ -1,17 +1,3 @@
-# -----------------------------------------------------------------
-# paranoid-passwd — Release (release-please tag)
-#
-# RUNS ON: release-please published a release whose tag matches
-#          paranoid-passwd-v*.
-# PURPOSE: produce every versioned artifact, attest it, upload to the
-#          release, and push Homebrew/Scoop/Chocolatey manifests to
-#          jbcom/pkgs + jbcom/homebrew-tap.
-#
-# Topology: ci → release → cd.
-#   ci.yml verifies PRs; release.yml ships artifacts; cd.yml deploys
-#   those already-shipped artifacts (Pages) from the latest release.
-# -----------------------------------------------------------------
-
 name: Release
 
 on:
@@ -20,51 +6,49 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to build (e.g. paranoid-passwd-v3.4.2)'
+        description: 'Release tag to build (e.g. paranoid-passwd-v3.5.1)'
         required: true
         type: string
 
 permissions: {}
 
 jobs:
-
-  # ─── CLI cross-compile matrix (5 targets) ──────────────────────
-  build-cli:
-    name: Build CLI ${{ matrix.target_os }}/${{ matrix.target_arch }}
+  build-native:
+    name: Build ${{ matrix.target_os }}/${{ matrix.target_arch }}
     if: >
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.release.tag_name, 'paranoid-passwd-v')
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target_os: linux
+          - runner: ubuntu-24.04
+            target_os: linux
             target_arch: amd64
-            zig_triple: x86_64-linux-musl
-            ext: ''
+            ext: ""
             archive: tar.gz
-          - target_os: linux
+          - runner: ubuntu-24.04-arm
+            target_os: linux
             target_arch: arm64
-            zig_triple: aarch64-linux-musl
-            ext: ''
+            ext: ""
             archive: tar.gz
-          - target_os: darwin
+          - runner: macos-13
+            target_os: darwin
             target_arch: amd64
-            zig_triple: x86_64-macos-none
-            ext: ''
+            ext: ""
             archive: tar.gz
-          - target_os: darwin
+          - runner: macos-14
+            target_os: darwin
             target_arch: arm64
-            zig_triple: aarch64-macos-none
-            ext: ''
+            ext: ""
             archive: tar.gz
-          - target_os: windows
+          - runner: windows-2022
+            target_os: windows
             target_arch: amd64
-            zig_triple: x86_64-windows-gnu
-            ext: '.exe'
+            ext: ".exe"
             archive: zip
 
     steps:
@@ -76,192 +60,111 @@ jobs:
 
       - name: Extract version
         id: ver
+        shell: bash
         env:
           RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: echo "version=${RAW_TAG#paranoid-passwd-v}" >> "$GITHUB_OUTPUT"
 
       - name: Resolve commit SHA
         id: commit
-        # release: published fires on the release commit; HEAD of the
-        # checked-out tag is the source of truth for the binary's version.
+        shell: bash
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Cross-compile inside Wolfi builder
+      - name: Install OpenSSL build dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install openssl@3 pkg-config
+          {
+            echo "OPENSSL_DIR=$(brew --prefix openssl@3)"
+            echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig"
+          } >> "$GITHUB_ENV"
+
+      - name: Install OpenSSL build dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          & "C:\vcpkg\vcpkg.exe" install openssl:x64-windows-static-md
+          "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "OPENSSL_NO_VENDOR=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build + package + smoke test inside the builder
+        if: runner.os == 'Linux'
         uses: ./.github/actions/builder
-        env:
-          ZIG_TRIPLE: ${{ matrix.zig_triple }}
-          BUILD_COMMIT: ${{ steps.commit.outputs.sha }}
         with:
           run: |
-            cmake -B build/cli \
-                -DCMAKE_TOOLCHAIN_FILE=cmake/zig-cross.cmake \
-                -DPARANOID_TARGET="${ZIG_TRIPLE}" \
-                -DPARANOID_BUILD_COMMIT="${BUILD_COMMIT}" \
-                -DCMAKE_BUILD_TYPE=Release
-            cmake --build build/cli --target paranoid_cli
+            export PARANOID_CLI_BUILD_COMMIT='${{ steps.commit.outputs.sha }}'
+            export PARANOID_CLI_BUILD_DATE='${{ github.event.release.published_at || github.event.repository.updated_at }}'
+            mkdir -p dist/release
+            bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' '${{ matrix.archive }}' dist/release
+            bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' 'dist/release/paranoid-passwd-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}'
 
-      - name: Package
-        id: pkg
+      - name: Build + package + smoke test on native runner
+        if: runner.os != 'Linux'
+        shell: bash
         env:
-          VERSION: ${{ steps.ver.outputs.version }}
-          TARGET_OS: ${{ matrix.target_os }}
-          TARGET_ARCH: ${{ matrix.target_arch }}
-          EXT: ${{ matrix.ext }}
-          ARCHIVE: ${{ matrix.archive }}
+          PARANOID_CLI_BUILD_COMMIT: ${{ steps.commit.outputs.sha }}
+          PARANOID_CLI_BUILD_DATE: ${{ github.event.release.published_at || github.event.repository.updated_at }}
         run: |
-          stage="paranoid-passwd-${VERSION}-${TARGET_OS}-${TARGET_ARCH}"
-          mkdir -p "stage/${stage}"
-          cp "build/cli/paranoid-passwd${EXT}" "stage/${stage}/"
-          cp LICENSE README.md "stage/${stage}/"
-
-          if [ "${ARCHIVE}" = "zip" ]; then
-            artifact="${stage}.zip"
-            (cd stage && zip -r "../${artifact}" "${stage}" >/dev/null)
-          else
-            artifact="${stage}.tar.gz"
-            tar -C stage -czf "${artifact}" "${stage}"
-          fi
-
-          sha256sum "${artifact}" > "${artifact}.sha256"
-          echo "artifact=${artifact}" >> "$GITHUB_OUTPUT"
+          mkdir -p dist/release
+          bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' '${{ matrix.archive }}' dist/release
+          bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "dist/release/paranoid-passwd-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cli-${{ matrix.target_os }}-${{ matrix.target_arch }}
           path: |
-            ${{ steps.pkg.outputs.artifact }}
-            ${{ steps.pkg.outputs.artifact }}.sha256
+            dist/release/paranoid-passwd-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}
+            dist/release/paranoid-passwd-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}.sha256
           retention-days: 7
 
-  # ─── Site + WASM artifacts via melange/apko ────────────────────
-  build-site:
-    name: Build Site + WASM (melange/apko)
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.event.release.tag_name, 'paranoid-passwd-v')
+  release-validate:
+    name: Validate Release Inputs
+    needs: build-native
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      packages: write
-      id-token: write
-
-    env:
-      REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ github.repository }}
-
-    outputs:
-      wasm-sha256: ${{ steps.extract.outputs.wasm-sha256 }}
-
     steps:
-      - name: Checkout release tag
+      - name: Checkout (for scripts and installer)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
 
-      - name: Install melange/apko/crane (curl + SHA would be nicer; these
-          releases don't publish checksums consistently)
-        run: |
-          MELANGE_VERSION="0.43.3"
-          curl -sSL "https://github.com/chainguard-dev/melange/releases/download/v${MELANGE_VERSION}/melange_${MELANGE_VERSION}_linux_amd64.tar.gz" | tar -xz --strip-components=1
-          sudo mv melange /usr/local/bin/
-          APKO_VERSION="1.1.11"
-          curl -sSL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_amd64.tar.gz" | tar -xz --strip-components=1
-          sudo mv apko /usr/local/bin/
-          CRANE_VERSION="0.20.2"
-          curl -sSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xz crane
-          sudo mv crane /usr/local/bin/
-
-      - name: Build melange package
-        run: |
-          melange keygen
-          melange build melange.yaml \
-              --signing-key melange.rsa \
-              --arch x86_64 \
-              --out-dir packages/ \
-              --runner docker
-
-      - name: Build OCI image with apko
+      - name: Extract version
+        id: ver
+        shell: bash
         env:
-          RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.tag }}
-        run: |
-          apko build apko.yaml \
-              "paranoid-passwd:${RELEASE_VERSION}" \
-              output.tar \
-              --keyring-append melange.rsa.pub \
-              --repository-append packages/
+          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: echo "version=${RAW_TAG#paranoid-passwd-v}" >> "$GITHUB_OUTPUT"
 
-      - name: Extract site + WASM from melange apk
-        id: extract
-        run: |
-          mkdir -p artifact/site
-          # Pick the MAIN paranoid-passwd apk, not paranoid-passwd-cli which
-          # only contains the CLI binary. Alphabetical sort via `head -1`
-          # would grab the -cli variant first; match the exact stem instead.
-          APK_FILE=$(find packages/ -maxdepth 3 -name 'paranoid-passwd-[0-9]*.apk' -type f | head -1)
-          if [ -z "$APK_FILE" ]; then
-            echo "::error::No paranoid-passwd-<version>.apk found in packages/"
-            find packages/ -name '*.apk' -type f
-            exit 1
-          fi
-
-          echo "Extracting ${APK_FILE}"
-          mkdir -p /tmp/apk-extract
-          tar -xzf "$APK_FILE" -C /tmp/apk-extract
-
-          site_src=/tmp/apk-extract/usr/share/paranoid-passwd/site
-          if [ ! -d "$site_src" ]; then
-            echo "::error::site tree missing from apk at $site_src"
-            find /tmp/apk-extract -type f | head -40
-            exit 1
-          fi
-          cp -r "$site_src"/* artifact/site/
-          cp "$site_src/paranoid.wasm" artifact/
-
-          echo "wasm-sha256=$(sha256sum artifact/paranoid.wasm | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
-
-      - name: Log in to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          path: cli-dist
+          merge-multiple: true
 
-      - name: Push + sign OCI image
-        env:
-          RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: Validate archives, manifests, and install.sh
+        shell: bash
         run: |
-          crane push output.tar "${REGISTRY}/${IMAGE_NAME}:${RELEASE_VERSION}"
-          crane push output.tar "${REGISTRY}/${IMAGE_NAME}:latest"
-          cosign sign --yes "${REGISTRY}/${IMAGE_NAME}:${RELEASE_VERSION}"
+          bash scripts/release_validate.sh '${{ steps.ver.outputs.version }}' cli-dist
 
-      - name: Upload site artifact (for cd.yml Pages deploy)
+      - name: Upload validated package manifests
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: paranoid-site-release
-          path: artifact/site/
-          retention-days: 90
+          name: package-manifests
+          path: cli-dist/pkg
+          retention-days: 7
 
-      - name: Upload WASM artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paranoid-wasm-release
-          path: artifact/paranoid.wasm
-          retention-days: 90
-
-  # ─── Attest everything, upload release assets ──────────────────
   attest-and-publish:
     name: Attest + Publish Release Assets
-    needs: [build-cli, build-site]
+    needs: release-validate
     runs-on: ubuntu-24.04
     permissions:
-      contents: write       # upload release assets
-      id-token: write       # sigstore OIDC
-      attestations: write   # attest-build-provenance
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Download CLI artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -269,33 +172,14 @@ jobs:
           path: cli-dist
           merge-multiple: true
 
-      - name: Download WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: paranoid-wasm-release
-          path: wasm-dist
-
-      - name: Download site
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: paranoid-site-release
-          path: site-dist
-
-      - name: Combine CLI checksums
+      - name: Combine checksums
+        shell: bash
         run: |
           cd cli-dist
           cat ./*.sha256 > checksums.txt
           rm -f ./*.sha256
 
-      - name: Package site zip
-        env:
-          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
-        run: |
-          ver="${RAW_TAG#paranoid-passwd-v}"
-          (cd site-dist && zip -r "../paranoid-site-${ver}.zip" . >/dev/null)
-          cp wasm-dist/paranoid.wasm "paranoid-${ver}.wasm"
-
-      - name: Attest CLI tarballs + checksums
+      - name: Attest release artifacts
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: |
@@ -303,27 +187,22 @@ jobs:
             cli-dist/*.zip
             cli-dist/checksums.txt
 
-      - name: Attest WASM
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
-        with:
-          subject-path: wasm-dist/paranoid.wasm
-
       - name: Upload everything to release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
           GH_REPO: ${{ github.repository }}
         run: |
-          ver="${RAW_TAG#paranoid-passwd-v}"
           gh release upload "${RAW_TAG}" \
               cli-dist/*.tar.gz cli-dist/*.zip cli-dist/checksums.txt \
-              "paranoid-${ver}.wasm" "paranoid-site-${ver}.zip" \
               --repo "${GH_REPO}" --clobber
 
-  # ─── Publish package manifests to jbcom/pkgs + tap ─────────────
   publish-packages:
     name: Publish to jbcom/pkgs
-    needs: attest-and-publish
+    needs:
+      - release-validate
+      - attest-and-publish
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
@@ -336,24 +215,19 @@ jobs:
 
       - name: Resolve version
         id: ver
+        shell: bash
         env:
           RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: echo "version=${RAW_TAG#paranoid-passwd-v}" >> "$GITHUB_OUTPUT"
 
-      - name: Download checksums
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
-        run: gh release download "${TAG}" -p checksums.txt --repo "${GH_REPO}"
-
-      - name: Generate manifests
-        env:
-          VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          ./scripts/generate_pkg_manifests.sh "${VERSION}" checksums.txt out/
+      - name: Download validated manifests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: package-manifests
+          path: out
 
       - name: Open PR against jbcom/pkgs
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
@@ -366,12 +240,10 @@ jobs:
           cp ../out/paranoid-passwd.rb Formula/
           cp ../out/paranoid-passwd.json bucket/
           cp ../out/paranoid-passwd.nuspec choco/paranoid-passwd/
-          cp ../out/chocolateyInstall.ps1 ../out/VERIFICATION.txt \
-              choco/paranoid-passwd/tools/
-          git config user.name  'jbcom-bot'
-          git config user.email 'noreply@jonbogaty.com'
-          git add Formula/paranoid-passwd.rb bucket/paranoid-passwd.json \
-                  choco/paranoid-passwd
+          cp ../out/chocolateyInstall.ps1 ../out/VERIFICATION.txt choco/paranoid-passwd/tools/
+          git config user.name "jbcom-bot"
+          git config user.email "noreply@jonbogaty.com"
+          git add Formula/paranoid-passwd.rb bucket/paranoid-passwd.json choco/paranoid-passwd
           if git diff --cached --quiet; then
             echo "No manifest changes for ${VERSION} — skipping PR"
             exit 0
@@ -383,11 +255,11 @@ jobs:
               --base main \
               --head "${branch}" \
               --title "feat(paranoid-passwd): bump to ${VERSION}" \
-              --body "Auto-generated from paranoid-passwd release pipeline for v${VERSION}." || true
-          # Enable auto-merge so pkgs's validate-packages.yml gate + squash-merge happen without manual work
-          gh pr merge --repo jbcom/pkgs --auto --squash "${branch}" || true
+              --body "Auto-generated from paranoid-passwd release pipeline for v${VERSION}."
+          gh pr merge --repo jbcom/pkgs --auto --squash "${branch}"
 
       - name: Open PR against jbcom/homebrew-tap
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
@@ -398,8 +270,8 @@ jobs:
           git checkout -b "${branch}"
           mkdir -p Formula
           cp ../out/paranoid-passwd.rb Formula/
-          git config user.name  'jbcom-bot'
-          git config user.email 'noreply@jonbogaty.com'
+          git config user.name "jbcom-bot"
+          git config user.email "noreply@jonbogaty.com"
           git add Formula/paranoid-passwd.rb
           if git diff --cached --quiet; then
             echo "No formula changes for ${VERSION} — skipping PR"
@@ -412,34 +284,56 @@ jobs:
               --base main \
               --head "${branch}" \
               --title "feat(paranoid-passwd): bump to ${VERSION}" \
-              --body "Auto-generated Homebrew formula bump for paranoid-passwd v${VERSION}." || true
-          gh pr merge --repo jbcom/homebrew-tap --auto --squash "${branch}" || true
+              --body "Auto-generated Homebrew formula bump for paranoid-passwd v${VERSION}."
+          gh pr merge --repo jbcom/homebrew-tap --auto --squash "${branch}"
 
-  # ─── Install smoke test (linux-amd64) ──────────────────────────
-  install-smoke-test:
-    name: Install Smoke Test (linux-amd64)
+  release-download-verify:
+    name: Release Download Verification (${{ matrix.target_os }}/${{ matrix.target_arch }})
     needs: attest-and-publish
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target_os: linux
+            target_arch: amd64
+            archive: tar.gz
+            runnable: true
+          - target_os: linux
+            target_arch: arm64
+            archive: tar.gz
+            runnable: false
+          - target_os: darwin
+            target_arch: amd64
+            archive: tar.gz
+            runnable: false
+          - target_os: darwin
+            target_arch: arm64
+            archive: tar.gz
+            runnable: false
+          - target_os: windows
+            target_arch: amd64
+            archive: zip
+            runnable: false
     steps:
-      - name: Download + verify + run
+      - name: Download + verify release asset
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
           OWNER: ${{ github.repository_owner }}
+          RUNNABLE: ${{ matrix.runnable }}
         run: |
           ver="${RAW_TAG#paranoid-passwd-v}"
-          tarball="paranoid-passwd-${ver}-linux-amd64.tar.gz"
-          stage="paranoid-passwd-${ver}-linux-amd64"
-          gh release download "${RAW_TAG}" -p "${tarball}" -p checksums.txt --repo "${GH_REPO}"
-          gh attestation verify "${tarball}" --owner "${OWNER}"
-          grep " ${tarball}$" checksums.txt | sha256sum -c -
-          tar xzf "${tarball}"
-          out=$("./${stage}/paranoid-passwd" --version)
-          echo "${out}" | grep -F "${ver}"
-          lines=$("./${stage}/paranoid-passwd" --length 16 --count 3 --no-audit --quiet | wc -l)
-          test "${lines}" = "3"
+          artifact="paranoid-passwd-${ver}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}"
+          gh release download "${RAW_TAG}" -p "${artifact}" -p checksums.txt --repo "${GH_REPO}"
+          gh attestation verify "${artifact}" --owner "${OWNER}"
+          grep " ${artifact}$" checksums.txt | sha256sum -c -
+          if [ "${RUNNABLE}" = "true" ]; then
+            bash scripts/smoke_test_release_artifact.sh "${ver}" '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "${artifact}"
+          fi

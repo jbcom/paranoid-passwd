@@ -3,12 +3,12 @@
 #
 # Use from any workflow:
 #
-#     - name: Build CLI
+#     - name: Run CI gates
 #       uses: ./.github/actions/builder
 #       with:
 #         run: |
-#           cmake -B build/cli -DCMAKE_BUILD_TYPE=Release
-#           cmake --build build/cli --target paranoid_cli
+#           cargo test --workspace --locked --frozen --offline
+#           python3 -m tox -e docs
 #
 # GitHub Actions builds the Dockerfile per-job from this directory,
 # bind-mounts $GITHUB_WORKSPACE into the container at /github/workspace
@@ -20,7 +20,7 @@
 # =================================================================
 
 name: 'paranoid-passwd builder'
-description: 'Run a step inside the Wolfi-pinned toolchain container.'
+description: 'Run a step inside the repository-owned Wolfi-based toolchain container.'
 
 inputs:
   run:

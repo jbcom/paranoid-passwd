@@ -1,87 +1,54 @@
 ---
-title: CLAUDE.md — Agent Entry Point
-updated: 2026-04-09
+title: CLAUDE.md — Rust-Native Entry Point
+updated: 2026-04-15
 status: current
 domain: technical
 ---
 
 # paranoid-passwd — Agent Entry Point
 
-A self-auditing cryptographic password generator. All computation is in C compiled
-to WebAssembly. JavaScript is a display-only bridge. The LLM that built this code
-is part of the threat model.
+`paranoid-passwd` is now a Rust-native password generator with:
 
-## Project Identity
+- `paranoid-core` for generation, audit math, compliance, and OpenSSL-backed crypto delegation
+- `paranoid-cli` for the scriptable CLI and default TUI
+- `paranoid-gui` for the desktop GUI scaffold
+- a Sphinx docs/download site instead of an interactive web app
 
-- **Language**: C (core), JavaScript (bridge), CSS (UI state machine)
-- **Build**: CMake + Zig cross-compilation to `wasm32-wasi`
-- **Package**: melange + apko (Wolfi ecosystem)
-- **Live site**: https://paranoid-passwd.com
-- **Current version**: 3.1.0
-
-## Quick Command Reference
+## Quick Commands
 
 ```bash
-# WASM build (release)
-cmake -B build/wasm -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DCMAKE_BUILD_TYPE=Release
-cmake --build build/wasm
+# Local CI-equivalent verification
+make ci
 
-# Native build + tests
-cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
-cmake --build build/native
-ctest --test-dir build/native --output-on-failure
+# Build the user-facing binary
+cargo build -p paranoid-cli --locked --frozen --offline
 
-# Local dev server
-cp build/wasm/paranoid.wasm www/ && cp build/wasm/BUILD_MANIFEST.json www/
-cd www && python3 -m http.server 8080
+# Launch the TUI
+cargo run -p paranoid-cli
 
-# E2E tests
-cd tests/e2e && npm install && npx playwright test
+# Force scriptable CLI mode
+cargo run -p paranoid-cli -- --cli --length 24 --count 3
 
-# Production build (Wolfi)
-melange build melange.yaml --arch x86_64 --runner docker
+# Build docs
+python3 -m tox -e docs
 ```
 
-## File Map
+## Zero-Exception Rules
 
-```
-src/paranoid.c            — ALL cryptographic computation
-src/platform_wasm.c       — WASM backend: WASI random_get
-src/platform_native.c     — Native backend: OpenSSL RAND_bytes
-src/sha256_compact.c      — FIPS 180-4 SHA-256 (WASM only)
-include/paranoid.h        — Public C API
-include/paranoid_platform.h — Platform abstraction interface
-www/index.html            — HTML structure only (no inline JS/CSS)
-www/app.js                — WASM bridge, display-only
-www/style.css             — CSS-only wizard navigation
-cmake/wasm32-wasi.cmake   — Zig WASM toolchain file
-melange.yaml              — Wolfi package recipe
-apko.yaml                 — OCI image assembly
-```
+1. Keep security-sensitive logic in `crates/paranoid-core`.
+2. Do not reintroduce browser, WASM, or webview runtime surfaces.
+3. Keep rejection sampling at `(256/N)*N - 1`.
+4. Keep chi-squared pass logic at `p > 0.01` and degrees of freedom at `N - 1`.
+5. Do not add `unsafe` Rust without explicit human approval.
+6. Keep Cargo builds locked, frozen, offline, and backed by `vendor/`.
 
-## Security-Critical Rules (Zero Exceptions)
-
-1. `src/paranoid.c` and `include/paranoid.h` require human cryptographer review before
-   any change — flag all crypto modifications with `// TODO: HUMAN_REVIEW - <reason>`.
-2. Rejection sampling: `max_valid = (256/N)*N - 1` (the `-1` is critical).
-3. P-value pass condition: `p > 0.01` (not `<`). Degrees of freedom: `N - 1` (not `N`).
-4. Never add JavaScript fallbacks. Fail-closed design is intentional.
-5. Never inline JS or CSS into HTML — CodeQL depends on file separation.
-6. Never unpin GitHub Actions from commit SHAs.
-7. RNG: WASM → WASI `random_get`. Native → OpenSSL `RAND_bytes`. Never `rand()`.
-
-## Key Documentation
+## Key Files
 
 | Need | Location |
 |------|----------|
-| Architecture | `docs/ARCHITECTURE.md` |
-| Design decisions | `docs/DESIGN.md` |
-| Threat model | `docs/THREAT-MODEL.md` |
-| Statistical audit | `docs/AUDIT.md` |
-| Build internals | `docs/BUILD.md` |
-| Supply chain | `docs/SUPPLY-CHAIN.md` |
-| Testing strategy | `docs/TESTING.md` |
-| Current state | `docs/STATE.md` |
-| Code standards | `STANDARDS.md` |
 | Agent protocols | `AGENTS.md` |
-| Security policy | `SECURITY.md` |
+| Core logic | `crates/paranoid-core/src/lib.rs` |
+| CLI/TUI | `crates/paranoid-cli/src/` |
+| GUI scaffold | `crates/paranoid-gui/src/main.rs` |
+| Docs site | `docs/` |
+| CI/release | `.github/workflows/` |

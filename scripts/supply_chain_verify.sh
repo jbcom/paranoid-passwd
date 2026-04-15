@@ -1,29 +1,7 @@
-#!/bin/bash
-# ═══════════════════════════════════════════════════════════════════════════════
-# supply_chain_verify.sh — Supply Chain Verification Script
-# ═══════════════════════════════════════════════════════════════════════════════
-#
-# Verifies the complete supply chain before build/deploy:
-#   1. No uncommitted changes
-#   2. OpenSSL built from source (vendor/openssl with BUILD_PROVENANCE.txt)
-#   3. libcrypto.a exists
-#   4. Zig compiler hash verification (if available)
-#   5. GitHub Actions SHA-pinned
-#   6. Dockerfile base image pinned
-#   7. Source files exist
-#   8. Web assets exist
-#   9. Git metadata available
-#
-# Exit codes:
-#   0 = All verifications passed
-#   1 = Verification failed (supply chain issue)
-#
-# Usage: ./scripts/supply_chain_verify.sh
-# ═══════════════════════════════════════════════════════════════════════════════
+#!/usr/bin/env bash
 
 set -euo pipefail
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -32,230 +10,111 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo ""
-echo "═══════════════════════════════════════════════════════════"
-echo "  Supply Chain Verification"
-echo "═══════════════════════════════════════════════════════════"
-echo ""
+failed=0
 
-FAILED=0
-WARNINGS=0
+pass() {
+  printf "%bPASS%b %s\n" "$GREEN" "$NC" "$1"
+}
 
-# ─────────────────────────────────────────────────────────────
-# Check 1: No uncommitted changes
-# ─────────────────────────────────────────────────────────────
-echo -n "Check 1: No uncommitted changes... "
-cd "$REPO_ROOT"
+fail() {
+  printf "%bFAIL%b %s\n" "$RED" "$NC" "$1"
+  failed=1
+}
 
-if git diff --quiet && git diff --cached --quiet; then
-    echo -e "${GREEN}PASS${NC}"
+echo
+echo "Rust-Native Supply Chain Verification"
+echo
+
+if [ -f "$REPO_ROOT/.cargo/config.toml" ] \
+  && rg -q 'replace-with = "vendored-sources"' "$REPO_ROOT/.cargo/config.toml" \
+  && rg -q 'directory = "vendor"' "$REPO_ROOT/.cargo/config.toml"; then
+  pass "Cargo is pinned to vendored sources"
 else
-    echo -e "${YELLOW}WARN${NC}"
-    echo "  Uncommitted changes detected. Build may not be reproducible."
-    WARNINGS=$((WARNINGS + 1))
+  fail "Cargo vendoring configuration is incomplete"
 fi
 
-# ─────────────────────────────────────────────────────────────
-# Check 2: Platform abstraction layer exists
-# ─────────────────────────────────────────────────────────────
-echo -n "Check 2: Platform abstraction layer... "
-
-PLATFORM_H="$REPO_ROOT/include/paranoid_platform.h"
-PLATFORM_NATIVE="$REPO_ROOT/src/platform_native.c"
-PLATFORM_WASM="$REPO_ROOT/src/platform_wasm.c"
-
-if [ -f "$PLATFORM_H" ] && [ -f "$PLATFORM_NATIVE" ] && [ -f "$PLATFORM_WASM" ]; then
-    echo -e "${GREEN}PASS${NC}"
-    echo "    paranoid_platform.h, platform_native.c, platform_wasm.c all present"
+if [ -d "$REPO_ROOT/vendor" ] && [ -f "$REPO_ROOT/Cargo.lock" ]; then
+  pass "vendor tree and Cargo.lock are present"
 else
-    echo -e "${RED}FAIL${NC}"
-    echo "  Platform abstraction layer incomplete!"
-    [ ! -f "$PLATFORM_H" ] && echo "    Missing: include/paranoid_platform.h"
-    [ ! -f "$PLATFORM_NATIVE" ] && echo "    Missing: src/platform_native.c"
-    [ ! -f "$PLATFORM_WASM" ] && echo "    Missing: src/platform_wasm.c"
-    FAILED=1
+  fail "vendor tree or Cargo.lock is missing"
 fi
 
-# ─────────────────────────────────────────────────────────────
-# Check 3: CMake build system exists
-# ─────────────────────────────────────────────────────────────
-echo -n "Check 3: CMake build system... "
-
-CMAKE_FILE="$REPO_ROOT/CMakeLists.txt"
-TOOLCHAIN_FILE="$REPO_ROOT/cmake/wasm32-wasi.cmake"
-if [ -f "$CMAKE_FILE" ] && [ -f "$TOOLCHAIN_FILE" ]; then
-    echo -e "${GREEN}PASS${NC}"
-    echo "    CMakeLists.txt and cmake/wasm32-wasi.cmake present"
+if (cd "$REPO_ROOT" && cargo metadata --locked --frozen --offline --format-version 1 >/dev/null); then
+  pass "Cargo metadata resolves fully offline"
 else
-    echo -e "${RED}FAIL${NC}"
-    echo "  CMake build system incomplete!"
-    [ ! -f "$CMAKE_FILE" ] && echo "    Missing: CMakeLists.txt"
-    [ ! -f "$TOOLCHAIN_FILE" ] && echo "    Missing: cmake/wasm32-wasi.cmake"
-    FAILED=1
+  fail "offline Cargo resolution failed"
 fi
 
-# ─────────────────────────────────────────────────────────────
-# Check 4: Zig tarball hash (if present)
-# ─────────────────────────────────────────────────────────────
-echo -n "Check 4: Zig tarball hash... "
-
-ZIG_TARBALL="$REPO_ROOT/zig-linux-x86_64-0.13.0.tar.xz"
-EXPECTED_ZIG_HASH="d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea"
-
-if [ -f "$ZIG_TARBALL" ]; then
-    if command -v sha256sum &> /dev/null; then
-        ACTUAL_HASH=$(sha256sum "$ZIG_TARBALL" | cut -d' ' -f1)
-        if [ "$ACTUAL_HASH" = "$EXPECTED_ZIG_HASH" ]; then
-            echo -e "${GREEN}PASS${NC}"
-        else
-            echo -e "${RED}FAIL${NC}"
-            echo "  Zig tarball hash mismatch!"
-            echo "  Expected: $EXPECTED_ZIG_HASH"
-            echo "  Actual:   $ACTUAL_HASH"
-            FAILED=1
-        fi
-    else
-        echo -e "${YELLOW}SKIP${NC} (sha256sum not available)"
-    fi
+workflow_dir="$REPO_ROOT/.github/workflows"
+if [ -d "$workflow_dir" ]; then
+  external_uses=$(grep -rE '^[[:space:]]*uses:' "$workflow_dir"/*.yml | grep -v 'uses:[[:space:]]\+\./' || true)
+  if [ -n "$external_uses" ] && ! printf '%s\n' "$external_uses" | grep -vE '@[a-f0-9]{40}' >/dev/null; then
+    pass "external GitHub Actions are SHA-pinned"
+  else
+    fail "one or more external GitHub Actions are not SHA-pinned"
+  fi
 else
-    echo -e "${YELLOW}SKIP${NC} (tarball not present locally)"
+  fail "workflow directory missing"
 fi
 
-# ─────────────────────────────────────────────────────────────
-# Check 5: GitHub Actions SHA-pinned
-# ─────────────────────────────────────────────────────────────
-echo -n "Check 5: GitHub Actions SHA-pinned... "
-
-WORKFLOWS="$REPO_ROOT/.github/workflows"
-TOTAL_USES=0
-TOTAL_PINNED=0
-if [ -d "$WORKFLOWS" ]; then
-    for WF in "$WORKFLOWS"/*.yml; do
-        [ -f "$WF" ] || continue
-        # Total `uses:` lines, EXCLUDING local-path actions (uses: ./...).
-        # Local-path actions are versioned with the repo commit itself,
-        # so SHA-pinning them is meaningless. Excluding them from both
-        # totals keeps the pass/fail check correct.
-        USES_TOTAL=$(grep -cE '^\s*uses:' "$WF" 2>/dev/null) || USES_TOTAL=0
-        USES_LOCAL=$(grep -cE '^\s*uses:[[:space:]]+\./' "$WF" 2>/dev/null) || USES_LOCAL=0
-        SHA_PINNED=$(grep -cE '^\s*uses:.*@[a-f0-9]{40}' "$WF" 2>/dev/null) || SHA_PINNED=0
-        USES_COUNT=$((USES_TOTAL - USES_LOCAL))
-        TOTAL_USES=$((TOTAL_USES + USES_COUNT))
-        TOTAL_PINNED=$((TOTAL_PINNED + SHA_PINNED))
-    done
-
-    if [ "$TOTAL_USES" -eq "$TOTAL_PINNED" ] && [ "$TOTAL_USES" -gt 0 ]; then
-        echo -e "${GREEN}PASS${NC} ($TOTAL_PINNED/$TOTAL_USES external actions pinned; local-path actions excluded)"
-    else
-        echo -e "${RED}FAIL${NC}"
-        echo "  Not all actions are SHA-pinned!"
-        echo "  Pinned: $TOTAL_PINNED / $TOTAL_USES (external)"
-        echo "  Unpinned actions:"
-        grep -rE '^\s*uses:' "$WORKFLOWS"/*.yml \
-            | grep -v '@[a-f0-9]\{40\}' \
-            | grep -v 'uses:[[:space:]]\+\./' \
-            | sed 's/^/    /'
-        FAILED=1
-    fi
+if rg -q -- '--locked --frozen --offline' "$REPO_ROOT/.github/workflows/ci.yml" \
+  && rg -q -- '--locked --frozen --offline' "$REPO_ROOT/Makefile"; then
+  pass "CI and make targets use locked/frozen/offline Cargo commands"
 else
-    echo -e "${YELLOW}SKIP${NC} (workflows directory not found)"
+  fail "locked/frozen/offline Cargo flags missing from CI or Makefile"
 fi
 
-# ─────────────────────────────────────────────────────────────
-# Check 6: melange/apko build configs exist
-# ─────────────────────────────────────────────────────────────
-echo -n "Check 6: melange/apko build configs... "
-
-MELANGE_YAML="$REPO_ROOT/melange.yaml"
-APKO_YAML="$REPO_ROOT/apko.yaml"
-if [ -f "$MELANGE_YAML" ] && [ -f "$APKO_YAML" ]; then
-    echo -e "${GREEN}PASS${NC}"
-    echo "    melange.yaml and apko.yaml present"
+builder="$REPO_ROOT/.github/actions/builder/Dockerfile"
+if [ -f "$builder" ] \
+  && rg -q '^FROM .+@sha256:' "$builder" \
+  && rg -q 'openssl-dev' "$builder" \
+  && rg -q 'pkgconf' "$builder" \
+  && rg -q 'python3' "$builder" \
+  && rg -q 'rust=' "$builder" \
+  && rg -q 'cargo=' "$builder" \
+  && rg -q 'tox==' "$builder"; then
+  pass "builder image is digest-pinned and contains the expected Rust/OpenSSL/docs toolchain"
 else
-    echo -e "${RED}FAIL${NC}"
-    [ ! -f "$MELANGE_YAML" ] && echo "    Missing: melange.yaml (needed for CD pipeline)"
-    [ ! -f "$APKO_YAML" ] && echo "    Missing: apko.yaml (needed for OCI image build)"
-    FAILED=$((FAILED + 1))
+  fail "builder image is not pinned or is missing required Rust/OpenSSL/docs packages"
 fi
 
-# ─────────────────────────────────────────────────────────────
-# Check 7: Source files exist
-# ─────────────────────────────────────────────────────────────
-echo -n "Check 7: Core source files exist... "
-
-MISSING=0
-for FILE in "src/paranoid.c" "src/platform_wasm.c" "src/platform_native.c" "src/sha256_compact.c" "include/paranoid.h" "include/paranoid_platform.h" "CMakeLists.txt"; do
-    if [ ! -f "$REPO_ROOT/$FILE" ]; then
-        MISSING=1
-        break
-    fi
-done
-
-if [ $MISSING -eq 0 ]; then
-    echo -e "${GREEN}PASS${NC}"
+release_workflow="$REPO_ROOT/.github/workflows/release.yml"
+if [ -f "$release_workflow" ] \
+  && rg -q 'brew install openssl@3 pkg-config' "$release_workflow" \
+  && rg -q 'vcpkg\.exe.*openssl:x64-windows-static-md' "$release_workflow"; then
+  pass "release workflow installs OpenSSL prerequisites per platform"
 else
-    echo -e "${RED}FAIL${NC}"
-    echo "  Missing core source files!"
-    FAILED=1
+  fail "release workflow is missing one or more platform OpenSSL setup steps"
 fi
 
-# ─────────────────────────────────────────────────────────────
-# Check 8: Web assets exist
-# ─────────────────────────────────────────────────────────────
-echo -n "Check 8: Web assets exist... "
-
-MISSING=0
-for FILE in "www/index.html" "www/app.js" "www/style.css"; do
-    if [ ! -f "$REPO_ROOT/$FILE" ]; then
-        MISSING=1
-        break
-    fi
-done
-
-if [ $MISSING -eq 0 ]; then
-    echo -e "${GREEN}PASS${NC}"
+if [ -f "$release_workflow" ] \
+  && rg -q 'scripts/build_release_artifact\.sh' "$release_workflow" \
+  && rg -q 'scripts/smoke_test_release_artifact\.sh' "$release_workflow" \
+  && rg -q 'scripts/release_validate\.sh' "$release_workflow" \
+  && ! rg -q '\|\| true' "$release_workflow"; then
+  pass "release workflow uses repo-owned packaging/validation scripts and fails loud"
 else
-    echo -e "${RED}FAIL${NC}"
-    echo "  Missing web assets!"
-    FAILED=1
+  fail "release workflow is not fully scripted in-repo or still swallows errors"
 fi
 
-# ─────────────────────────────────────────────────────────────
-# Check 9: Git commit information
-# ─────────────────────────────────────────────────────────────
-echo -n "Check 9: Git metadata available... "
-
-if git rev-parse HEAD &>/dev/null; then
-    echo -e "${GREEN}PASS${NC}"
-    COMMIT=$(git rev-parse --short HEAD)
-    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
-    echo "    Commit: $COMMIT"
-    echo "    Branch: $BRANCH"
+if rg -q '^release-emulate:' "$REPO_ROOT/Makefile" \
+  && rg -q '^release-validate:' "$REPO_ROOT/Makefile"; then
+  pass "Makefile exposes local release emulation and validation targets"
 else
-    echo -e "${YELLOW}WARN${NC} (not a git repository)"
-    WARNINGS=$((WARNINGS + 1))
+  fail "Makefile is missing local release emulation or validation targets"
 fi
 
-# ─────────────────────────────────────────────────────────────
-# Summary
-# ─────────────────────────────────────────────────────────────
-echo ""
-echo "═══════════════════════════════════════════════════════════"
-
-if [ $FAILED -eq 0 ]; then
-    if [ $WARNINGS -gt 0 ]; then
-        echo -e "  ${YELLOW}Verification passed with $WARNINGS warning(s)${NC}"
-    else
-        echo -e "  ${GREEN}All supply chain checks passed${NC}"
-    fi
-    echo "═══════════════════════════════════════════════════════════"
-    echo ""
-    exit 0
+if [ -f "$REPO_ROOT/docs/public/install.sh" ] && [ -f "$REPO_ROOT/tox.ini" ]; then
+  pass "docs/download surface and docs build config exist"
 else
-    echo -e "  ${RED}Supply chain verification FAILED${NC}"
-    echo "═══════════════════════════════════════════════════════════"
-    echo ""
-    echo "DO NOT BUILD OR DEPLOY until issues are resolved."
-    echo ""
-    exit 1
+  fail "docs/download surface is incomplete"
 fi
+
+if [ "$failed" -ne 0 ]; then
+  echo
+  echo -e "${RED}Supply chain verification failed${NC}"
+  exit 1
+fi
+
+echo
+echo -e "${GREEN}All supply chain checks passed${NC}"

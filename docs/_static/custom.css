@@ -1,0 +1,77 @@
+:root {
+  --pp-bg: #080c14;
+  --pp-panel: #0d1119;
+  --pp-border: #17304b;
+  --pp-text: #e4e7f2;
+  --pp-muted: #95a0b8;
+  --pp-green: #34d399;
+  --pp-blue: #60a5fa;
+  --pp-red: #f87171;
+  --pp-amber: #fbbf24;
+}
+
+body {
+  background:
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.15), transparent 24rem),
+    radial-gradient(circle at bottom left, rgba(52, 211, 153, 0.12), transparent 24rem),
+    var(--pp-bg);
+  color: var(--pp-text);
+}
+
+body,
+.md-typeset,
+.md-sidebar,
+.shibuya-content,
+.shibuya-main {
+  font-family: "IBM Plex Mono", "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
+}
+
+.shibuya-main,
+.shibuya-sidebar,
+.shibuya-header,
+.shibuya-article {
+  background: transparent;
+}
+
+.shibuya-content__inner,
+.shibuya-page-nav,
+.shibuya-sidebar__inner {
+  background: rgba(13, 17, 25, 0.88);
+  border: 1px solid var(--pp-border);
+  border-radius: 18px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+}
+
+a {
+  color: var(--pp-green);
+}
+
+h1,
+h2,
+h3,
+.shibuya-site-title {
+  color: var(--pp-text);
+  letter-spacing: 0.03em;
+}
+
+code,
+pre,
+.highlight {
+  background: #09101a;
+  border-color: var(--pp-border);
+}
+
+.shibuya-announcement {
+  background: linear-gradient(90deg, rgba(52, 211, 153, 0.18), rgba(96, 165, 250, 0.18));
+  border-bottom: 1px solid rgba(52, 211, 153, 0.25);
+}
+
+.shibuya-nav-link {
+  color: var(--pp-muted);
+}
+
+.shibuya-nav-link:hover,
+.shibuya-nav-link--active {
+  color: var(--pp-green);
+}
+

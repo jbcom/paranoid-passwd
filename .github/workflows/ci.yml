@@ -1,14 +1,3 @@
-# -----------------------------------------------------------------
-# paranoid-passwd — CI (Pull Requests)
-#
-# RUNS ON: pull requests to main.
-# PURPOSE: verify every change before merge. No artifacts ship from
-#          this workflow; release.yml owns versioned builds and cd.yml
-#          owns deploys.
-#
-# Folds in what used to live in codeql.yml — a single PR gate.
-# -----------------------------------------------------------------
-
 name: CI
 
 on:
@@ -22,15 +11,9 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  # acutest v1.7.5 (2024-01-14), pinned by SHA.
-  ACUTEST_SHA: "31751b4089c93b46a9fd8a8183a695f772de66de"
-
 jobs:
-
-  # ─── Native CMake + CTest (acutest) ────────────────────────────
-  native-test:
-    name: Native Build + Tests
+  rust:
+    name: Rust Build + Tests
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -40,102 +23,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev cmake
-
-      - name: Clone acutest
-        env:
-          ACUTEST_SHA_ENV: ${{ env.ACUTEST_SHA }}
-        run: |
-          mkdir -p vendor
-          git clone https://github.com/mity/acutest.git vendor/acutest
-          cd vendor/acutest && git checkout "$ACUTEST_SHA_ENV"
-
-      - name: Configure + build + test
-        run: |
-          cmake -B build/native -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build/native
-          ctest --test-dir build/native --output-on-failure
-
-  # ─── WASM cross-compile + validate (inside Wolfi builder) ──────
-  wasm-build:
-    name: WASM Build + Validate
-    runs-on: ubuntu-24.04
-    needs: native-test
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Build + validate WASM inside Wolfi builder
+      - name: Run the Rust CI gates inside the builder
         uses: ./.github/actions/builder
         with:
           run: |
-            cmake -B build/wasm \
-                -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
-                -DCMAKE_BUILD_TYPE=Release
-            cmake --build build/wasm
+            cargo fmt --check
+            cargo clippy --workspace --all-targets --locked --frozen --offline -- -D warnings
+            cargo test --workspace --locked --frozen --offline
+            cargo build -p paranoid-cli --locked --frozen --offline
+            bash tests/test_cli.sh target/debug/paranoid-passwd
+            bash scripts/hallucination_check.sh
+            bash scripts/supply_chain_verify.sh
 
-            # -mexec-model=reactor may drop the .wasm suffix on some
-            # Zig/LLVM versions. Normalize.
-            if [ -f build/wasm/paranoid ] && [ ! -f build/wasm/paranoid.wasm ]; then
-                mv build/wasm/paranoid build/wasm/paranoid.wasm
-            fi
-
-            echo "=== Validate structure ==="
-            wasm-validate build/wasm/paranoid.wasm
-
-            # Check exports by their export NAME (the string after `->` in
-            # the Export section), not by the internal function name from
-            # the name section. Export names are ALWAYS in the binary —
-            # they're the stable interface — while the name section is
-            # optional debug info that wasm-opt can drop.
-            echo "=== Required exports ==="
-            EXPORTS=$(wasm-objdump -j Export -x build/wasm/paranoid.wasm)
-            printf '%s\n' "$EXPORTS" | sed 's/^/    /'
-            for fn in paranoid_version paranoid_generate paranoid_run_audit \
-                      paranoid_get_result_ptr paranoid_get_result_size \
-                      paranoid_sha256 paranoid_sha256_hex \
-                      paranoid_chi_squared paranoid_serial_correlation \
-                      paranoid_count_collisions malloc free; do
-                if printf '%s\n' "$EXPORTS" | grep -qE -- "-> \"${fn}\""; then
-                    echo "  OK: ${fn}"
-                else
-                    echo "  MISSING: ${fn}"; exit 1
-                fi
-            done
-
-            echo "=== Import namespaces ==="
-            NAMESPACES=$(wasm-objdump -j Import -x build/wasm/paranoid.wasm \
-                | grep -oE '<- [^.]+\.' \
-                | sed -E 's/<- ([^.]+)\./\1/' | sort -u)
-            for ns in $NAMESPACES; do
-                if [ "$ns" = "wasi_snapshot_preview1" ]; then
-                    echo "  OK: $ns"
-                else
-                    echo "  UNEXPECTED: $ns"; exit 1
-                fi
-            done
-
-            echo "=== Size ==="
-            stat -c%s build/wasm/paranoid.wasm
-            sha256sum build/wasm/paranoid.wasm
-
-      - name: Upload WASM artifact (for e2e)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paranoid-wasm
-          path: build/wasm/paranoid.wasm
-          retention-days: 7
-
-  # ─── E2E (Playwright) ──────────────────────────────────────────
-  e2e-test:
-    name: E2E Tests (Playwright)
+  docs:
+    name: Docs Build
     runs-on: ubuntu-24.04
-    needs: wasm-build
     permissions:
       contents: read
     steps:
@@ -144,50 +46,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download WASM artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Build the Sphinx docs site inside the builder
+        uses: ./.github/actions/builder
         with:
-          name: paranoid-wasm
-          path: build/wasm
+          run: |
+            python3 -m tox -e docs
 
-      - name: Setup Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: '22'
-
-      - name: Assemble site
-        run: |
-          mkdir -p build/site
-          cp www/index.html www/style.css www/app.js build/site/
-          cp build/wasm/paranoid.wasm build/site/
-
-      - name: Install Playwright
-        working-directory: tests/e2e
-        run: |
-          npm install
-          npx playwright install --with-deps chromium
-
-      - name: Start server and run tests
-        working-directory: tests/e2e
-        run: |
-          python3 -m http.server 8080 --directory ../../build/site &
-          SERVER_PID=$!
-          sleep 2
-          npx playwright test --project chromium \
-            || { kill $SERVER_PID 2>/dev/null; exit 1; }
-          kill $SERVER_PID 2>/dev/null || true
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: playwright-report
-          path: |
-            tests/e2e/playwright-report/
-            tests/e2e/test-results/
-          retention-days: 7
-
-  # ─── Static analysis ───────────────────────────────────────────
   codeql:
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-24.04
@@ -197,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [c-cpp, javascript]
+        language: [rust, python]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -216,70 +80,3 @@ jobs:
         uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
         with:
           category: "/language:${{ matrix.language }}"
-
-  sonarcloud:
-    name: SonarCloud
-    runs-on: ubuntu-24.04
-    # Dependabot PRs don't receive secrets, so SONAR_TOKEN is empty and
-    # the scan fails. CodeQL still provides static-analysis coverage.
-    if: github.actor != 'dependabot[bot]'
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Scan
-        uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8 # v5.0.0
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-  shellcheck:
-    name: ShellCheck
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Install and run
-        run: |
-          sudo apt-get update && sudo apt-get install -y shellcheck
-          FAILED=0
-          for script in scripts/*.sh; do
-            shellcheck -x "$script" || FAILED=1
-          done
-          [ "$FAILED" -eq 0 ]
-
-  # ─── Project-specific gates ────────────────────────────────────
-  hallucination-check:
-    name: Hallucination Check
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Run
-        run: ./scripts/hallucination_check.sh
-
-  supply-chain-verify:
-    name: Supply Chain Verify
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Run
-        run: ./scripts/supply_chain_verify.sh

@@ -1,0 +1,42 @@
+[workspace]
+members = [
+    "crates/paranoid-core",
+    "crates/paranoid-cli",
+    "crates/paranoid-gui",
+    "crates/paranoid-vault",
+]
+resolver = "2"
+
+[workspace.package]
+version = "3.5.1"
+edition = "2024"
+license = "MIT"
+authors = ["Jon Bogaty"]
+repository = "https://github.com/jbcom/paranoid-passwd"
+homepage = "https://paranoid-passwd.com"
+rust-version = "1.88"
+
+[workspace.dependencies]
+anyhow = "1.0.102"
+argon2 = "0.5.3"
+arboard = "3.6.1"
+crossterm = "0.29.0"
+iced = { version = "0.14.0", default-features = false, features = ["tiny-skia", "thread-pool", "fira-sans", "x11", "wayland"] }
+lexopt = "0.3.2"
+openssl = "0.10.77"
+ratatui = "0.30.0"
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+statrs = "0.18.0"
+tempfile = "3.20.0"
+thiserror = "2.0.18"
+zeroize = "1.8.2"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
