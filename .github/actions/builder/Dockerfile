@@ -19,6 +19,7 @@ RUN apk add --no-cache \
         pkgconf \
         py3-pip \
         python3 \
+        ripgrep \
         ${RUST_APK_PACKAGE}=${RUST_APK_VERSION}
 
 RUN python3 -m pip install --break-system-packages --no-cache-dir "tox==${TOX_VERSION}"
@@ -31,6 +32,7 @@ RUN bash --version >/dev/null \
  && rustc --version >/dev/null \
  && pkgconf --modversion openssl >/dev/null \
  && python3 --version >/dev/null \
+ && rg --version >/dev/null \
  && tox --version >/dev/null \
  && rustc --version | grep -F "1.88.0" >/dev/null \
  && tox --version | grep -F "${TOX_VERSION}" >/dev/null \

@@ -70,6 +70,7 @@ if [ -f "$builder" ] \
   && rg -q 'openssl-dev' "$builder" \
   && rg -q 'pkgconf' "$builder" \
   && rg -q 'python3' "$builder" \
+  && rg -q 'ripgrep' "$builder" \
   && rg -q 'RUST_APK_PACKAGE=rust-1\.88' "$builder" \
   && rg -q 'RUST_APK_VERSION=1\.88\.0-r0' "$builder" \
   && rg -q 'SPHINX_RUSTDOCGEN_VERSION=1\.1\.0' "$builder" \
