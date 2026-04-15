@@ -355,7 +355,7 @@ jobs:
 
       - name: Push to jbcom/pkgs
         env:
-          TOKEN: ${{ secrets.JBCOM_PKGS_GITHUB_TOKEN }}
+          TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           git clone "https://x-access-token:${TOKEN}@github.com/jbcom/pkgs.git" pkgs
@@ -376,7 +376,7 @@ jobs:
 
       - name: Push Homebrew tap mirror to jbcom/homebrew-tap
         env:
-          TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           git clone "https://x-access-token:${TOKEN}@github.com/jbcom/homebrew-tap.git" tap
