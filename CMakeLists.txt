@@ -163,8 +163,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
     find_program(WASM_VALIDATE wasm-validate)
 
     if(WASM_OPT)
+        # -g preserves the name section (function-export symbol names).
+        # Without it wasm-opt strips the name section, breaking export
+        # verification and removing useful symbols from browser stack traces.
         add_custom_command(TARGET paranoid_wasm POST_BUILD
-            COMMAND ${WASM_OPT} -O2 --enable-bulk-memory
+            COMMAND ${WASM_OPT} -O2 --enable-bulk-memory -g
                 -o $<TARGET_FILE:paranoid_wasm>
                 $<TARGET_FILE:paranoid_wasm>
             COMMENT "Post-processing with wasm-opt (fixes Zig codegen + optimizes size)"
