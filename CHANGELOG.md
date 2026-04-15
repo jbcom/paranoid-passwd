@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.3](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.5.2...paranoid-passwd-v3.5.3) (2026-04-15)
+
+
+### Bug Fixes
+
+* **release:** standardize launch contract and verify published releases ([#74](https://github.com/jbcom/paranoid-passwd/issues/74)) ([77bf464](https://github.com/jbcom/paranoid-passwd/commit/77bf464314d1164e4fbe08da0815254dd525ecdd))
+
 ## [3.5.2](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.5.1...paranoid-passwd-v3.5.2) (2026-04-15)
 
 
