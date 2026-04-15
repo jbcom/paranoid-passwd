@@ -35,7 +35,7 @@ extern "C" {
 
 /* Version constant. release-please rewrites the literal below via the
  * marker comment on each release; do not edit by hand. */
-#define PARANOID_VERSION_STRING "3.4.2" // x-release-please-version
+#define PARANOID_VERSION_STRING "3.4.3" // x-release-please-version
 
 /** Return version string. */
 const char* paranoid_version(void);
