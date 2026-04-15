@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.2](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.4.1...paranoid-passwd-v3.4.2) (2026-04-15)
+
+
+### Bug Fixes
+
+* scrub audit batch buffer in paranoid_run_audit before free (closes [#18](https://github.com/jbcom/paranoid-passwd/issues/18), replaces [#35](https://github.com/jbcom/paranoid-passwd/issues/35)) ([#56](https://github.com/jbcom/paranoid-passwd/issues/56)) ([4a506e0](https://github.com/jbcom/paranoid-passwd/commit/4a506e03613c642f749c96218a629d7dbe8d2914))
+
 ## [3.4.1](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.4.0...paranoid-passwd-v3.4.1) (2026-04-15)
 
 
