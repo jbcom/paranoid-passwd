@@ -70,7 +70,8 @@ if [ -f "$builder" ] \
   && rg -q 'openssl-dev' "$builder" \
   && rg -q 'pkgconf' "$builder" \
   && rg -q 'python3' "$builder" \
-  && rg -q 'rust=' "$builder" \
+  && rg -q 'RUST_APK_PACKAGE=rust-1\.88' "$builder" \
+  && rg -q 'RUST_APK_VERSION=1\.88\.0-r0' "$builder" \
   && rg -q 'tox==' "$builder"; then
   pass "builder image is digest-pinned and contains the expected Rust/OpenSSL/docs toolchain"
 else
