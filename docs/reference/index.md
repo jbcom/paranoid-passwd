@@ -8,6 +8,7 @@ title: Reference
 :maxdepth: 2
 
 architecture
+vault-format
 release-checklist
 testing
 supply-chain

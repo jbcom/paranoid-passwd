@@ -1,7 +1,12 @@
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::SaltString};
 use openssl::{
+    cms::{CMSOptions, CmsContentInfo},
+    hash::MessageDigest,
+    pkey::{PKey, Private},
     rand::rand_bytes,
+    stack::Stack,
     symm::{Cipher, Crypter, Mode},
+    x509::X509,
 };
 use paranoid_core::{GenerationReport, ParanoidRequest, execute_request};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -18,9 +23,12 @@ const FORMAT_VERSION: u32 = 1;
 const MASTER_KEY_LEN: usize = 32;
 const MASTER_KEY_AAD: &[u8] = b"paranoid-passwd::vault::master-key";
 const ITEM_AAD_PREFIX: &[u8] = b"paranoid-passwd::vault::item::";
+const SQLITE_APPLICATION_ID: i64 = 1_347_446_356;
 const DEFAULT_MEMORY_COST_KIB: u32 = 65_536;
 const DEFAULT_ITERATIONS: u32 = 3;
 const DEFAULT_PARALLELISM: u32 = 1;
+const PASSWORD_WRAP_ALGORITHM: &str = "argon2id+aes-256-gcm";
+const CERTIFICATE_WRAP_ALGORITHM: &str = "cms-envelope+aes-256-cbc";
 
 #[derive(Debug, Error)]
 pub enum VaultError {
@@ -38,6 +46,8 @@ pub enum VaultError {
     RandomFailure(String),
     #[error("crypto failure: {0}")]
     CryptoFailure(String),
+    #[error("certificate failure: {0}")]
+    CertificateFailure(String),
     #[error("sqlite failure: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("io failure: {0}")]
@@ -60,20 +70,40 @@ pub struct VaultKdfParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum VaultKeyslotKind {
-    Password,
-    Device,
+    #[serde(alias = "Password")]
+    PasswordRecovery,
+    #[serde(alias = "Device")]
+    DeviceBound,
+    CertificateWrapped,
+}
+
+impl VaultKeyslotKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::PasswordRecovery => "password_recovery",
+            Self::DeviceBound => "device_bound",
+            Self::CertificateWrapped => "certificate_wrapped",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultKeyslot {
     pub id: String,
     pub kind: VaultKeyslotKind,
+    #[serde(default)]
+    pub label: Option<String>,
     pub wrapped_by_os_keystore: bool,
+    #[serde(default = "default_password_wrap_algorithm")]
+    pub wrap_algorithm: String,
     pub salt_hex: String,
     pub nonce_hex: String,
     pub tag_hex: String,
     pub encrypted_master_key_hex: String,
+    #[serde(default)]
+    pub certificate_fingerprint_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +203,41 @@ impl UnlockedVault {
 
     pub fn header(&self) -> &VaultHeader {
         &self.header
+    }
+
+    pub fn add_certificate_keyslot(
+        &mut self,
+        certificate_pem: &[u8],
+        label: Option<String>,
+    ) -> Result<VaultKeyslot, VaultError> {
+        let certificate = load_certificate(certificate_pem)?;
+        let fingerprint = certificate_fingerprint_hex(&certificate)?;
+        if self.header.keyslots.iter().any(|slot| {
+            slot.kind == VaultKeyslotKind::CertificateWrapped
+                && slot.certificate_fingerprint_sha256.as_deref() == Some(fingerprint.as_str())
+        }) {
+            return Err(VaultError::InvalidArguments(format!(
+                "certificate keyslot already exists for fingerprint {fingerprint}"
+            )));
+        }
+
+        let wrapped = wrap_master_key_with_certificate(self.master_key.as_slice(), &certificate)?;
+        let slot = VaultKeyslot {
+            id: format!("cert-{}", &fingerprint[..16]),
+            kind: VaultKeyslotKind::CertificateWrapped,
+            label,
+            wrapped_by_os_keystore: false,
+            wrap_algorithm: CERTIFICATE_WRAP_ALGORITHM.to_string(),
+            salt_hex: String::new(),
+            nonce_hex: String::new(),
+            tag_hex: String::new(),
+            encrypted_master_key_hex: hex_encode(wrapped.as_slice()),
+            certificate_fingerprint_sha256: Some(fingerprint),
+        };
+
+        self.header.keyslots.push(slot.clone());
+        self.persist_header()?;
+        Ok(slot)
     }
 
     pub fn add_login(&self, record: NewLoginRecord) -> Result<VaultItem, VaultError> {
@@ -371,6 +436,14 @@ impl UnlockedVault {
         item.updated_at_epoch = row.updated_at_epoch;
         Ok(item)
     }
+
+    fn persist_header(&self) -> Result<(), VaultError> {
+        self.conn.execute(
+            "UPDATE metadata SET value = ?1 WHERE key = 'header_json'",
+            params![serde_json::to_string(&self.header)?],
+        )?;
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -409,6 +482,7 @@ pub fn init_vault(
     }
 
     let conn = Connection::open(path)?;
+    configure_connection(&conn)?;
     create_schema(&conn)?;
 
     let salt_bytes = random_bytes(16)?;
@@ -431,13 +505,16 @@ pub fn init_vault(
         migration_state: "ready".to_string(),
         kdf: params,
         keyslots: vec![VaultKeyslot {
-            id: "primary".to_string(),
-            kind: VaultKeyslotKind::Password,
+            id: "recovery".to_string(),
+            kind: VaultKeyslotKind::PasswordRecovery,
+            label: Some("password-recovery".to_string()),
             wrapped_by_os_keystore: false,
+            wrap_algorithm: PASSWORD_WRAP_ALGORITHM.to_string(),
             salt_hex: hex_encode(salt.as_str().as_bytes()),
             nonce_hex: hex_encode(&wrapped.nonce),
             tag_hex: hex_encode(&wrapped.tag),
             encrypted_master_key_hex: hex_encode(&wrapped.ciphertext),
+            certificate_fingerprint_sha256: None,
         }],
     };
 
@@ -449,6 +526,16 @@ pub fn init_vault(
     Ok(header)
 }
 
+pub fn read_vault_header(path: impl AsRef<Path>) -> Result<VaultHeader, VaultError> {
+    let path = path.as_ref();
+    if !path.exists() {
+        return Err(VaultError::VaultNotFound(path.display().to_string()));
+    }
+    let conn = Connection::open(path)?;
+    configure_connection(&conn)?;
+    read_header(&conn)
+}
+
 pub fn unlock_vault(
     path: impl AsRef<Path>,
     master_password: &str,
@@ -458,17 +545,15 @@ pub fn unlock_vault(
         return Err(VaultError::VaultNotFound(path.display().to_string()));
     }
     let conn = Connection::open(path)?;
-    let header_json: String = conn.query_row(
-        "SELECT value FROM metadata WHERE key = 'header_json'",
-        [],
-        |row| row.get(0),
-    )?;
-    let header: VaultHeader = serde_json::from_str(&header_json)?;
+    configure_connection(&conn)?;
+    let header = read_header(&conn)?;
     let keyslot = header
         .keyslots
         .iter()
-        .find(|keyslot| keyslot.kind == VaultKeyslotKind::Password)
-        .ok_or_else(|| VaultError::InvalidArguments("vault has no password keyslot".to_string()))?;
+        .find(|keyslot| keyslot.kind == VaultKeyslotKind::PasswordRecovery)
+        .ok_or_else(|| {
+            VaultError::InvalidArguments("vault has no password recovery keyslot".to_string())
+        })?;
     let salt_raw = hex_decode(keyslot.salt_hex.as_str())?;
     let salt_text = String::from_utf8(salt_raw)
         .map_err(|error| VaultError::InvalidArguments(format!("invalid salt encoding: {error}")))?;
@@ -494,9 +579,50 @@ pub fn unlock_vault(
     })
 }
 
+pub fn unlock_vault_with_certificate(
+    path: impl AsRef<Path>,
+    certificate_pem: &[u8],
+    private_key_pem: &[u8],
+    private_key_passphrase: Option<&str>,
+) -> Result<UnlockedVault, VaultError> {
+    let path = path.as_ref();
+    if !path.exists() {
+        return Err(VaultError::VaultNotFound(path.display().to_string()));
+    }
+
+    let conn = Connection::open(path)?;
+    configure_connection(&conn)?;
+    let header = read_header(&conn)?;
+
+    let certificate = load_certificate(certificate_pem)?;
+    let fingerprint = certificate_fingerprint_hex(&certificate)?;
+    let keyslot = header
+        .keyslots
+        .iter()
+        .find(|keyslot| {
+            keyslot.kind == VaultKeyslotKind::CertificateWrapped
+                && keyslot.certificate_fingerprint_sha256.as_deref() == Some(fingerprint.as_str())
+        })
+        .ok_or(VaultError::UnlockFailed)?;
+    let private_key = load_private_key(private_key_pem, private_key_passphrase)?;
+    let wrapped = hex_decode(keyslot.encrypted_master_key_hex.as_str())?;
+    let master_key =
+        unwrap_master_key_with_certificate(wrapped.as_slice(), &certificate, &private_key)
+            .map_err(|_| VaultError::UnlockFailed)?;
+
+    Ok(UnlockedVault {
+        path: path.to_path_buf(),
+        conn,
+        header,
+        master_key: Zeroizing::new(master_key),
+    })
+}
+
 fn create_schema(conn: &Connection) -> Result<(), VaultError> {
     conn.execute_batch(
         "BEGIN;
+         PRAGMA application_id = 1347446356;
+         PRAGMA user_version = 1;
          CREATE TABLE metadata (
            key TEXT PRIMARY KEY,
            value TEXT NOT NULL
@@ -513,6 +639,54 @@ fn create_schema(conn: &Connection) -> Result<(), VaultError> {
          COMMIT;",
     )?;
     Ok(())
+}
+
+fn configure_connection(conn: &Connection) -> Result<(), VaultError> {
+    conn.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA secure_delete = ON;
+         PRAGMA temp_store = MEMORY;
+         PRAGMA journal_mode = DELETE;
+         PRAGMA synchronous = FULL;",
+    )?;
+    Ok(())
+}
+
+fn read_header(conn: &Connection) -> Result<VaultHeader, VaultError> {
+    let application_id: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
+    let user_version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    let header_json: String = conn.query_row(
+        "SELECT value FROM metadata WHERE key = 'header_json'",
+        [],
+        |row| row.get(0),
+    )?;
+    let header: VaultHeader = serde_json::from_str(&header_json)?;
+    if header.format_version != FORMAT_VERSION {
+        return Err(VaultError::InvalidArguments(format!(
+            "unsupported vault format version: {}",
+            header.format_version
+        )));
+    }
+
+    if application_id == 0 && user_version == 0 {
+        conn.execute_batch(
+            "PRAGMA application_id = 1347446356;
+             PRAGMA user_version = 1;",
+        )?;
+    } else {
+        if application_id != SQLITE_APPLICATION_ID {
+            return Err(VaultError::InvalidArguments(format!(
+                "unexpected vault application_id: {application_id}"
+            )));
+        }
+        if user_version != i64::from(FORMAT_VERSION) {
+            return Err(VaultError::InvalidArguments(format!(
+                "unsupported vault schema version: {user_version}"
+            )));
+        }
+    }
+
+    Ok(header)
 }
 
 fn derive_key(
@@ -617,6 +791,65 @@ fn random_bytes(len: usize) -> Result<Vec<u8>, VaultError> {
     Ok(bytes)
 }
 
+fn load_certificate(certificate_pem: &[u8]) -> Result<X509, VaultError> {
+    X509::from_pem(certificate_pem)
+        .map_err(|error| VaultError::CertificateFailure(error.to_string()))
+}
+
+fn load_private_key(
+    private_key_pem: &[u8],
+    passphrase: Option<&str>,
+) -> Result<PKey<Private>, VaultError> {
+    let result = match passphrase {
+        Some(passphrase) => {
+            PKey::private_key_from_pem_passphrase(private_key_pem, passphrase.as_bytes())
+        }
+        None => PKey::private_key_from_pem(private_key_pem),
+    };
+    result.map_err(|error| VaultError::CertificateFailure(error.to_string()))
+}
+
+fn certificate_fingerprint_hex(certificate: &X509) -> Result<String, VaultError> {
+    let digest = certificate
+        .digest(MessageDigest::sha256())
+        .map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
+    Ok(hex_encode(digest.as_ref()))
+}
+
+fn wrap_master_key_with_certificate(
+    master_key: &[u8],
+    certificate: &X509,
+) -> Result<Vec<u8>, VaultError> {
+    let mut certs =
+        Stack::new().map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
+    certs
+        .push(certificate.to_owned())
+        .map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
+    let envelope = CmsContentInfo::encrypt(
+        &certs,
+        master_key,
+        Cipher::aes_256_cbc(),
+        CMSOptions::BINARY,
+    )
+    .map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
+    // TODO: HUMAN_REVIEW - confirm CMS recipient selection and content-encryption policy for certificate-wrapped keyslots.
+    envelope
+        .to_der()
+        .map_err(|error| VaultError::CertificateFailure(error.to_string()))
+}
+
+fn unwrap_master_key_with_certificate(
+    wrapped_der: &[u8],
+    certificate: &X509,
+    private_key: &PKey<Private>,
+) -> Result<Vec<u8>, VaultError> {
+    let envelope = CmsContentInfo::from_der(wrapped_der)
+        .map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
+    envelope
+        .decrypt(private_key, certificate)
+        .map_err(|error| VaultError::CertificateFailure(error.to_string()))
+}
+
 fn item_aad(id: &str) -> Vec<u8> {
     let mut aad = ITEM_AAD_PREFIX.to_vec();
     aad.extend_from_slice(id.as_bytes());
@@ -629,6 +862,10 @@ fn unix_epoch_now() -> Result<i64, VaultError> {
         .map_err(|error| VaultError::InvalidArguments(error.to_string()))?;
     i64::try_from(duration.as_secs())
         .map_err(|error| VaultError::InvalidArguments(error.to_string()))
+}
+
+fn default_password_wrap_algorithm() -> String {
+    PASSWORD_WRAP_ALGORITHM.to_string()
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -656,6 +893,15 @@ fn hex_decode(input: &str) -> Result<Vec<u8>, VaultError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openssl::{
+        asn1::Asn1Time,
+        bn::{BigNum, MsbOption},
+        hash::MessageDigest,
+        nid::Nid,
+        pkey::PKey,
+        rsa::Rsa,
+        x509::{X509, X509Name},
+    };
     use tempfile::tempdir;
 
     #[test]
@@ -709,6 +955,69 @@ mod tests {
     }
 
     #[test]
+    fn certificate_keyslot_unlock_round_trip() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let (certificate_pem, private_key_pem) = test_certificate_pair();
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let keyslot = vault
+            .add_certificate_keyslot(certificate_pem.as_slice(), Some("laptop".to_string()))
+            .expect("add certificate keyslot");
+        assert_eq!(keyslot.kind, VaultKeyslotKind::CertificateWrapped);
+        assert!(keyslot.certificate_fingerprint_sha256.is_some());
+
+        let header = read_vault_header(&path).expect("read header");
+        assert_eq!(header.keyslots.len(), 2);
+        assert!(
+            header
+                .keyslots
+                .iter()
+                .any(|slot| slot.kind == VaultKeyslotKind::CertificateWrapped)
+        );
+
+        let unlocked = unlock_vault_with_certificate(
+            &path,
+            certificate_pem.as_slice(),
+            private_key_pem.as_slice(),
+            None,
+        )
+        .expect("unlock with cert");
+        let item = unlocked
+            .add_login(NewLoginRecord {
+                title: "Cert Login".to_string(),
+                username: "jon@example.com".to_string(),
+                password: "Sup3r$ecret!".to_string(),
+                url: None,
+                notes: None,
+            })
+            .expect("add login");
+        assert_eq!(unlocked.get_item(&item.id).expect("get item").id, item.id);
+    }
+
+    #[test]
+    fn encrypted_private_key_unlock_round_trip() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let (certificate_pem, private_key_pem) = encrypted_test_certificate_pair("vault-pass");
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_certificate_keyslot(certificate_pem.as_slice(), Some("encrypted".to_string()))
+            .expect("add certificate keyslot");
+
+        unlock_vault_with_certificate(
+            &path,
+            certificate_pem.as_slice(),
+            private_key_pem.as_slice(),
+            Some("vault-pass"),
+        )
+        .expect("unlock with encrypted key");
+    }
+
+    #[test]
     fn generate_and_store_uses_core_generator() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("vault.sqlite");
@@ -727,5 +1036,60 @@ mod tests {
         let stored = vault.get_item(&item.id).expect("show");
         let VaultItemPayload::Login(login) = stored.payload;
         assert_eq!(login.password, report.passwords[0].value);
+    }
+
+    fn test_certificate_pair() -> (Vec<u8>, Vec<u8>) {
+        let pkey = build_test_key();
+        let cert = build_self_signed_cert(&pkey);
+        (
+            cert.to_pem().expect("cert pem"),
+            pkey.private_key_to_pem_pkcs8().expect("key pem"),
+        )
+    }
+
+    fn encrypted_test_certificate_pair(passphrase: &str) -> (Vec<u8>, Vec<u8>) {
+        let pkey = build_test_key();
+        let cert = build_self_signed_cert(&pkey);
+        (
+            cert.to_pem().expect("cert pem"),
+            pkey.private_key_to_pem_pkcs8_passphrase(Cipher::aes_256_cbc(), passphrase.as_bytes())
+                .expect("encrypted key pem"),
+        )
+    }
+
+    fn build_test_key() -> PKey<Private> {
+        let rsa = Rsa::generate(2048).expect("rsa");
+        PKey::from_rsa(rsa).expect("pkey")
+    }
+
+    fn build_self_signed_cert(pkey: &PKey<Private>) -> X509 {
+        let mut name = X509Name::builder().expect("x509 name builder");
+        name.append_entry_by_nid(Nid::COMMONNAME, "paranoid-passwd.test")
+            .expect("append common name");
+        let name = name.build();
+
+        let mut serial = BigNum::new().expect("serial");
+        serial
+            .rand(128, MsbOption::MAYBE_ZERO, false)
+            .expect("rand serial");
+
+        let mut builder = X509::builder().expect("x509 builder");
+        builder.set_version(2).expect("set version");
+        builder
+            .set_serial_number(&serial.to_asn1_integer().expect("asn1 serial"))
+            .expect("set serial");
+        builder.set_subject_name(&name).expect("set subject");
+        builder.set_issuer_name(&name).expect("set issuer");
+        builder
+            .set_not_before(&Asn1Time::days_from_now(0).expect("not before"))
+            .expect("apply not before");
+        builder
+            .set_not_after(&Asn1Time::days_from_now(365).expect("not after"))
+            .expect("apply not after");
+        builder.set_pubkey(pkey).expect("set pubkey");
+        builder
+            .sign(pkey, MessageDigest::sha256())
+            .expect("sign cert");
+        builder.build()
     }
 }

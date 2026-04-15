@@ -51,10 +51,19 @@ The shared report model is split between:
 
 `paranoid-vault` is the first password-manager crate boundary.
 
-- SQLite stores vault metadata and encrypted item blobs.
-- Argon2id derives the master unlock key.
-- OpenSSL-backed AES-256-GCM wraps the vault master key and item payloads.
+- SQLite is the explicit vault file format, not a temporary backend choice.
+- The vault stays local-device only and uses rollback-journal SQLite rather than a persistent WAL profile.
+- A random master key encrypts vault items.
+- Keyslots unwrap that master key:
+  - `password_recovery` is the current recovery path
+  - `certificate_wrapped` is the current non-password slot type
+  - `device_bound` is the next passwordless local-unlock target
+- Argon2id derives the recovery KEK.
+- OpenSSL-backed AES-256-GCM encrypts item payloads.
+- OpenSSL CMS envelope encryption wraps the master key for certificate slots.
 - The current item model supports `Login` entries, CRUD operations, and generate-and-store flows.
+
+See [Vault Format](/Users/jbogaty/src/jbcom/paranoid-passwd/docs/reference/vault-format.md) for the storage-engine decision and on-disk layout.
 
 ## Public Website
 

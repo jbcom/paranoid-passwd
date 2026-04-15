@@ -1,21 +1,30 @@
 use paranoid_core::{CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, VERSION};
-use paranoid_vault::{NewLoginRecord, UpdateLoginRecord, init_vault, unlock_vault};
+use paranoid_vault::{
+    NewLoginRecord, UpdateLoginRecord, init_vault, read_vault_header, unlock_vault,
+    unlock_vault_with_certificate,
+};
 use std::{
     env,
     ffi::OsString,
+    fs,
     io::{self, Write},
     path::PathBuf,
 };
 
 pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
     let invocation = parse_vault_args(args)?;
-    match invocation.command {
+    match &invocation.command {
         VaultCommand::Help => {
             print_usage(io::stdout())?;
             Ok(0)
         }
         VaultCommand::Init => {
-            let master_password = read_master_password(invocation.password_env.as_str())?;
+            if !matches!(&invocation.auth, VaultAuth::PasswordEnv(_)) {
+                return Err(anyhow::anyhow!(
+                    "vault init requires a recovery secret via PARANOID_MASTER_PASSWORD or --password-env"
+                ));
+            }
+            let master_password = read_master_password(invocation.password_env())?;
             let header = init_vault(&invocation.path, &master_password)?;
             println!(
                 "initialized\t{}\tformat={}\tkeyslots={}",
@@ -25,9 +34,22 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             );
             Ok(0)
         }
+        VaultCommand::Keyslots => {
+            let header = read_vault_header(&invocation.path)?;
+            for keyslot in header.keyslots {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    keyslot.id,
+                    keyslot.kind.as_str(),
+                    keyslot.label.unwrap_or_default(),
+                    keyslot.wrap_algorithm,
+                    keyslot.certificate_fingerprint_sha256.unwrap_or_default()
+                );
+            }
+            Ok(0)
+        }
         VaultCommand::List => {
-            let master_password = read_master_password(invocation.password_env.as_str())?;
-            let vault = unlock_vault(&invocation.path, &master_password)?;
+            let vault = unlock_vault_for_invocation(&invocation)?;
             for item in vault.list_items()? {
                 println!(
                     "{}\t{}\t{}\t{}\t{}\t{}",
@@ -42,31 +64,39 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             Ok(0)
         }
         VaultCommand::Show { id } => {
-            let master_password = read_master_password(invocation.password_env.as_str())?;
-            let vault = unlock_vault(&invocation.path, &master_password)?;
-            let item = vault.get_item(&id)?;
+            let vault = unlock_vault_for_invocation(&invocation)?;
+            let item = vault.get_item(id)?;
             print_item(&item)?;
             Ok(0)
         }
         VaultCommand::Add { record } => {
-            let master_password = read_master_password(invocation.password_env.as_str())?;
-            let vault = unlock_vault(&invocation.path, &master_password)?;
-            let item = vault.add_login(record)?;
+            let vault = unlock_vault_for_invocation(&invocation)?;
+            let item = vault.add_login(record.clone())?;
             println!("{}", item.id);
             Ok(0)
         }
         VaultCommand::Update { id, update } => {
-            let master_password = read_master_password(invocation.password_env.as_str())?;
-            let vault = unlock_vault(&invocation.path, &master_password)?;
-            let item = vault.update_login(&id, update)?;
+            let vault = unlock_vault_for_invocation(&invocation)?;
+            let item = vault.update_login(id, update.clone())?;
             println!("{}", item.id);
             Ok(0)
         }
         VaultCommand::Delete { id } => {
-            let master_password = read_master_password(invocation.password_env.as_str())?;
-            let vault = unlock_vault(&invocation.path, &master_password)?;
-            vault.delete_item(&id)?;
+            let vault = unlock_vault_for_invocation(&invocation)?;
+            vault.delete_item(id)?;
             println!("deleted\t{id}");
+            Ok(0)
+        }
+        VaultCommand::AddCertSlot { cert_path, label } => {
+            let cert_pem = fs::read(cert_path)?;
+            let mut vault = unlock_vault_for_invocation(&invocation)?;
+            let keyslot = vault.add_certificate_keyslot(cert_pem.as_slice(), label.clone())?;
+            println!(
+                "{}\t{}\t{}",
+                keyslot.id,
+                keyslot.wrap_algorithm,
+                keyslot.certificate_fingerprint_sha256.unwrap_or_default()
+            );
             Ok(0)
         }
         VaultCommand::GenerateStore {
@@ -82,11 +112,16 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
                     "vault generate-store only supports --count 1 to avoid ambiguous storage"
                 ));
             }
-            let master_password = read_master_password(invocation.password_env.as_str())?;
-            let vault = unlock_vault(&invocation.path, &master_password)?;
-            let (report, item) = vault.generate_and_store(&request, title, username, url, notes)?;
+            let vault = unlock_vault_for_invocation(&invocation)?;
+            let (report, item) = vault.generate_and_store(
+                request,
+                title.clone(),
+                username.clone(),
+                url.clone(),
+                notes.clone(),
+            )?;
             print_generated_passwords(&report)?;
-            if !quiet {
+            if !*quiet {
                 eprintln!("stored: {}", item.id);
             }
             Ok(0)
@@ -96,13 +131,32 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
 
 struct VaultInvocation {
     path: PathBuf,
-    password_env: String,
+    auth: VaultAuth,
     command: VaultCommand,
+}
+
+enum VaultAuth {
+    PasswordEnv(String),
+    Certificate {
+        cert_path: PathBuf,
+        key_path: PathBuf,
+        key_passphrase_env: Option<String>,
+    },
+}
+
+impl VaultInvocation {
+    fn password_env(&self) -> &str {
+        match &self.auth {
+            VaultAuth::PasswordEnv(env_name) => env_name.as_str(),
+            VaultAuth::Certificate { .. } => "PARANOID_MASTER_PASSWORD",
+        }
+    }
 }
 
 enum VaultCommand {
     Help,
     Init,
+    Keyslots,
     List,
     Show {
         id: String,
@@ -117,6 +171,10 @@ enum VaultCommand {
     Delete {
         id: String,
     },
+    AddCertSlot {
+        cert_path: PathBuf,
+        label: Option<String>,
+    },
     GenerateStore {
         request: ParanoidRequest,
         title: String,
@@ -130,6 +188,9 @@ enum VaultCommand {
 fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
     let mut path = default_vault_path();
     let mut password_env = "PARANOID_MASTER_PASSWORD".to_string();
+    let mut cert_path = None;
+    let mut key_path = None;
+    let mut key_passphrase_env = None;
     let mut command: Option<String> = None;
     let mut command_args = Vec::new();
     let mut iter = args
@@ -154,6 +215,24 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("--password-env requires a value"))?;
             }
+            "--cert" if command.is_none() => {
+                cert_path = Some(PathBuf::from(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("--cert requires a value"))?,
+                ));
+            }
+            "--key" if command.is_none() => {
+                key_path = Some(PathBuf::from(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("--key requires a value"))?,
+                ));
+            }
+            "--key-passphrase-env" if command.is_none() => {
+                key_passphrase_env = Some(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("--key-passphrase-env requires a value"))?,
+                );
+            }
             value if command.is_none() => {
                 command = Some(value.to_string());
             }
@@ -164,18 +243,34 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
     let command = match command.as_deref().unwrap_or("help") {
         "help" => VaultCommand::Help,
         "init" => VaultCommand::Init,
+        "keyslots" => VaultCommand::Keyslots,
         "list" => VaultCommand::List,
         "show" => parse_show(command_args.as_slice())?,
         "add" => parse_add(command_args.as_slice())?,
         "update" => parse_update(command_args.as_slice())?,
         "delete" => parse_delete(command_args.as_slice())?,
+        "add-cert-slot" => parse_add_cert_slot(command_args.as_slice())?,
         "generate-store" => parse_generate_store(command_args.as_slice())?,
         other => return Err(anyhow::anyhow!("unknown vault subcommand: {other}")),
     };
 
+    let auth = match (cert_path, key_path) {
+        (Some(cert_path), Some(key_path)) => VaultAuth::Certificate {
+            cert_path,
+            key_path,
+            key_passphrase_env,
+        },
+        (None, None) => VaultAuth::PasswordEnv(password_env),
+        _ => {
+            return Err(anyhow::anyhow!(
+                "--cert and --key must be provided together for certificate-backed unlock"
+            ));
+        }
+    };
+
     Ok(VaultInvocation {
         path,
-        password_env,
+        auth,
         command,
     })
 }
@@ -281,6 +376,40 @@ fn parse_delete(args: &[String]) -> anyhow::Result<VaultCommand> {
     }
     Ok(VaultCommand::Delete {
         id: id.ok_or_else(|| anyhow::anyhow!("vault delete requires --id"))?,
+    })
+}
+
+fn parse_add_cert_slot(args: &[String]) -> anyhow::Result<VaultCommand> {
+    let mut cert_path = None;
+    let mut label = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--cert" => {
+                cert_path = Some(PathBuf::from(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("--cert requires a value"))?,
+                ));
+            }
+            "--label" => {
+                label = Some(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("--label requires a value"))?
+                        .to_string(),
+                );
+            }
+            other => {
+                return Err(anyhow::anyhow!(
+                    "unexpected vault add-cert-slot argument: {other}"
+                ));
+            }
+        }
+    }
+
+    Ok(VaultCommand::AddCertSlot {
+        cert_path: cert_path
+            .ok_or_else(|| anyhow::anyhow!("vault add-cert-slot requires --cert"))?,
+        label,
     })
 }
 
@@ -466,6 +595,49 @@ fn read_master_password(env_name: &str) -> anyhow::Result<String> {
     Ok(value)
 }
 
+fn read_optional_env(env_name: &str) -> anyhow::Result<Option<String>> {
+    match env::var(env_name) {
+        Ok(value) => {
+            if value.is_empty() {
+                return Err(anyhow::anyhow!("{env_name} must not be empty"));
+            }
+            Ok(Some(value))
+        }
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(anyhow::Error::from(error)),
+    }
+}
+
+fn unlock_vault_for_invocation(
+    invocation: &VaultInvocation,
+) -> anyhow::Result<paranoid_vault::UnlockedVault> {
+    match &invocation.auth {
+        VaultAuth::PasswordEnv(env_name) => {
+            let master_password = read_master_password(env_name.as_str())?;
+            unlock_vault(&invocation.path, &master_password).map_err(anyhow::Error::from)
+        }
+        VaultAuth::Certificate {
+            cert_path,
+            key_path,
+            key_passphrase_env,
+        } => {
+            let cert_pem = fs::read(cert_path)?;
+            let key_pem = fs::read(key_path)?;
+            let key_passphrase = match key_passphrase_env {
+                Some(env_name) => read_optional_env(env_name.as_str())?,
+                None => None,
+            };
+            unlock_vault_with_certificate(
+                &invocation.path,
+                cert_pem.as_slice(),
+                key_pem.as_slice(),
+                key_passphrase.as_deref(),
+            )
+            .map_err(anyhow::Error::from)
+        }
+    }
+}
+
 fn default_vault_path() -> PathBuf {
     if let Ok(xdg) = env::var("XDG_DATA_HOME") {
         return PathBuf::from(xdg)
@@ -496,20 +668,24 @@ fn print_usage(mut out: impl Write) -> io::Result<()> {
 paranoid-passwd {VERSION}
 
 Usage:
-  paranoid-passwd vault [--path FILE] [--password-env VAR] <subcommand> [OPTIONS]
+  paranoid-passwd vault [--path FILE] [--password-env VAR] [--cert CERT.pem --key KEY.pem [--key-passphrase-env VAR]] <subcommand> [OPTIONS]
 
 Subcommands:
   init
+  keyslots
   list
   show --id ID
   add --title TITLE --username USER --password SECRET [--url URL] [--notes NOTES]
   update --id ID [--title TITLE] [--username USER] [--password SECRET] [--url URL|--clear-url] [--notes NOTES|--clear-notes]
   delete --id ID
+  add-cert-slot --cert CERT.pem [--label LABEL]
   generate-store [generator flags...] --title TITLE --username USER [--url URL] [--notes NOTES]
 
-Master password:
-  Vault commands read the master password from PARANOID_MASTER_PASSWORD by default.
+Unlock sources:
+  By default vault commands read the recovery secret from PARANOID_MASTER_PASSWORD.
   Override with --password-env VAR.
+  Certificate-backed unlock requires --cert and --key together before the subcommand.
+  If the private key PEM is encrypted, pass --key-passphrase-env VAR.
 "
     )
 }
@@ -539,4 +715,60 @@ fn print_generated_passwords(report: &GenerationReport) -> anyhow::Result<()> {
     }
     handle.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_vault_args_supports_certificate_auth() {
+        let invocation = parse_vault_args(&[
+            OsString::from("--cert"),
+            OsString::from("unlock-cert.pem"),
+            OsString::from("--key"),
+            OsString::from("unlock-key.pem"),
+            OsString::from("--key-passphrase-env"),
+            OsString::from("PARANOID_KEY_PASSPHRASE"),
+            OsString::from("list"),
+        ])
+        .expect("parse");
+
+        match invocation.auth {
+            VaultAuth::Certificate {
+                cert_path,
+                key_path,
+                key_passphrase_env,
+            } => {
+                assert_eq!(cert_path, PathBuf::from("unlock-cert.pem"));
+                assert_eq!(key_path, PathBuf::from("unlock-key.pem"));
+                assert_eq!(
+                    key_passphrase_env.as_deref(),
+                    Some("PARANOID_KEY_PASSPHRASE")
+                );
+            }
+            VaultAuth::PasswordEnv(_) => panic!("expected certificate auth"),
+        }
+        assert!(matches!(invocation.command, VaultCommand::List));
+    }
+
+    #[test]
+    fn parse_add_cert_slot_requires_slot_certificate() {
+        let command = parse_vault_args(&[
+            OsString::from("add-cert-slot"),
+            OsString::from("--cert"),
+            OsString::from("recipient.pem"),
+            OsString::from("--label"),
+            OsString::from("laptop"),
+        ])
+        .expect("parse");
+
+        match command.command {
+            VaultCommand::AddCertSlot { cert_path, label } => {
+                assert_eq!(cert_path, PathBuf::from("recipient.pem"));
+                assert_eq!(label.as_deref(), Some("laptop"));
+            }
+            _ => panic!("expected add-cert-slot command"),
+        }
+    }
 }
