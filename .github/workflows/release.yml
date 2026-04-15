@@ -192,35 +192,32 @@ jobs:
               --keyring-append melange.rsa.pub \
               --repository-append packages/
 
-      - name: Extract site + WASM
+      - name: Extract site + WASM from melange apk
         id: extract
         run: |
           mkdir -p artifact/site
-          APK_FILE=$(find packages/ -name '*.apk' -type f | head -1)
-          if [ -n "$APK_FILE" ]; then
-            mkdir -p /tmp/apk-extract
-            tar -xzf "$APK_FILE" -C /tmp/apk-extract 2>/dev/null || true
-            if [ -d /tmp/apk-extract/usr/share/paranoid-passwd/site ]; then
-              cp -r /tmp/apk-extract/usr/share/paranoid-passwd/site/* artifact/site/
-            fi
-            if [ -f /tmp/apk-extract/usr/share/paranoid-passwd/site/paranoid.wasm ]; then
-              cp /tmp/apk-extract/usr/share/paranoid-passwd/site/paranoid.wasm artifact/
-            fi
+          # Pick the MAIN paranoid-passwd apk, not paranoid-passwd-cli which
+          # only contains the CLI binary. Alphabetical sort via `head -1`
+          # would grab the -cli variant first; match the exact stem instead.
+          APK_FILE=$(find packages/ -maxdepth 3 -name 'paranoid-passwd-[0-9]*.apk' -type f | head -1)
+          if [ -z "$APK_FILE" ]; then
+            echo "::error::No paranoid-passwd-<version>.apk found in packages/"
+            find packages/ -name '*.apk' -type f
+            exit 1
           fi
 
-          # Fallback to a direct build if melange extraction didn't yield
-          # the expected tree.
-          if [ ! -f artifact/paranoid.wasm ]; then
-            cmake -B build/wasm \
-                -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake \
-                -DCMAKE_BUILD_TYPE=Release
-            cmake --build build/wasm
-            [ -f build/wasm/paranoid ] && [ ! -f build/wasm/paranoid.wasm ] \
-                && mv build/wasm/paranoid build/wasm/paranoid.wasm
-            cp build/wasm/paranoid.wasm artifact/
-            cp www/index.html www/style.css www/app.js www/CNAME artifact/site/
-            cp build/wasm/paranoid.wasm artifact/site/
+          echo "Extracting ${APK_FILE}"
+          mkdir -p /tmp/apk-extract
+          tar -xzf "$APK_FILE" -C /tmp/apk-extract
+
+          site_src=/tmp/apk-extract/usr/share/paranoid-passwd/site
+          if [ ! -d "$site_src" ]; then
+            echo "::error::site tree missing from apk at $site_src"
+            find /tmp/apk-extract -type f | head -40
+            exit 1
           fi
+          cp -r "$site_src"/* artifact/site/
+          cp "$site_src/paranoid.wasm" artifact/
 
           echo "wasm-sha256=$(sha256sum artifact/paranoid.wasm | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
