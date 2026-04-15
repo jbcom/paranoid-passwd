@@ -418,14 +418,18 @@ void test_stress_distribution(void) {
         }
     }
 
-    /* Each character should appear ~1000 times (10000/10) */
-    /* Allow 10% deviation for random variation */
+    /* Each character should appear ~1000 times (10000/10).
+     * Per-character count is binomial(10000, 0.1): mean=1000, σ≈30.
+     * 10% deviation = 3.33σ (~0.1% fail per char, ~1% overall — flaky).
+     * 15% deviation = 5σ (~3e-7 fail per char, effectively never flakes).
+     * Uniformity is also asserted rigorously by the chi-squared tests;
+     * this test exists as a smoke check, not a rigorous uniformity proof. */
     double expected = (double)total_chars / charset_len;
     for (int i = 0; i < charset_len; i++) {
         int count = freq[(unsigned char)charset[i]];
         double deviation = fabs((double)count - expected) / expected;
-        TEST_CHECK(deviation < 0.10);  /* Less than 10% deviation */
-        if (deviation >= 0.10) {
+        TEST_CHECK(deviation < 0.15);
+        if (deviation >= 0.15) {
             TEST_MSG("Char '%c': expected ~%.0f, got %d (%.1f%% deviation)",
                      charset[i], expected, count, deviation * 100.0);
         }
