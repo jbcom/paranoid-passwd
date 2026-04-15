@@ -23,9 +23,9 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir "tox==${TOX_VE
 RUN bash --version >/dev/null \
  && cargo --version >/dev/null \
  && rustc --version >/dev/null \
+ && pkgconf --modversion openssl >/dev/null \
  && python3 --version >/dev/null \
  && tox --version >/dev/null \
- && openssl version >/dev/null \
  && rustc --version | grep -F "1.88.0" >/dev/null \
  && tox --version | grep -F "${TOX_VERSION}" >/dev/null \
  && echo "builder image OK"
