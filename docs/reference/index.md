@@ -8,8 +8,8 @@ title: Reference
 :maxdepth: 2
 
 architecture
+release-checklist
 testing
 supply-chain
 release-verification
 ```
-

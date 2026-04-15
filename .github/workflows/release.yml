@@ -198,11 +198,37 @@ jobs:
               cli-dist/*.tar.gz cli-dist/*.zip cli-dist/checksums.txt \
               --repo "${GH_REPO}" --clobber
 
+  release-surface-verify:
+    name: Verify Published Release Surface
+    needs: attest-and-publish
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout (for verification scripts)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+
+      - name: Verify expected assets, checksums, attestation, and smoke path
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          bash scripts/verify_published_release.sh "${RAW_TAG}" "${GH_REPO}" "${OWNER}"
+
   publish-packages:
     name: Publish to jbcom/pkgs
     needs:
       - release-validate
       - attest-and-publish
+      - release-surface-verify
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
@@ -289,7 +315,7 @@ jobs:
 
   release-download-verify:
     name: Release Download Verification (${{ matrix.target_os }}/${{ matrix.target_arch }})
-    needs: attest-and-publish
+    needs: release-surface-verify
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:

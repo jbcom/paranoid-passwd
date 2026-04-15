@@ -39,12 +39,13 @@ The shared report model is split between:
 
 - On an interactive TTY with no mode-forcing or operational flags, it launches the TUI.
 - In automation or with `--cli`, it keeps the scriptable stdout/stderr contract.
+- That launch policy is treated as the standard product contract: default TUI, explicit or implied headless CLI when operational flags are present, dedicated GUI app when the GUI surface is launched.
 - The TUI uses `ratatui` plus `crossterm` to keep the current three-step product flow.
 - The `vault` namespace adds encrypted local retention without changing the generator root behavior.
 
 ## GUI
 
-`paranoid-passwd-gui` is the follow-on desktop surface. It uses `Iced` and shares the same core request/result model.
+`paranoid-passwd-gui` is the follow-on desktop surface. It uses `Iced`, shares the same core request/result model, and is still under parity work rather than being part of the shipped release line.
 
 ## Vault Foundation
 

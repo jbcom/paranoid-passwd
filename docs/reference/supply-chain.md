@@ -41,8 +41,13 @@ Before attestation, the release workflow now validates:
 - aggregate checksums
 - Homebrew / Scoop / Chocolatey manifest generation
 - the docs-hosted `install.sh` flow against a local artifact server
+- the checked-in release-validation scripts instead of workflow-only inline shell
 
 GitHub Pages is rebuilt directly from `main` using the Sphinx docs tree instead of downloading a site zip from a release artifact.
+
+## Branch Protection Discipline
+
+The repository now carries `scripts/verify_branch_protection.sh` plus `make verify-branch-protection` so operators can detect stale required-check policies before they block a merge. This is a manual or authenticated check because branch protection lives in GitHub configuration rather than the Git tree.
 
 ## Cargo Dependency Discipline
 

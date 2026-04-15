@@ -58,9 +58,10 @@ The docs site is part of the build:
 
 ```bash
 python3 -m tox -e docs
+python3 -m tox -e docs-linkcheck
 ```
 
-That validates the docs tree and builds the Sphinx output under `docs/_build/html`.
+That validates the docs tree, builds the Sphinx output under `docs/_build/html`, and checks outbound documentation links without coupling CI to the live Pages deployment.
 
 ## Release Validation
 
@@ -74,3 +75,4 @@ make release-emulate
 - `make smoke-release` builds and smoke-tests the host-native archive.
 - `make release-emulate` drives the Linux release packaging path through the custom builder image.
 - `scripts/release_validate.sh` is used in CI after the full matrix build to verify all archives, package-manager manifests, and `install.sh`.
+- `make verify-branch-protection` checks that GitHub branch protection still matches the active Rust-native required checks.

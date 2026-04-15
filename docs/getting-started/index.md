@@ -4,6 +4,13 @@ title: Getting Started
 
 # Getting Started
 
+```{toctree}
+:maxdepth: 1
+
+downloads
+install-and-verify
+```
+
 ## Download
 
 The canonical binaries are published through [GitHub Releases](https://github.com/jbcom/paranoid-passwd/releases). Release assets keep the existing naming pattern:
@@ -15,6 +22,8 @@ The canonical binaries are published through [GitHub Releases](https://github.co
 - `paranoid-passwd-<version>-windows-amd64.zip`
 
 The docs site also serves [`/install.sh`](https://paranoid-passwd.com/install.sh), which downloads the correct release archive for the current platform.
+
+Today’s published release artifact is `paranoid-passwd`, which includes the CLI and TUI entrypoint. The GUI crate is present in the workspace, but GUI packaging is a later phase.
 
 ## Install With `install.sh`
 
@@ -83,3 +92,5 @@ If you want to exercise the checked-in release packaging path locally:
 make smoke-release
 make release-emulate
 ```
+
+If you are validating the release process itself instead of installing the tool, use the release checklist in [Reference → Release Checklist](../reference/release-checklist.md).

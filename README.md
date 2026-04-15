@@ -13,11 +13,17 @@ domain: product
 
 - a scriptable CLI
 - a full-screen wizard TUI
-- a cross-platform GUI path
+- a cross-platform GUI crate under active parity work
 - an encrypted local vault foundation
 - a docs-and-downloads website published from Sphinx
 
 The old interactive GitHub Pages app is retired. `paranoid-passwd.com` now serves documentation, installation instructions, and release links only.
+
+Launch behavior is standardized:
+
+- `paranoid-passwd` defaults to the TUI on an interactive terminal with no operational flags
+- `paranoid-passwd` stays headless when generation or vault flags are passed, or when stdin/stdout are not interactive
+- `paranoid-passwd-gui` is the dedicated app surface once GUI packaging ships
 
 ## Workspace
 
@@ -81,6 +87,7 @@ To exercise the release packaging path:
 ```bash
 make smoke-release
 make release-emulate
+make verify-published-release TAG=paranoid-passwd-v3.5.2
 ```
 
 ## Releases
@@ -90,6 +97,8 @@ Release archives are published on [GitHub Releases](https://github.com/jbcom/par
 - [`https://paranoid-passwd.com/install.sh`](https://paranoid-passwd.com/install.sh)
 - install and verification guides
 - generated Rust API docs via `sphinxcontrib-rust`
+
+The currently shipped release artifact is `paranoid-passwd`, which contains the scriptable CLI and the TUI entrypoint. The GUI crate is tracked in the workspace, but it is not a published release artifact yet.
 
 ## Security Posture
 

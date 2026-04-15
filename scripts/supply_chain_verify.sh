@@ -113,6 +113,35 @@ else
   fail "docs/download surface is incomplete"
 fi
 
+if [ -f "$REPO_ROOT/scripts/verify_published_release.sh" ] \
+  && rg -q '^verify-published-release:' "$REPO_ROOT/Makefile"; then
+  pass "published release verification is available from the repo"
+else
+  fail "published release verification is missing"
+fi
+
+if rg -q 'docs-linkcheck' "$REPO_ROOT/tox.ini" \
+  && rg -q 'docs-linkcheck' "$REPO_ROOT/.github/workflows/ci.yml"; then
+  pass "docs link validation is wired into tox and CI"
+else
+  fail "docs link validation is missing from tox or CI"
+fi
+
+if [ -f "$REPO_ROOT/scripts/verify_branch_protection.sh" ] \
+  && rg -q '^verify-branch-protection:' "$REPO_ROOT/Makefile"; then
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    if bash "$REPO_ROOT/scripts/verify_branch_protection.sh" >/dev/null; then
+      pass "branch protection matches the Rust-native required checks"
+    else
+      fail "branch protection does not match the Rust-native required checks"
+    fi
+  else
+    pass "branch protection verification script exists (live check skipped: gh auth unavailable)"
+  fi
+else
+  fail "branch protection verification is missing"
+fi
+
 if [ "$failed" -ne 0 ]; then
   echo
   echo -e "${RED}Supply chain verification failed${NC}"
