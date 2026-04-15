@@ -155,30 +155,30 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
     # The platform_wasm.c backend has zero external dependencies beyond
     # WASI random_get and the compact SHA-256 implementation.
 
-    # ── Post-build: wasm-opt + wasm-strip + wasm-validate ────
+    # ── Post-build: wasm-opt + wasm-validate ────
     # wasm-opt fixes Zig WASM codegen issues and optimizes size.
-    # wasm-strip removes remaining debug info.
     # wasm-validate is a hard gate — catches structural issues
     # that browsers would silently reject.
     find_program(WASM_OPT wasm-opt)
-    find_program(WASM_STRIP wasm-strip)
     find_program(WASM_VALIDATE wasm-validate)
 
     if(WASM_OPT)
+        # -g preserves the name section (function-export symbol names).
+        # Without it wasm-opt strips the name section, breaking export
+        # verification and removing useful symbols from browser stack traces.
         add_custom_command(TARGET paranoid_wasm POST_BUILD
-            COMMAND ${WASM_OPT} -O2 --enable-bulk-memory
+            COMMAND ${WASM_OPT} -O2 --enable-bulk-memory -g
                 -o $<TARGET_FILE:paranoid_wasm>
                 $<TARGET_FILE:paranoid_wasm>
             COMMENT "Post-processing with wasm-opt (fixes Zig codegen + optimizes size)"
         )
     endif()
 
-    if(WASM_STRIP)
-        add_custom_command(TARGET paranoid_wasm POST_BUILD
-            COMMAND ${WASM_STRIP} $<TARGET_FILE:paranoid_wasm>
-            COMMENT "Stripping WASM binary"
-        )
-    endif()
+    # wasm-strip removed: it strips the WASM name section, which breaks
+    # `wasm-objdump -x | grep "<symbol>"`-style export verification in CI
+    # and also removes useful symbols from browser stack traces. wasm-opt
+    # above already handles size optimization; the extra few KB the name
+    # section costs isn't worth losing those capabilities.
 
     # wasm-validate runs AFTER opt+strip to catch any corruption.
     # This is a hard gate — build fails if the binary is invalid.
@@ -218,7 +218,16 @@ elseif(PARANOID_CROSS_CLI)
         src
     )
 
-    target_link_libraries(paranoid_cli_core PUBLIC m)
+    # POSIX targets need libm for math. Windows (MSVCRT/mingw) links it
+     # automatically and lacks a standalone -lm.
+    if(NOT WIN32)
+        target_link_libraries(paranoid_cli_core PUBLIC m)
+    endif()
+
+    # Windows needs bcrypt.lib for BCryptGenRandom in platform_posix.c.
+    if(WIN32)
+        target_link_libraries(paranoid_cli_core PUBLIC bcrypt)
+    endif()
 
     target_compile_options(paranoid_cli_core PRIVATE
         -Wall -Wextra -Werror -O2

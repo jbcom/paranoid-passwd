@@ -19,6 +19,7 @@ packages/
 Thumbs.db
 _codeql_detected_source_root
 
+
 # Playwright
 test-results/
 playwright-report/

@@ -1,18 +1,16 @@
 # -----------------------------------------------------------------
-# paranoid-passwd -- CD Pipeline (Push to Main)
+# paranoid-passwd — CD (push to main)
 #
-# RUNS ON: Push to main branch
-# PURPOSE: Build verified artifacts with melange/apko, generate
-#          SBOM, sign with cosign, run reproducible build check,
-#          and trigger release-please.
+# RUNS ON: push to main, weekly Scorecard schedule.
+# PURPOSE: deploy what release.yml has already built and shipped.
 #
-# SUPPLY CHAIN SECURITY:
-#   - All GitHub Actions SHA-pinned (not tags)
-#   - melange package build with signing key
-#   - apko OCI image build with automatic SBOM
-#   - Cosign keyless signing via GitHub OIDC (Sigstore)
-#   - Diverse double-compilation check
-#   - release-please automated releases
+# Topology: ci → release → cd.
+#   ci.yml verifies PRs; release.yml produces versioned artifacts on
+#   each release-please tag; cd.yml fetches the latest release's
+#   site artifact and deploys it to GitHub Pages.
+#
+# Also folds in the release-please action (so a merge to main opens
+# or updates the release PR) and OpenSSF Scorecard (weekly + on push).
 # -----------------------------------------------------------------
 
 name: CD
@@ -20,6 +18,8 @@ name: CD
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # weekly Monday 6am UTC — Scorecard
   workflow_dispatch:
 
 permissions: {}
@@ -28,278 +28,143 @@ concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  ZIG_VERSION: "0.13.0"
-  # SHA-256 of zig-linux-x86_64-${ZIG_VERSION}.tar.xz from ziglang.org.
-  # Update in lockstep with ZIG_VERSION.
-  ZIG_SHA256: "d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea"
-
 jobs:
 
-  # ---------------------------------------------------------------
-  # JOB 1: Build with melange + apko, Sign with Cosign
-  # ---------------------------------------------------------------
-  build:
-    name: Build + Sign (melange/apko)
-    runs-on: ubuntu-24.04
-
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write
-
-    outputs:
-      image-digest: ${{ steps.apko-build.outputs.digest }}
-      wasm-sha256: ${{ steps.extract.outputs.wasm-sha256 }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Install Zig (SHA-verified)
-        run: |
-          archive="zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
-          curl -sSLO "https://ziglang.org/download/${ZIG_VERSION}/${archive}"
-          echo "${ZIG_SHA256}  ${archive}" | sha256sum -c -
-          tar -xJf "${archive}"
-          rm "${archive}"
-          echo "$PWD/zig-linux-x86_64-${ZIG_VERSION}" >> "$GITHUB_PATH"
-
-      - name: Install melange
-        run: |
-          # Install melange from Chainguard releases
-          MELANGE_VERSION="0.43.3"
-          curl -sSL "https://github.com/chainguard-dev/melange/releases/download/v${MELANGE_VERSION}/melange_${MELANGE_VERSION}_linux_amd64.tar.gz" | tar -xz --strip-components=1
-          sudo mv melange /usr/local/bin/
-          melange version
-
-      - name: Install apko
-        run: |
-          # Install apko from Chainguard releases
-          APKO_VERSION="1.1.11"
-          curl -sSL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_amd64.tar.gz" | tar -xz --strip-components=1
-          sudo mv apko /usr/local/bin/
-          apko version
-
-      - name: Install crane
-        run: |
-          CRANE_VERSION="0.20.2"
-          curl -sSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xz crane
-          sudo mv crane /usr/local/bin/
-
-      - name: Generate melange signing key
-        run: melange keygen
-
-      - name: Build package with melange
-        run: |
-          melange build melange.yaml \
-            --signing-key melange.rsa \
-            --arch x86_64 \
-            --out-dir packages/ \
-            --runner docker
-
-      - name: Build OCI image with apko
-        id: apko-build
-        run: |
-          apko build apko.yaml \
-            paranoid-passwd:latest \
-            output.tar \
-            --keyring-append melange.rsa.pub \
-            --repository-append packages/
-
-          # Extract digest from the built image
-          DIGEST=$(crane digest --tarball output.tar 2>/dev/null || echo "local-build")
-          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-
-      - name: Extract site artifacts
-        id: extract
-        run: |
-          echo "================================================================"
-          echo "  Extracting verified artifacts from package"
-          echo "================================================================"
-
-          # Extract site directory from the melange package
-          mkdir -p artifact/site
-          if [ -d packages/ ]; then
-            # Find the built .apk and extract www contents
-            APK_FILE=$(find packages/ -name '*.apk' -type f | head -1)
-            if [ -n "$APK_FILE" ]; then
-              mkdir -p /tmp/apk-extract
-              tar -xzf "$APK_FILE" -C /tmp/apk-extract 2>/dev/null || true
-              # Copy site files from the extracted package
-              # melange installs to /usr/share/paranoid-passwd/site/
-              if [ -d /tmp/apk-extract/usr/share/paranoid-passwd/site ]; then
-                cp -r /tmp/apk-extract/usr/share/paranoid-passwd/site/* artifact/site/
-              fi
-              if [ -f /tmp/apk-extract/usr/share/paranoid-passwd/site/paranoid.wasm ]; then
-                cp /tmp/apk-extract/usr/share/paranoid-passwd/site/paranoid.wasm artifact/
-              fi
-            fi
-          fi
-
-          # Fall back to build directory if package extraction didn't work
-          if [ ! -f artifact/paranoid.wasm ]; then
-            echo "Package extraction incomplete, checking build directory..."
-            # Normalize: -mexec-model=reactor may produce "paranoid" without .wasm
-            if [ -f build/wasm/paranoid ] && [ ! -f build/wasm/paranoid.wasm ]; then
-              mv build/wasm/paranoid build/wasm/paranoid.wasm
-            fi
-            if [ -f build/wasm/paranoid.wasm ]; then
-              cp build/wasm/paranoid.wasm artifact/
-              cp www/index.html www/style.css www/app.js www/CNAME artifact/site/
-              cp build/wasm/paranoid.wasm artifact/site/
-            fi
-          fi
-
-          echo "Extracted files:"
-          ls -la artifact/ 2>/dev/null || echo "No artifact directory"
-          ls -la artifact/site/ 2>/dev/null || echo "No site directory"
-
-          if [ -f artifact/paranoid.wasm ]; then
-            WASM_SHA256=$(sha256sum artifact/paranoid.wasm | cut -d' ' -f1)
-            echo "wasm-sha256=${WASM_SHA256}" >> "$GITHUB_OUTPUT"
-            echo "WASM SHA-256: ${WASM_SHA256}"
-          else
-            echo "WARNING: paranoid.wasm not found in artifacts"
-            echo "wasm-sha256=none" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push OCI image
-        run: |
-          if [ -f output.tar ]; then
-            # Load and push the apko-built image
-            crane push output.tar ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            crane push output.tar ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          else
-            echo "ERROR: output.tar not found, cannot push OCI image" && exit 1
-          fi
-
-      - name: Sign container image with Cosign
-        if: steps.apko-build.outputs.digest != 'local-build'
-        run: |
-          echo "Signing image with Cosign (keyless via GitHub OIDC)..."
-          cosign sign --yes \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          echo "Image signed and recorded in Sigstore Rekor transparency log"
-
-      - name: Upload site artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paranoid-site
-          path: artifact/site/
-          retention-days: 90
-
-      - name: Upload WASM binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: paranoid-wasm
-          path: artifact/paranoid.wasm
-          retention-days: 90
-
-      - name: Supply chain summary
-        run: |
-          echo ""
-          echo "================================================================"
-          echo "  SUPPLY CHAIN SECURITY SUMMARY"
-          echo "================================================================"
-          echo ""
-          echo "Image:      ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          echo "WASM Hash:  ${{ steps.extract.outputs.wasm-sha256 }}"
-          echo ""
-          echo "Build Attestations:"
-          echo "  - melange package built with signing key"
-          echo "  - apko OCI image with automatic SBOM"
-          echo "  - Cosign signature (keyless, GitHub OIDC)"
-          echo ""
-
-  # ---------------------------------------------------------------
-  # JOB 2: Double Compilation (Reproducible Build Check)
-  # ---------------------------------------------------------------
-  double-compile:
-    name: Double Compilation
-    runs-on: ubuntu-24.04
-
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Install Zig (SHA-verified)
-        run: |
-          archive="zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
-          curl -sSLO "https://ziglang.org/download/${ZIG_VERSION}/${archive}"
-          echo "${ZIG_SHA256}  ${archive}" | sha256sum -c -
-          tar -xJf "${archive}"
-          rm "${archive}"
-          echo "$PWD/zig-linux-x86_64-${ZIG_VERSION}" >> "$GITHUB_PATH"
-
-      - name: Install wabt
-        run: sudo apt-get update && sudo apt-get install -y wabt
-
-      - name: Run double compilation check
-        run: ./scripts/double_compile.sh
-
-  # ---------------------------------------------------------------
-  # JOB 3: Multi-Party Verify (release branches only)
-  # ---------------------------------------------------------------
-  multiparty-verify:
-    name: Multi-Party Verify
-    runs-on: ubuntu-24.04
-    if: startsWith(github.ref, 'refs/heads/release-')
-
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Run multi-party verification
-        run: ./scripts/multiparty_verify.sh check
-        continue-on-error: true
-
-  # ---------------------------------------------------------------
-  # JOB 4: Release Please
-  # ---------------------------------------------------------------
+  # ─── Release Please (opens/updates release PR) ─────────────────
   release-please:
     name: Release Please
     runs-on: ubuntu-24.04
-    needs: [build, double-compile]
-
+    if: github.event_name == 'push'
     permissions:
       contents: write
       pull-requests: write
-
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-
     steps:
-      - name: Release Please
-        id: release
+      - name: Run release-please
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
           token: ${{ secrets.CI_GITHUB_TOKEN }}
+
+  # ─── Deploy site from latest release ───────────────────────────
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push'
+    needs: release-please
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout (for CNAME fallback)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Resolve latest release tag
+        id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Use the most recent release tag (release.yml uploads
+          # paranoid-site-${ver}.zip to every release).
+          tag=$(gh release view --repo "${GH_REPO}" --json tagName --jq '.tagName' 2>/dev/null || echo "")
+          if [ -z "${tag}" ]; then
+            echo "No release yet — skipping Pages deploy"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download site zip from latest release
+        if: steps.latest.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.latest.outputs.tag }}
+        run: |
+          ver="${TAG#paranoid-passwd-v}"
+          gh release download "${TAG}" \
+              --repo "${GH_REPO}" \
+              -p "paranoid-site-${ver}.zip"
+          mkdir -p _site
+          unzip -q "paranoid-site-${ver}.zip" -d _site
+
+      - name: Configure Pages
+        if: steps.latest.outputs.skip != 'true'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload Pages artifact
+        if: steps.latest.outputs.skip != 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+      - name: Deploy
+        if: steps.latest.outputs.skip != 'true'
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+
+  # ─── OpenSSF Scorecard ─────────────────────────────────────────
+  scorecard:
+    name: OpenSSF Scorecard
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 14
+
+      - name: Upload SARIF to Code Scanning
+        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
+        with:
+          sarif_file: results.sarif
+
+  # ─── CodeQL on main (scheduled) ────────────────────────────────
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [c-cpp, javascript]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
+        with:
+          languages: ${{ matrix.language }}
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
+      - name: Analyze
+        uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
+        with:
+          category: "/language:${{ matrix.language }}"
