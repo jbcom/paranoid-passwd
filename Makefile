@@ -1,4 +1,4 @@
-.PHONY: help build build-cli build-gui test lint verify-security docs-build docs-check ci ci-emulate package-release smoke-release release-validate release-emulate clean
+.PHONY: help build build-cli build-gui test lint verify-security verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci ci-emulate package-release smoke-release release-validate release-emulate clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -34,10 +34,21 @@ verify-security: ## Run repository security and supply-chain verification script
 	bash scripts/hallucination_check.sh
 	bash scripts/supply_chain_verify.sh
 
+verify-branch-protection: ## Verify main branch protection matches the Rust-native required checks
+	bash scripts/verify_branch_protection.sh
+
+verify-published-release: ## Verify a published GitHub release asset set, attestation, checksums, and host smoke path (TAG=paranoid-passwd-vX.Y.Z)
+	@if [ -z "$(TAG)" ]; then echo "TAG is required, for example: make verify-published-release TAG=paranoid-passwd-v3.5.2"; exit 2; fi
+	bash scripts/verify_published_release.sh "$(TAG)"
+
 docs-build: ## Build the Sphinx docs site
 	python3 -m tox -e docs
 
-docs-check: docs-build ## Validate the docs site and generated API docs
+docs-linkcheck: ## Validate outbound documentation links
+	python3 -m tox -e docs-linkcheck
+
+docs-check: ## Validate the docs site, generated API docs, and external links
+	python3 -m tox -e docs,docs-linkcheck
 
 ci: ## Run the local equivalent of the repository CI gates
 	cargo fmt --check
@@ -47,7 +58,7 @@ ci: ## Run the local equivalent of the repository CI gates
 	bash tests/test_cli.sh target/debug/paranoid-passwd
 	bash scripts/hallucination_check.sh
 	bash scripts/supply_chain_verify.sh
-	python3 -m tox -e docs
+	python3 -m tox -e docs,docs-linkcheck
 
 ci-emulate: ## Build the custom builder image and run the CI target from the repository root
 	docker build -t paranoid-passwd-builder .github/actions/builder

@@ -90,3 +90,10 @@ suppress_warnings = [
     "myst.header",
     "myst.xref_missing",
 ]
+
+linkcheck_anchors = False
+linkcheck_timeout = 10
+linkcheck_retries = 2
+linkcheck_ignore = [
+    r"https://paranoid-passwd\.com/.*",
+]

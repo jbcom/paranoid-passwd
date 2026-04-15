@@ -242,8 +242,15 @@ impl App {
     }
 
     fn start_audit(&mut self) {
+        if let Err(error) = self.request.resolve() {
+            self.status = format!("Blocked: {error}");
+            self.screen = Screen::Configure;
+            return;
+        }
         self.current_stage = Some(AuditStage::Generate);
         self.completed_stages.clear();
+        self.detail_tab = 0;
+        self.report = None;
         self.screen = Screen::Audit;
         self.status = "Running password generation and statistical audit...".to_string();
         let request = self.request.clone();
@@ -303,10 +310,13 @@ impl App {
                                 "Audit complete. Review the results or copy the password."
                                     .to_string();
                             self.report = Some(report);
+                            self.detail_tab = 0;
                             self.screen = Screen::Results;
                         }
                         Err(error) => {
                             self.status = format!("Audit failed: {error}");
+                            self.current_stage = None;
+                            self.completed_stages.clear();
                             self.screen = Screen::Configure;
                         }
                     }
@@ -399,6 +409,8 @@ impl App {
                 self.screen = Screen::Configure;
                 self.current_stage = None;
                 self.completed_stages.clear();
+                self.detail_tab = 0;
+                self.report = None;
                 false
             }
             KeyCode::Char('c') => {
@@ -798,10 +810,18 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
 
     let password_block = Paragraph::new(Text::from(vec![
         Line::styled(
+            "primary",
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+        ),
+        Line::styled(
             primary.value.as_str(),
             Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
         ),
         Line::raw(format!("SHA-256: {}", primary.sha256_hex)),
+        Line::raw(format!(
+            "Selected frameworks: {}",
+            selected_framework_summary(primary)
+        )),
         Line::raw(format!(
             "Additional passwords: {}",
             report.passwords.len().saturating_sub(1)
@@ -813,7 +833,7 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
     ]))
     .block(
         Block::default()
-            .title("Generated Password")
+            .title("Primary Password")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(GREEN))
             .style(Style::default().bg(PANEL).fg(TEXT)),
@@ -953,28 +973,30 @@ fn result_tab_text(tab: usize, report: &GenerationReport) -> Text<'static> {
                 "Primary verdict: {}",
                 if primary.all_pass { "PASS" } else { "REVIEW" }
             )),
+            Line::raw(format!(
+                "Generator-wide statistical verdict: {}",
+                if audit.chi2_pass && audit.serial_pass && audit.collision_pass {
+                    "PASS"
+                } else {
+                    "REVIEW"
+                }
+            )),
             Line::raw(""),
             Line::raw("Additional passwords"),
-            Line::raw(
-                report
-                    .passwords
-                    .iter()
-                    .skip(1)
-                    .enumerate()
-                    .map(|(index, password)| {
-                        format!(
-                            "  additional[{}]: {} ({})",
-                            index + 2,
-                            secure_preview(&password.value),
-                            if password.all_pass { "pass" } else { "review" }
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            ),
+            Line::raw(additional_password_summary(report)),
         ]),
         1 => {
-            let mut lines = Vec::new();
+            let mut lines = vec![
+                Line::raw(format!(
+                    "Selected framework roll-up: {}",
+                    if audit.selected_frameworks_pass {
+                        "PASS"
+                    } else {
+                        "REVIEW"
+                    }
+                )),
+                Line::raw(""),
+            ];
             for (index, password) in report.passwords.iter().enumerate() {
                 let label = if index == 0 {
                     "primary".to_string()
@@ -992,7 +1014,15 @@ fn result_tab_text(tab: usize, report: &GenerationReport) -> Text<'static> {
                 if selected.is_empty() {
                     lines.push(Line::raw(format!("{label}: no frameworks selected")));
                 } else {
-                    lines.push(Line::raw(format!("{label}: {}", selected.join(", "))));
+                    lines.push(Line::raw(format!(
+                        "{label}: {} ({})",
+                        selected.join(", "),
+                        if password.selected_compliance_pass {
+                            "pass"
+                        } else {
+                            "review"
+                        }
+                    )));
                 }
             }
             Text::from(lines)
@@ -1078,9 +1108,48 @@ fn result_tab_text(tab: usize, report: &GenerationReport) -> Text<'static> {
     }
 }
 
+fn additional_password_summary(report: &GenerationReport) -> String {
+    let additional = report
+        .passwords
+        .iter()
+        .skip(1)
+        .enumerate()
+        .map(|(index, password)| {
+            format!(
+                "  additional[{}]: {} ({})",
+                index + 2,
+                secure_preview(&password.value),
+                if password.all_pass { "pass" } else { "review" }
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if additional.is_empty() {
+        "  none".to_string()
+    } else {
+        additional.join("\n")
+    }
+}
+
+fn selected_framework_summary(password: &paranoid_core::GeneratedPassword) -> String {
+    let selected = password
+        .compliance
+        .iter()
+        .filter(|status| status.selected)
+        .map(|status| format!("{}={}", status.id, if status.passed { "OK" } else { "no" }))
+        .collect::<Vec<_>>();
+
+    if selected.is_empty() {
+        "none".to_string()
+    } else {
+        selected.join(", ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     fn render_to_string(app: &App) -> String {
         let backend = TestBackend::new(100, 36);
@@ -1093,6 +1162,15 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>()
+    }
+
+    fn wait_for_worker(app: &mut App) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.worker.is_some() && Instant::now() < deadline {
+            app.poll_worker();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        app.poll_worker();
     }
 
     #[test]
@@ -1138,5 +1216,82 @@ mod tests {
         let rendered = render_to_string(&app);
         assert!(rendered.contains("Total entropy"));
         assert!(rendered.contains("Brute-force"));
+    }
+
+    #[test]
+    fn invalid_launch_stays_on_configure_and_sets_blocked_status() {
+        let mut app = App::default();
+        app.request.length = 4;
+        app.request.requirements.min_lowercase = 5;
+
+        app.start_audit();
+
+        assert_eq!(app.screen, Screen::Configure);
+        assert!(app.status.contains("Blocked:"));
+        assert!(app.worker.is_none());
+    }
+
+    #[test]
+    fn results_summary_explicitly_labels_absent_additional_passwords() {
+        let app = App {
+            report: Some(
+                execute_request(&ParanoidRequest::default(), true, |_| {}).expect("report"),
+            ),
+            screen: Screen::Results,
+            detail_tab: 0,
+            ..App::default()
+        };
+
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("Primary Password"));
+        assert!(rendered.contains("Additional passwords"));
+        assert!(rendered.contains("none"));
+    }
+
+    #[test]
+    fn compliance_tab_distinguishes_primary_and_additional_passwords() {
+        let request = ParanoidRequest {
+            count: 2,
+            selected_frameworks: vec![FrameworkId::Nist],
+            ..ParanoidRequest::default()
+        };
+        let app = App {
+            report: Some(execute_request(&request, true, |_| {}).expect("report")),
+            screen: Screen::Results,
+            detail_tab: 1,
+            ..App::default()
+        };
+
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("Selected framework roll-up"));
+        assert!(rendered.contains("primary"));
+        assert!(rendered.contains("additional[2]"));
+        assert!(rendered.contains("NIST"));
+    }
+
+    #[test]
+    fn full_flow_transitions_from_configure_to_results_and_back() {
+        let mut app = App::default();
+        app.focus_index = app
+            .focus_order()
+            .iter()
+            .position(|field| matches!(field, FocusField::Launch))
+            .expect("launch field");
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_quit);
+        assert_eq!(app.screen, Screen::Audit);
+        assert!(app.worker.is_some());
+
+        wait_for_worker(&mut app);
+
+        assert_eq!(app.screen, Screen::Results);
+        assert!(app.report.is_some());
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+        assert!(!should_quit);
+        assert_eq!(app.screen, Screen::Configure);
+        assert!(app.report.is_none());
+        assert_eq!(app.detail_tab, 0);
     }
 }

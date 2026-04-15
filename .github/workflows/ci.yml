@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -50,10 +52,11 @@ jobs:
         uses: ./.github/actions/builder
         with:
           run: |
-            python3 -m tox -e docs
+            python3 -m tox -e docs,docs-linkcheck
 
   codeql:
     name: CodeQL (${{ matrix.language }})
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

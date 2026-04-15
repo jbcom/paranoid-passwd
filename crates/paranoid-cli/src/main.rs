@@ -73,10 +73,7 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
         ParseOutcome::Exit(code) => return Ok(code),
     };
     let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
-    let launch_tui = matches!(options.mode, LaunchMode::Tui)
-        || (matches!(options.mode, LaunchMode::Auto)
-            && interactive
-            && !options.explicit_operational_flag);
+    let launch_tui = should_launch_tui(&options, interactive);
 
     if launch_tui {
         return tui::run().map(|_| EX_OK);
@@ -107,6 +104,13 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
     }
 
     Ok(EX_OK)
+}
+
+fn should_launch_tui(options: &CliOptions, interactive: bool) -> bool {
+    matches!(options.mode, LaunchMode::Tui)
+        || (matches!(options.mode, LaunchMode::Auto)
+            && interactive
+            && !options.explicit_operational_flag)
 }
 
 fn parse_args(args: Vec<OsString>) -> anyhow::Result<ParseOutcome> {
@@ -343,44 +347,70 @@ fn print_audit(report: &GenerationReport) -> io::Result<()> {
     }
 
     if let Some(primary) = report.passwords.first() {
+        let selected = primary
+            .compliance
+            .iter()
+            .filter(|status| status.selected)
+            .map(|status| format!("{}={}", status.id, if status.passed { "OK" } else { "no" }))
+            .collect::<Vec<_>>()
+            .join(", ");
         writeln!(
             handle,
-            "primary: {}  sha256={}  patterns={}",
+            "primary: {}  sha256={}  patterns={}  selected-frameworks={}  pass={}",
             secure_preview(primary.value.as_str()),
             primary.sha256_hex,
-            primary.pattern_issues
+            primary.pattern_issues,
+            if selected.is_empty() {
+                "none"
+            } else {
+                &selected
+            },
+            if primary.all_pass { "yes" } else { "no" }
         )?;
     }
     if report.passwords.len() > 1 {
         for (index, password) in report.passwords.iter().enumerate().skip(1) {
+            let selected = password
+                .compliance
+                .iter()
+                .filter(|status| status.selected)
+                .map(|status| format!("{}={}", status.id, if status.passed { "OK" } else { "no" }))
+                .collect::<Vec<_>>()
+                .join(", ");
             writeln!(
                 handle,
-                "additional[{}]: {}  patterns={}  pass={}",
+                "additional[{}]: {}  patterns={}  selected-frameworks={}  pass={}",
                 index + 1,
                 secure_preview(password.value.as_str()),
                 password.pattern_issues,
+                if selected.is_empty() {
+                    "none"
+                } else {
+                    &selected
+                },
                 if password.all_pass { "yes" } else { "no" }
             )?;
         }
     }
-    if !report.request.selected_frameworks.is_empty() {
-        let selected = report
-            .passwords
-            .first()
-            .map(|password| {
-                password
-                    .compliance
-                    .iter()
-                    .filter(|status| status.selected)
-                    .map(|status| {
-                        format!("{}={}", status.id, if status.passed { "OK" } else { "no" })
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .unwrap_or_default();
-        writeln!(handle, "compliance:      {selected}")?;
-    }
+    writeln!(
+        handle,
+        "generator:       batch_stats={} per_password={} selected_frameworks={}",
+        if audit.chi2_pass && audit.serial_pass && audit.collision_pass {
+            "pass"
+        } else {
+            "review"
+        },
+        if audit.passwords_all_pass {
+            "pass"
+        } else {
+            "review"
+        },
+        if audit.selected_frameworks_pass {
+            "pass"
+        } else {
+            "review"
+        }
+    )?;
     writeln!(
         handle,
         "audit: {}",
@@ -404,4 +434,46 @@ fn secure_preview(password: &str) -> String {
     }
     let suffix = &password[password.len() - 4..];
     format!("{}{}", "•".repeat(password.len() - 4), suffix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_mode_launches_tui_on_interactive_terminal_without_operational_flags() {
+        let options = CliOptions::default();
+        assert!(should_launch_tui(&options, true));
+    }
+
+    #[test]
+    fn auto_mode_stays_headless_when_operational_flags_are_present() {
+        let options = CliOptions {
+            explicit_operational_flag: true,
+            ..CliOptions::default()
+        };
+        assert!(!should_launch_tui(&options, true));
+    }
+
+    #[test]
+    fn auto_mode_stays_headless_when_not_interactive() {
+        let options = CliOptions::default();
+        assert!(!should_launch_tui(&options, false));
+    }
+
+    #[test]
+    fn explicit_modes_override_auto_detection() {
+        let tui = CliOptions {
+            mode: LaunchMode::Tui,
+            explicit_operational_flag: true,
+            ..CliOptions::default()
+        };
+        let cli = CliOptions {
+            mode: LaunchMode::Cli,
+            ..CliOptions::default()
+        };
+
+        assert!(should_launch_tui(&tui, false));
+        assert!(!should_launch_tui(&cli, true));
+    }
 }

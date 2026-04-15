@@ -136,6 +136,16 @@ t_require_lower() {
 }
 check "--require-lower 5 -> >=5 lowercase" t_require_lower
 
+# --- Test 13: audit output distinguishes primary/additional passwords and generator roll-up
+t_audit_rollup() {
+    local err
+    err="$("$BIN" --cli --length 18 --count 2 --framework nist 2>&1 >/dev/null)"
+    [[ "$err" == *"primary:"* ]] || return 1
+    [[ "$err" == *"additional[2]:"* ]] || return 1
+    [[ "$err" == *"generator:"* ]]
+}
+check "audit output includes per-password and generator roll-ups" t_audit_rollup
+
 # --- Summary
 printf '\n'
 printf '%d passed, %d failed\n' "$PASSES" "$FAILS"

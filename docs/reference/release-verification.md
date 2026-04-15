@@ -9,13 +9,31 @@ title: Release Verification
 Use the checked-in release scripts before you cut a tag:
 
 ```bash
+make verify-branch-protection
 make smoke-release
 make release-emulate
 ```
 
+`make verify-branch-protection` catches stale required-check policies before they block or silently weaken the release line.
+
 `make smoke-release` packages and verifies the host-native archive.
 
 `make release-emulate` runs the Linux amd64 release path through the repository-owned builder container.
+
+## Verify a Published Release End to End
+
+If a tag is already published, use the checked-in verifier instead of replaying the commands manually:
+
+```bash
+make verify-published-release TAG=paranoid-passwd-v3.5.2
+```
+
+That script verifies:
+
+- the exact expected asset set
+- checksum integrity for the host-native archive
+- GitHub attestation for the downloaded artifact
+- the host-native smoke path through `scripts/smoke_test_release_artifact.sh`
 
 ## Download a Release
 
