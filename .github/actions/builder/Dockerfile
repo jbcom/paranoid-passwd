@@ -29,6 +29,7 @@ FROM cgr.dev/chainguard/wolfi-base:latest
 RUN apk add --no-cache \
         bash \
         binaryen \
+        build-base \
         cmake \
         coreutils \
         curl \
@@ -41,6 +42,7 @@ RUN apk add --no-cache \
 
 # Sanity check at image-build time — fail fast if any tool is missing.
 RUN bash --version >/dev/null \
+ && cc --version >/dev/null \
  && cmake --version >/dev/null \
  && zig version >/dev/null \
  && wasm-validate --version >/dev/null \
