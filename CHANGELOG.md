@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.3](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.4.2...paranoid-passwd-v3.4.3) (2026-04-15)
+
+
+### Bug Fixes
+
+* **cd:** restore scorecard.yml + tolerate legacy site-zip naming ([#61](https://github.com/jbcom/paranoid-passwd/issues/61)) ([a4829e6](https://github.com/jbcom/paranoid-passwd/commit/a4829e68fcdb5012bb05d6385554033e84fd30e4))
+
 ## [3.4.2](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.4.1...paranoid-passwd-v3.4.2) (2026-04-15)
 
 

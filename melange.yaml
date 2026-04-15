@@ -22,7 +22,7 @@
 
 package:
   name: paranoid-passwd
-  version: 3.4.2 # x-release-please-version
+  version: 3.4.3 # x-release-please-version
   epoch: 0
   description: "Self-auditing cryptographic password generator -- WASM binary + web UI"
   copyright:
