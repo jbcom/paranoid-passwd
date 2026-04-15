@@ -18,6 +18,16 @@
 #include <stdlib.h>
 #include <ctype.h>
 
+/* VERIFIED: memory hygiene helper for sensitive buffers.
+ * Plain memset(p, 0, n) before free(p) is dead-store-eliminable at -O2.
+ * The volatile-pointer write loop is portable (C99) and the standard
+ * forbids the compiler from optimizing it away. Same pattern as
+ * src/cli.c::secure_zero (added in PR #17 for the same UB class). */
+static void secure_zero(void *p, size_t n) {
+    volatile unsigned char *vp = (volatile unsigned char *)p;
+    while (n--) *vp++ = 0;
+}
+
 /* ═══════════════════════════════════════════════════════════
    STATIC RESULT — lives in WASM linear memory
    JS gets a pointer to this via paranoid_get_result_ptr()
@@ -663,13 +673,18 @@ int paranoid_run_audit(
     result->current_stage = 2;
 
     /* Each paranoid_generate call writes pw_length chars + 1 NUL terminator */
-    char *batch = malloc(batch_size * (pw_length + 1));
+    size_t batch_bytes = (size_t)batch_size * (size_t)(pw_length + 1);
+    char *batch = malloc(batch_bytes);
     if (!batch) return -1;
 
     for (int i = 0; i < batch_size; i++) {
         rc = paranoid_generate(charset, charset_len, pw_length,
                                batch + i * pw_length);
-        if (rc != 0) { free(batch); return rc; }
+        /* VERIFIED: scrub batch before free on every exit path.
+         * plaintext passwords would otherwise survive in heap memory
+         * until reuse; in WASM linear memory the JS bridge could
+         * read them. */
+        if (rc != 0) { secure_zero(batch, batch_bytes); free(batch); return rc; }
     }
 
     result->chi2_statistic = paranoid_chi_squared(
@@ -691,9 +706,11 @@ int paranoid_run_audit(
     result->current_stage = 4;
 
     result->duplicates = paranoid_count_collisions(batch, batch_size, pw_length);
-    if (result->duplicates < 0) { free(batch); return -1; }
+    if (result->duplicates < 0) { secure_zero(batch, batch_bytes); free(batch); return -1; }
     result->collision_pass = (result->duplicates == 0) ? 1 : 0;
 
+    /* VERIFIED: scrub before free; see comment above. */
+    secure_zero(batch, batch_bytes);
     free(batch);
 
     /* ── Stage 5: Entropy proof + Uniqueness ── */
