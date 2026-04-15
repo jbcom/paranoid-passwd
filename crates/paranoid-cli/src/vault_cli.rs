@@ -1,7 +1,7 @@
 use paranoid_core::{CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, VERSION};
 use paranoid_vault::{
     NewLoginRecord, UpdateLoginRecord, init_vault, read_vault_header, unlock_vault,
-    unlock_vault_with_certificate,
+    unlock_vault_with_certificate, unlock_vault_with_device,
 };
 use std::{
     env,
@@ -99,6 +99,17 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             );
             Ok(0)
         }
+        VaultCommand::AddDeviceSlot { label } => {
+            let mut vault = unlock_vault_for_invocation(&invocation)?;
+            let keyslot = vault.add_device_keyslot(label.clone())?;
+            println!(
+                "{}\t{}\t{}",
+                keyslot.id,
+                keyslot.wrap_algorithm,
+                keyslot.label.unwrap_or_default()
+            );
+            Ok(0)
+        }
         VaultCommand::GenerateStore {
             request,
             title,
@@ -132,6 +143,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
 struct VaultInvocation {
     path: PathBuf,
     auth: VaultAuth,
+    device_slot: Option<String>,
     command: VaultCommand,
 }
 
@@ -175,6 +187,9 @@ enum VaultCommand {
         cert_path: PathBuf,
         label: Option<String>,
     },
+    AddDeviceSlot {
+        label: Option<String>,
+    },
     GenerateStore {
         request: ParanoidRequest,
         title: String,
@@ -191,6 +206,7 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
     let mut cert_path = None;
     let mut key_path = None;
     let mut key_passphrase_env = None;
+    let mut device_slot = None;
     let mut command: Option<String> = None;
     let mut command_args = Vec::new();
     let mut iter = args
@@ -233,6 +249,12 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
                         .ok_or_else(|| anyhow::anyhow!("--key-passphrase-env requires a value"))?,
                 );
             }
+            "--device-slot" if command.is_none() => {
+                device_slot = Some(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("--device-slot requires a value"))?,
+                );
+            }
             value if command.is_none() => {
                 command = Some(value.to_string());
             }
@@ -250,9 +272,16 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
         "update" => parse_update(command_args.as_slice())?,
         "delete" => parse_delete(command_args.as_slice())?,
         "add-cert-slot" => parse_add_cert_slot(command_args.as_slice())?,
+        "add-device-slot" => parse_add_device_slot(command_args.as_slice())?,
         "generate-store" => parse_generate_store(command_args.as_slice())?,
         other => return Err(anyhow::anyhow!("unknown vault subcommand: {other}")),
     };
+
+    if device_slot.is_some() && cert_path.is_some() {
+        return Err(anyhow::anyhow!(
+            "--device-slot cannot be combined with certificate-backed unlock"
+        ));
+    }
 
     let auth = match (cert_path, key_path) {
         (Some(cert_path), Some(key_path)) => VaultAuth::Certificate {
@@ -271,6 +300,7 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
     Ok(VaultInvocation {
         path,
         auth,
+        device_slot,
         command,
     })
 }
@@ -411,6 +441,29 @@ fn parse_add_cert_slot(args: &[String]) -> anyhow::Result<VaultCommand> {
             .ok_or_else(|| anyhow::anyhow!("vault add-cert-slot requires --cert"))?,
         label,
     })
+}
+
+fn parse_add_device_slot(args: &[String]) -> anyhow::Result<VaultCommand> {
+    let mut label = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--label" => {
+                label = Some(
+                    iter.next()
+                        .ok_or_else(|| anyhow::anyhow!("--label requires a value"))?
+                        .to_string(),
+                );
+            }
+            other => {
+                return Err(anyhow::anyhow!(
+                    "unexpected vault add-device-slot argument: {other}"
+                ));
+            }
+        }
+    }
+
+    Ok(VaultCommand::AddDeviceSlot { label })
 }
 
 fn parse_generate_store(args: &[String]) -> anyhow::Result<VaultCommand> {
@@ -611,11 +664,22 @@ fn read_optional_env(env_name: &str) -> anyhow::Result<Option<String>> {
 fn unlock_vault_for_invocation(
     invocation: &VaultInvocation,
 ) -> anyhow::Result<paranoid_vault::UnlockedVault> {
+    if let Some(slot_id) = invocation.device_slot.as_deref() {
+        return unlock_vault_with_device(&invocation.path, Some(slot_id))
+            .map_err(anyhow::Error::from);
+    }
+
     match &invocation.auth {
-        VaultAuth::PasswordEnv(env_name) => {
-            let master_password = read_master_password(env_name.as_str())?;
-            unlock_vault(&invocation.path, &master_password).map_err(anyhow::Error::from)
-        }
+        VaultAuth::PasswordEnv(env_name) => match read_master_password(env_name.as_str()) {
+            Ok(master_password) => {
+                unlock_vault(&invocation.path, &master_password).map_err(anyhow::Error::from)
+            }
+            Err(password_error) => match unlock_vault_with_device(&invocation.path, None) {
+                Ok(vault) => Ok(vault),
+                Err(device_error) => Err(password_error
+                    .context(format!("device-bound fallback unavailable: {device_error}"))),
+            },
+        },
         VaultAuth::Certificate {
             cert_path,
             key_path,
@@ -668,7 +732,7 @@ fn print_usage(mut out: impl Write) -> io::Result<()> {
 paranoid-passwd {VERSION}
 
 Usage:
-  paranoid-passwd vault [--path FILE] [--password-env VAR] [--cert CERT.pem --key KEY.pem [--key-passphrase-env VAR]] <subcommand> [OPTIONS]
+  paranoid-passwd vault [--path FILE] [--password-env VAR] [--device-slot ID] [--cert CERT.pem --key KEY.pem [--key-passphrase-env VAR]] <subcommand> [OPTIONS]
 
 Subcommands:
   init
@@ -679,11 +743,14 @@ Subcommands:
   update --id ID [--title TITLE] [--username USER] [--password SECRET] [--url URL|--clear-url] [--notes NOTES|--clear-notes]
   delete --id ID
   add-cert-slot --cert CERT.pem [--label LABEL]
+  add-device-slot [--label LABEL]
   generate-store [generator flags...] --title TITLE --username USER [--url URL] [--notes NOTES]
 
 Unlock sources:
   By default vault commands read the recovery secret from PARANOID_MASTER_PASSWORD.
   Override with --password-env VAR.
+  If the recovery secret is absent and the vault has exactly one device-bound keyslot, commands fall back to passwordless device unlock.
+  Use --device-slot ID to select a specific device-bound keyslot explicitly.
   Certificate-backed unlock requires --cert and --key together before the subcommand.
   If the private key PEM is encrypted, pass --key-passphrase-env VAR.
 "
@@ -770,5 +837,35 @@ mod tests {
             }
             _ => panic!("expected add-cert-slot command"),
         }
+    }
+
+    #[test]
+    fn parse_add_device_slot_supports_label() {
+        let command = parse_vault_args(&[
+            OsString::from("add-device-slot"),
+            OsString::from("--label"),
+            OsString::from("daily"),
+        ])
+        .expect("parse");
+
+        match command.command {
+            VaultCommand::AddDeviceSlot { label } => {
+                assert_eq!(label.as_deref(), Some("daily"));
+            }
+            _ => panic!("expected add-device-slot command"),
+        }
+    }
+
+    #[test]
+    fn parse_vault_args_supports_explicit_device_slot_unlock() {
+        let invocation = parse_vault_args(&[
+            OsString::from("--device-slot"),
+            OsString::from("device-abc123"),
+            OsString::from("list"),
+        ])
+        .expect("parse");
+
+        assert_eq!(invocation.device_slot.as_deref(), Some("device-abc123"));
+        assert!(matches!(invocation.command, VaultCommand::List));
     }
 }

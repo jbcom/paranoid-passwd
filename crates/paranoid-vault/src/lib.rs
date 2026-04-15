@@ -11,6 +11,8 @@ use openssl::{
 use paranoid_core::{GenerationReport, ParanoidRequest, execute_request};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -29,6 +31,10 @@ const DEFAULT_ITERATIONS: u32 = 3;
 const DEFAULT_PARALLELISM: u32 = 1;
 const PASSWORD_WRAP_ALGORITHM: &str = "argon2id+aes-256-gcm";
 const CERTIFICATE_WRAP_ALGORITHM: &str = "cms-envelope+aes-256-cbc";
+const DEVICE_WRAP_ALGORITHM: &str = "os-keyring+aes-256-gcm-check";
+const DEVICE_KEYRING_SERVICE: &str = "com.paranoid-passwd.vault";
+const DEVICE_AAD_PREFIX: &[u8] = b"paranoid-passwd::vault::device-slot::";
+const DEVICE_CHECK_PLAINTEXT: &[u8] = b"paranoid-passwd::device-bound::v1";
 
 #[derive(Debug, Error)]
 pub enum VaultError {
@@ -48,6 +54,8 @@ pub enum VaultError {
     CryptoFailure(String),
     #[error("certificate failure: {0}")]
     CertificateFailure(String),
+    #[error("device secure storage failure: {0}")]
+    DeviceStoreFailure(String),
     #[error("sqlite failure: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("io failure: {0}")]
@@ -104,6 +112,10 @@ pub struct VaultKeyslot {
     pub encrypted_master_key_hex: String,
     #[serde(default)]
     pub certificate_fingerprint_sha256: Option<String>,
+    #[serde(default)]
+    pub device_service: Option<String>,
+    #[serde(default)]
+    pub device_account: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,10 +245,53 @@ impl UnlockedVault {
             tag_hex: String::new(),
             encrypted_master_key_hex: hex_encode(wrapped.as_slice()),
             certificate_fingerprint_sha256: Some(fingerprint),
+            device_service: None,
+            device_account: None,
         };
 
         self.header.keyslots.push(slot.clone());
         self.persist_header()?;
+        Ok(slot)
+    }
+
+    pub fn add_device_keyslot(
+        &mut self,
+        label: Option<String>,
+    ) -> Result<VaultKeyslot, VaultError> {
+        let slot_id = format!("device-{}", random_hex_id(8)?);
+        let device_account = format!("vault-{}", random_hex_id(16)?);
+        device_store_set_secret(
+            DEVICE_KEYRING_SERVICE,
+            device_account.as_str(),
+            self.master_key.as_slice(),
+        )?;
+
+        let check_blob = encrypt_blob(
+            self.master_key.as_slice(),
+            &device_slot_aad(slot_id.as_str()),
+            DEVICE_CHECK_PLAINTEXT,
+        )?;
+        // TODO: HUMAN_REVIEW - confirm the device-bound keyslot design of storing the raw master key in OS secure storage plus an AES-GCM verification blob is acceptable across macOS, Windows, and Linux secret stores.
+        let slot = VaultKeyslot {
+            id: slot_id,
+            kind: VaultKeyslotKind::DeviceBound,
+            label,
+            wrapped_by_os_keystore: true,
+            wrap_algorithm: DEVICE_WRAP_ALGORITHM.to_string(),
+            salt_hex: String::new(),
+            nonce_hex: hex_encode(check_blob.nonce.as_slice()),
+            tag_hex: hex_encode(check_blob.tag.as_slice()),
+            encrypted_master_key_hex: hex_encode(check_blob.ciphertext.as_slice()),
+            certificate_fingerprint_sha256: None,
+            device_service: Some(DEVICE_KEYRING_SERVICE.to_string()),
+            device_account: Some(device_account.clone()),
+        };
+
+        self.header.keyslots.push(slot.clone());
+        if let Err(error) = self.persist_header() {
+            let _ = device_store_delete_secret(DEVICE_KEYRING_SERVICE, device_account.as_str());
+            return Err(error);
+        }
         Ok(slot)
     }
 
@@ -515,6 +570,8 @@ pub fn init_vault(
             tag_hex: hex_encode(&wrapped.tag),
             encrypted_master_key_hex: hex_encode(&wrapped.ciphertext),
             certificate_fingerprint_sha256: None,
+            device_service: None,
+            device_account: None,
         }],
     };
 
@@ -615,6 +672,54 @@ pub fn unlock_vault_with_certificate(
         conn,
         header,
         master_key: Zeroizing::new(master_key),
+    })
+}
+
+pub fn unlock_vault_with_device(
+    path: impl AsRef<Path>,
+    slot_id: Option<&str>,
+) -> Result<UnlockedVault, VaultError> {
+    let path = path.as_ref();
+    if !path.exists() {
+        return Err(VaultError::VaultNotFound(path.display().to_string()));
+    }
+
+    let conn = Connection::open(path)?;
+    configure_connection(&conn)?;
+    let header = read_header(&conn)?;
+    let keyslot = select_device_keyslot(&header, slot_id)?;
+    let service = keyslot.device_service.as_deref().ok_or_else(|| {
+        VaultError::InvalidArguments(format!(
+            "device keyslot {} has no service metadata",
+            keyslot.id
+        ))
+    })?;
+    let account = keyslot.device_account.as_deref().ok_or_else(|| {
+        VaultError::InvalidArguments(format!(
+            "device keyslot {} has no account metadata",
+            keyslot.id
+        ))
+    })?;
+    let master_key = Zeroizing::new(device_store_get_secret(service, account)?);
+    let plaintext = decrypt_blob(
+        master_key.as_slice(),
+        &device_slot_aad(keyslot.id.as_str()),
+        EncryptedBlob {
+            nonce: hex_decode(keyslot.nonce_hex.as_str())?,
+            tag: hex_decode(keyslot.tag_hex.as_str())?,
+            ciphertext: hex_decode(keyslot.encrypted_master_key_hex.as_str())?,
+        },
+    )
+    .map_err(|_| VaultError::UnlockFailed)?;
+    if plaintext.as_slice() != DEVICE_CHECK_PLAINTEXT {
+        return Err(VaultError::UnlockFailed);
+    }
+
+    Ok(UnlockedVault {
+        path: path.to_path_buf(),
+        conn,
+        header,
+        master_key,
     })
 }
 
@@ -856,6 +961,12 @@ fn item_aad(id: &str) -> Vec<u8> {
     aad
 }
 
+fn device_slot_aad(id: &str) -> Vec<u8> {
+    let mut aad = DEVICE_AAD_PREFIX.to_vec();
+    aad.extend_from_slice(id.as_bytes());
+    aad
+}
+
 fn unix_epoch_now() -> Result<i64, VaultError> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -866,6 +977,136 @@ fn unix_epoch_now() -> Result<i64, VaultError> {
 
 fn default_password_wrap_algorithm() -> String {
     PASSWORD_WRAP_ALGORITHM.to_string()
+}
+
+fn select_device_keyslot<'a>(
+    header: &'a VaultHeader,
+    slot_id: Option<&str>,
+) -> Result<&'a VaultKeyslot, VaultError> {
+    let device_slots = header
+        .keyslots
+        .iter()
+        .filter(|slot| slot.kind == VaultKeyslotKind::DeviceBound)
+        .collect::<Vec<_>>();
+    match slot_id {
+        Some(slot_id) => device_slots
+            .into_iter()
+            .find(|slot| slot.id == slot_id)
+            .ok_or_else(|| {
+                VaultError::InvalidArguments(format!("unknown device keyslot: {slot_id}"))
+            }),
+        None => match device_slots.as_slice() {
+            [] => Err(VaultError::InvalidArguments(
+                "vault has no device-bound keyslot".to_string(),
+            )),
+            [slot] => Ok(*slot),
+            _ => Err(VaultError::InvalidArguments(
+                "vault has multiple device-bound keyslots; pass --device-slot ID".to_string(),
+            )),
+        },
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#[cfg(not(test))]
+fn device_store_set_secret(service: &str, account: &str, secret: &[u8]) -> Result<(), VaultError> {
+    let entry = keyring::Entry::new(service, account)
+        .map_err(|error| VaultError::DeviceStoreFailure(error.to_string()))?;
+    entry
+        .set_secret(secret)
+        .map_err(|error| VaultError::DeviceStoreFailure(error.to_string()))
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#[cfg(not(test))]
+fn device_store_get_secret(service: &str, account: &str) -> Result<Vec<u8>, VaultError> {
+    let entry = keyring::Entry::new(service, account)
+        .map_err(|error| VaultError::DeviceStoreFailure(error.to_string()))?;
+    entry.get_secret().map_err(|error| match error {
+        keyring::Error::NoEntry => VaultError::UnlockFailed,
+        other => VaultError::DeviceStoreFailure(other.to_string()),
+    })
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#[cfg(not(test))]
+fn device_store_delete_secret(service: &str, account: &str) -> Result<(), VaultError> {
+    let entry = keyring::Entry::new(service, account)
+        .map_err(|error| VaultError::DeviceStoreFailure(error.to_string()))?;
+    entry.delete_credential().map_err(|error| match error {
+        keyring::Error::NoEntry => VaultError::UnlockFailed,
+        other => VaultError::DeviceStoreFailure(other.to_string()),
+    })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+#[cfg(not(test))]
+fn device_store_set_secret(
+    _service: &str,
+    _account: &str,
+    _secret: &[u8],
+) -> Result<(), VaultError> {
+    Err(VaultError::DeviceStoreFailure(
+        "device-bound secure storage is unsupported on this platform".to_string(),
+    ))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+#[cfg(not(test))]
+fn device_store_get_secret(_service: &str, _account: &str) -> Result<Vec<u8>, VaultError> {
+    Err(VaultError::DeviceStoreFailure(
+        "device-bound secure storage is unsupported on this platform".to_string(),
+    ))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+#[cfg(not(test))]
+fn device_store_delete_secret(_service: &str, _account: &str) -> Result<(), VaultError> {
+    Err(VaultError::DeviceStoreFailure(
+        "device-bound secure storage is unsupported on this platform".to_string(),
+    ))
+}
+
+#[cfg(test)]
+fn device_store_set_secret(service: &str, account: &str, secret: &[u8]) -> Result<(), VaultError> {
+    let mut store = test_device_store().lock().map_err(|_| {
+        VaultError::DeviceStoreFailure("device test store lock poisoned".to_string())
+    })?;
+    store.insert(device_store_key(service, account), secret.to_vec());
+    Ok(())
+}
+
+#[cfg(test)]
+fn device_store_get_secret(service: &str, account: &str) -> Result<Vec<u8>, VaultError> {
+    let store = test_device_store().lock().map_err(|_| {
+        VaultError::DeviceStoreFailure("device test store lock poisoned".to_string())
+    })?;
+    store
+        .get(&device_store_key(service, account))
+        .cloned()
+        .ok_or(VaultError::UnlockFailed)
+}
+
+#[cfg(test)]
+fn device_store_delete_secret(service: &str, account: &str) -> Result<(), VaultError> {
+    let mut store = test_device_store().lock().map_err(|_| {
+        VaultError::DeviceStoreFailure("device test store lock poisoned".to_string())
+    })?;
+    store
+        .remove(&device_store_key(service, account))
+        .map(|_| ())
+        .ok_or(VaultError::UnlockFailed)
+}
+
+#[cfg(test)]
+fn device_store_key(service: &str, account: &str) -> String {
+    format!("{service}\u{0}{account}")
+}
+
+#[cfg(test)]
+fn test_device_store() -> &'static Mutex<std::collections::HashMap<String, Vec<u8>>> {
+    static STORE: OnceLock<Mutex<std::collections::HashMap<String, Vec<u8>>>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -1015,6 +1256,57 @@ mod tests {
             Some("vault-pass"),
         )
         .expect("unlock with encrypted key");
+    }
+
+    #[test]
+    fn device_keyslot_unlock_round_trip() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let keyslot = vault
+            .add_device_keyslot(Some("daily-device".to_string()))
+            .expect("add device keyslot");
+        assert_eq!(keyslot.kind, VaultKeyslotKind::DeviceBound);
+        assert!(keyslot.wrapped_by_os_keystore);
+        assert_eq!(keyslot.wrap_algorithm, DEVICE_WRAP_ALGORITHM);
+        assert!(keyslot.device_service.is_some());
+        assert!(keyslot.device_account.is_some());
+
+        let unlocked =
+            unlock_vault_with_device(&path, Some(keyslot.id.as_str())).expect("device unlock");
+        let item = unlocked
+            .add_login(NewLoginRecord {
+                title: "Device Login".to_string(),
+                username: "jon@example.com".to_string(),
+                password: "Sup3r$ecret!".to_string(),
+                url: None,
+                notes: None,
+            })
+            .expect("add login");
+        assert_eq!(unlocked.get_item(&item.id).expect("get item").id, item.id);
+    }
+
+    #[test]
+    fn device_unlock_requires_explicit_slot_when_multiple_exist() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_device_keyslot(Some("laptop".to_string()))
+            .expect("add first device slot");
+        vault
+            .add_device_keyslot(Some("desktop".to_string()))
+            .expect("add second device slot");
+
+        let error =
+            unlock_vault_with_device(&path, None).expect_err("unlock should require slot id");
+        assert!(
+            matches!(error, VaultError::InvalidArguments(message) if message.contains("multiple device-bound keyslots"))
+        );
     }
 
     #[test]

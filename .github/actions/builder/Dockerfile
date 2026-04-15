@@ -12,6 +12,7 @@ RUN apk add --no-cache \
         build-base \
         coreutils \
         curl \
+        dbus-dev \
         git \
         make \
         openssl-dev \

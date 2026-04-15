@@ -38,11 +38,13 @@ That is an intentional product decision, not a placeholder:
 - The current keyslot model is:
   - `password_recovery`
   - `certificate_wrapped`
-  - `device_bound` reserved for passwordless local unlock
+  - `device_bound`
 
 The current shipped recovery slot is password-derived with Argon2id and `AES-256-GCM`.
 
 Certificate slots wrap the same master key with an X.509 recipient certificate using OpenSSL CMS envelope encryption. This preserves one vault format while allowing multiple unlock paths.
+
+Device-bound slots store the unwrap secret in platform secure storage and keep only an AES-256-GCM verification blob plus keyring metadata in the SQLite header. That gives the product passwordless daily unlock without collapsing recovery or certificate support into the same path.
 
 ## Why SQLite
 

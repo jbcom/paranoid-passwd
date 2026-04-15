@@ -50,6 +50,8 @@ bash scripts/supply_chain_verify.sh
 - vault init/unlock round trips
 - CRUD coverage for login items
 - wrong-password fail-closed coverage
+- device-bound keyslot add/unlock coverage
+- multi-device-slot explicit-selection coverage
 - certificate-wrapped keyslot add/unlock coverage
 - encrypted private-key certificate unlock coverage
 - generator-to-vault `generate-store` coverage
