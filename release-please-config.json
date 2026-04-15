@@ -7,10 +7,11 @@
       "bump-patch-for-minor-pre-major": true,
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        "CMakeLists.txt",
-        "include/paranoid.h",
-        "melange.yaml",
-        "sonar-project.properties"
+        "Cargo.toml",
+        "crates/paranoid-core/Cargo.toml",
+        "crates/paranoid-cli/Cargo.toml",
+        "crates/paranoid-gui/Cargo.toml",
+        "docs/conf.py"
       ]
     }
   },

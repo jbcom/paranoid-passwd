@@ -1,0 +1,26 @@
+[package]
+name = "paranoid-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "paranoid-passwd"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+arboard.workspace = true
+crossterm.workspace = true
+lexopt.workspace = true
+paranoid-core = { path = "../paranoid-core" }
+paranoid-vault = { path = "../paranoid-vault" }
+ratatui.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true

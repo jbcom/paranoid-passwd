@@ -1,28 +1,10 @@
-# -----------------------------------------------------------------
-# paranoid-passwd — CD (push to main)
-#
-# RUNS ON: push to main, weekly CodeQL schedule.
-# PURPOSE: deploy what release.yml has already built and shipped.
-#
-# Topology: ci → release → cd.
-#   ci.yml verifies PRs; release.yml produces versioned artifacts on
-#   each release-please tag; cd.yml fetches the latest release's
-#   site artifact and deploys it to GitHub Pages.
-#
-# Also folds in the release-please action (so a merge to main opens
-# or updates the release PR) and scheduled CodeQL on main. OpenSSF
-# Scorecard lives in scorecard.yml of its own — the Scorecard webapp
-# rejects workflows where any other job has id-token: write, which
-# the Pages deploy below needs.
-# -----------------------------------------------------------------
-
 name: CD
 
 on:
   push:
     branches: [main]
   schedule:
-    - cron: '0 6 * * 1'  # weekly Monday 6am UTC — CodeQL on main
+    - cron: '0 6 * * 1'
   workflow_dispatch:
 
 permissions: {}
@@ -32,8 +14,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-
-  # ─── Release Please (opens/updates release PR) ─────────────────
   release-please:
     name: Release Please
     runs-on: ubuntu-24.04
@@ -47,9 +27,8 @@ jobs:
         with:
           token: ${{ secrets.CI_GITHUB_TOKEN }}
 
-  # ─── Deploy site from latest release ───────────────────────────
   deploy-pages:
-    name: Deploy to GitHub Pages
+    name: Deploy Docs to GitHub Pages
     runs-on: ubuntu-24.04
     if: github.event_name == 'push'
     needs: release-please
@@ -61,63 +40,29 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout (for CNAME fallback)
+      - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Resolve latest release tag
-        id: latest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          # Use the most recent release tag (release.yml uploads
-          # paranoid-site-${ver}.zip to every release).
-          tag=$(gh release view --repo "${GH_REPO}" --json tagName --jq '.tagName' 2>/dev/null || echo "")
-          if [ -z "${tag}" ]; then
-            echo "No release yet — skipping Pages deploy"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download site zip from latest release
-        if: steps.latest.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ steps.latest.outputs.tag }}
-        run: |
-          ver="${TAG#paranoid-passwd-v}"
-          # New shape (release.yml post-consolidation): paranoid-site-3.4.3.zip
-          # Legacy shape (pre-consolidation release.yml): paranoid-site-paranoid-passwd-v3.4.2.zip
-          # Try new first; fall back to legacy so we can still deploy
-          # pre-#60 tags until they age out.
-          if ! gh release download "${TAG}" --repo "${GH_REPO}" -p "paranoid-site-${ver}.zip" 2>/dev/null; then
-            gh release download "${TAG}" --repo "${GH_REPO}" -p "paranoid-site-${TAG}.zip"
-            mv "paranoid-site-${TAG}.zip" "paranoid-site-${ver}.zip"
-          fi
-          mkdir -p _site
-          unzip -q "paranoid-site-${ver}.zip" -d _site
+      - name: Build docs site from the repository root
+        uses: ./.github/actions/builder
+        with:
+          run: |
+            python3 -m tox -e docs
 
       - name: Configure Pages
-        if: steps.latest.outputs.skip != 'true'
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Upload Pages artifact
-        if: steps.latest.outputs.skip != 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: _site
+          path: docs/_build/html
 
       - name: Deploy
-        if: steps.latest.outputs.skip != 'true'
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
 
-  # ─── CodeQL on main (scheduled) ────────────────────────────────
   codeql:
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-24.04
@@ -127,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [c-cpp, javascript]
+        language: [rust, python]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

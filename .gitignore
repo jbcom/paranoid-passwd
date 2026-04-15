@@ -3,6 +3,7 @@ build/
 build-*/
 artifact/
 dist/
+target/
 *.apk
 *.tar
 packages/
@@ -26,12 +27,13 @@ playwright-report/
 playwright/.cache/
 .playwright-mcp/
 node_modules/
+.tox/
+docs/_build/
+docs/api/crates/
 
 # Test screenshots
 *.png
-
-# Dependencies (cloned in Docker at pinned SHAs)
-vendor/
+!vendor/**
 
 # Claude Code project settings (local, not committed)
 .claude/
@@ -39,3 +41,6 @@ vendor/
 # Melange signing keys
 melange.rsa
 melange.rsa.pub
+
+# Ralph handoff session state
+.ralph-tui/session*.json

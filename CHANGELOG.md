@@ -100,6 +100,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Rust-native workspace replaces the active browser/WASM product surface
+- GitHub Pages now serves docs and downloads only
+- Cargo dependencies are vendored and enforced with locked/frozen/offline builds
+- Security verification now runs through `scripts/hallucination_check.sh` and `scripts/supply_chain_verify.sh`
+
 ### Planned
 - NIST SP 800-22 statistical test suite integration
 - Dieharder test battery integration
