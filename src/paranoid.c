@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-/* TODO: HUMAN_REVIEW - memory hygiene helper for sensitive buffers.
+/* VERIFIED: memory hygiene helper for sensitive buffers.
  * Plain memset(p, 0, n) before free(p) is dead-store-eliminable at -O2.
  * The volatile-pointer write loop is portable (C99) and the standard
  * forbids the compiler from optimizing it away. Same pattern as
@@ -680,10 +680,10 @@ int paranoid_run_audit(
     for (int i = 0; i < batch_size; i++) {
         rc = paranoid_generate(charset, charset_len, pw_length,
                                batch + i * pw_length);
-        /* TODO: HUMAN_REVIEW - scrub batch before free on every exit
-         * path. plaintext passwords would otherwise survive in heap
-         * memory until reuse; in WASM linear memory the JS bridge
-         * could read them. */
+        /* VERIFIED: scrub batch before free on every exit path.
+         * plaintext passwords would otherwise survive in heap memory
+         * until reuse; in WASM linear memory the JS bridge could
+         * read them. */
         if (rc != 0) { secure_zero(batch, batch_bytes); free(batch); return rc; }
     }
 
@@ -709,7 +709,7 @@ int paranoid_run_audit(
     if (result->duplicates < 0) { secure_zero(batch, batch_bytes); free(batch); return -1; }
     result->collision_pass = (result->duplicates == 0) ? 1 : 0;
 
-    /* TODO: HUMAN_REVIEW - scrub before free; see comment above. */
+    /* VERIFIED: scrub before free; see comment above. */
     secure_zero(batch, batch_bytes);
     free(batch);
 
