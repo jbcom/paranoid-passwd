@@ -5,6 +5,8 @@ ARG RUST_APK_VERSION=1.88.0-r0
 ARG SPHINX_RUSTDOCGEN_VERSION=1.1.0
 ARG TOX_VERSION=4.53.0
 
+ENV PATH="/root/.cargo/bin:${PATH}"
+
 RUN apk add --no-cache \
         bash \
         build-base \
