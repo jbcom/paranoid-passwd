@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.1](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.4.0...paranoid-passwd-v3.4.1) (2026-04-15)
+
+
+### Bug Fixes
+
+* delete unused PARANOID_VERSION_MAJOR/MINOR/PATCH macros (closes [#24](https://github.com/jbcom/paranoid-passwd/issues/24)) ([#53](https://github.com/jbcom/paranoid-passwd/issues/53)) ([9227cba](https://github.com/jbcom/paranoid-passwd/commit/9227cbad81e8185d150caf8d185a1452a53c5b79))
+
 ## [3.4.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.3.0...paranoid-passwd-v3.4.0) (2026-04-15)
 
 
