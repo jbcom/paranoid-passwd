@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.4.3...paranoid-passwd-v3.5.0) (2026-04-15)
+
+
+### Features
+
+* Windows CLI + Homebrew/Scoop/Chocolatey delivery ([#63](https://github.com/jbcom/paranoid-passwd/issues/63)) ([6edee14](https://github.com/jbcom/paranoid-passwd/commit/6edee145fb8b3d593ee23ca3583d8811faa6de2f))
+
 ## [3.4.3](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.4.2...paranoid-passwd-v3.4.3) (2026-04-15)
 
 
