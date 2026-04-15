@@ -88,13 +88,20 @@ jobs:
             echo "=== Validate structure ==="
             wasm-validate build/wasm/paranoid.wasm
 
+            # Check exports by their export NAME (the string after `->` in
+            # the Export section), not by the internal function name from
+            # the name section. Export names are ALWAYS in the binary —
+            # they're the stable interface — while the name section is
+            # optional debug info that wasm-opt can drop.
             echo "=== Required exports ==="
+            EXPORTS=$(wasm-objdump -j Export -x build/wasm/paranoid.wasm)
+            printf '%s\n' "$EXPORTS" | sed 's/^/    /'
             for fn in paranoid_version paranoid_generate paranoid_run_audit \
                       paranoid_get_result_ptr paranoid_get_result_size \
                       paranoid_sha256 paranoid_sha256_hex \
                       paranoid_chi_squared paranoid_serial_correlation \
                       paranoid_count_collisions malloc free; do
-                if wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | grep -q "<${fn}>"; then
+                if printf '%s\n' "$EXPORTS" | grep -qE "-> \"${fn}\""; then
                     echo "  OK: ${fn}"
                 else
                     echo "  MISSING: ${fn}"; exit 1
@@ -102,9 +109,9 @@ jobs:
             done
 
             echo "=== Import namespaces ==="
-            NAMESPACES=$(wasm-objdump -x build/wasm/paranoid.wasm 2>/dev/null | \
-                grep " <- " | \
-                sed 's/.*<- \([^.]*\)\..*/\1/' | sort -u)
+            NAMESPACES=$(wasm-objdump -j Import -x build/wasm/paranoid.wasm \
+                | grep -oE '<- [^.]+\.' \
+                | sed -E 's/<- ([^.]+)\./\1/' | sort -u)
             for ns in $NAMESPACES; do
                 if [ "$ns" = "wasi_snapshot_preview1" ]; then
                     echo "  OK: $ns"
