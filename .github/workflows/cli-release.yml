@@ -203,3 +203,83 @@ jobs:
               ./*.tar.gz checksums.txt \
               --repo "${GH_REPO}" \
               --clobber
+
+  install-smoke-test:
+    name: Install smoke test (linux-amd64)
+    needs: sign-and-release
+    if: github.event_name == 'release'
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Resolve version and asset names
+        id: names
+        env:
+          RAW_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${RAW_TAG#paranoid-passwd-v}"
+          tarball="paranoid-passwd-${version}-linux-amd64.tar.gz"
+          stage="paranoid-passwd-${version}-linux-amd64"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
+          echo "stage=${stage}" >> "$GITHUB_OUTPUT"
+          echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.names.outputs.tag }}
+          TARBALL: ${{ steps.names.outputs.tarball }}
+        run: |
+          gh release download "${TAG}" \
+              --repo "${GH_REPO}" \
+              -p "${TARBALL}" \
+              -p checksums.txt
+
+      - name: Verify sigstore attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARBALL: ${{ steps.names.outputs.tarball }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          gh attestation verify "${TARBALL}" --owner "${OWNER}"
+
+      - name: Verify SHA-256 from checksums.txt
+        env:
+          TARBALL: ${{ steps.names.outputs.tarball }}
+        run: |
+          grep " ${TARBALL}$" checksums.txt | sha256sum -c -
+
+      - name: Extract tarball
+        env:
+          TARBALL: ${{ steps.names.outputs.tarball }}
+        run: |
+          tar xzf "${TARBALL}"
+
+      - name: Run --version and match tag
+        env:
+          STAGE: ${{ steps.names.outputs.stage }}
+          VERSION: ${{ steps.names.outputs.version }}
+        run: |
+          out=$("./${STAGE}/paranoid-passwd" --version)
+          echo "${out}"
+          echo "${out}" | grep -F "${VERSION}"
+
+      - name: Single password is 32 chars + newline (33 bytes)
+        env:
+          STAGE: ${{ steps.names.outputs.stage }}
+        run: |
+          out=$("./${STAGE}/paranoid-passwd" --length 32 --quiet --no-audit)
+          printf '%s\n' "${out}" > /tmp/pw.out
+          size=$(wc -c < /tmp/pw.out)
+          test "${size}" = "33"
+
+      - name: --count 3 emits 3 lines
+        env:
+          STAGE: ${{ steps.names.outputs.stage }}
+        run: |
+          lines=$("./${STAGE}/paranoid-passwd" --length 16 --count 3 --no-audit --quiet | wc -l)
+          test "${lines}" = "3"
