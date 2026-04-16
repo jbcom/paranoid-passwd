@@ -22,5 +22,9 @@ paranoid-vault = { path = "../paranoid-vault" }
 ratatui.workspace = true
 zeroize.workspace = true
 
+[dev-dependencies]
+openssl.workspace = true
+tempfile.workspace = true
+
 [lints]
 workspace = true

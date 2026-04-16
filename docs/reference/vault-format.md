@@ -30,6 +30,57 @@ That is an intentional product decision, not a placeholder:
 - Item storage:
   - row-level SQLite columns keep only ids, item kind, timestamps, and encrypted blobs
   - item payloads are encrypted with the random vault master key using OpenSSL-backed `AES-256-GCM`
+  - item payloads currently include typed `Login`, `SecureNote`, `Card`, and `Identity` records plus local organization metadata such as tags, and `Login` items retain prior passwords as encrypted history entries when rotations occur
+
+## Backup Package
+
+The standardized backup format is a **portable JSON package of the existing encrypted vault state**, not a second vault implementation.
+
+- Backup file: user-chosen path, typically `vault.backup.json`
+- Contents:
+  - `backup_format_version`
+  - `exported_at_epoch`
+  - `vault_format_version`
+  - serialized `VaultHeader`
+  - encrypted item rows with ids, kinds, timestamps, and hex-encoded `nonce`, `tag`, and `ciphertext`
+
+That means backup export/import preserves the same keyslot model, encrypted item rows, unlock semantics, and recovery posture:
+
+- recovery-secret slots
+- mnemonic recovery slots
+- certificate-wrapped slots
+- device-bound slots
+
+Export does not decrypt items into a new storage format. Restore recreates a normal `vault.sqlite` file from the serialized encrypted rows and header.
+
+Backup packages can now be inspected before restore through a read-only `VaultBackupSummary`, which reports item-kind counts, keyslot posture, keyslot detail summaries including certificate metadata, and whether the current build can restore the package directly without mutating a live vault.
+
+## Transfer Package
+
+The standardized transfer format is a **portable encrypted package of selected item payloads**, not a second full-vault backup.
+
+- Transfer file: user-chosen path, typically `vault-transfer.ppvt.json`
+- Contents:
+  - `transfer_format_version`
+  - `exported_at_epoch`
+  - `source_vault_format_version`
+  - clear item-kind counts and the selection filter used at export time
+  - an encrypted payload containing the selected `VaultItem` records
+  - one or more unwrap paths for the transfer data key:
+    - recovery-secret unwrap via Argon2id + `AES-256-GCM`
+    - recipient-certificate unwrap via OpenSSL CMS envelope encryption
+
+That separation is intentional:
+
+- **backup packages** preserve the current encrypted vault header, ciphertext rows, and keyslots for full restore or migration
+- **transfer packages** move selected decrypted records into an already unlocked destination vault without copying the source vault’s keyslots or device-bound secure-storage assumptions
+
+Import keeps the cryptographic boundary in application code:
+
+- the transfer payload is decrypted only after the package unwrap path succeeds
+- imported items are revalidated before storage
+- conflicting ids are remapped by default instead of overwriting local records silently
+- headless import can explicitly replace matching ids when the operator chooses that behavior
 
 ## Key Hierarchy
 
@@ -45,9 +96,17 @@ The current shipped password recovery slot is password-derived with Argon2id and
 
 Mnemonic recovery slots use a 24-word English BIP39 phrase as a wallet-style recovery encoding for a random 256-bit recovery key. That recovery key wraps the same vault master key with OpenSSL-backed `AES-256-GCM`.
 
-Certificate slots wrap the same master key with an X.509 recipient certificate using OpenSSL CMS envelope encryption. This preserves one vault format while allowing multiple unlock paths.
+Certificate slots wrap the same master key with an X.509 recipient certificate using OpenSSL CMS envelope encryption. The header also stores public certificate metadata needed for lifecycle management, including the fingerprint, subject, validity window, and canonical epoch values used by the shared keyslot-health layer. This preserves one vault format while allowing multiple unlock paths.
 
 Device-bound slots store the unwrap secret in platform secure storage and keep only an AES-256-GCM verification blob plus keyring metadata in the SQLite header. That gives the product passwordless daily unlock without collapsing recovery or certificate support into the same path.
+
+The lifecycle stays explicit in the application layer: interactive and headless native surfaces can inspect slots, compute a shared recovery posture, emit shared recovery recommendations, enroll new mnemonic/device/certificate slots, rotate mnemonic recovery slots in place, rotate the password recovery slot in place, remove non-recovery slots, and rebind device-bound slots to a fresh secure-storage account without changing the underlying SQLite file format. Native certificate rewrap forms can also update the active certificate key path and passphrase alongside the replacement recipient certificate so session continuity does not depend on stale unlock material after a rotation.
+
+Keyslot removal is no longer a blind mutation. The header now supports a shared removal-impact analysis that compares the before/after posture and warns when a removal would drop certificate coverage, remove the last mnemonic recovery phrase, or disable passwordless daily unlock. The CLI requires `--force` for those posture-downgrading removals, and the TUI/GUI mirror that with a native confirmation step instead of silently weakening the vault.
+
+Item payloads now carry folder plus tag metadata inside ciphertext, so local organization and decrypted summary search can evolve without exposing a plaintext folder index in SQLite.
+
+Generator-driven password rotation reuses the same login item id and appends the previous password to encrypted history instead of creating a parallel shadow record format for rotated credentials.
 
 ## Why SQLite
 

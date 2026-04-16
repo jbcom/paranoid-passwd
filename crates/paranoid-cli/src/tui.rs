@@ -11,6 +11,7 @@ use paranoid_core::{
     AuditStage, CharsetOptions, CharsetSpec, GenerationReport, ParanoidRequest,
     combined_framework_requirements, execute_request, secure_preview,
 };
+use paranoid_vault::NativeSessionHardening;
 #[cfg(test)]
 use ratatui::backend::TestBackend;
 use ratatui::{
@@ -82,6 +83,7 @@ struct App {
     report: Option<GenerationReport>,
     status: String,
     detail_tab: usize,
+    session: NativeSessionHardening,
 }
 
 impl Default for App {
@@ -100,6 +102,7 @@ impl Default for App {
             report: None,
             status: "Use arrows to adjust values, Space to toggle, Enter to run.".to_string(),
             detail_tab: 0,
+            session: NativeSessionHardening::default(),
         }
     }
 }
@@ -276,10 +279,31 @@ impl App {
                 .and_then(|mut clipboard| clipboard.set_text(password.value.clone()))
             {
                 Ok(()) => {
-                    self.status = "Copied password to the system clipboard.".to_string();
+                    self.session.arm_clipboard_clear(password.value.clone());
+                    self.status = format!(
+                        "Copied password to the system clipboard. It will be cleared in {} seconds if unchanged.",
+                        self.session.clipboard_clear_after().as_secs()
+                    );
                 }
                 Err(error) => {
                     self.status = format!("Clipboard unavailable: {error}");
+                }
+            }
+        }
+    }
+
+    fn poll_hardening(&mut self) {
+        if let Some(expected) = self.session.take_due_clipboard_contents() {
+            match clear_clipboard_if_matches(expected.as_str()) {
+                Ok(true) => {
+                    self.status = format!(
+                        "Clipboard auto-cleared after {} seconds.",
+                        self.session.clipboard_clear_after().as_secs()
+                    );
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    self.status = format!("Clipboard auto-clear failed: {error}");
                 }
             }
         }
@@ -457,11 +481,13 @@ pub fn run() -> anyhow::Result<()> {
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> anyhow::Result<()> {
     loop {
         app.poll_worker();
+        app.poll_hardening();
         terminal
             .draw(|frame| render(frame, &app))
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         if event::poll(Duration::from_millis(80))? {
             if let Event::Key(key) = event::read()? {
+                app.session.note_activity();
                 if app.handle_key(key) {
                     break;
                 }
@@ -916,6 +942,18 @@ fn stage_progress(stage: Option<AuditStage>) -> f64 {
         Some(AuditStage::EntropyProofs) => 5.0 / 7.0,
         Some(AuditStage::PatternDetection) => 6.0 / 7.0,
         Some(AuditStage::ThreatAssessment) | Some(AuditStage::Complete) => 1.0,
+    }
+}
+
+fn clear_clipboard_if_matches(expected: &str) -> Result<bool, arboard::Error> {
+    let mut clipboard = Clipboard::new()?;
+    match clipboard.get_text() {
+        Ok(current) if current == expected => {
+            clipboard.set_text(String::new())?;
+            Ok(true)
+        }
+        Ok(_) => Ok(false),
+        Err(_) => Ok(false),
     }
 }
 

@@ -8,6 +8,7 @@ title: Reference
 :maxdepth: 2
 
 architecture
+human-review
 vault-format
 release-checklist
 testing

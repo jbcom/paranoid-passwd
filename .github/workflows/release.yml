@@ -95,9 +95,17 @@ jobs:
           run: |
             export PARANOID_CLI_BUILD_COMMIT='${{ steps.commit.outputs.sha }}'
             export PARANOID_CLI_BUILD_DATE='${{ github.event.release.published_at || github.event.repository.updated_at }}'
+            export PARANOID_GUI_BUILD_COMMIT='${{ steps.commit.outputs.sha }}'
+            export PARANOID_GUI_BUILD_DATE='${{ github.event.release.published_at || github.event.repository.updated_at }}'
             mkdir -p dist/release
             bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' '${{ matrix.archive }}' dist/release
             bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' 'dist/release/paranoid-passwd-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}'
+            bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' deb dist/release
+            bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' 'dist/release/paranoid-passwd_${{ steps.ver.outputs.version }}_${{ matrix.target_arch }}.deb'
+            bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' '${{ matrix.archive }}' dist/release paranoid-passwd-gui paranoid-gui
+            bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' 'dist/release/paranoid-passwd-gui-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}' paranoid-passwd-gui
+            bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' deb dist/release paranoid-passwd-gui paranoid-gui
+            bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' 'dist/release/paranoid-passwd-gui_${{ steps.ver.outputs.version }}_${{ matrix.target_arch }}.deb' paranoid-passwd-gui
 
       - name: Build + package + smoke test on native runner
         if: runner.os != 'Linux'
@@ -105,18 +113,29 @@ jobs:
         env:
           PARANOID_CLI_BUILD_COMMIT: ${{ steps.commit.outputs.sha }}
           PARANOID_CLI_BUILD_DATE: ${{ github.event.release.published_at || github.event.repository.updated_at }}
+          PARANOID_GUI_BUILD_COMMIT: ${{ steps.commit.outputs.sha }}
+          PARANOID_GUI_BUILD_DATE: ${{ github.event.release.published_at || github.event.repository.updated_at }}
         run: |
           mkdir -p dist/release
           bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' '${{ matrix.archive }}' dist/release
           bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "dist/release/paranoid-passwd-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}"
+          bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' '${{ matrix.archive }}' dist/release paranoid-passwd-gui paranoid-gui
+          bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "dist/release/paranoid-passwd-gui-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}" paranoid-passwd-gui
+          if [ '${{ matrix.target_os }}' = 'darwin' ]; then
+            bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' dmg dist/release paranoid-passwd-gui paranoid-gui
+            bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "dist/release/paranoid-passwd-gui-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.dmg" paranoid-passwd-gui
+          fi
 
-      - name: Upload artifact
+      - name: Upload native artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: cli-${{ matrix.target_os }}-${{ matrix.target_arch }}
+          name: native-${{ matrix.target_os }}-${{ matrix.target_arch }}
           path: |
-            dist/release/paranoid-passwd-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}
-            dist/release/paranoid-passwd-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}.sha256
+            dist/release/*.tar.gz
+            dist/release/*.zip
+            dist/release/*.deb
+            dist/release/*.dmg
+            dist/release/*.sha256
           retention-days: 7
 
   release-validate:
@@ -139,13 +158,13 @@ jobs:
           RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: echo "version=${RAW_TAG#paranoid-passwd-v}" >> "$GITHUB_OUTPUT"
 
-      - name: Download CLI artifacts
+      - name: Download native artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: cli-dist
           merge-multiple: true
 
-      - name: Validate archives, manifests, and install.sh
+      - name: Validate artifacts, manifests, and install.sh
         shell: bash
         run: |
           bash scripts/release_validate.sh '${{ steps.ver.outputs.version }}' cli-dist
@@ -166,7 +185,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - name: Download CLI artifacts
+      - name: Download native artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: cli-dist
@@ -185,6 +204,8 @@ jobs:
           subject-path: |
             cli-dist/*.tar.gz
             cli-dist/*.zip
+            cli-dist/*.deb
+            cli-dist/*.dmg
             cli-dist/checksums.txt
 
       - name: Upload everything to release
@@ -195,17 +216,25 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release upload "${RAW_TAG}" \
-              cli-dist/*.tar.gz cli-dist/*.zip cli-dist/checksums.txt \
+              cli-dist/*.tar.gz cli-dist/*.zip cli-dist/*.deb cli-dist/*.dmg cli-dist/checksums.txt \
               --repo "${GH_REPO}" --clobber
 
   release-surface-verify:
-    name: Verify Published Release Surface
+    name: Verify Published Release Surface (${{ matrix.verify_host }})
     needs: attest-and-publish
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - verify_host: linux
+            runner: ubuntu-24.04
+          - verify_host: darwin
+            runner: macos-14
     steps:
       - name: Checkout (for verification scripts)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -314,10 +343,10 @@ jobs:
           gh pr merge --repo jbcom/homebrew-tap --auto --squash "${branch}"
 
   release-download-verify:
-    name: Release Download Verification (${{ matrix.target_os }}/${{ matrix.target_arch }})
+    name: Release Download Verification (${{ matrix.label }})
     needs: release-surface-verify
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       id-token: write
@@ -325,25 +354,129 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target_os: linux
+          - runner: ubuntu-24.04
+            label: paranoid-passwd linux/amd64 tar.gz
+            target_os: linux
             target_arch: amd64
-            archive: tar.gz
+            product_name: paranoid-passwd
+            asset_suffix: linux-amd64.tar.gz
+            deb: false
             runnable: true
-          - target_os: linux
+          - runner: ubuntu-24.04
+            label: paranoid-passwd linux/arm64 tar.gz
+            target_os: linux
             target_arch: arm64
-            archive: tar.gz
+            product_name: paranoid-passwd
+            asset_suffix: linux-arm64.tar.gz
+            deb: false
             runnable: false
-          - target_os: darwin
+          - runner: macos-14
+            label: paranoid-passwd darwin/amd64 tar.gz
+            target_os: darwin
             target_arch: amd64
-            archive: tar.gz
-            runnable: false
-          - target_os: darwin
+            product_name: paranoid-passwd
+            asset_suffix: darwin-amd64.tar.gz
+            deb: false
+            runnable: true
+          - runner: macos-14
+            label: paranoid-passwd darwin/arm64 tar.gz
+            target_os: darwin
             target_arch: arm64
-            archive: tar.gz
-            runnable: false
-          - target_os: windows
+            product_name: paranoid-passwd
+            asset_suffix: darwin-arm64.tar.gz
+            deb: false
+            runnable: true
+          - runner: ubuntu-24.04
+            label: paranoid-passwd windows/amd64 zip
+            target_os: windows
             target_arch: amd64
-            archive: zip
+            product_name: paranoid-passwd
+            asset_suffix: windows-amd64.zip
+            deb: false
+            runnable: false
+          - runner: ubuntu-24.04
+            label: paranoid-passwd linux/amd64 deb
+            target_os: linux
+            target_arch: amd64
+            product_name: paranoid-passwd
+            deb: true
+            runnable: true
+          - runner: ubuntu-24.04
+            label: paranoid-passwd linux/arm64 deb
+            target_os: linux
+            target_arch: arm64
+            product_name: paranoid-passwd
+            deb: true
+            runnable: false
+          - runner: ubuntu-24.04
+            label: paranoid-passwd-gui linux/amd64 tar.gz
+            target_os: linux
+            target_arch: amd64
+            product_name: paranoid-passwd-gui
+            asset_suffix: linux-amd64.tar.gz
+            deb: false
+            runnable: true
+          - runner: ubuntu-24.04
+            label: paranoid-passwd-gui linux/arm64 tar.gz
+            target_os: linux
+            target_arch: arm64
+            product_name: paranoid-passwd-gui
+            asset_suffix: linux-arm64.tar.gz
+            deb: false
+            runnable: false
+          - runner: macos-14
+            label: paranoid-passwd-gui darwin/amd64 tar.gz
+            target_os: darwin
+            target_arch: amd64
+            product_name: paranoid-passwd-gui
+            asset_suffix: darwin-amd64.tar.gz
+            deb: false
+            runnable: true
+          - runner: macos-14
+            label: paranoid-passwd-gui darwin/amd64 dmg
+            target_os: darwin
+            target_arch: amd64
+            product_name: paranoid-passwd-gui
+            asset_suffix: darwin-amd64.dmg
+            deb: false
+            runnable: true
+          - runner: macos-14
+            label: paranoid-passwd-gui darwin/arm64 tar.gz
+            target_os: darwin
+            target_arch: arm64
+            product_name: paranoid-passwd-gui
+            asset_suffix: darwin-arm64.tar.gz
+            deb: false
+            runnable: true
+          - runner: macos-14
+            label: paranoid-passwd-gui darwin/arm64 dmg
+            target_os: darwin
+            target_arch: arm64
+            product_name: paranoid-passwd-gui
+            asset_suffix: darwin-arm64.dmg
+            deb: false
+            runnable: true
+          - runner: ubuntu-24.04
+            label: paranoid-passwd-gui windows/amd64 zip
+            target_os: windows
+            target_arch: amd64
+            product_name: paranoid-passwd-gui
+            asset_suffix: windows-amd64.zip
+            deb: false
+            runnable: false
+          - runner: ubuntu-24.04
+            label: paranoid-passwd-gui linux/amd64 deb
+            target_os: linux
+            target_arch: amd64
+            product_name: paranoid-passwd-gui
+            deb: true
+            runnable: true
+          - runner: ubuntu-24.04
+            label: paranoid-passwd-gui linux/arm64 deb
+            target_os: linux
+            target_arch: arm64
+            product_name: paranoid-passwd-gui
+            deb: true
             runnable: false
     steps:
       - name: Download + verify release asset
@@ -356,10 +489,18 @@ jobs:
           RUNNABLE: ${{ matrix.runnable }}
         run: |
           ver="${RAW_TAG#paranoid-passwd-v}"
-          artifact="paranoid-passwd-${ver}-${{ matrix.target_os }}-${{ matrix.target_arch }}.${{ matrix.archive }}"
+          if [ '${{ matrix.deb }}' = 'true' ]; then
+            artifact="${{ matrix.product_name }}_${ver}_${{ matrix.target_arch }}.deb"
+          else
+            artifact="${{ matrix.product_name }}-${ver}-${{ matrix.asset_suffix }}"
+          fi
           gh release download "${RAW_TAG}" -p "${artifact}" -p checksums.txt --repo "${GH_REPO}"
           gh attestation verify "${artifact}" --owner "${OWNER}"
-          grep " ${artifact}$" checksums.txt | sha256sum -c -
+          if command -v sha256sum >/dev/null 2>&1; then
+            grep " ${artifact}$" checksums.txt | sha256sum -c -
+          else
+            grep " ${artifact}$" checksums.txt | shasum -a 256 -c -
+          fi
           if [ "${RUNNABLE}" = "true" ]; then
-            bash scripts/smoke_test_release_artifact.sh "${ver}" '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "${artifact}"
+            bash scripts/smoke_test_release_artifact.sh "${ver}" '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "${artifact}" '${{ matrix.product_name }}'
           fi

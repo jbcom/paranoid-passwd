@@ -29,7 +29,9 @@ The custom GitHub Action builder image is the repository trust root for:
 
 The release pipeline now focuses on:
 
-- native CLI archives
+- native CLI and GUI archives
+- macOS GUI `.dmg` packages
+- Linux `.deb` packages for both binaries
 - checksums
 - provenance / attestations
 - package-manager metadata
@@ -38,6 +40,8 @@ The release pipeline now focuses on:
 Before attestation, the release workflow now validates:
 
 - per-platform archive smoke tests
+- macOS GUI `.dmg` payload validation and host smoke tests
+- Debian package payload validation and Linux host smoke tests for `.deb` artifacts
 - aggregate checksums
 - Homebrew / Scoop / Chocolatey manifest generation
 - the docs-hosted `install.sh` flow against a local artifact server
