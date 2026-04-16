@@ -121,6 +121,7 @@ Focus review on:
 2. The OpenSSL-backed RNG / SHA-256 delegation paths in `paranoid-core`
 3. Any `TODO: HUMAN_REVIEW` sites added around statistical or security logic
 4. Release and supply-chain changes under `.github/`, `.cargo/`, and `vendor/`
+5. `docs/reference/human-review.md` for the tracked open review inventory and expected reviewer outputs
 
 ## Documentation Map
 

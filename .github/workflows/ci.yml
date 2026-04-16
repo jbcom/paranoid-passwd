@@ -36,6 +36,7 @@ jobs:
             bash tests/test_cli.sh target/debug/paranoid-passwd
             bash scripts/hallucination_check.sh
             bash scripts/supply_chain_verify.sh
+            bash scripts/verify_human_review_inventory.sh
 
   docs:
     name: Docs Build
