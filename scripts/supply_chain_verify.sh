@@ -38,6 +38,13 @@ else
   fail "vendor tree or Cargo.lock is missing"
 fi
 
+if [ -f "$REPO_ROOT/.gitattributes" ] \
+  && rg -q '^vendor/\*\*[[:space:]]+-text[[:space:]]*(#.*)?$' "$REPO_ROOT/.gitattributes"; then
+  pass "vendored Cargo sources are protected from checkout line-ending rewrites"
+else
+  fail "vendored Cargo sources are not protected from checkout line-ending rewrites"
+fi
+
 if (cd "$REPO_ROOT" && cargo metadata --locked --frozen --offline --format-version 1 >/dev/null); then
   pass "Cargo metadata resolves fully offline"
 else

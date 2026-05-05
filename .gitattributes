@@ -1,0 +1,3 @@
+# Cargo validates vendored source bytes against each crate's .cargo-checksum.json.
+# Disable line-ending normalization so Windows checkouts cannot rewrite vendored files.
+vendor/** -text
