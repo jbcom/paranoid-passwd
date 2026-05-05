@@ -135,7 +135,7 @@ need for recovery coverage. If a seal provider is rotated, disabled, or becomes 
 and seal layers should expose that as posture and state, and the vault layer should only perform
 rewraps through typed, audited operations. The ops policy context now accepts non-secret seal
 posture evidence: federal certificate unlock requires that posture to be present, and device-bound
-unlock requires confirmed auto-unseal availability rather than configured-only provider metadata.
+unlock fails closed without seal posture evidence or confirmed auto-unseal availability.
 
 This split keeps the trust boundaries narrow:
 

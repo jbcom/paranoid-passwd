@@ -112,8 +112,9 @@ crates. Current coverage proves that:
   the serialized evidence schema; the external audit-device wire shape is versioned as federal
   startup evidence schema `2`
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
-- ops policy tests require seal posture evidence for federal certificate unlock and require confirmed
-  auto-unseal availability for device-bound unlock
+- ops policy tests require seal posture evidence for federal certificate unlock, require seal
+  posture evidence for device-bound unlock, and require confirmed auto-unseal availability before
+  device-bound unlock can proceed
 - the seal state machine covers unlock, idle-lock, timeout, and relock transitions
 - seal posture reports configured recovery, certificate, and auto-unseal providers without claiming
   provider availability before a health check confirms it

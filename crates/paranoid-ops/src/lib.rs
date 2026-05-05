@@ -404,6 +404,9 @@ fn append_seal_policy_missing_controls(
     missing_controls: &mut Vec<String>,
 ) {
     let Some(posture) = &context.seal_posture else {
+        if matches!(method, VaultUnlockMethod::DeviceBound) {
+            missing_controls.push("seal_posture_evidence".to_string());
+        }
         return;
     };
 
@@ -1171,6 +1174,37 @@ mod tests {
                     missing_controls,
                     vec!["auto_unseal_provider_available".to_string()]
                 );
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn device_bound_unlock_requires_seal_posture_evidence() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::Default,
+            OpsCommand::VaultUnlock {
+                method: VaultUnlockMethod::DeviceBound,
+            },
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: None,
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert_eq!(missing_controls, vec!["seal_posture_evidence".to_string()]);
             }
             other => panic!("expected deny, got {other:?}"),
         }

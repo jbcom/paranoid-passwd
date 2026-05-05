@@ -580,6 +580,11 @@ CLAIMS: tuple[Claim, ...] = (
                 "ops tests prove device-bound unlock requires confirmed auto-unseal availability",
             ),
             Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "device_bound_unlock_requires_seal_posture_evidence",
+                "ops tests prove device-bound unlock fails closed without seal posture evidence",
+            ),
+            Requirement(
                 "crates/paranoid-cli/src/vault_cli.rs",
                 '"schema_version": SEAL_SCHEMA_VERSION',
                 "seal-status JSON uses the seal schema version",
