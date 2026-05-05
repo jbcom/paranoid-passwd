@@ -72,6 +72,8 @@ correlation identifiers, not authentication tokens or cryptographic nonces.
 
 - command envelopes with request ids, actor context, session surface, transport, profile, and
   command identity
+- authenticated mTLS transport evidence for commands that cross a process boundary, including
+  non-secret peer identity, certificate fingerprint, channel-binding, and warning evidence
 - an explicit `allow`, `challenge`, and `deny` policy decision model
 - federal-ready startup evidence over build id, platform, audit schema, configured audit-sink
   health, and OpenSSL provider evidence
@@ -100,7 +102,8 @@ challenge when fresh proof is required, or a typed denial when controls are miss
 - JSONL sink health evidence covering configured, writable, unavailable, and not-configured states
 - external audit-device probe boundaries, including TCP reachability evidence that remains
   `unverified` and an mTLS JSONL write-ack probe that requires a matching challenge before `ready`
-- stable typed ops trace fixtures for CLI, TUI, and GUI vault operation automation
+- stable typed ops trace fixtures for CLI, TUI, GUI, and mTLS process-boundary vault operation
+  automation
 - strict redaction markers for sensitive attributes
 - SHA-256 hash-chain evidence generated through the `paranoid-core` OpenSSL-backed hash path
 - fail-closed integration when a required audit sink is unavailable
@@ -125,9 +128,9 @@ The native TUI and GUI now evaluate local vault actions through the same typed o
 calling `paranoid-vault`, and their tests record non-secret request/response policy events for read,
 mutate, keyslot, and export flows. TUI launches inherit `vault --audit-jsonl` / `--require-audit-sink`
 policy, and the GUI exposes the same durable local JSONL sink controls for deterministic automation.
-The remaining implementation work is additional seal-provider health checks, external
-process-boundary command fixtures, broader PTY coverage over those same command envelopes, and
-release-grade packaging evidence.
+The remaining implementation work is additional seal-provider health checks, a live external
+process-boundary transport implementation behind the pinned mTLS command fixture contract, broader
+PTY coverage over those same command envelopes, and release-grade packaging evidence.
 
 The seal model stays local-first but borrows the operational shape of Vault: a sealed vault can read
 metadata needed to decide how to unlock, but it cannot decrypt stored item payloads. Auto-unseal

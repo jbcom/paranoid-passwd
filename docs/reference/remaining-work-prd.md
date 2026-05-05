@@ -84,14 +84,14 @@ sinks with writable health evidence, external audit-device posture, seal-state p
 federal-ready startup evidence path. Headless vault CLI commands, native TUI actions, and native GUI
 automation now share that protocol for covered vault operations rather than drifting back into
 UI-local patches. The next architecture boundary extends the same model into mTLS external
-process-boundary command fixtures, seal / auto-unseal provider policy, and broader assessor
-fixtures.
+process-boundary transport implementation behind the pinned command-fixture contract, seal /
+auto-unseal provider policy, and broader assessor fixtures.
 
 That PR should be scoped around:
 
 - CLI/TUI/GUI JSONL fixtures and additional automation output over the typed ops protocol
 - seal / auto-unseal provider policy
-- mTLS external process-boundary command fixtures and policy evidence
+- mTLS external process-boundary transport implementation and policy evidence
 - additional federal-ready profile fixtures and configured-provider evidence
 - docs and tests that make the trust boundary reviewable
 

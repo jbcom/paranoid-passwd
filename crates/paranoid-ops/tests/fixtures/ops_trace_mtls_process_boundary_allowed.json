@@ -1,0 +1,91 @@
+{
+  "audit_events": [
+    {
+      "action": "vault_operation.request",
+      "attributes": {
+        "command": "vault_operation",
+        "profile": "federal_ready",
+        "request_id": "pp.fixture.request.mtls.export_process",
+        "session_surface": "ops",
+        "session_transport": "mtls",
+        "transport_authenticated": "true",
+        "transport_certificate_fingerprint_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "transport_channel_binding_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        "transport_evidence_source": "fixture-mtls-handshake",
+        "transport_peer_identity": "spiffe://example.test/paranoid-assessor",
+        "vault_access": "export",
+        "vault_operation": "export"
+      },
+      "event_id": "pp.fixture.operation.mtls.export_process.event.1",
+      "message": "typed ops command request accepted for policy evaluation",
+      "occurred_at_epoch_ms": 0,
+      "operation_id": "pp.fixture.operation.mtls.export_process",
+      "outcome": "started",
+      "schema_version": 1,
+      "sequence": 1,
+      "severity": "info",
+      "subject": "vault_operation",
+      "surface": "ops"
+    },
+    {
+      "action": "vault_operation.response",
+      "attributes": {
+        "decision": "allow",
+        "request_id": "pp.fixture.request.mtls.export_process",
+        "session_surface": "ops",
+        "session_transport": "mtls",
+        "transport_authenticated": "true",
+        "transport_certificate_fingerprint_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "transport_channel_binding_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        "transport_evidence_source": "fixture-mtls-handshake",
+        "transport_peer_identity": "spiffe://example.test/paranoid-assessor",
+        "vault_access": "export",
+        "vault_operation": "export"
+      },
+      "event_id": "pp.fixture.operation.mtls.export_process.event.2",
+      "message": "typed ops command policy response emitted",
+      "occurred_at_epoch_ms": 0,
+      "operation_id": "pp.fixture.operation.mtls.export_process",
+      "outcome": "success",
+      "schema_version": 1,
+      "sequence": 2,
+      "severity": "notice",
+      "subject": "vault_operation",
+      "surface": "ops"
+    }
+  ],
+  "decision": {
+    "decision": "allow",
+    "reason": "federal-ready controls satisfied"
+  },
+  "envelope": {
+    "actor": {
+      "actor_id": "external_assessor",
+      "kind": "service_account"
+    },
+    "command": {
+      "access": "export",
+      "kind": "vault_operation",
+      "name": "export"
+    },
+    "operation_id": "pp.fixture.operation.mtls.export_process",
+    "profile": "federal_ready",
+    "request_id": "pp.fixture.request.mtls.export_process",
+    "schema_version": 1,
+    "session": {
+      "session_id": "pp.fixture.session.mtls.export_process",
+      "surface": "ops",
+      "transport": "mtls",
+      "transport_evidence": {
+        "authenticated": true,
+        "certificate_fingerprint_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "channel_binding_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        "evidence_source": "fixture-mtls-handshake",
+        "peer_identity": "spiffe://example.test/paranoid-assessor",
+        "schema_version": 1,
+        "transport": "mtls"
+      }
+    }
+  },
+  "schema_version": 1
+}

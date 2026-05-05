@@ -7,6 +7,7 @@
         "profile": "default",
         "request_id": "pp.fixture.request.tui.keyslot_denied",
         "session_surface": "tui",
+        "session_transport": "in_process",
         "vault_access": "keyslot",
         "vault_operation": "keyslot_lifecycle"
       },
@@ -27,6 +28,7 @@
         "decision": "deny",
         "request_id": "pp.fixture.request.tui.keyslot_denied",
         "session_surface": "tui",
+        "session_transport": "in_process",
         "vault_access": "keyslot",
         "vault_operation": "keyslot_lifecycle"
       },

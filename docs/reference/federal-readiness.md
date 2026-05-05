@@ -126,7 +126,9 @@ and hash-chain evidence.
 - vault operation access classes for metadata, decrypt, mutate, export, import, and keyslot
   lifecycle flows
 - reusable vault operation policy evaluation for CLI, TUI, and native GUI adapters
-- a placeholder transport model for future mTLS policy when operations cross process boundaries
+- mTLS process-boundary transport evidence that fails closed unless a security-relevant command has
+  authenticated peer identity and certificate fingerprint evidence; non-secret channel-binding
+  evidence is carried when present
 - stable JSON responses for automation and evidence capture, including federal startup evidence
   schema `2` for the external audit-device posture field
 

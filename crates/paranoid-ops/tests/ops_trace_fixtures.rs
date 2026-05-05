@@ -2,7 +2,7 @@ use paranoid_audit::{AuditEvent, AuditSurface};
 use paranoid_ops::{
     FederalApprovedMode, FederalCryptoProviderEvidence, OPS_SCHEMA_VERSION, OpsActor, OpsCommand,
     OpsCommandEnvelope, OpsCommandTrace, OpsPolicyContext, OpsProfile, OpsSession, OpsTransport,
-    VaultOperationAccess, evaluate_ops_command_envelope,
+    OpsTransportEvidence, VaultOperationAccess, evaluate_ops_command_envelope,
 };
 
 #[test]
@@ -66,6 +66,33 @@ fn gui_export_federal_ready_trace_fixture_is_stable() {
     );
 }
 
+#[test]
+fn mtls_process_boundary_export_trace_fixture_is_stable() {
+    let trace = fixture_trace_with_session(
+        "mtls.export_process",
+        OpsProfile::FederalReady,
+        OpsActor {
+            actor_id: "external_assessor".to_string(),
+            kind: paranoid_ops::OpsActorKind::ServiceAccount,
+        },
+        OpsSession::mtls(
+            AuditSurface::Ops,
+            "pp.fixture.session.mtls.export_process",
+            mtls_fixture_evidence(),
+        ),
+        OpsCommand::VaultOperation {
+            name: "export".to_string(),
+            access: VaultOperationAccess::Export,
+        },
+        federal_context(true, true),
+    );
+
+    assert_fixture(
+        &trace,
+        include_str!("fixtures/ops_trace_mtls_process_boundary_allowed.json"),
+    );
+}
+
 fn fixture_trace(
     fixture_id: &str,
     surface: AuditSurface,
@@ -83,12 +110,44 @@ fn fixture_trace(
             session_id: format!("pp.fixture.session.{fixture_id}"),
             surface,
             transport: OpsTransport::InProcess,
+            transport_evidence: None,
         },
         command,
     };
     let mut trace = evaluate_ops_command_envelope(envelope, &context).into_trace();
     normalize_event_timestamps(&mut trace.audit_events);
     trace
+}
+
+fn fixture_trace_with_session(
+    fixture_id: &str,
+    profile: OpsProfile,
+    actor: OpsActor,
+    session: OpsSession,
+    command: OpsCommand,
+    context: OpsPolicyContext,
+) -> OpsCommandTrace {
+    let envelope = OpsCommandEnvelope {
+        schema_version: OPS_SCHEMA_VERSION,
+        request_id: format!("pp.fixture.request.{fixture_id}"),
+        operation_id: format!("pp.fixture.operation.{fixture_id}"),
+        profile,
+        actor,
+        session,
+        command,
+    };
+    let mut trace = evaluate_ops_command_envelope(envelope, &context).into_trace();
+    normalize_event_timestamps(&mut trace.audit_events);
+    trace
+}
+
+fn mtls_fixture_evidence() -> OpsTransportEvidence {
+    OpsTransportEvidence::authenticated_mtls(
+        "spiffe://example.test/paranoid-assessor",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "fixture-mtls-handshake",
+    )
+    .with_channel_binding_sha256("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 }
 
 fn default_context(audit_sink_required: bool, audit_sink_available: bool) -> OpsPolicyContext {
