@@ -4,22 +4,24 @@ use paranoid_audit::{
 };
 use paranoid_core::{CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, VERSION};
 use paranoid_ops::{
-    OpsCommand, OpsPolicyContext, OpsPolicyDecision, OpsProfile, VaultOperationAccess,
-    VaultSealMachine, collect_federal_startup_evidence_with_audit_sink, evaluate_ops_command,
+    OpsCommand, OpsPolicyContext, OpsPolicyDecision, OpsProfile, SEAL_SCHEMA_VERSION,
+    VaultOperationAccess, VaultSealMachine, VaultSealPosture, VaultSealProviderEvidence,
+    VaultSealProviderKind, VaultSealState, collect_federal_startup_evidence_with_audit_sink,
+    evaluate_ops_command,
 };
 use paranoid_vault::{
     GenerateStoreLoginRecord, NewCardRecord, NewIdentityRecord, NewLoginRecord,
     NewSecureNoteRecord, UpdateCardRecord, UpdateIdentityRecord, UpdateLoginRecord,
-    UpdateSecureNoteRecord, VaultAuth, VaultItemFilter, VaultItemKind, VaultOpenOptions,
-    default_vault_path, init_vault, inspect_certificate_pem, inspect_vault_backup,
-    inspect_vault_transfer, read_master_password, read_vault_header, restore_vault_backup,
-    unlock_vault_for_options,
+    UpdateSecureNoteRecord, VaultAuth, VaultHeader, VaultItemFilter, VaultItemKind,
+    VaultKeyslotKind, VaultOpenOptions, default_vault_path, init_vault, inspect_certificate_pem,
+    inspect_vault_backup, inspect_vault_transfer, read_master_password, read_vault_header,
+    restore_vault_backup, unlock_vault_for_options,
 };
 use std::{
     ffi::OsString,
     fs,
     io::{self, IsTerminal, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use crate::vault_tui;
@@ -123,17 +125,13 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             Ok(0)
         }
         VaultCommand::SealStatus => {
-            let vault_exists = invocation.open_options.path.exists();
-            let state = if vault_exists {
-                VaultSealMachine::default().state()
-            } else {
-                paranoid_ops::VaultSealState::RecoveryRequired
-            };
+            let (vault_exists, posture) = seal_posture_for_path(&invocation.open_options.path);
             let report = serde_json::json!({
-                "schema_version": paranoid_ops::OPS_SCHEMA_VERSION,
+                "schema_version": SEAL_SCHEMA_VERSION,
                 "operation": "vault_seal_status",
                 "path": invocation.open_options.path,
-                "state": state,
+                "state": posture.state,
+                "seal": posture,
                 "vault_exists": vault_exists,
             });
             serde_json::to_writer_pretty(io::stdout(), &report)?;
@@ -594,6 +592,65 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             }
             Ok(0)
         }
+    }
+}
+
+fn seal_posture_for_path(path: &Path) -> (bool, VaultSealPosture) {
+    if !path.exists() {
+        return (
+            false,
+            VaultSealPosture::from_providers(VaultSealState::RecoveryRequired, Vec::new()),
+        );
+    }
+
+    match read_vault_header(path) {
+        Ok(header) => (true, seal_posture_for_header(&header)),
+        Err(error) => {
+            let provider = VaultSealProviderEvidence::unavailable(
+                "vault_header",
+                VaultSealProviderKind::PasswordRecovery,
+                "vault_header",
+                format!("Vault header could not be read: {error}"),
+            );
+            (
+                true,
+                VaultSealPosture::from_providers(VaultSealState::RecoveryRequired, vec![provider]),
+            )
+        }
+    }
+}
+
+fn seal_posture_for_header(header: &VaultHeader) -> VaultSealPosture {
+    let providers = header
+        .keyslots
+        .iter()
+        .map(|keyslot| {
+            let provider = VaultSealProviderEvidence::configured(
+                keyslot.id.clone(),
+                seal_provider_kind(&keyslot.kind),
+                "vault_header",
+            );
+            let warnings = match header.assess_keyslot_health(&keyslot.id) {
+                Ok(health) => health.warnings,
+                Err(error) => vec![format!("Keyslot health could not be read: {error}")],
+            };
+            if warnings.is_empty() {
+                provider
+            } else {
+                provider.with_warnings(warnings)
+            }
+        })
+        .collect();
+
+    VaultSealPosture::from_providers(VaultSealMachine::default().state(), providers)
+}
+
+fn seal_provider_kind(kind: &VaultKeyslotKind) -> VaultSealProviderKind {
+    match kind {
+        VaultKeyslotKind::PasswordRecovery => VaultSealProviderKind::PasswordRecovery,
+        VaultKeyslotKind::MnemonicRecovery => VaultSealProviderKind::MnemonicRecovery,
+        VaultKeyslotKind::DeviceBound => VaultSealProviderKind::DeviceBound,
+        VaultKeyslotKind::CertificateWrapped => VaultSealProviderKind::CertificateWrapped,
     }
 }
 
@@ -2763,6 +2820,7 @@ fn print_generated_passwords(report: &GenerationReport) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paranoid_ops::VaultSealProviderStatus;
 
     #[test]
     fn parse_vault_args_supports_certificate_auth() {
@@ -2866,6 +2924,60 @@ mod tests {
 
         let seal = parse_vault_args(&[OsString::from("seal-status")]).expect("parse");
         assert!(matches!(seal.command, Some(VaultCommand::SealStatus)));
+    }
+
+    #[test]
+    fn seal_posture_for_missing_vault_requires_recovery() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("missing.vault");
+
+        let (vault_exists, posture) = seal_posture_for_path(&path);
+
+        assert!(!vault_exists);
+        assert_eq!(posture.state, VaultSealState::RecoveryRequired);
+        assert!(posture.recovery_required);
+        assert_eq!(posture.provider_count, 0);
+    }
+
+    #[test]
+    fn seal_posture_for_initialized_vault_reports_header_providers_only() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("vault.db");
+        let header = init_vault(&path, "seal posture unit test password").expect("init vault");
+
+        let (vault_exists, posture) = seal_posture_for_path(&path);
+
+        assert!(vault_exists);
+        assert_eq!(posture.state, VaultSealState::Sealed);
+        assert_eq!(posture.provider_count, header.keyslots.len());
+        assert!(posture.operator_recovery_configured);
+        assert!(!posture.recovery_required);
+        assert!(posture.providers.iter().any(|provider| {
+            provider.kind == VaultSealProviderKind::PasswordRecovery
+                && provider.status == VaultSealProviderStatus::Configured
+        }));
+        let serialized = serde_json::to_string(&posture).expect("serialize posture");
+        assert!(!serialized.contains("seal posture unit test password"));
+    }
+
+    #[test]
+    fn seal_provider_kind_maps_vault_keyslot_kinds() {
+        assert_eq!(
+            seal_provider_kind(&VaultKeyslotKind::PasswordRecovery),
+            VaultSealProviderKind::PasswordRecovery
+        );
+        assert_eq!(
+            seal_provider_kind(&VaultKeyslotKind::MnemonicRecovery),
+            VaultSealProviderKind::MnemonicRecovery
+        );
+        assert_eq!(
+            seal_provider_kind(&VaultKeyslotKind::DeviceBound),
+            VaultSealProviderKind::DeviceBound
+        );
+        assert_eq!(
+            seal_provider_kind(&VaultKeyslotKind::CertificateWrapped),
+            VaultSealProviderKind::CertificateWrapped
+        );
     }
 
     #[test]

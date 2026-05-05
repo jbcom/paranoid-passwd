@@ -225,6 +225,43 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
+        "seal.lifecycle-boundary",
+        "Seal lifecycle boundary",
+        "seal-security",
+        (
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "pub enum VaultSealState",
+                "paranoid-seal owns the seal state enum",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "pub struct VaultSealPosture",
+                "paranoid-seal owns the non-secret seal posture model",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "pub enum VaultSealProviderKind",
+                "paranoid-seal models seal provider kinds",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "pub use paranoid_seal::{",
+                "paranoid-ops re-exports seal types for adapter stability",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_cli.rs",
+                "seal_posture_for_path",
+                "vault seal-status emits seal posture without unlocking items",
+            ),
+            Requirement(
+                "docs/reference/architecture.md",
+                "`paranoid-seal` owns:",
+                "architecture docs name the seal lifecycle boundary",
+            ),
+        ),
+    ),
+    Claim(
         "supply-chain.locked-offline-cargo",
         "Locked offline Cargo policy",
         "supply-chain",
@@ -333,6 +370,7 @@ SURFACE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core-security", ("crates/paranoid-core/",)),
     ("vault-security", ("crates/paranoid-vault/",)),
     ("ops-security", ("crates/paranoid-audit/", "crates/paranoid-ops/")),
+    ("seal-security", ("crates/paranoid-seal/",)),
     ("supply-chain", (".cargo/", "Cargo.lock", "vendor/", ".github/", "scripts/", "Makefile")),
     ("security-docs", ("AGENTS.md", "SECURITY.md", "docs/reference/")),
 )

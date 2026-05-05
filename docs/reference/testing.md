@@ -90,8 +90,8 @@ validation remain product work before WASM can become a supported secret-handlin
 
 ## Ops, Audit, and Federal Profile Tests
 
-The ops/audit layer now has dedicated `paranoid-ops` and `paranoid-audit` crates. Current coverage
-proves that:
+The ops/audit/seal layer now has dedicated `paranoid-ops`, `paranoid-audit`, and `paranoid-seal`
+crates. Current coverage proves that:
 
 - generator automation runs through the ops boundary
 - JSON reports include policy request/response audit events
@@ -106,6 +106,8 @@ proves that:
 - federal startup evidence is emitted as JSON
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
 - the seal state machine covers unlock, idle-lock, timeout, and relock transitions
+- seal posture reports configured recovery, certificate, and auto-unseal providers without claiming
+  provider availability before a health check confirms it
 - redaction removes sensitive attributes instead of copying or hashing secrets
 - hash-chain verification detects tampered event streams
 

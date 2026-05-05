@@ -4020,6 +4020,15 @@ version = "3.5.1"
 dependencies = [
  "paranoid-audit",
  "paranoid-core",
+ "paranoid-seal",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "paranoid-seal"
+version = "3.5.1"
+dependencies = [
  "serde",
  "thiserror 2.0.18",
 ]
