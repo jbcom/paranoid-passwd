@@ -21,7 +21,7 @@ Before making any change, complete this self-audit:
 - [ ] I will not bypass rejection sampling; the boundary remains `(256/N)*N - 1`
 - [ ] I will not reintroduce the retired browser, JavaScript, or webview product path
 - [ ] I will treat any Slint WASM or mobile target as a separately gated Rust-native surface with an explicit threat model
-- [ ] I will not add handwritten `unsafe` Rust; Slint-generated GUI code is the only current unsafe-code lint exception
+- [ ] I will not add handwritten `unsafe` blocks, functions, or impls; only Slint-generated code and exact audited platform ABI export attributes may lower the GUI lint
 - [ ] I will keep security-sensitive logic in `crates/paranoid-core`, not in the CLI, TUI, GUI, or docs layer
 - [ ] I will flag math/security-sensitive changes with `TODO: HUMAN_REVIEW - <reason>`
 
@@ -36,7 +36,7 @@ If you cannot check all boxes, stop and request human guidance.
 4. Reintroduce JavaScript, DOM, or webview fallbacks into the product surface
 5. Move cryptographic or audit math into the TUI, GUI, docs tooling, or shell scripts
 6. Unpin GitHub Actions from commit SHAs
-7. Add handwritten `unsafe` Rust without explicit human approval and assurance-script coverage
+7. Add handwritten `unsafe` blocks, functions, or impls without explicit human approval and assurance-script coverage
 8. Remove audit layers to simplify the UX
 
 ### Always
@@ -71,7 +71,7 @@ Before committing:
 
 ### Source Code
 - [ ] No ad hoc RNG or custom crypto primitives in new code
-- [ ] No handwritten `unsafe` Rust in workspace sources
+- [ ] No handwritten `unsafe` blocks, functions, or impls in workspace sources
 - [ ] Rejection sampling still uses `(256/N)*N - 1`
 - [ ] Chi-squared pass logic still uses `p > 0.01`
 - [ ] Chi-squared degrees of freedom remain `df = N - 1`
@@ -97,14 +97,15 @@ Before committing:
 |-------|----------------|
 | `crates/paranoid-core` | password generation, OpenSSL-backed RNG/SHA-256, statistical audit, compliance checks |
 | `crates/paranoid-cli` | scriptable CLI plus full-screen wizard TUI |
-| `crates/paranoid-gui` | Slint-first native GUI direction with the current Iced surface retained during migration |
+| `crates/paranoid-gui` | Slint-native GUI surface plus target-gated desktop, mobile, and WASM build checks |
 
 Never duplicate generation, hashing, or audit logic outside `paranoid-core`.
 
 The GUI crate uses `unsafe_code = "deny"` instead of the workspace `forbid` because Slint's
-generated Rust lowers that lint internally. Handwritten GUI Rust remains checked by
-`scripts/hallucination_check.sh`, and `paranoid-core`, `paranoid-cli`, and `paranoid-vault`
-keep the workspace-level `forbid` policy.
+generated Rust lowers that lint internally and Rust 2024 marks exported Android/WASM ABI entrypoint
+attributes as unsafe. Handwritten GUI Rust remains checked by `scripts/hallucination_check.sh`;
+only exact `#[unsafe(no_mangle)]` ABI attributes are allowed there, and `paranoid-core`,
+`paranoid-cli`, and `paranoid-vault` keep the workspace-level `forbid` policy.
 
 ### Product Surface
 

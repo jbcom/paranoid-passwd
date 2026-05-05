@@ -5,7 +5,8 @@ title: Testing
 # Testing
 
 The native product line keeps generator, vault, and release behavior covered in tests while
-keeping the browser/WASM surface retired.
+keeping the retired browser app out of the product surface. Slint WASM and mobile targets are
+treated as explicit Rust-native target surfaces with their own threat model and local checks.
 
 The remaining open disposition surface is tracked separately in
 [Human Review Surface](./human-review.md) and mapped to [Assurance Claims](./assurance-claims.md).
@@ -51,6 +52,41 @@ make quality
 
 Python remains in the repo only where it already owns a specific workflow: Sphinx/tox docs and the
 PTY-driven TUI harness. It is not the project automation layer.
+
+## Local Build Chain Configure
+
+The repository owns local toolchain discovery through:
+
+```bash
+./configure
+make configure
+make bootstrap-local
+make show-config
+```
+
+`./configure` and `make configure` generate `.config/paranoid-local.mk` for Make and
+`.config/paranoid-local.env` for manual shell work. The generated config detects the host platform,
+Cargo/Rustup, Docker, Xvfb/ImageMagick GUI capture tools, Android SDK/NDK paths, NDK clang/ar/ranlib,
+adb, emulator, Maestro, `wasm-pack`, and installed Rust Android/WASM targets. `make bootstrap-local`
+installs `aarch64-linux-android` and `wasm32-unknown-unknown` with Rustup before regenerating the
+config.
+
+GUI target checks are separate from the main CI target so platform-readiness does not hide behind
+remote runners:
+
+```bash
+make test-gui-host-check
+make test-gui-android-check
+make test-gui-wasm-check
+make test-gui-targets
+```
+
+`make test-gui-android-check` currently compile-checks the Slint GUI library through the configured
+NDK while keeping the native `paranoid-core` and `paranoid-vault` path linked. `make
+test-gui-wasm-check` is intentionally strict and warning-clean, but it only checks the gated
+non-secret Slint WASM surface. The native vault and generator crates are not linked for
+`wasm32-unknown-unknown`; target-appropriate vault storage, crypto, packaging, and runtime
+validation remain product work before WASM can become a supported secret-handling surface.
 
 ## Ops, Audit, and Federal Profile Tests
 
@@ -106,7 +142,7 @@ cargo test -p paranoid-core --locked --frozen --offline
   keystrokes
 - a Linux GUI-binary workflow harness in
   [`tests/test_gui_e2e.sh`](../../../tests/test_gui_e2e.sh), proving the native
-  `iced` desktop app can run an operator workflow end to end under `xvfb-run`
+  Slint desktop app can run an operator workflow end to end under `xvfb-run`
   and leave a screenshot artifact for review
 - vault TUI rendering and launch-policy smoke tests
 - headless CLI end-to-end coverage for the documented vault workflows in
@@ -188,9 +224,10 @@ test backend.
 - native GUI idle auto-lock coverage
 - GUI launch-policy coverage for `--version` and `--help` without creating a window
 
-The GUI crate permits Slint-generated Rust to lower the unsafe-code lint, but handwritten GUI Rust
-is still scanned by `scripts/hallucination_check.sh`; security-sensitive crates remain under the
-workspace `unsafe_code = "forbid"` lint.
+The GUI crate permits Slint-generated Rust and exact Rust 2024 platform ABI export attributes to
+lower the unsafe-code lint, but handwritten unsafe blocks, functions, and impls are still scanned by
+`scripts/hallucination_check.sh`; security-sensitive crates remain under the workspace
+`unsafe_code = "forbid"` lint.
 
 ## Docs
 

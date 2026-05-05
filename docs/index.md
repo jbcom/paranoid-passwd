@@ -13,8 +13,7 @@ It ships native tools for daily use, scripting, and recovery operations:
 
 - `paranoid-core` owns password generation, rejection sampling, OpenSSL-backed hashing and RNG, compliance policy, and the 7-layer audit.
 - `paranoid-passwd` is the primary user binary. It defaults to the TUI on an interactive terminal and keeps the scriptable CLI for automation.
-- `paranoid-passwd-gui` is the dedicated GUI surface over the same generator and vault model;
-  the project is now Slint-first while the current Iced surface remains in place during migration.
+- `paranoid-passwd-gui` is the dedicated Slint-native GUI surface over the same generator and vault model.
 - `paranoid-vault` stores encrypted local `Login`, `SecureNote`, `Card`, and `Identity` records with explicit recovery posture.
 - the public website is docs and downloads only; the retired browser generator and JavaScript
   trust boundary are gone from the product surface.

@@ -16,7 +16,7 @@ It gives you:
 
 - a scriptable password generator CLI
 - a full-screen terminal wizard
-- a dedicated cross-platform desktop GUI
+- a dedicated Slint-native desktop GUI
 - an encrypted local vault for `Login`, `SecureNote`, `Card`, and `Identity` records
 - explicit recovery paths through recovery secrets, mnemonic slots, device-bound unlock,
   and certificate-wrapped keyslots
@@ -42,7 +42,7 @@ Launch behavior is standardized:
 - [`crates/paranoid-gui`](crates/paranoid-gui/src/main.rs)
 - [`crates/paranoid-vault`](crates/paranoid-vault/src/lib.rs)
 
-`paranoid-core` owns generation, rejection sampling, OpenSSL-backed RNG and hashing, statistical audit math, pattern detection, and compliance checks. The CLI, TUI, GUI, and vault flows consume typed Rust results instead of the old WASM memory bridge.
+`paranoid-core` owns generation, rejection sampling, OpenSSL-backed RNG and hashing, statistical audit math, pattern detection, and compliance checks. The CLI, TUI, GUI, and vault flows consume typed Rust results instead of the old raw-memory WASM bridge.
 
 ## Quick Start
 
@@ -104,6 +104,7 @@ open docs/_build/html/index.html
 ## Build and Test
 
 ```bash
+make configure
 make build
 make test
 make lint
@@ -112,7 +113,23 @@ make docs-build
 make smoke-release
 ```
 
-All Cargo commands use the vendored dependency tree through `.cargo/config.toml`.
+`make configure` writes `.config/paranoid-local.mk` and `.config/paranoid-local.env` with the
+detected local Rust, Android SDK/NDK, WASM, Docker, Xvfb, adb, emulator, and Maestro paths. All
+Cargo commands use the vendored dependency tree through `.cargo/config.toml`.
+
+Target-gated GUI checks are explicit:
+
+```bash
+make test-gui-host-check
+make test-gui-android-check
+make test-gui-wasm-check
+make test-gui-e2e-emulate
+```
+
+The Android check is a strict Slint GUI library compile through the configured NDK and keeps the
+native `paranoid-core`/`paranoid-vault` path linked. The WASM check is strict too, but intentionally
+compiles only a gated non-secret Slint surface; native vault and generator operations are disabled
+there until storage and crypto are threat-modeled for `wasm32-unknown-unknown`.
 
 To emulate the repository CI flow through the custom builder image:
 
@@ -148,8 +165,7 @@ The shipped release surface now has two native binaries, each published through 
 `paranoid-passwd` is licensed under the GNU General Public License v3.0 only
 (`GPL-3.0-only`). This keeps the product open source under a reciprocal license
 and permits using Slint under Slint's GPLv3 open-source licensing path. The GUI
-direction is Slint-first; the current Iced surface remains in place while the
-Slint implementation reaches parity.
+surface is Slint-native.
 
 ## Security Posture
 

@@ -44,15 +44,35 @@ if rg -n '\bunsafe\b' \
   "$REPO_ROOT/crates/paranoid-vault/src" \
   --glob '*.rs' >/dev/null 2>&1; then
   fail "unsafe Rust detected in core, CLI, or vault Rust sources"
-elif rg -n '\bunsafe\b' \
+else
+  gui_unsafe_hits="$(
+    rg -n '\bunsafe\b' \
+      "$REPO_ROOT/crates/paranoid-gui/src" \
+      "$REPO_ROOT/crates/paranoid-gui/build.rs" \
+      --glob '*.rs' || true
+  )"
+  gui_disallowed_unsafe_hits="$(
+    printf '%s\n' "$gui_unsafe_hits" \
+      | rg -v '#\[allow\(unsafe_code\)\]' \
+      | rg -v '#\[unsafe\(no_mangle\)\]' || true
+  )"
+  if [ -n "$gui_disallowed_unsafe_hits" ]; then
+    printf '%s\n' "$gui_disallowed_unsafe_hits"
+    fail "handwritten unsafe Rust detected in GUI sources"
+  elif rg -q 'unsafe_code = "deny"' "$REPO_ROOT/crates/paranoid-gui/Cargo.toml"; then
+    pass "handwritten workspace Rust remains unsafe-free; GUI only permits audited platform ABI export attributes under deny-level linting"
+  else
+    fail "GUI unsafe-code lint is not pinned to deny"
+  fi
+fi
+
+if rg -n '\btodo!\s*\(' \
   "$REPO_ROOT/crates/paranoid-gui/src" \
   "$REPO_ROOT/crates/paranoid-gui/build.rs" \
   --glob '*.rs' >/dev/null 2>&1; then
-  fail "handwritten unsafe Rust detected in GUI sources"
-elif rg -q 'unsafe_code = "deny"' "$REPO_ROOT/crates/paranoid-gui/Cargo.toml"; then
-  pass "handwritten workspace Rust remains unsafe-free; GUI permits Slint generated code under deny-level linting"
+  fail "handwritten todo! macro detected in GUI sources"
 else
-  fail "GUI unsafe-code lint is not pinned to deny"
+  pass "no handwritten todo! macro in GUI sources; Slint generated embed stubs remain excluded from source-tree checks"
 fi
 
 if rg -q 'let max_valid = \(256 / charset_bytes\.len\(\)\) \* charset_bytes\.len\(\) - 1;' "$CORE" \
@@ -84,6 +104,33 @@ if rg -q '^use statrs::distribution::\{ChiSquared, ContinuousCDF\};' "$CORE"; th
   pass "chi-squared tail probability still uses statrs"
 else
   fail "statrs chi-squared dependency path missing"
+fi
+
+wasm_gui_tree="$(
+  cd "$REPO_ROOT" \
+    && cargo tree -p paranoid-gui --target wasm32-unknown-unknown --locked --offline --edges normal,build 2>/dev/null \
+    || true
+)"
+if [ -z "$wasm_gui_tree" ]; then
+  fail "WASM GUI dependency tree did not resolve offline"
+elif printf '%s\n' "$wasm_gui_tree" | rg -q '\b(paranoid-core|paranoid-vault|openssl-sys|rusqlite)\b'; then
+  fail "WASM GUI target links native secret-handling crates"
+else
+  pass "WASM GUI target remains a gated non-secret Slint surface without native vault/core linkage"
+fi
+
+android_gui_tree="$(
+  cd "$REPO_ROOT" \
+    && cargo tree -p paranoid-gui --target aarch64-linux-android --locked --offline --edges normal,build 2>/dev/null \
+    || true
+)"
+if [ -z "$android_gui_tree" ]; then
+  fail "Android GUI dependency tree did not resolve offline"
+elif printf '%s\n' "$android_gui_tree" | rg -q '\bparanoid-core\b' \
+  && printf '%s\n' "$android_gui_tree" | rg -q '\bparanoid-vault\b'; then
+  pass "Android GUI target keeps the native core/vault linkage"
+else
+  fail "Android GUI target lost native core/vault linkage"
 fi
 
 legacy_paths=(

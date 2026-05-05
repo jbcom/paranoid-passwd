@@ -5,7 +5,6 @@ set -euo pipefail
 TARGET_OS="${1:?target os required}"
 BINARY_PATH="${2:?binary path required}"
 OUTPUT_PATH="${3:?output path required}"
-WINDOW_NAME="${4:-paranoid-passwd}"
 
 HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
@@ -25,7 +24,9 @@ capture_linux() {
 
   mkdir -p "$(dirname "${OUTPUT_PATH}")"
 
-  xvfb-run -a env WINIT_UNIX_BACKEND=x11 bash -lc '
+  # The inner script expands inside the Xvfb shell, not in this parent shell.
+  # shellcheck disable=SC2016
+  xvfb-run -a env WINIT_UNIX_BACKEND=x11 SLINT_BACKEND=software bash -lc '
     set -euo pipefail
     binary_path="$1"
     output_path="$2"
@@ -44,9 +45,7 @@ capture_linux() {
     gui_pid=$!
 
     capture_gui_window() {
-      if ! import -descend -window "'"${WINDOW_NAME}"'" "${output_path}" 2>/dev/null; then
-        import -window root "${output_path}"
-      fi
+      timeout 5s import -window root "${output_path}"
     }
 
     for _ in $(seq 1 120); do

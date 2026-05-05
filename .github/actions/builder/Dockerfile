@@ -19,7 +19,9 @@ RUN --mount=type=cache,target=/var/cache/apk \
         curl \
         dbus \
         dbus-dev \
+        fontconfig \
         fontconfig-dev \
+        font-liberation \
         git \
         imagemagick \
         make \
@@ -47,6 +49,8 @@ RUN --mount=type=cache,target=/tmp/cargo/registry \
 
 RUN bash --version >/dev/null \
  && cargo --version >/dev/null \
+ && fc-cache -f >/dev/null \
+ && fc-match sans >/dev/null \
  && command -v sphinx-rustdocgen >/dev/null \
  && command -v dbus-run-session >/dev/null \
  && command -v identify >/dev/null \

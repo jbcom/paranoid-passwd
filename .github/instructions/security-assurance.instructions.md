@@ -23,7 +23,7 @@ Never waive these invariants:
 - Chi-squared pass logic remains `p > 0.01` with `N - 1` degrees of freedom unless a
   written claim disposition and known-answer tests land in the same PR.
 - No custom crypto primitives.
-- No browser, WASM, JavaScript, webview, or retired C product surface.
+- No retired browser app, JavaScript secret-handling logic, DOM UI, webview, retired C product surface, or unthreat-modeled Slint WASM/mobile surface.
 - External GitHub Actions remain SHA-pinned.
 - Cargo CI and release commands stay locked, frozen, offline, and vendored.
 - `TODO: HUMAN_REVIEW` markers are not removed without updating

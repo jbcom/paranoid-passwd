@@ -29,7 +29,9 @@ log_path="${tmpdir}/gui.log"
 export PARANOID_MASTER_PASSWORD="correct horse battery staple"
 "${CLI_BINARY}" vault --cli --path "${vault_path}" init >/dev/null
 
-xvfb-run -a env WINIT_UNIX_BACKEND=x11 bash -lc '
+# The inner script expands inside the Xvfb shell, not in this parent shell.
+# shellcheck disable=SC2016
+xvfb-run -a env WINIT_UNIX_BACKEND=x11 SLINT_BACKEND=software bash -lc '
   set -euo pipefail
 
   gui_binary="$1"
@@ -48,9 +50,7 @@ xvfb-run -a env WINIT_UNIX_BACKEND=x11 bash -lc '
   trap cleanup_gui EXIT
 
   capture_gui_window() {
-    if ! import -descend -window "paranoid-passwd" "${screenshot_path}" 2>/dev/null; then
-      import -window root "${screenshot_path}"
-    fi
+    timeout 5s import -window root "${screenshot_path}"
   }
 
   PARANOID_GUI_AUTOMATION_SCENARIO=operator-workflow \

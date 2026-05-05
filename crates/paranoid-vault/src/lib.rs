@@ -3587,7 +3587,11 @@ fn select_device_keyslot<'a>(
     }
 }
 
-#[cfg(all(debug_assertions, not(test)))]
+#[cfg(all(
+    debug_assertions,
+    not(test),
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
 fn debug_device_store_root() -> Option<PathBuf> {
     std::env::var_os("PARANOID_TEST_DEVICE_STORE_DIR").and_then(|value| {
         if value.is_empty() {
@@ -3598,12 +3602,20 @@ fn debug_device_store_root() -> Option<PathBuf> {
     })
 }
 
-#[cfg(all(debug_assertions, not(test)))]
+#[cfg(all(
+    debug_assertions,
+    not(test),
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
 fn debug_device_store_path(root: &Path, service: &str, account: &str) -> PathBuf {
     root.join(hex_encode(format!("{service}\u{0}{account}").as_bytes()).as_str())
 }
 
-#[cfg(all(debug_assertions, not(test)))]
+#[cfg(all(
+    debug_assertions,
+    not(test),
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
 fn debug_device_store_set_secret(
     service: &str,
     account: &str,
@@ -3620,7 +3632,11 @@ fn debug_device_store_set_secret(
     Ok(true)
 }
 
-#[cfg(all(debug_assertions, not(test)))]
+#[cfg(all(
+    debug_assertions,
+    not(test),
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
 fn debug_device_store_get_secret(
     service: &str,
     account: &str,
@@ -3636,7 +3652,11 @@ fn debug_device_store_get_secret(
     }
 }
 
-#[cfg(all(debug_assertions, not(test)))]
+#[cfg(all(
+    debug_assertions,
+    not(test),
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
 fn debug_device_store_delete_secret(service: &str, account: &str) -> Result<bool, VaultError> {
     let Some(root) = debug_device_store_root() else {
         return Ok(false);

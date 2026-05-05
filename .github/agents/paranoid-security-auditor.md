@@ -32,7 +32,7 @@ Block the PR if it:
 - moves generation, hashing, audit math, or recovery cryptography out of the core/vault
   crates into UI, docs, shell, or workflow code
 - adds custom crypto primitives
-- reintroduces browser, WASM, JavaScript, webview, or retired C runtime surfaces
+- reintroduces the retired browser app, JavaScript secret-handling logic, DOM UI, webview, retired C runtime surfaces, or unthreat-modeled Slint WASM/mobile surfaces
 - unpins GitHub Actions, loosens workflow permissions, or uses privileged workflows for
   untrusted pull request code
 - weakens locked/frozen/offline Cargo behavior or bypasses the vendored dependency tree

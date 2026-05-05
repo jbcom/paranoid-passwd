@@ -13,12 +13,25 @@ rust-version.workspace = true
 name = "paranoid-passwd-gui"
 path = "src/main.rs"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
 [dependencies]
-arboard.workspace = true
-iced.workspace = true
+slint.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 paranoid-core = { path = "../paranoid-core" }
 paranoid-vault = { path = "../paranoid-vault" }
-slint.workspace = true
+
+[target.'cfg(not(any(target_os = "android", target_arch = "wasm32")))'.dependencies]
+arboard.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Compile-only support for the gated non-secret Slint WASM surface. Native password and
+# vault entropy remains owned by the OpenSSL-backed paranoid-core/vault paths, and WASM
+# secret handling remains disabled until storage and crypto are threat-modeled.
+getrandom = { version = "0.2.17", features = ["js"] }
 
 [build-dependencies]
 slint-build.workspace = true

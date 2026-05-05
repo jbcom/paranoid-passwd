@@ -124,23 +124,27 @@ an unassessed boundary. See [Federal Readiness](./federal-readiness.md).
 
 ## GUI
 
-`paranoid-passwd-gui` is the dedicated GUI surface. The project is now Slint-first for new GUI work
-under the GPLv3 licensing path. The current Iced surface remains in place while the Slint
-implementation reaches feature parity, and it continues to share the same core request/result
-model, native vault `Login`, `SecureNote`, `Card`, and `Identity` CRUD/filter flows plus
+`paranoid-passwd-gui` is the dedicated GUI surface. The project is now Slint-native under the GPLv3
+licensing path, and it shares the same core request/result model, native vault `Login`,
+`SecureNote`, `Card`, and `Identity` CRUD/filter flows plus
 folder-plus-tag organization, login password-history visibility, duplicate-password visibility,
 native keyslot management, recovery-posture reporting, direct native unlock, encrypted backup
 export/import, clipboard auto-clear, and vault idle auto-lock.
 
-The first checked-in Slint surface lives under `crates/paranoid-gui/ui/` and is compiled by the
-GUI crate build script. Desktop remains the primary target. Slint WASM and mobile targets are
-allowed roadmap surfaces only when they keep the Rust/Slint implementation boundary, avoid
-JavaScript secret-handling logic, and carry their own threat model and release gate.
+The checked-in Slint surface lives under `crates/paranoid-gui/ui/` and is compiled by the GUI crate
+build script. Desktop remains the primary release target. Android and WASM are now explicit local
+build-chain targets through `make configure`, `make test-gui-android-check`, and
+`make test-gui-wasm-check`. Android compile-checks through the configured NDK with the native
+`paranoid-core` and `paranoid-vault` crates linked. WASM compile-checks a gated non-secret Slint
+surface that does not link the native vault or generator crates; storage, crypto, release packaging,
+and runtime validation for `wasm32-unknown-unknown` remain separate threat-model work and cannot
+revive JavaScript secret-handling logic or the retired DOM app.
 
 `crates/paranoid-gui` uses a crate-local `unsafe_code = "deny"` lint instead of the workspace
-`forbid` because Slint's generated Rust needs to lower that lint internally. The handwritten GUI
-sources are still checked by `scripts/hallucination_check.sh`, and all security-sensitive crates
-retain the workspace `forbid` policy.
+`forbid` because Slint's generated Rust and Rust 2024 platform ABI export attributes need to lower
+that lint internally. The handwritten GUI sources are still checked by
+`scripts/hallucination_check.sh`; only exact `#[unsafe(no_mangle)]` ABI attributes are allowed
+there, and all security-sensitive crates retain the workspace `forbid` policy.
 
 ## Local Vault
 
