@@ -90,28 +90,28 @@ validation remain product work before WASM can become a supported secret-handlin
 
 ## Ops, Audit, and Federal Profile Tests
 
-The ops/audit foundation now has dedicated `paranoid-ops` and `paranoid-audit` crates. Current
-coverage proves that generator automation runs through the ops boundary, emits structured JSON, and
-records redacted audit events that do not copy generated password values into evidence metadata.
+The ops/audit layer now has dedicated `paranoid-ops` and `paranoid-audit` crates. Current coverage
+proves that:
 
-The remaining comprehensive test expansion should add:
+- generator automation runs through the ops boundary
+- JSON reports include policy request/response audit events
+- `--audit-jsonl` writes a local append-oriented JSONL audit sink
+- `--federal-ready` fails closed without confirmed approved-provider evidence
+- federal startup evidence is emitted as JSON
+- typed allow/challenge/deny decisions cover sensitive vault unlock methods
+- the seal state machine covers unlock, idle-lock, timeout, and relock transitions
+- redaction removes sensitive attributes instead of copying or hashing secrets
+- hash-chain verification detects tampered event streams
 
-- typed command-envelope serialization and compatibility fixtures
-- allow / challenge / deny policy decisions for sensitive vault operations
-- seal, unseal, auto-unseal, idle-lock, and recovery-required state transitions
-- request/response audit-event pairing by stable request id
-- audit redaction and keyed-hash behavior for sensitive fields
-- event hash-chain verification and tamper/truncation detection
-- fail-closed behavior when a required audit sink is unavailable
-- CLI JSON and JSONL output fixtures for automation consumers
+The remaining test expansion is now narrower:
+
+- stable JSON/JSONL compatibility fixtures checked into the repository
 - TUI and GUI adapter tests that prove controls submit typed ops commands instead of reimplementing
   policy
-- federal-ready profile startup checks for FIPS-provider availability, approved mode evidence,
-  required audit sinks, and disabled non-federal recovery paths
-
-The federal-ready profile should have its own evidence fixtures so a release candidate can show what
-would be attached to a FedRAMP High, GovCloud, or DoD IL5 customer assessment package without
-claiming that this standalone project is itself authorized.
+- audit-device health checks beyond the local JSONL sink
+- keyed correlation hashes only after the approved primitive and low-entropy secret risk are
+  dispositioned
+- e2e coverage for vault mutations routed through typed ops envelopes
 
 ## Core Tests
 

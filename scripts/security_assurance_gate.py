@@ -41,7 +41,7 @@ CLAIMS: tuple[Claim, ...] = (
         (
             Requirement(
                 "crates/paranoid-core/src/lib.rs",
-                r"^use openssl::\{" + "rand" + r"::rand_bytes, sha::sha256\};",
+                r"^use openssl::\{(?=[^}]*" + "rand" + r"::rand_bytes)(?=[^}]*sha::sha256)[^}]*\};",
                 "paranoid-core imports OpenSSL RNG and SHA-256",
                 True,
             ),

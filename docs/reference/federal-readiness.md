@@ -36,13 +36,14 @@ Use careful language:
 
 ## Federal-Ready Profile
 
-The next comprehensive PR should introduce a federal-ready profile. It should be explicit, testable,
-and fail closed when required controls are missing.
+The product now has an explicit federal-ready profile entry point. It is intentionally conservative:
+security-relevant operations fail closed unless the required audit sink is available and runtime
+evidence confirms an approved cryptographic provider mode.
 
 Required behavior:
 
-- load only an approved cryptographic provider path when federal mode is requested
-- verify at startup that the expected FIPS provider is available, active, and in approved mode
+- report the configured cryptographic provider path when federal mode is requested
+- verify at startup whether the expected FIPS provider is confirmed in approved mode
 - emit machine-readable evidence for provider name, provider version, module certificate or platform
   certificate reference, operating system, architecture, build id, and policy profile
 - require structured audit output for security-relevant commands
@@ -53,10 +54,28 @@ Required behavior:
 - preserve offline/vendored dependency builds, pinned workflows, checksums, attestations, SBOM, and
   payload inspection
 
-Current OpenSSL usage is not enough by itself. The federal-ready profile must prove that the runtime
-uses a validated module in its approved mode, such as an appropriate OpenSSL FIPS Provider or an
-approved platform provider, and must document the tested operating environment and configuration
-constraints.
+Current OpenSSL usage is not enough by itself. The checked-in default runtime reports OpenSSL
+evidence, but it does not claim approved mode. Federal-ready operations therefore deny by default
+unless the deployment provides approved-mode evidence, for example:
+
+```bash
+PARANOID_FEDERAL_APPROVED_MODE=confirmed \
+PARANOID_FEDERAL_CERTIFICATE_REFERENCE="CMVP certificate <customer-owned-reference>" \
+paranoid-passwd --cli --profile federal-ready --audit-jsonl audit.jsonl --length 32
+```
+
+Those environment variables are evidence inputs, not a product certification. A customer still has
+to prove that its exact build, OpenSSL provider, operating environment, and assessment boundary
+support the claim.
+
+Automation surfaces:
+
+```bash
+paranoid-passwd --federal-evidence
+paranoid-passwd --cli --federal-ready --audit-jsonl audit.jsonl --length 32
+paranoid-passwd vault federal-evidence
+paranoid-passwd vault seal-status
+```
 
 ## Crypto Disposition
 
@@ -79,31 +98,35 @@ automatically enough for a federal authorization.
 ## Ops and Audit Controls
 
 `paranoid-ops` and `paranoid-audit` are the right place to satisfy federal readiness without
-bloating UI code. The current foundation covers generator automation reports and redacted structured
-audit events; vault seal policy, required sinks, and federal profile evidence remain explicit
-follow-on work.
+bloating UI code. The current implementation covers generator automation reports, typed command
+envelopes, allow/challenge/deny decisions, seal-state primitives, required local JSONL sinks,
+federal startup evidence, redacted structured audit events, and hash-chain evidence.
 
-`paranoid-ops` should continue toward:
+`paranoid-ops` now provides:
 
-- typed command envelopes with request id, actor, surface, session, profile, target, and operation
+- typed command envelopes with request id, actor, surface, session, profile, and operation
 - policy decisions of `allow`, `challenge`, or `deny`
 - challenge/response handling for sensitive operations and fresh proof requirements
 - seal and auto-unseal state transitions
-- mTLS policy when operations cross process boundaries
+- a placeholder transport model for future mTLS policy when operations cross process boundaries
 - stable JSON responses for automation and evidence capture
 
-`paranoid-audit` should continue toward:
+`paranoid-audit` now provides:
 
 - request and response events for every command that reaches policy evaluation
 - stable JSONL schemas suitable for SIEM ingestion
-- redaction and keyed hashing for sensitive fields
+- strict redaction markers for sensitive fields
 - hash-chained local event streams
-- explicit audit-device health and fail-closed behavior for required sinks
+- fail-closed behavior for required local JSONL sinks
 - fixtures that can be attached to an SSP, control implementation summary, or assessor evidence
   package
 
+The current redaction behavior intentionally replaces sensitive values with a redaction marker
+rather than hashing secrets. Keyed correlation hashes remain future work because they must use an
+approved primitive and must not create offline-guessing evidence for low-entropy secrets.
+
 This is the replacement for primitive logging. Operational logs may still exist for troubleshooting,
-but audit events must be typed, durable, redacted, and testable.
+but audit events are typed, durable, redacted, and testable.
 
 ## Evidence Package
 

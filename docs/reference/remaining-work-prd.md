@@ -28,7 +28,7 @@ What remains is no longer “build the product.” It is “close the production
 
 This PRD covers only the work **not handled in the current session**:
 
-1. typed ops protocol, dedicated audit crate, and seal / auto-unseal lifecycle
+1. completion of typed ops adoption across vault/TUI/GUI flows and seal / auto-unseal lifecycle
 2. federal-ready operating profile for FedRAMP High, GovCloud, and DoD IL5 customers
 3. live release qualification on GitHub
 4. security assurance disposition for the remaining crypto/statistics claims
@@ -59,7 +59,7 @@ The current branch should be treated as the functional baseline:
 - backup/restore and transfer packages exist
 - offline Cargo + vendored dependency policy exists
 - docs, release verification, and supply-chain checks exist
-- the next ops/audit/seal and federal-readiness direction is documented, but not yet implemented
+- the first ops/audit/seal and federal-readiness primitives exist, but vault/TUI/GUI adoption is not complete
 
 The remaining work therefore falls into protocolization, federal readiness, qualification, review,
 packaging, and closure.
@@ -78,19 +78,19 @@ Ship a local-first password manager and generator whose implementation, release 
 
 ## Next Comprehensive PR Boundary
 
-The current ops/audit foundation adds the shared crates and migrates generator automation onto
-them. The next comprehensive architecture PR should finish the security-relevant vault command
-flows, seal lifecycle, required audit sinks, and first federal-ready profile evidence path in one
-coherent change rather than drifting back into UI-local patches.
+The current ops/audit work adds typed command envelopes, allow/challenge/deny policy, JSONL audit
+sinks, seal-state primitives, and a federal-ready startup evidence path. The next architecture
+boundary should route all security-relevant vault command flows and interactive UI adapters through
+that protocol rather than drifting back into UI-local patches.
 
 That PR should be scoped around:
 
-- expanding `crates/paranoid-ops`
-- expanding `crates/paranoid-audit`
+- expanding `crates/paranoid-ops` into vault mutation orchestration
+- expanding `crates/paranoid-audit` beyond local JSONL sinks into configured audit-device health
 - CLI JSONL fixtures and additional automation output over the typed ops protocol
 - TUI and GUI adapters over the same protocol
-- seal / auto-unseal state and policy
-- federal-ready profile scaffolding and evidence fixtures
+- seal / auto-unseal provider policy
+- federal-ready profile fixtures and configured-provider evidence
 - docs and tests that make the trust boundary reviewable
 
 ## Workstream 1: Ops Protocol, Audit Crate, and Seal Lifecycle
@@ -157,8 +157,8 @@ OpenSSL linkage are not enough.
 
 ### Requirements
 
-1. Add a federal-ready profile gate that can be enabled in CLI automation and surfaced in TUI/GUI
-   posture views.
+1. Keep the federal-ready profile gate enabled in CLI automation and surface it in TUI/GUI posture
+   views.
 2. Verify and report the cryptographic provider path, provider version, module or platform
    certificate reference, operating system, architecture, build id, and profile at startup.
 3. Fail closed when federal mode requires a FIPS provider, approved mode, or required audit sink and
@@ -389,10 +389,11 @@ This PRD is complete when all of the following are true:
 
 ## Immediate Next Actions
 
-1. finish and merge the current PR with local tests, GUI screenshot verification, and GitHub checks
-2. open one comprehensive ops/audit/seal plus federal-readiness PR
-3. implement `paranoid-ops` and `paranoid-audit` before expanding UI-specific behavior
-4. add federal-ready startup checks, evidence output, and control-mapping docs
+1. finish and merge the current ops/audit/federal-readiness PR with local tests, GUI screenshot
+   verification, and GitHub checks
+2. route vault mutations, TUI actions, and GUI actions through typed ops envelopes
+3. add configured audit-device health beyond local JSONL sinks
+4. add stable federal-ready JSON/JSONL fixtures and a control-mapping evidence artifact
 5. run the first canary release from `main` after those architecture boundaries are stable
 6. choose the Windows installer technology and macOS signing/notarization path
 7. update this PRD as those decisions are made
