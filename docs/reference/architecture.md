@@ -109,11 +109,12 @@ The CLI exposes the first automation surface:
 - `vault seal-status` reports the local vault seal posture without decrypting item payloads
 - `vault federal-evidence` emits the same federal startup evidence from the vault namespace
 
-The native GUI now evaluates local vault actions through the same typed ops protocol before calling
-`paranoid-vault`, and its deterministic automation contract records non-secret request/response
-policy events for read, mutate, keyslot, and export flows. The remaining implementation work is to
-route TUI vault actions and durable GUI audit sinks through the same command envelopes without
-duplicating policy in presentation code.
+The native TUI and GUI now evaluate local vault actions through the same typed ops protocol before
+calling `paranoid-vault`, and their tests record non-secret request/response policy events for read,
+mutate, keyslot, and export flows. TUI launches inherit `vault --audit-jsonl` / `--require-audit-sink`
+policy, and the GUI exposes the same durable local JSONL sink controls for deterministic automation.
+The remaining implementation work is external audit-device health, seal / auto-unseal provider
+policy, and stable assessor fixtures over those same command envelopes.
 
 The seal model stays local-first but borrows the operational shape of Vault: a sealed vault can read
 metadata needed to decide how to unlock, but it cannot decrypt stored item payloads. Auto-unseal

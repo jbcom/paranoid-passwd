@@ -3,7 +3,10 @@
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 use arboard::Clipboard;
 #[cfg(not(target_arch = "wasm32"))]
-use paranoid_audit::{AuditEvent, AuditSurface};
+use paranoid_audit::{
+    AuditEvent, AuditSinkHealth, AuditSurface, assess_optional_jsonl_file_audit_sink,
+    write_events_jsonl,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use paranoid_core::{
     CharsetOptions, CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, execute_request,
@@ -36,9 +39,15 @@ mod slint_shell {
     slint::include_modules!();
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct GuiLaunchOptions {
+    audit_jsonl: Option<String>,
+    require_audit_sink: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum LaunchAction {
-    RunGui,
+    RunGui(GuiLaunchOptions),
     PrintHelp,
     PrintVersion,
 }
@@ -50,6 +59,8 @@ Usage: paranoid-passwd-gui [OPTIONS]
 Launch the native paranoid-passwd desktop application.
 
 Options:
+      --audit-jsonl PATH      Append GUI ops policy audit events to a JSONL file
+      --require-audit-sink    Fail closed when the configured audit sink is unavailable
   -V, --version            Print version info and exit
   -h, --help               Print this help and exit
 "
@@ -59,16 +70,24 @@ fn resolve_launch_action<I>(args: I) -> Result<LaunchAction, String>
 where
     I: IntoIterator<Item = std::ffi::OsString>,
 {
-    let mut action = LaunchAction::RunGui;
-    for argument in args {
+    let mut options = GuiLaunchOptions::default();
+    let mut args = args.into_iter();
+    while let Some(argument) = args.next() {
         match argument.to_string_lossy().as_ref() {
-            "-V" | "--version" => action = LaunchAction::PrintVersion,
-            "-h" | "--help" => action = LaunchAction::PrintHelp,
+            "-V" | "--version" => return Ok(LaunchAction::PrintVersion),
+            "-h" | "--help" => return Ok(LaunchAction::PrintHelp),
+            "--audit-jsonl" => {
+                let Some(path) = args.next() else {
+                    return Err("--audit-jsonl requires a path".to_string());
+                };
+                options.audit_jsonl = Some(path.to_string_lossy().to_string());
+            }
+            "--require-audit-sink" => options.require_audit_sink = true,
             "--" => break,
             value => return Err(format!("unsupported argument: {value}")),
         }
     }
-    Ok(action)
+    Ok(LaunchAction::RunGui(options))
 }
 
 fn print_gui_usage() {
@@ -121,6 +140,38 @@ struct GuiAutomation {
     output_path: PathBuf,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone)]
+struct GuiRuntimeConfig {
+    audit_jsonl: Option<PathBuf>,
+    require_audit_sink: bool,
+    audit_sink_health: AuditSinkHealth,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl GuiRuntimeConfig {
+    fn from_launch_options(options: &GuiLaunchOptions) -> Self {
+        let audit_jsonl = options.audit_jsonl.as_ref().map(PathBuf::from);
+        let audit_sink_health = assess_optional_jsonl_file_audit_sink(audit_jsonl.as_deref());
+        Self {
+            audit_jsonl,
+            require_audit_sink: options.require_audit_sink,
+            audit_sink_health,
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for GuiRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            audit_jsonl: None,
+            require_audit_sink: false,
+            audit_sink_health: AuditSinkHealth::not_configured_jsonl(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct GuiState {
     #[cfg(not(target_arch = "wasm32"))]
@@ -133,6 +184,12 @@ struct GuiState {
     last_report: Option<GenerationReport>,
     #[cfg(not(target_arch = "wasm32"))]
     ops_audit_events: Vec<AuditEvent>,
+    #[cfg(not(target_arch = "wasm32"))]
+    audit_jsonl: Option<PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
+    require_audit_sink: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    audit_sink_health: AuditSinkHealth,
     status: String,
     generated_passwords: String,
     audit_details: String,
@@ -146,24 +203,7 @@ struct GuiState {
 impl Default for GuiState {
     #[cfg(not(target_arch = "wasm32"))]
     fn default() -> Self {
-        Self {
-            vault_path: default_vault_path(),
-            vault_secret: String::new(),
-            selected_login_id: None,
-            last_report: None,
-            ops_audit_events: Vec::new(),
-            status: "Ready. Core owns RNG, rejection sampling, audit math, and vault crypto."
-                .to_string(),
-            generated_passwords: "No passwords generated yet.".to_string(),
-            audit_details:
-                "Run an audit to produce entropy, compliance, and rejection-sampling evidence."
-                    .to_string(),
-            vault_items: "Vault is locked or not loaded.".to_string(),
-            vault_posture: "Vault posture unavailable.".to_string(),
-            keyslot_summary: "No keyslots loaded.".to_string(),
-            selected_item: "No vault item selected.".to_string(),
-            automation_status: "Manual mode".to_string(),
-        }
+        Self::with_runtime_config(GuiRuntimeConfig::default())
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -183,6 +223,31 @@ impl Default for GuiState {
 }
 
 impl GuiState {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn with_runtime_config(config: GuiRuntimeConfig) -> Self {
+        Self {
+            vault_path: default_vault_path(),
+            vault_secret: String::new(),
+            selected_login_id: None,
+            last_report: None,
+            ops_audit_events: Vec::new(),
+            audit_jsonl: config.audit_jsonl,
+            require_audit_sink: config.require_audit_sink,
+            audit_sink_health: config.audit_sink_health,
+            status: "Ready. Core owns RNG, rejection sampling, audit math, and vault crypto."
+                .to_string(),
+            generated_passwords: "No passwords generated yet.".to_string(),
+            audit_details:
+                "Run an audit to produce entropy, compliance, and rejection-sampling evidence."
+                    .to_string(),
+            vault_items: "Vault is locked or not loaded.".to_string(),
+            vault_posture: "Vault posture unavailable.".to_string(),
+            keyslot_summary: "No keyslots loaded.".to_string(),
+            selected_item: "No vault item selected.".to_string(),
+            automation_status: "Manual mode".to_string(),
+        }
+    }
+
     fn apply_to(&self, window: &slint_shell::ParanoidPasswdShell) {
         window.set_mode("Slint GUI".into());
         window.set_posture(self.vault_posture.clone().into());
@@ -211,11 +276,21 @@ impl GuiState {
         operation: &str,
         access: VaultOperationAccess,
     ) -> Result<(), String> {
-        let context = gui_ops_policy_context();
+        let context = self.ops_policy_context();
         let evaluation = evaluate_vault_operation(AuditSurface::Gui, operation, access, &context);
         self.ops_audit_events
             .extend(evaluation.audit_events.iter().cloned());
         self.audit_details = summarize_gui_ops_audit(self.ops_audit_events.as_slice());
+        if let Some(path) = &self.audit_jsonl
+            && self.audit_sink_health.is_available()
+        {
+            write_events_jsonl(path, evaluation.audit_events.as_slice()).map_err(|error| {
+                format!(
+                    "write GUI vault audit events to {}: {error}",
+                    path.display()
+                )
+            })?;
+        }
         if evaluation.is_allowed() {
             Ok(())
         } else {
@@ -225,15 +300,15 @@ impl GuiState {
             ))
         }
     }
-}
 
-#[cfg(not(target_arch = "wasm32"))]
-fn gui_ops_policy_context() -> OpsPolicyContext {
-    OpsPolicyContext {
-        profile: OpsProfile::Default,
-        audit_sink_required: false,
-        audit_sink_available: false,
-        crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+    #[cfg(not(target_arch = "wasm32"))]
+    fn ops_policy_context(&self) -> OpsPolicyContext {
+        OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: self.audit_jsonl.is_some() || self.require_audit_sink,
+            audit_sink_available: self.audit_sink_health.is_available(),
+            crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+        }
     }
 }
 
@@ -265,7 +340,7 @@ fn summarize_gui_ops_audit(events: &[AuditEvent]) -> String {
 
 pub fn cli_main() -> Result<(), slint::PlatformError> {
     match resolve_launch_action(env::args_os().skip(1)) {
-        Ok(LaunchAction::RunGui) => run_gui(),
+        Ok(LaunchAction::RunGui(options)) => run_gui(options),
         Ok(LaunchAction::PrintHelp) => {
             print_gui_usage();
             Ok(())
@@ -282,9 +357,10 @@ pub fn cli_main() -> Result<(), slint::PlatformError> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn run_gui() -> Result<(), slint::PlatformError> {
+fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
     let window = slint_shell::ParanoidPasswdShell::new()?;
-    let state = Rc::new(RefCell::new(GuiState::default()));
+    let runtime_config = GuiRuntimeConfig::from_launch_options(&options);
+    let state = Rc::new(RefCell::new(GuiState::with_runtime_config(runtime_config)));
 
     if let Ok(Some(automation)) = configured_gui_automation() {
         let result = run_operator_automation(&mut state.borrow_mut(), &automation);
@@ -332,7 +408,7 @@ fn run_gui() -> Result<(), slint::PlatformError> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn run_gui() -> Result<(), slint::PlatformError> {
+fn run_gui(_options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
     let window = slint_shell::ParanoidPasswdShell::new()?;
     let state = Rc::new(RefCell::new(GuiState::default()));
     wire_callbacks(&window, Rc::clone(&state));
@@ -1226,7 +1302,7 @@ fn parse_tags_csv(value: &str) -> Vec<String> {
 #[unsafe(no_mangle)]
 fn android_main(app: slint::android::AndroidApp) {
     slint::android::init(app).expect("failed to initialize Slint Android backend");
-    if let Err(error) = run_gui() {
+    if let Err(error) = run_gui(GuiLaunchOptions::default()) {
         eprintln!("paranoid-passwd-gui Android launch failed: {error}");
     }
 }
@@ -1235,7 +1311,7 @@ fn android_main(app: slint::android::AndroidApp) {
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
 pub extern "C" fn paranoid_passwd_wasm_entrypoint() {
-    if let Err(error) = run_gui() {
+    if let Err(error) = run_gui(GuiLaunchOptions::default()) {
         eprintln!("paranoid-passwd-gui WASM launch failed: {error}");
     }
 }
@@ -1255,6 +1331,17 @@ mod tests {
             Ok(LaunchAction::PrintHelp)
         );
         assert!(resolve_launch_action([std::ffi::OsString::from("--bogus")]).is_err());
+        assert_eq!(
+            resolve_launch_action([
+                std::ffi::OsString::from("--audit-jsonl"),
+                std::ffi::OsString::from("gui-audit.jsonl"),
+                std::ffi::OsString::from("--require-audit-sink"),
+            ]),
+            Ok(LaunchAction::RunGui(GuiLaunchOptions {
+                audit_jsonl: Some("gui-audit.jsonl".to_string()),
+                require_audit_sink: true,
+            }))
+        );
     }
 
     #[test]
@@ -1326,6 +1413,48 @@ mod tests {
         assert_eq!(state.ops_audit_events.len(), 2);
         assert!(state.audit_details.contains("mutate_item"));
         assert!(state.audit_details.contains("access=mutate"));
+        assert!(state.audit_details.contains("decision=allow"));
+    }
+
+    #[test]
+    fn gui_vault_operation_policy_persists_jsonl_when_configured() {
+        let tmpdir = tempfile::tempdir().expect("temporary GUI audit directory");
+        let audit_path = tmpdir.path().join("gui-audit.jsonl");
+        let mut state = GuiState::with_runtime_config(GuiRuntimeConfig::from_launch_options(
+            &GuiLaunchOptions {
+                audit_jsonl: Some(audit_path.display().to_string()),
+                require_audit_sink: false,
+            },
+        ));
+
+        state
+            .record_vault_operation_policy("export", VaultOperationAccess::Export)
+            .expect("policy allow");
+
+        let audit_jsonl = fs::read_to_string(&audit_path).expect("audit jsonl");
+        assert_eq!(audit_jsonl.lines().count(), 2);
+        assert!(audit_jsonl.contains(r#""surface":"ops""#));
+        assert!(audit_jsonl.contains(r#""session_surface":"gui""#));
+        assert!(audit_jsonl.contains(r#""vault_access":"export""#));
+    }
+
+    #[test]
+    fn gui_vault_operation_policy_keeps_memory_events_when_jsonl_write_fails() {
+        let tmpdir = tempfile::tempdir().expect("temporary GUI audit directory");
+        let audit_path = tmpdir.path().join("gui-audit.jsonl");
+        let mut state = GuiState::with_runtime_config(GuiRuntimeConfig::from_launch_options(
+            &GuiLaunchOptions {
+                audit_jsonl: Some(audit_path.display().to_string()),
+                require_audit_sink: false,
+            },
+        ));
+        drop(tmpdir);
+
+        let result = state.record_vault_operation_policy("export", VaultOperationAccess::Export);
+
+        assert!(result.is_err());
+        assert_eq!(state.ops_audit_events.len(), 2);
+        assert!(state.audit_details.contains("Last operation=export"));
         assert!(state.audit_details.contains("decision=allow"));
     }
 }

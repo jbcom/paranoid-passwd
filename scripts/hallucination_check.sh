@@ -113,7 +113,7 @@ wasm_gui_tree="$(
 )"
 if [ -z "$wasm_gui_tree" ]; then
   fail "WASM GUI dependency tree did not resolve offline"
-elif printf '%s\n' "$wasm_gui_tree" | rg -q '\b(paranoid-core|paranoid-vault|openssl-sys|rusqlite)\b'; then
+elif rg -q '\b(paranoid-core|paranoid-vault|openssl-sys|rusqlite)\b' <<<"$wasm_gui_tree"; then
   fail "WASM GUI target links native secret-handling crates"
 else
   pass "WASM GUI target remains a gated non-secret Slint surface without native vault/core linkage"
@@ -126,8 +126,8 @@ android_gui_tree="$(
 )"
 if [ -z "$android_gui_tree" ]; then
   fail "Android GUI dependency tree did not resolve offline"
-elif printf '%s\n' "$android_gui_tree" | rg -q '\bparanoid-core\b' \
-  && printf '%s\n' "$android_gui_tree" | rg -q '\bparanoid-vault\b'; then
+elif rg -q '\bparanoid-core\b' <<<"$android_gui_tree" \
+  && rg -q '\bparanoid-vault\b' <<<"$android_gui_tree"; then
   pass "Android GUI target keeps the native core/vault linkage"
 else
   fail "Android GUI target lost native core/vault linkage"

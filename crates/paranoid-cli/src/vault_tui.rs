@@ -5,12 +5,20 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use paranoid_audit::{
+    AuditEvent, AuditSinkHealth, AuditSurface, assess_optional_jsonl_file_audit_sink,
+    write_events_jsonl,
+};
 use paranoid_core::{FrameworkId, ParanoidRequest};
+use paranoid_ops::{
+    FederalCryptoProviderEvidence, OpsPolicyContext, OpsProfile, VaultOperationAccess,
+    evaluate_vault_operation,
+};
 use paranoid_vault::{
     GenerateStoreLoginRecord, MnemonicRecoveryEnrollment, NativeSessionHardening, NewCardRecord,
-    NewIdentityRecord, NewLoginRecord, NewSecureNoteRecord, SecretString, UpdateCardRecord,
-    UpdateIdentityRecord, UpdateSecureNoteRecord, VaultAuth, VaultBackupSummary, VaultHeader,
-    VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary,
+    NewIdentityRecord, NewLoginRecord, NewSecureNoteRecord, SecretString, UnlockedVault,
+    UpdateCardRecord, UpdateIdentityRecord, UpdateSecureNoteRecord, VaultAuth, VaultBackupSummary,
+    VaultHeader, VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary,
     VaultOpenOptions, VaultTransferSummary, inspect_certificate_pem, inspect_vault_backup,
     inspect_vault_transfer, read_vault_header, restore_vault_backup, unlock_vault_for_options,
 };
@@ -24,7 +32,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
-use std::{fs, io};
+use std::{fs, io, path::PathBuf};
 
 const BG: Color = Color::Rgb(8, 12, 20);
 const PANEL: Color = Color::Rgb(13, 17, 25);
@@ -1038,8 +1046,52 @@ impl GenerateStoreForm {
 }
 
 #[derive(Debug)]
+enum BackupSummaryPreview {
+    Available(VaultBackupSummary),
+    Unavailable(String),
+}
+
+impl BackupSummaryPreview {
+    fn as_result(&self) -> Result<&VaultBackupSummary, &str> {
+        match self {
+            Self::Available(summary) => Ok(summary),
+            Self::Unavailable(error) => Err(error.as_str()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VaultTuiConfig {
+    pub open_options: VaultOpenOptions,
+    pub profile: OpsProfile,
+    pub audit_jsonl: Option<PathBuf>,
+    pub require_audit_sink: bool,
+}
+
+impl VaultTuiConfig {
+    #[cfg(test)]
+    pub fn new(open_options: VaultOpenOptions) -> Self {
+        Self {
+            open_options,
+            profile: OpsProfile::Default,
+            audit_jsonl: None,
+            require_audit_sink: false,
+        }
+    }
+
+    fn audit_sink_health(&self) -> AuditSinkHealth {
+        assess_optional_jsonl_file_audit_sink(self.audit_jsonl.as_deref())
+    }
+}
+
+#[derive(Debug)]
 struct App {
     options: VaultOpenOptions,
+    profile: OpsProfile,
+    audit_jsonl: Option<PathBuf>,
+    require_audit_sink: bool,
+    audit_sink_health: AuditSinkHealth,
+    ops_audit_events: Vec<AuditEvent>,
     screen: Screen,
     status: String,
     header: Option<VaultHeader>,
@@ -1064,6 +1116,7 @@ struct App {
     pending_keyslot_removal_confirmation: Option<String>,
     generate_store_form: GenerateStoreForm,
     export_backup_form: ExportBackupForm,
+    export_backup_preview: Option<BackupSummaryPreview>,
     export_transfer_form: ExportTransferForm,
     import_backup_form: ImportBackupForm,
     import_transfer_form: ImportTransferForm,
@@ -1072,9 +1125,20 @@ struct App {
 }
 
 impl App {
+    #[cfg(test)]
     fn new(options: VaultOpenOptions) -> Self {
+        Self::with_config(VaultTuiConfig::new(options))
+    }
+
+    fn with_config(config: VaultTuiConfig) -> Self {
+        let audit_sink_health = config.audit_sink_health();
         let mut app = Self {
-            options,
+            options: config.open_options,
+            profile: config.profile,
+            audit_jsonl: config.audit_jsonl,
+            require_audit_sink: config.require_audit_sink,
+            audit_sink_health,
+            ops_audit_events: Vec::new(),
             screen: Screen::UnlockBlocked,
             status: String::new(),
             header: None,
@@ -1099,6 +1163,7 @@ impl App {
             pending_keyslot_removal_confirmation: None,
             generate_store_form: GenerateStoreForm::default(),
             export_backup_form: ExportBackupForm::default(),
+            export_backup_preview: None,
             export_transfer_form: ExportTransferForm::default(),
             import_backup_form: ImportBackupForm::default(),
             import_transfer_form: ImportTransferForm::default(),
@@ -1107,6 +1172,51 @@ impl App {
         };
         app.refresh();
         app
+    }
+
+    fn ops_policy_context(&self) -> OpsPolicyContext {
+        OpsPolicyContext {
+            profile: self.profile,
+            audit_sink_required: self.audit_jsonl.is_some()
+                || self.require_audit_sink
+                || self.profile == OpsProfile::FederalReady,
+            audit_sink_available: self.audit_sink_health.is_available(),
+            crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+        }
+    }
+
+    fn record_vault_operation_policy(
+        &mut self,
+        operation: &str,
+        access: VaultOperationAccess,
+    ) -> anyhow::Result<()> {
+        let context = self.ops_policy_context();
+        let evaluation = evaluate_vault_operation(AuditSurface::Tui, operation, access, &context);
+        self.ops_audit_events
+            .extend(evaluation.audit_events.iter().cloned());
+        if let Some(path) = &self.audit_jsonl
+            && self.audit_sink_health.is_available()
+        {
+            write_events_jsonl(path, evaluation.audit_events.as_slice())
+                .with_context(|| format!("write TUI vault audit events to {}", path.display()))?;
+        }
+        if evaluation.is_allowed() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "TUI vault operation policy denied: {:?}",
+                evaluation.decision
+            ))
+        }
+    }
+
+    fn unlock_for_operation(
+        &mut self,
+        operation: &str,
+        access: VaultOperationAccess,
+    ) -> anyhow::Result<UnlockedVault> {
+        self.record_vault_operation_policy(operation, access)?;
+        Ok(unlock_vault_for_options(&self.options)?)
     }
 
     fn refresh(&mut self) {
@@ -1131,7 +1241,7 @@ impl App {
     }
 
     fn reload_vault_state(&mut self, preferred_id: Option<&str>) -> anyhow::Result<()> {
-        let vault = unlock_vault_for_options(&self.options)?;
+        let vault = self.unlock_for_operation("read_item", VaultOperationAccess::Decrypt)?;
         self.header = Some(vault.header().clone());
         if self
             .pending_keyslot_removal_confirmation
@@ -2504,9 +2614,23 @@ impl App {
             path: default_backup_export_path(&self.options.path),
         };
         self.screen = Screen::ExportBackup;
-        self.status =
-            "Export the current encrypted vault state into a portable JSON backup package."
-                .to_string();
+        self.export_backup_preview = Some(
+            match self
+                .unlock_for_operation("read_item", VaultOperationAccess::Decrypt)
+                .and_then(|vault| vault.backup_summary().map_err(anyhow::Error::from))
+            {
+                Ok(summary) => {
+                    self.status =
+                        "Export the current encrypted vault state into a portable JSON backup package."
+                            .to_string();
+                    BackupSummaryPreview::Available(summary)
+                }
+                Err(error) => {
+                    self.status = format!("Backup preview unavailable: {error}");
+                    BackupSummaryPreview::Unavailable(error.to_string())
+                }
+            },
+        );
     }
 
     fn open_export_transfer(&mut self) {
@@ -2629,7 +2753,7 @@ impl App {
     }
 
     fn submit_login_create(&mut self, record: NewLoginRecord) {
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => match vault.add_login(record).map_err(anyhow::Error::from) {
                 Ok(item) => {
                     let item_id = item.id.clone();
@@ -2653,7 +2777,7 @@ impl App {
     }
 
     fn submit_login_update(&mut self, item_id: String, record: NewLoginRecord) {
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => match vault
                 .update_login(
                     &item_id,
@@ -2692,7 +2816,7 @@ impl App {
     }
 
     fn submit_note_create(&mut self, record: NewSecureNoteRecord) {
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => match vault.add_secure_note(record).map_err(anyhow::Error::from) {
                 Ok(item) => {
                     let item_id = item.id.clone();
@@ -2716,7 +2840,7 @@ impl App {
     }
 
     fn submit_note_update(&mut self, item_id: String, record: NewSecureNoteRecord) {
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => match vault
                 .update_secure_note(
                     &item_id,
@@ -2752,7 +2876,7 @@ impl App {
     }
 
     fn submit_card_create(&mut self, record: NewCardRecord) {
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => match vault.add_card(record).map_err(anyhow::Error::from) {
                 Ok(item) => {
                     let item_id = item.id.clone();
@@ -2771,7 +2895,7 @@ impl App {
     }
 
     fn submit_card_update(&mut self, item_id: String, record: NewCardRecord) {
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => match vault
                 .update_card(
                     &item_id,
@@ -2809,7 +2933,7 @@ impl App {
     }
 
     fn submit_identity_create(&mut self, record: NewIdentityRecord) {
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => match vault.add_identity(record).map_err(anyhow::Error::from) {
                 Ok(item) => {
                     let item_id = item.id.clone();
@@ -2829,7 +2953,7 @@ impl App {
     }
 
     fn submit_identity_update(&mut self, item_id: String, record: NewIdentityRecord) {
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => match vault
                 .update_identity(
                     &item_id,
@@ -2872,8 +2996,8 @@ impl App {
                 return;
             }
         };
-        let title = self.generate_store_form.title.trim();
-        let username = self.generate_store_form.username.trim();
+        let title = self.generate_store_form.title.trim().to_string();
+        let username = self.generate_store_form.username.trim().to_string();
         if self.generate_store_form.target_login_id.is_none()
             && (title.is_empty() || username.is_empty())
         {
@@ -2881,14 +3005,14 @@ impl App {
             return;
         }
 
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => match vault
                 .generate_and_store(
                     &request,
                     GenerateStoreLoginRecord {
                         target_login_id: self.generate_store_form.target_login_id.clone(),
-                        title: (!title.is_empty()).then(|| title.to_string()),
-                        username: (!username.is_empty()).then(|| username.to_string()),
+                        title: (!title.is_empty()).then(|| title.clone()),
+                        username: (!username.is_empty()).then(|| username.clone()),
                         url: normalize_optional_field(&self.generate_store_form.url),
                         notes: normalize_optional_field(&self.generate_store_form.notes),
                         folder: normalize_optional_field(&self.generate_store_form.folder),
@@ -2932,13 +3056,16 @@ impl App {
     }
 
     fn submit_export_backup(&mut self) {
-        let output = self.export_backup_form.path.trim();
+        let output = self.export_backup_form.path.trim().to_string();
         if output.is_empty() {
             self.status = "Backup export requires an output path.".to_string();
             return;
         }
-        match unlock_vault_for_options(&self.options) {
-            Ok(vault) => match vault.export_backup(output).map_err(anyhow::Error::from) {
+        match self.unlock_for_operation("export", VaultOperationAccess::Export) {
+            Ok(vault) => match vault
+                .export_backup(output.as_str())
+                .map_err(anyhow::Error::from)
+            {
                 Ok(path) => {
                     self.screen = Screen::Vault;
                     self.status = format!("Exported encrypted vault backup to {}.", path.display());
@@ -2954,13 +3081,23 @@ impl App {
     }
 
     fn submit_import_backup(&mut self) {
-        let input = self.import_backup_form.path.trim();
+        let input = self.import_backup_form.path.trim().to_string();
         if input.is_empty() {
             self.status = "Backup import requires an input path.".to_string();
             return;
         }
-        match restore_vault_backup(input, &self.options.path, self.import_backup_form.overwrite)
-            .map_err(anyhow::Error::from)
+        if let Err(error) =
+            self.record_vault_operation_policy("mutate_item", VaultOperationAccess::Mutate)
+        {
+            self.status = format!("Backup import failed: {error}");
+            return;
+        }
+        match restore_vault_backup(
+            input.as_str(),
+            &self.options.path,
+            self.import_backup_form.overwrite,
+        )
+        .map_err(anyhow::Error::from)
         {
             Ok(_) => {
                 let source = input.to_string();
@@ -2978,7 +3115,7 @@ impl App {
     }
 
     fn submit_export_transfer(&mut self) {
-        let output = self.export_transfer_form.path.trim();
+        let output = self.export_transfer_form.path.trim().to_string();
         if output.is_empty() {
             self.status = "Transfer export requires an output path.".to_string();
             return;
@@ -2994,7 +3131,7 @@ impl App {
             return;
         }
 
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("export", VaultOperationAccess::Export) {
             Ok(vault) => {
                 let cert_pem = match cert_path {
                     Some(ref path) => match fs::read(path) {
@@ -3008,7 +3145,7 @@ impl App {
                 };
                 match vault
                     .export_transfer_package(
-                        output,
+                        output.as_str(),
                         &self.filters.as_filter(),
                         package_password.as_deref(),
                         cert_pem.as_deref(),
@@ -3067,7 +3204,7 @@ impl App {
             return;
         }
 
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => {
                 let result = if let Some(password) = package_password {
                     vault.import_transfer_package_with_password(
@@ -3121,7 +3258,7 @@ impl App {
     }
 
     fn submit_mnemonic_slot(&mut self) {
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot) {
             Ok(mut vault) => match vault
                 .add_mnemonic_keyslot(normalize_optional_field(&self.mnemonic_slot_form.label))
                 .map_err(anyhow::Error::from)
@@ -3153,7 +3290,7 @@ impl App {
             self.status = "No keyslot selected to rotate.".to_string();
             return;
         };
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot) {
             Ok(mut vault) => match vault
                 .rotate_mnemonic_keyslot(&slot.id)
                 .map_err(anyhow::Error::from)
@@ -3186,7 +3323,7 @@ impl App {
     }
 
     fn submit_device_slot(&mut self) {
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot) {
             Ok(mut vault) => match vault
                 .add_device_keyslot(normalize_optional_field(&self.device_slot_form.label))
                 .map_err(anyhow::Error::from)
@@ -3227,42 +3364,45 @@ impl App {
             return;
         }
         match fs::read(cert_path) {
-            Ok(cert_pem) => match unlock_vault_for_options(&self.options) {
-                Ok(mut vault) => match vault
-                    .add_certificate_keyslot(
-                        cert_pem.as_slice(),
-                        normalize_optional_field(&self.certificate_slot_form.label),
-                    )
-                    .map_err(anyhow::Error::from)
+            Ok(cert_pem) => {
+                match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot)
                 {
-                    Ok(slot) => {
-                        self.header = Some(vault.header().clone());
-                        self.selected_keyslot_index = self
-                            .header
-                            .as_ref()
-                            .and_then(|header| {
-                                header
-                                    .keyslots
-                                    .iter()
-                                    .position(|candidate| candidate.id == slot.id)
-                            })
-                            .unwrap_or(0);
-                        self.screen = Screen::Keyslots;
-                        self.status = format!(
-                            "Enrolled certificate keyslot {} for fingerprint {} (valid until {}).",
-                            slot.id,
-                            slot.certificate_fingerprint_sha256.unwrap_or_default(),
-                            slot.certificate_not_after.unwrap_or_default()
-                        );
-                    }
+                    Ok(mut vault) => match vault
+                        .add_certificate_keyslot(
+                            cert_pem.as_slice(),
+                            normalize_optional_field(&self.certificate_slot_form.label),
+                        )
+                        .map_err(anyhow::Error::from)
+                    {
+                        Ok(slot) => {
+                            self.header = Some(vault.header().clone());
+                            self.selected_keyslot_index = self
+                                .header
+                                .as_ref()
+                                .and_then(|header| {
+                                    header
+                                        .keyslots
+                                        .iter()
+                                        .position(|candidate| candidate.id == slot.id)
+                                })
+                                .unwrap_or(0);
+                            self.screen = Screen::Keyslots;
+                            self.status = format!(
+                                "Enrolled certificate keyslot {} for fingerprint {} (valid until {}).",
+                                slot.id,
+                                slot.certificate_fingerprint_sha256.unwrap_or_default(),
+                                slot.certificate_not_after.unwrap_or_default()
+                            );
+                        }
+                        Err(error) => {
+                            self.status = format!("Certificate keyslot enrollment failed: {error}");
+                        }
+                    },
                     Err(error) => {
                         self.status = format!("Certificate keyslot enrollment failed: {error}");
                     }
-                },
-                Err(error) => {
-                    self.status = format!("Certificate keyslot enrollment failed: {error}");
                 }
-            },
+            }
             Err(error) => {
                 self.status = format!("Certificate read failed: {error}");
             }
@@ -3283,45 +3423,48 @@ impl App {
         let replacement_key_passphrase =
             normalize_optional_field(&self.certificate_rewrap_form.key_passphrase);
         match fs::read(&cert_path) {
-            Ok(cert_pem) => match unlock_vault_for_options(&self.options) {
-                Ok(mut vault) => match vault
-                    .rewrap_certificate_keyslot(&slot.id, cert_pem.as_slice())
-                    .map_err(anyhow::Error::from)
+            Ok(cert_pem) => {
+                match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot)
                 {
-                    Ok(updated) => {
-                        self.sync_rewrapped_certificate_unlock(
-                            &slot,
-                            cert_path.as_str(),
-                            replacement_key_path.as_deref(),
-                            replacement_key_passphrase.as_deref(),
-                        );
-                        self.header = Some(vault.header().clone());
-                        self.selected_keyslot_index = self
-                            .header
-                            .as_ref()
-                            .and_then(|header| {
-                                header
-                                    .keyslots
-                                    .iter()
-                                    .position(|candidate| candidate.id == updated.id)
-                            })
-                            .unwrap_or(0);
-                        self.screen = Screen::Keyslots;
-                        self.status = format!(
-                            "Rewrapped certificate keyslot {} to fingerprint {} (valid until {}). Active certificate session settings were preserved or updated if this was the active cert slot.",
-                            updated.id,
-                            updated.certificate_fingerprint_sha256.unwrap_or_default(),
-                            updated.certificate_not_after.unwrap_or_default()
-                        );
-                    }
+                    Ok(mut vault) => match vault
+                        .rewrap_certificate_keyslot(&slot.id, cert_pem.as_slice())
+                        .map_err(anyhow::Error::from)
+                    {
+                        Ok(updated) => {
+                            self.sync_rewrapped_certificate_unlock(
+                                &slot,
+                                cert_path.as_str(),
+                                replacement_key_path.as_deref(),
+                                replacement_key_passphrase.as_deref(),
+                            );
+                            self.header = Some(vault.header().clone());
+                            self.selected_keyslot_index = self
+                                .header
+                                .as_ref()
+                                .and_then(|header| {
+                                    header
+                                        .keyslots
+                                        .iter()
+                                        .position(|candidate| candidate.id == updated.id)
+                                })
+                                .unwrap_or(0);
+                            self.screen = Screen::Keyslots;
+                            self.status = format!(
+                                "Rewrapped certificate keyslot {} to fingerprint {} (valid until {}). Active certificate session settings were preserved or updated if this was the active cert slot.",
+                                updated.id,
+                                updated.certificate_fingerprint_sha256.unwrap_or_default(),
+                                updated.certificate_not_after.unwrap_or_default()
+                            );
+                        }
+                        Err(error) => {
+                            self.status = format!("Certificate keyslot rewrap failed: {error}");
+                        }
+                    },
                     Err(error) => {
                         self.status = format!("Certificate keyslot rewrap failed: {error}");
                     }
-                },
-                Err(error) => {
-                    self.status = format!("Certificate keyslot rewrap failed: {error}");
                 }
-            },
+            }
             Err(error) => {
                 self.status = format!("Certificate read failed: {error}");
             }
@@ -3333,7 +3476,7 @@ impl App {
             self.status = "No keyslot selected to relabel.".to_string();
             return;
         };
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot) {
             Ok(mut vault) => match vault
                 .relabel_keyslot(
                     &slot.id,
@@ -3382,7 +3525,7 @@ impl App {
         }
 
         let new_secret = self.recovery_secret_form.new_secret.clone();
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot) {
             Ok(mut vault) => match vault
                 .rotate_password_recovery_keyslot(new_secret.as_str())
                 .map_err(anyhow::Error::from)
@@ -3438,7 +3581,7 @@ impl App {
             );
             return;
         }
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot) {
             Ok(mut vault) => match vault
                 .remove_keyslot(&slot.id, force)
                 .map_err(anyhow::Error::from)
@@ -3476,7 +3619,7 @@ impl App {
             return;
         };
         self.pending_keyslot_removal_confirmation = None;
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot) {
             Ok(mut vault) => match vault
                 .rebind_device_keyslot(&slot.id)
                 .map_err(anyhow::Error::from)
@@ -3518,7 +3661,7 @@ impl App {
             return;
         };
         let item_id = detail.id.clone();
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("mutate_item", VaultOperationAccess::Mutate) {
             Ok(vault) => match vault.delete_item(&item_id).map_err(anyhow::Error::from) {
                 Ok(()) => {
                     self.screen = Screen::Vault;
@@ -3541,14 +3684,18 @@ impl App {
     }
 
     fn reload_detail(&mut self) {
-        let Some(item) = self.items.get(self.selected_index) else {
+        let Some(item_id) = self
+            .items
+            .get(self.selected_index)
+            .map(|item| item.id.clone())
+        else {
             self.detail = None;
             return;
         };
 
-        match unlock_vault_for_options(&self.options) {
+        match self.unlock_for_operation("read_item", VaultOperationAccess::Decrypt) {
             Ok(vault) => match vault
-                .get_item(&item.id)
+                .get_item(&item_id)
                 .map_err(anyhow::Error::from)
                 .context("failed to reload selected vault item")
             {
@@ -3582,6 +3729,12 @@ impl App {
                 .or_else(|| identity.phone.clone())
                 .unwrap_or_else(|| identity.full_name.clone()),
         };
+        if let Err(error) =
+            self.record_vault_operation_policy("read_item", VaultOperationAccess::Decrypt)
+        {
+            self.status = format!("Copy blocked: {error}");
+            return;
+        }
         match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(content.clone())) {
             Ok(()) => {
                 self.session.arm_clipboard_clear(content);
@@ -3633,14 +3786,14 @@ fn edit_form_value(buffer: Option<&mut String>, key: KeyEvent) {
     }
 }
 
-pub fn run(options: VaultOpenOptions) -> anyhow::Result<()> {
+pub fn run(config: VaultTuiConfig) -> anyhow::Result<()> {
     enable_raw_mode().context("failed to enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("failed to enter alternate screen")?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
     terminal.clear().ok();
-    let result = run_app(&mut terminal, App::new(options));
+    let result = run_app(&mut terminal, App::with_config(config));
     disable_raw_mode().ok();
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     terminal.show_cursor().ok();
@@ -5276,7 +5429,11 @@ fn export_backup_panel(app: &App) -> Paragraph<'static> {
         Line::raw("The live vault file is not modified by export."),
     ];
     lines.extend(backup_preview_lines(
-        current_vault_backup_summary(app).as_ref(),
+        app.export_backup_preview
+            .as_ref()
+            .map_or(Err("current backup summary was not prepared"), |preview| {
+                preview.as_result()
+            }),
     ));
 
     Paragraph::new(Text::from(lines))
@@ -5367,9 +5524,14 @@ fn import_backup_panel(app: &App) -> Paragraph<'static> {
         Line::raw("Import replaces the current local vault file when overwrite is enabled."),
         Line::raw("Use this for restore and migration, not for ad hoc editing of the backup JSON."),
     ];
-    lines.extend(backup_preview_lines(
-        inspected_backup_summary(form.path.as_str()).as_ref(),
-    ));
+    let inspected = inspected_backup_summary(form.path.as_str());
+    lines.extend(match inspected.as_ref() {
+        Ok(summary) => backup_preview_lines(Ok(summary)),
+        Err(error) => {
+            let error = error.to_string();
+            backup_preview_lines(Err(error.as_str()))
+        }
+    });
 
     Paragraph::new(Text::from(lines))
         .block(
@@ -5465,11 +5627,6 @@ fn import_transfer_panel(app: &App) -> Paragraph<'static> {
         .wrap(Wrap { trim: false })
 }
 
-fn current_vault_backup_summary(app: &App) -> Result<VaultBackupSummary, anyhow::Error> {
-    let vault = unlock_vault_for_options(&app.options)?;
-    Ok(vault.backup_summary()?)
-}
-
 fn inspected_backup_summary(path: &str) -> Result<VaultBackupSummary, anyhow::Error> {
     let path = path.trim();
     if path.is_empty() {
@@ -5486,9 +5643,7 @@ fn inspected_transfer_summary(path: &str) -> Result<VaultTransferSummary, anyhow
     Ok(inspect_vault_transfer(path)?)
 }
 
-fn backup_preview_lines(
-    summary: Result<&VaultBackupSummary, &anyhow::Error>,
-) -> Vec<Line<'static>> {
+fn backup_preview_lines(summary: Result<&VaultBackupSummary, &str>) -> Vec<Line<'static>> {
     match summary {
         Ok(summary) => {
             let mut lines = vec![
@@ -6032,6 +6187,11 @@ mod tests {
         let items = vault.list_items().expect("items");
         let app = App {
             options,
+            profile: OpsProfile::Default,
+            audit_jsonl: None,
+            require_audit_sink: false,
+            audit_sink_health: AuditSinkHealth::not_configured_jsonl(),
+            ops_audit_events: Vec::new(),
             screen: Screen::Vault,
             status: "test render".to_string(),
             header: Some(header),
@@ -6056,6 +6216,7 @@ mod tests {
             pending_keyslot_removal_confirmation: None,
             generate_store_form: GenerateStoreForm::default(),
             export_backup_form: ExportBackupForm::default(),
+            export_backup_preview: None,
             export_transfer_form: ExportTransferForm::default(),
             import_backup_form: ImportBackupForm::default(),
             import_transfer_form: ImportTransferForm::default(),
@@ -6097,6 +6258,114 @@ mod tests {
         assert_eq!(login.folder.as_deref(), Some("Work"));
         assert_eq!(login.tags, vec!["work".to_string(), "code".to_string()]);
         assert!(app.status.contains("Stored login item"));
+    }
+
+    #[test]
+    fn tui_vault_operation_policy_records_non_secret_audit_metadata() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        let initial_event_count = app.ops_audit_events.len();
+        app.open_add_login();
+        app.add_login_form.title = "GitHub".to_string();
+        app.add_login_form.username = "octocat".to_string();
+        app.add_login_form.password = "hunter2".to_string();
+        app.submit_login_form();
+
+        assert!(app.ops_audit_events.len() >= initial_event_count + 4);
+        assert!(app.ops_audit_events.iter().all(|event| {
+            event
+                .attributes
+                .get("session_surface")
+                .is_some_and(|surface| surface == "tui")
+        }));
+        assert!(
+            app.ops_audit_events
+                .iter()
+                .any(|event| event.attributes.get("vault_access") == Some(&"mutate".to_string()))
+        );
+        let serialized = serde_json::to_string(&app.ops_audit_events).expect("serialize events");
+        assert!(!serialized.contains("hunter2"));
+    }
+
+    #[test]
+    fn tui_vault_operation_policy_persists_jsonl_when_configured() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        let audit_path = tempdir.path().join("tui-audit.jsonl");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::with_config(VaultTuiConfig {
+            open_options: options,
+            profile: OpsProfile::Default,
+            audit_jsonl: Some(audit_path.clone()),
+            require_audit_sink: false,
+        });
+        app.open_add_login();
+        app.add_login_form.title = "GitHub".to_string();
+        app.add_login_form.username = "octocat".to_string();
+        app.add_login_form.password = "hunter2".to_string();
+        app.submit_login_form();
+
+        let audit_jsonl = fs::read_to_string(&audit_path).expect("audit jsonl");
+        let events = audit_jsonl
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("audit event"))
+            .collect::<Vec<_>>();
+        assert!(events.len() >= 6);
+        assert!(events.iter().all(|event| event["surface"] == "ops"));
+        assert!(
+            events
+                .iter()
+                .all(|event| event["attributes"]["session_surface"] == "tui")
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event["action"] == "vault_operation.request")
+        );
+        assert!(!audit_jsonl.contains("hunter2"));
+    }
+
+    #[test]
+    fn tui_vault_operation_policy_keeps_memory_events_when_jsonl_write_fails() {
+        let vault_tempdir = tempdir().expect("vault tempdir");
+        let audit_tempdir = tempdir().expect("audit tempdir");
+        let path = vault_tempdir.path().join("vault.sqlite");
+        let audit_path = audit_tempdir.path().join("tui-audit.jsonl");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::with_config(VaultTuiConfig {
+            open_options: options,
+            profile: OpsProfile::Default,
+            audit_jsonl: Some(audit_path),
+            require_audit_sink: false,
+        });
+        let initial_event_count = app.ops_audit_events.len();
+        drop(audit_tempdir);
+
+        let result = app.record_vault_operation_policy("export", VaultOperationAccess::Export);
+
+        assert!(result.is_err());
+        assert_eq!(app.ops_audit_events.len(), initial_event_count + 2);
+        assert!(
+            app.ops_audit_events[initial_event_count..]
+                .iter()
+                .all(|event| {
+                    event
+                        .attributes
+                        .get("session_surface")
+                        .is_some_and(|surface| surface == "tui")
+                })
+        );
     }
 
     #[test]
@@ -7244,6 +7513,11 @@ mod tests {
                 device_slot: None,
                 use_device_auto: false,
             },
+            profile: OpsProfile::Default,
+            audit_jsonl: None,
+            require_audit_sink: false,
+            audit_sink_health: AuditSinkHealth::not_configured_jsonl(),
+            ops_audit_events: Vec::new(),
             screen: Screen::UnlockBlocked,
             status: "Unlock blocked: no secret".to_string(),
             header: None,
@@ -7268,6 +7542,7 @@ mod tests {
             pending_keyslot_removal_confirmation: None,
             generate_store_form: GenerateStoreForm::default(),
             export_backup_form: ExportBackupForm::default(),
+            export_backup_preview: None,
             export_transfer_form: ExportTransferForm::default(),
             import_backup_form: ImportBackupForm::default(),
             import_transfer_form: ImportTransferForm::default(),
