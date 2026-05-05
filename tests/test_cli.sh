@@ -149,7 +149,7 @@ check "audit output includes per-password and generator roll-ups" t_audit_rollup
 # --- Test 14: --json emits a structured automation report
 t_json_output() {
     local out err
-    err="$(mktemp)"
+    err="$(mktemp)" || return 1
     out="$("$BIN" --cli --json --length 12 --charset hex --no-audit 2>"$err")"
     if [[ -s "$err" ]]; then
         rm -f "$err"
@@ -176,7 +176,7 @@ check "--json emits structured automation report" t_json_output
 # --- Test 15: --json errors stay structured
 t_json_error_output() {
     local out err rc
-    err="$(mktemp)"
+    err="$(mktemp)" || return 1
     rc=0
     out="$("$BIN" --cli --json --length 0 2>"$err")" || rc=$?
     if [[ "$rc" -ne 1 ]]; then

@@ -65,6 +65,8 @@ The first ops/audit foundation is implemented for generator automation: CLI `--j
 `paranoid-ops`, returns a stable operation report, and carries `paranoid-audit` events with an
 operation id shared by every event in the report. Audit events are evidence metadata only; generated
 passwords remain in the typed report and are not copied into audit messages or attributes.
+Current operation ids are process-local correlation identifiers, not authentication tokens or
+cryptographic nonces.
 
 The UI surfaces should continue converging on this shared typed operations protocol instead of
 calling each other. The CLI can emit JSON/JSONL for automation, the TUI can render the same

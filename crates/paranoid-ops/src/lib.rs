@@ -186,13 +186,14 @@ pub fn run_generate_password_operation(
 
 pub fn new_local_operation_id() -> String {
     let sequence = LOCAL_OPERATION_SEQUENCE.fetch_add(1, Ordering::Relaxed) + 1;
-    let epoch_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis());
+    let time_component = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_nanos().to_string(),
+        Err(error) => format!("pre_epoch_{}", error.duration().as_nanos()),
+    };
     format!(
         "pp.operation.v1.{}.{}.{}",
         process::id(),
-        epoch_ms,
+        time_component,
         sequence
     )
 }
@@ -296,5 +297,15 @@ mod tests {
             "pp.operation.v1.test-failure"
         );
         assert!(!error.audit_events().is_empty());
+    }
+
+    #[test]
+    fn local_operation_ids_are_process_local_non_secret_identifiers() {
+        let first = new_local_operation_id();
+        let second = new_local_operation_id();
+
+        assert!(first.starts_with("pp.operation.v1."));
+        assert!(second.starts_with("pp.operation.v1."));
+        assert_ne!(first, second);
     }
 }

@@ -135,11 +135,6 @@ impl AuditTrail {
             .expect("record just pushed an audit event")
     }
 
-    pub fn push(&mut self, event: AuditEvent) {
-        self.next_sequence = self.next_sequence.max(event.sequence);
-        self.events.push(event);
-    }
-
     pub fn events(&self) -> &[AuditEvent] {
         &self.events
     }
