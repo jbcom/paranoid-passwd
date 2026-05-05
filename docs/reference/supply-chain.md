@@ -58,6 +58,13 @@ The repository now carries `scripts/verify_branch_protection.sh` plus `make veri
 - `Cargo.lock` is committed and release-aware.
 - Cargo dependencies are vendored under `vendor/`.
 - Workspace Cargo commands run with `--locked --frozen --offline` in `make` and CI.
+- `make verify-deep` runs Rust-native `xtask` checks for offline metadata, dependency source and
+  license policy, repo-owned shell linting, Python syntax checks for the existing docs/test harness
+  scripts, and tracked-file secret scanning.
+- `make quality` is the local release-candidate gate: it runs `verify-deep`, the enforced local
+  scanner subset, `ci`, and the host-supported GUI e2e harness before remote CI is treated as
+  confirmation. It also requires the local security scanner stack to be installed.
+- `deny.toml` records the local dependency license/source policy for `cargo-deny`.
 - `scripts/hallucination_check.sh` verifies math/security invariants in `paranoid-core`.
 - `scripts/supply_chain_verify.sh` verifies vendoring, workflow pinning, and release prerequisites.
 - `scripts/security_assurance_gate.py` verifies the claim-led PR assurance protocol wiring.

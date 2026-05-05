@@ -21,6 +21,37 @@ make verify-assurance
 That command verifies the hallucination checks, supply-chain checks, open review inventory, and
 security assurance protocol wiring.
 
+## Local Release-Candidate Quality Gate
+
+The Makefile remains the operator interface for local and CI workflows. Repo-owned deep checks that
+need structured parsing live in the Rust-native `xtask` crate instead of ad hoc Python glue:
+
+```bash
+make verify-deep
+make quality
+```
+
+- `make verify-deep` runs `cargo run -p xtask --locked --frozen --offline -- verify-deep`.
+- The `xtask` gate verifies the Rust toolchain policy, locked offline Cargo metadata, workspace
+  license/source policy, ShellCheck warning-or-higher results for repo-owned shell scripts, Python
+  syntax for the existing docs/test harness scripts without writing bytecode, tracked-file secret
+  scanning, and local visibility of security scanners.
+- `make quality` runs `verify-deep`, the full `ci` target, and the supported GUI e2e target for the
+  host. On macOS it drives the Linux GUI harness through the local builder image; on Linux it uses
+  the native `xvfb-run` harness. This target requires the local security scanner stack and runs the
+  enforced local scanner subset.
+- Optional external tools (`codeql`, `semgrep`, `cargo-deny`, `cargo-audit`, `cargo-vet`, `syft`,
+  `trivy`, and `osv-scanner`) are reported when missing under `make verify-deep`; `make quality`
+  sets `PARANOID_STRICT_EXTERNAL_TOOLS=1` and treats missing tools as fatal.
+- The enforced scanner subset is `cargo audit --no-fetch --stale`, `cargo deny check`, Semgrep
+  `--config auto`, and an OSV lockfile report. `cargo-deny` allows unmaintained/unsound advisories
+  as warnings only when there is no safe upgrade path; OSV findings with a fixed version remain
+  blocking. Trivy, Syft, CodeQL, and cargo-vet are installed/visible locally but require pinned
+  policies or evidence-output handling before they become default `make quality` steps.
+
+Python remains in the repo only where it already owns a specific workflow: Sphinx/tox docs and the
+PTY-driven TUI harness. It is not the project automation layer.
+
 ## Ops, Audit, and Federal Profile Tests
 
 The next comprehensive PR should move command orchestration and security audit behavior into

@@ -19,6 +19,8 @@ The repo now has a real Rust-native product line:
 - backup/restore, transfer packages, search, tags, folders, password history, duplicate detection, clipboard auto-clear, and idle auto-lock are implemented
 - GitHub Pages serves docs/downloads only
 - release verification, archive inspection, Linux `.deb`, and macOS GUI `.dmg` / `.app` packaging now exist in-repo
+- local release-candidate quality now runs through Make plus Rust-native `xtask`, with remote CI
+  treated as confirmation rather than the first real verifier
 
 What remains is no longer “build the product.” It is “close the production, assurance, and platform-distribution gaps so the product can honestly be called finished to the same standard everywhere.”
 
@@ -33,6 +35,9 @@ This PRD covers only the work **not handled in the current session**:
 5. installer-grade platform packaging and signing
 6. remaining recovery / lifecycle polish that depends on those dispositions
 7. post-GA assurance work that should not be improvised later
+8. vendoring or otherwise pinning the local scanner stack update process (`codeql`, `semgrep`,
+   `cargo-deny`, `cargo-audit`, `cargo-vet`, `syft`, `trivy`, and `osv-scanner`) so workstation
+   setup itself has the same evidence discipline as the repo gates
 
 ## Non-Goals
 

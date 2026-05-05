@@ -7,6 +7,8 @@ ARG SPHINX_RUSTDOCGEN_VERSION=1.1.0
 ARG TOX_VERSION=4.53.0
 
 ENV PATH="/usr/local/bin:${PATH}" \
+    CARGO_HOME=/tmp/cargo \
+    CARGO_TARGET_DIR=/tmp/cargo-target \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN --mount=type=cache,target=/var/cache/apk \
@@ -61,5 +63,11 @@ RUN bash --version >/dev/null \
  && tox --version | grep -F "${TOX_VERSION}" >/dev/null \
  && echo "builder image OK"
 
+RUN addgroup -g 1001 builder \
+ && adduser -D -u 1001 -G builder builder \
+ && mkdir -p /github/workspace /tmp/cargo /tmp/cargo-target \
+ && chown -R builder:builder /github /tmp/cargo /tmp/cargo-target
+
 COPY --chmod=0755 entrypoint.sh /entrypoint.sh
+USER builder
 ENTRYPOINT ["/entrypoint.sh"]

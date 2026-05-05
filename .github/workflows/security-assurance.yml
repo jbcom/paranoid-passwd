@@ -26,11 +26,13 @@ jobs:
 
       - name: Run security assurance gate inside the builder
         uses: ./.github/actions/builder
+        env:
+          SECURITY_ASSURANCE_BASE_REF: origin/${{ github.base_ref || 'main' }}
         with:
           run: |
             make verify-assurance
             python3 scripts/security_assurance_gate.py \
-              --base-ref "origin/${{ github.base_ref || 'main' }}" \
+              --base-ref "$SECURITY_ASSURANCE_BASE_REF" \
               --json-out dist/security-assurance-report.json \
               --markdown-out dist/security-assurance-report.md
 
