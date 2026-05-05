@@ -108,7 +108,8 @@ product grows.
 
 - move sensitive command orchestration into `paranoid-ops`
 - replace primitive logging with `paranoid-audit`
-- model seal, unseal, auto-unseal, idle-lock, and recovery-required states explicitly
+- model seal, unseal, auto-unseal, idle-lock, and recovery-required states explicitly in
+  `paranoid-seal`
 - make CLI, TUI, and GUI presentation adapters over the same protocol
 - support automation through typed JSON and JSONL without requiring UI scraping
 
@@ -124,9 +125,10 @@ product grows.
    one response event with the same request id.
 4. Define a typed `allow`, `challenge`, and `deny` decision model. Challenge/response is a policy
    primitive, not an LLM prompt pattern.
-5. Move vault lock/unlock orchestration into an explicit seal lifecycle with states for `sealed`,
-   `challenge_pending`, `unsealed`, `idle_lock_pending`, `sealed_after_timeout`, and
-   `recovery_required`.
+5. Move vault lock/unlock posture into an explicit `paranoid-seal` lifecycle with states for
+   `sealed`, `challenge_pending`, `unsealed`, `idle_lock_pending`, `sealed_after_timeout`, and
+   `recovery_required`, plus non-secret provider evidence for recovery, certificate, device-bound,
+   and external auto-unseal paths.
 6. Treat mTLS as transport/session authorization for typed ops commands when commands cross a
    process boundary, not as UI logic.
 7. Keep `paranoid-core` responsible for generation/audit math and `paranoid-vault` responsible for
@@ -139,7 +141,8 @@ product grows.
 - audit events never contain plaintext passwords, recovery phrases, private keys, or unwrapped vault
   material
 - JSON and JSONL fixtures are stable and documented
-- seal-state transitions have unit tests and e2e coverage through at least one interactive surface
+- seal-state transitions and seal-provider posture have unit tests and e2e coverage through at least
+  one interactive surface
 - existing TUI and GUI operator e2e tests still pass
 
 ## Workstream 2: Federal-Ready Operating Profile

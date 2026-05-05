@@ -1,5 +1,5 @@
 [package]
-name = "paranoid-ops"
+name = "paranoid-seal"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,9 +10,6 @@ description.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-paranoid-audit.workspace = true
-paranoid-core.workspace = true
-paranoid-seal.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 

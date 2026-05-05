@@ -80,6 +80,7 @@ rust_crates = {
     "paranoid_core": str(repo_root / "crates" / "paranoid-core"),
     "paranoid_audit": str(repo_root / "crates" / "paranoid-audit"),
     "paranoid_ops": str(repo_root / "crates" / "paranoid-ops"),
+    "paranoid_seal": str(repo_root / "crates" / "paranoid-seal"),
     "paranoid_cli": str(repo_root / "crates" / "paranoid-cli"),
     "paranoid_gui": str(repo_root / "crates" / "paranoid-gui"),
     "paranoid_vault": str(repo_root / "crates" / "paranoid-vault"),

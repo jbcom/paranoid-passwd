@@ -99,10 +99,11 @@ automatically enough for a federal authorization.
 
 ## Ops and Audit Controls
 
-`paranoid-ops` and `paranoid-audit` are the right place to satisfy federal readiness without
-bloating UI code. The current implementation covers generator automation reports, typed command
-envelopes, allow/challenge/deny decisions, seal-state primitives, required local JSONL sinks,
-federal startup evidence, redacted structured audit events, and hash-chain evidence.
+`paranoid-ops`, `paranoid-seal`, and `paranoid-audit` are the right place to satisfy federal
+readiness without bloating UI code. The current implementation covers generator automation reports,
+typed command envelopes, allow/challenge/deny decisions, seal-state and provider-posture
+primitives, required local JSONL sinks, federal startup evidence, redacted structured audit events,
+and hash-chain evidence.
 
 `paranoid-ops` now provides:
 
@@ -112,9 +113,17 @@ federal startup evidence, redacted structured audit events, and hash-chain evide
 - vault operation access classes for metadata, decrypt, mutate, export, import, and keyslot
   lifecycle flows
 - reusable vault operation policy evaluation for CLI, TUI, and native GUI adapters
-- seal and auto-unseal state transitions
 - a placeholder transport model for future mTLS policy when operations cross process boundaries
 - stable JSON responses for automation and evidence capture
+
+`paranoid-seal` now provides:
+
+- typed seal-state transitions for sealed, challenge-pending, unsealed, idle-lock, timeout, and
+  recovery-required states
+- non-secret provider evidence for password recovery, mnemonic recovery, device-bound,
+  certificate-wrapped, and future external auto-unseal paths
+- posture reporting that distinguishes configured auto-unseal from confirmed provider availability
+  so evidence does not overstate what the local process has actually checked
 
 `paranoid-audit` now provides:
 

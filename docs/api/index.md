@@ -12,6 +12,7 @@ The API pages below are generated directly from the workspace crates during the 
 crates/paranoid_core/lib
 crates/paranoid_audit/lib
 crates/paranoid_ops/lib
+crates/paranoid_seal/lib
 crates/paranoid_cli/main
 crates/paranoid_gui/lib
 crates/paranoid_gui/main

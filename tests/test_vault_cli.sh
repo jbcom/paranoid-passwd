@@ -201,6 +201,7 @@ t_init_and_crud() {
     local audit_denial=""
     local audit_err=""
     local audit_rc=0
+    local seal_status=""
     local created_password=""
     local created_list=""
     local created_login_id=""
@@ -217,6 +218,27 @@ t_init_and_crud() {
     contains "$out" $'initialized\t'"$SOURCE_VAULT" || return 1
     contains "$out" "format=1" || return 1
     contains "$out" "keyslots=1" || return 1
+
+    seal_status="$(source_vault seal-status)"
+    MASTER_PASSWORD="$MASTER_PASSWORD" python3 -c '
+import json
+import os
+import sys
+
+data = json.load(sys.stdin)
+seal = data["seal"]
+assert data["operation"] == "vault_seal_status"
+assert data["state"] == "sealed"
+assert seal["state"] == "sealed"
+assert seal["provider_count"] == 1
+assert seal["operator_recovery_configured"] is True
+assert seal["recovery_required"] is False
+assert any(
+    provider["kind"] == "password_recovery" and provider["status"] == "configured"
+    for provider in seal["providers"]
+)
+assert os.environ["MASTER_PASSWORD"] not in json.dumps(data)
+' <<<"$seal_status"
 
     audit_path="$TMPDIR_ROOT/vault-audit.jsonl"
     audit_out="$(source_vault --audit-jsonl "$audit_path" keyslots)"

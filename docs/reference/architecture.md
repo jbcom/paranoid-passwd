@@ -9,13 +9,15 @@ title: Architecture
 - `crates/paranoid-core`
 - `crates/paranoid-audit`
 - `crates/paranoid-ops`
+- `crates/paranoid-seal`
 - `crates/paranoid-cli`
 - `crates/paranoid-gui`
 - `crates/paranoid-vault`
 
 The shared crate split is deliberate: security-sensitive generation and vault mechanics stay in the
-core and vault crates, operation orchestration starts in `paranoid-ops`, and structured evidence
-starts in `paranoid-audit` instead of UI-local logging.
+core and vault crates, operation orchestration starts in `paranoid-ops`, seal lifecycle posture
+starts in `paranoid-seal`, and structured evidence starts in `paranoid-audit` instead of UI-local
+logging.
 
 ## Core
 
@@ -75,10 +77,17 @@ correlation identifiers, not authentication tokens or cryptographic nonces.
   health, and OpenSSL provider evidence
 - a fail-closed federal policy that requires an audit sink and confirmed approved-provider evidence
   before security-relevant operations can run
-- a vault seal state machine covering `sealed`, `challenge_pending`, `unsealed`,
-  `idle_lock_pending`, `sealed_after_timeout`, and `recovery_required`
 - request/response audit event helpers so every command that reaches policy evaluation can be
   paired by request id
+
+`paranoid-seal` owns:
+
+- a vault seal state machine covering `sealed`, `challenge_pending`, `unsealed`,
+  `idle_lock_pending`, `sealed_after_timeout`, and `recovery_required`
+- non-secret seal provider evidence for password recovery, mnemonic recovery, device-bound,
+  certificate-wrapped, and future external auto-unseal paths
+- a seal posture report that distinguishes configured auto-unseal from confirmed provider
+  availability
 
 This is challenge/response in the security sense, not prompt-engineering in the LLM sense. Sensitive
 operations declare the command, surface, profile, and preconditions; policy returns a typed
@@ -114,21 +123,23 @@ calling `paranoid-vault`, and their tests record non-secret request/response pol
 mutate, keyslot, and export flows. TUI launches inherit `vault --audit-jsonl` / `--require-audit-sink`
 policy, and the GUI exposes the same durable local JSONL sink controls for deterministic automation.
 The remaining implementation work is external audit-device health, seal / auto-unseal provider
-policy, and stable assessor fixtures over those same command envelopes.
+health checks, seal / auto-unseal provider policy, and stable assessor fixtures over those same
+command envelopes.
 
 The seal model stays local-first but borrows the operational shape of Vault: a sealed vault can read
 metadata needed to decide how to unlock, but it cannot decrypt stored item payloads. Auto-unseal
 providers are convenience paths for retrieving unwrap material under policy; they do not remove the
 need for recovery coverage. If a seal provider is rotated, disabled, or becomes unavailable, the ops
-layer should expose that as posture and state, and the vault layer should only perform rewraps
-through typed, audited operations.
+and seal layers should expose that as posture and state, and the vault layer should only perform
+rewraps through typed, audited operations.
 
 This split keeps the trust boundaries narrow:
 
 - `paranoid-core` remains responsible for generation, hashing, audit math, and compliance checks.
 - `paranoid-vault` remains responsible for encrypted storage, keyslots, and unwrap/rewrap
   mechanics.
-- `paranoid-ops` becomes the command, policy, seal-state, and automation boundary.
+- `paranoid-ops` becomes the command, policy, and automation boundary.
+- `paranoid-seal` becomes the vault seal-state and auto-unseal posture boundary.
 - `paranoid-audit` becomes the durable security-event boundary.
 - CLI, TUI, and GUI become presentation adapters over the shared protocol.
 

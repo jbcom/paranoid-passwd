@@ -3,6 +3,11 @@ use paranoid_audit::{
     AuditSurface, AuditTrail,
 };
 use paranoid_core::{AuditStage, AuditSummary, GenerationReport, ParanoidError, ParanoidRequest};
+pub use paranoid_seal::{
+    SEAL_SCHEMA_VERSION, VaultSealEvent, VaultSealMachine, VaultSealPosture,
+    VaultSealProviderEvidence, VaultSealProviderKind, VaultSealProviderStatus, VaultSealState,
+    VaultSealTransition, VaultSealTransitionError,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     env, process,
@@ -553,157 +558,6 @@ pub fn collect_federal_startup_evidence_with_audit_sink(
         audit_sink,
         crypto_provider,
         policy_decision,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum VaultSealState {
-    Sealed,
-    ChallengePending,
-    Unsealed,
-    IdleLockPending,
-    SealedAfterTimeout,
-    RecoveryRequired,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum VaultSealEvent {
-    UnlockRequested,
-    ChallengeIssued,
-    ChallengeSatisfied,
-    UnlockSucceeded,
-    UnlockFailed,
-    IdleTimeoutStarted,
-    ActivityObserved,
-    IdleTimeoutExpired,
-    ManualLock,
-    RecoveryRequired,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VaultSealTransition {
-    pub from: VaultSealState,
-    pub event: VaultSealEvent,
-    pub to: VaultSealState,
-}
-
-#[derive(Debug, Error, PartialEq, Eq)]
-#[error("invalid vault seal transition from {from:?} via {event:?}")]
-pub struct VaultSealTransitionError {
-    pub from: VaultSealState,
-    pub event: VaultSealEvent,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VaultSealMachine {
-    state: VaultSealState,
-}
-
-impl Default for VaultSealMachine {
-    fn default() -> Self {
-        Self {
-            state: VaultSealState::Sealed,
-        }
-    }
-}
-
-impl VaultSealMachine {
-    pub fn new(state: VaultSealState) -> Self {
-        Self { state }
-    }
-
-    pub fn state(&self) -> VaultSealState {
-        self.state
-    }
-
-    pub fn apply(
-        &mut self,
-        event: VaultSealEvent,
-    ) -> Result<VaultSealTransition, VaultSealTransitionError> {
-        let from = self.state;
-        let to = self
-            .next_state(event)
-            .ok_or(VaultSealTransitionError { from, event })?;
-        self.state = to;
-        Ok(VaultSealTransition { from, event, to })
-    }
-
-    fn next_state(&self, event: VaultSealEvent) -> Option<VaultSealState> {
-        match event {
-            VaultSealEvent::RecoveryRequired => Some(VaultSealState::RecoveryRequired),
-            VaultSealEvent::UnlockRequested => self.unlock_requested_transition(),
-            VaultSealEvent::ChallengeIssued => self.challenge_issued_transition(),
-            VaultSealEvent::ChallengeSatisfied | VaultSealEvent::UnlockSucceeded => {
-                self.challenge_satisfied_transition()
-            }
-            VaultSealEvent::UnlockFailed => self.unlock_failed_transition(),
-            VaultSealEvent::IdleTimeoutStarted => self.idle_timeout_started_transition(),
-            VaultSealEvent::ActivityObserved => self.activity_observed_transition(),
-            VaultSealEvent::IdleTimeoutExpired => self.idle_timeout_expired_transition(),
-            VaultSealEvent::ManualLock => self.manual_lock_transition(),
-        }
-    }
-
-    fn unlock_requested_transition(&self) -> Option<VaultSealState> {
-        match self.state {
-            VaultSealState::Sealed | VaultSealState::SealedAfterTimeout => {
-                Some(VaultSealState::ChallengePending)
-            }
-            _ => None,
-        }
-    }
-
-    fn challenge_issued_transition(&self) -> Option<VaultSealState> {
-        match self.state {
-            VaultSealState::ChallengePending => Some(VaultSealState::ChallengePending),
-            _ => None,
-        }
-    }
-
-    fn challenge_satisfied_transition(&self) -> Option<VaultSealState> {
-        match self.state {
-            VaultSealState::ChallengePending => Some(VaultSealState::Unsealed),
-            _ => None,
-        }
-    }
-
-    fn unlock_failed_transition(&self) -> Option<VaultSealState> {
-        match self.state {
-            VaultSealState::ChallengePending => Some(VaultSealState::Sealed),
-            _ => None,
-        }
-    }
-
-    fn idle_timeout_started_transition(&self) -> Option<VaultSealState> {
-        match self.state {
-            VaultSealState::Unsealed => Some(VaultSealState::IdleLockPending),
-            _ => None,
-        }
-    }
-
-    fn activity_observed_transition(&self) -> Option<VaultSealState> {
-        match self.state {
-            VaultSealState::IdleLockPending => Some(VaultSealState::Unsealed),
-            _ => None,
-        }
-    }
-
-    fn idle_timeout_expired_transition(&self) -> Option<VaultSealState> {
-        match self.state {
-            VaultSealState::IdleLockPending => Some(VaultSealState::SealedAfterTimeout),
-            _ => None,
-        }
-    }
-
-    fn manual_lock_transition(&self) -> Option<VaultSealState> {
-        match self.state {
-            VaultSealState::Unsealed | VaultSealState::IdleLockPending => {
-                Some(VaultSealState::Sealed)
-            }
-            _ => None,
-        }
     }
 }
 
