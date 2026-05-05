@@ -2,7 +2,7 @@ use paranoid_audit::{
     AUDIT_SCHEMA_VERSION, AuditEvent, AuditOutcome, AuditSeverity, AuditSubject, AuditSurface,
     AuditTrail,
 };
-use paranoid_core::{AuditStage, GenerationReport, ParanoidError, ParanoidRequest};
+use paranoid_core::{AuditStage, AuditSummary, GenerationReport, ParanoidError, ParanoidRequest};
 use serde::{Deserialize, Serialize};
 use std::{
     process,
@@ -44,15 +44,10 @@ impl GeneratePasswordOutcome {
             schema_version: AUDIT_SCHEMA_VERSION,
             operation: "generate_password",
             operation_id: &self.operation_id,
-            status: if self
-                .report
-                .audit
-                .as_ref()
-                .is_some_and(|audit| !audit.overall_pass)
-            {
-                "review"
-            } else {
+            status: if report_pass(&self.report.audit) {
                 "success"
+            } else {
+                "review"
             },
             report: &self.report,
             audit_events: &self.audit_events,
@@ -73,11 +68,16 @@ pub struct GeneratePasswordAutomationReport<'a> {
 #[derive(Debug, Error)]
 #[error("{source}")]
 pub struct GeneratePasswordError {
+    operation_id: String,
     source: ParanoidError,
     audit_events: Vec<AuditEvent>,
 }
 
 impl GeneratePasswordError {
+    pub fn operation_id(&self) -> &str {
+        &self.operation_id
+    }
+
     pub fn source(&self) -> &ParanoidError {
         &self.source
     }
@@ -90,11 +90,7 @@ impl GeneratePasswordError {
         GeneratePasswordFailureReport {
             schema_version: AUDIT_SCHEMA_VERSION,
             operation: "generate_password",
-            operation_id: self
-                .audit_events
-                .first()
-                .map(|event| event.operation_id.as_str())
-                .unwrap_or("unknown"),
+            operation_id: &self.operation_id,
             status: "error",
             error_kind: paranoid_error_kind(&self.source),
             error_message: self.source.to_string(),
@@ -133,14 +129,10 @@ pub fn run_generate_password_operation(
 
     match result {
         Ok(report) => {
-            let outcome = if report
-                .audit
-                .as_ref()
-                .is_some_and(|audit| !audit.overall_pass)
-            {
-                AuditOutcome::Review
-            } else {
+            let outcome = if report_pass(&report.audit) {
                 AuditOutcome::Success
+            } else {
+                AuditOutcome::Review
             };
             let severity = if outcome == AuditOutcome::Review {
                 AuditSeverity::Warning
@@ -168,6 +160,7 @@ pub fn run_generate_password_operation(
             })
         }
         Err(source) => {
+            let operation_id = trail.operation_id().to_string();
             trail.record(
                 AuditSurface::Ops,
                 AuditSubject::PasswordGeneration,
@@ -177,10 +170,18 @@ pub fn run_generate_password_operation(
                 source.to_string(),
             );
             Err(GeneratePasswordError {
+                operation_id,
                 source,
                 audit_events: trail.into_events(),
             })
         }
+    }
+}
+
+fn report_pass(audit: &Option<AuditSummary>) -> bool {
+    match audit {
+        Some(audit) => audit.overall_pass,
+        None => true,
     }
 }
 
@@ -292,6 +293,7 @@ mod tests {
         .expect_err("invalid request fails");
 
         assert_eq!(error.failure_report().error_kind, "invalid_arguments");
+        assert_eq!(error.operation_id(), "pp.operation.v1.test-failure");
         assert_eq!(
             error.failure_report().operation_id,
             "pp.operation.v1.test-failure"
