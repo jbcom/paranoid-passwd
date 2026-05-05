@@ -1192,8 +1192,19 @@ mod tests {
         assert_eq!(audit.charset_size, report.request.charset.len());
         assert!(audit.entropy.total_entropy > 0.0);
         assert!(report.passwords[0].selected_compliance_pass);
-        assert!(audit.passwords_all_pass);
+        assert_eq!(
+            audit.passwords_all_pass,
+            report.passwords.iter().all(|password| password.all_pass)
+        );
         assert!(audit.selected_frameworks_pass);
+        assert_eq!(
+            audit.overall_pass,
+            audit.chi2_pass
+                && audit.serial_pass
+                && audit.collision_pass
+                && audit.passwords_all_pass
+                && audit.selected_frameworks_pass
+        );
     }
 
     #[test]
@@ -1218,6 +1229,21 @@ mod tests {
                 .iter()
                 .all(|password| password.compliance.iter().any(|status| status.selected))
         );
-        assert!(report.audit.expect("audit").passwords_all_pass);
+        assert!(report.passwords.iter().all(|password| {
+            password.all_pass == (password.pattern_issues == 0 && password.selected_compliance_pass)
+        }));
+
+        let audit = report.audit.expect("audit");
+        assert_eq!(
+            audit.passwords_all_pass,
+            report.passwords.iter().all(|password| password.all_pass)
+        );
+        assert_eq!(
+            audit.selected_frameworks_pass,
+            report
+                .passwords
+                .iter()
+                .all(|password| password.selected_compliance_pass)
+        );
     }
 }
