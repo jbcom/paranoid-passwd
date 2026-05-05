@@ -33,7 +33,7 @@ system security plan.
 | AU - Audit and Accountability | Redacted JSONL audit events pair each request and response by request id, preserve operation/access metadata, and fail closed when a required local audit sink is unavailable. | Collect, retain, protect, and monitor JSONL/SIEM records according to the customer's AU control implementation. | `paranoid-audit`; `--audit-jsonl`; ops trace fixtures; `tests/test_cli.sh`; `tests/test_vault_cli.sh` |
 | CM - Configuration Management | Federal-ready profile and release verification scripts make profile, build id, vendored dependencies, and release payload verification explicit. | Manage approved deployment baselines, endpoint configuration drift, and release promotion. | `make ci`; `make verify-assurance`; `scripts/release_validate.sh`; `scripts/verify_published_release.sh` |
 | IA - Identification and Authentication | Vault unlock paths are explicit policy inputs: recovery secret, mnemonic recovery, device-bound, and certificate-wrapped keyslots. Federal-ready policy rejects non-federal unlock methods until they are dispositioned. | Decide which unlock methods are allowed in the assessed boundary and bind certificates/devices to organizational identity policy. | `paranoid-vault`; `paranoid-seal`; `docs/reference/federal-readiness.md` |
-| SC - System and Communications Protection | Cryptographic operations stay in Rust crates using OpenSSL-backed primitives where applicable; external audit-device evidence requires configured mTLS material and does not treat TCP reachability as durable ingestion. | Operate validated cryptographic modules in approved mode when required, protect transport endpoints, and manage certificate lifecycles. | `paranoid-core`; `paranoid-audit`; federal startup evidence |
+| SC - System and Communications Protection | Cryptographic operations stay in Rust crates using OpenSSL-backed primitives where applicable; external audit-device evidence requires configured mTLS material and treats readiness as a matching JSONL challenge acknowledgement, not TCP reachability. | Operate validated cryptographic modules in approved mode when required, protect transport endpoints, and manage certificate lifecycles. | `paranoid-core`; `paranoid-audit`; federal startup evidence |
 | SI - System and Information Integrity | Local and CI gates run locked/offline builds, linting, tests, supply-chain checks, assurance inventory checks, and GUI automation evidence. | Integrate repo evidence with endpoint monitoring, vulnerability management, and incident response processes. | `.github/workflows/`; `Makefile`; `scripts/security_assurance_gate.py` |
 | SR - Supply Chain Risk Management | Dependencies are vendored, GitHub Actions are SHA-pinned, release artifacts are checksummed/attested, and published releases can be verified after download. | Decide supplier acceptance, mirror artifacts if needed, and retain provenance evidence in the customer's release process. | `.cargo/config.toml`; `vendor/`; `scripts/supply_chain_verify.sh`; release verification docs |
 
@@ -44,6 +44,8 @@ system security plan.
 - The project is not a FIPS validated product.
 - Generic OpenSSL linkage is not by itself evidence of approved-mode operation.
 - TCP reachability to an external audit endpoint is not evidence of durable audit ingestion.
+- A matching mTLS JSONL write acknowledgement is readiness evidence for the configured endpoint; it
+  is not a claim about the customer's downstream retention, monitoring, or SIEM control operation.
 
 ## Minimum Federal-Ready Evidence Packet
 
@@ -54,5 +56,6 @@ A customer-oriented evidence packet should include:
 3. a sample `--audit-jsonl` trace for the operational flow being assessed
 4. the relevant ops trace fixture name and schema version
 5. the configured cryptographic provider evidence and approved-mode status
-6. the external audit-device posture, including whether readiness came from a write acknowledgement
+6. the external audit-device posture, including whether readiness came from a matching mTLS JSONL
+   write acknowledgement
 7. the customer's decision for non-federal recovery paths such as Argon2id and BIP39

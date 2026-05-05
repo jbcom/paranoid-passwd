@@ -99,7 +99,7 @@ challenge when fresh proof is required, or a typed denial when controls are miss
 - append-only JSONL file sinks through `--audit-jsonl`
 - JSONL sink health evidence covering configured, writable, unavailable, and not-configured states
 - external audit-device probe boundaries, including TCP reachability evidence that remains
-  `unverified` until a write acknowledgement proves readiness
+  `unverified` and an mTLS JSONL write-ack probe that requires a matching challenge before `ready`
 - stable typed ops trace fixtures for CLI, TUI, and GUI vault operation automation
 - strict redaction markers for sensitive attributes
 - SHA-256 hash-chain evidence generated through the `paranoid-core` OpenSSL-backed hash path
@@ -125,9 +125,9 @@ The native TUI and GUI now evaluate local vault actions through the same typed o
 calling `paranoid-vault`, and their tests record non-secret request/response policy events for read,
 mutate, keyslot, and export flows. TUI launches inherit `vault --audit-jsonl` / `--require-audit-sink`
 policy, and the GUI exposes the same durable local JSONL sink controls for deterministic automation.
-The remaining implementation work is external audit-device write-ack probes, additional
-seal-provider health checks, external process-boundary command fixtures, and broader PTY coverage
-over those same command envelopes.
+The remaining implementation work is additional seal-provider health checks, external
+process-boundary command fixtures, broader PTY coverage over those same command envelopes, and
+release-grade packaging evidence.
 
 The seal model stays local-first but borrows the operational shape of Vault: a sealed vault can read
 metadata needed to decide how to unlock, but it cannot decrypt stored item payloads. Auto-unseal

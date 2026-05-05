@@ -50,6 +50,21 @@ CLAIMS: tuple[Claim, ...] = (
                 "core still delegates RNG and SHA-256 to OpenSSL",
                 "hallucination check enforces OpenSSL delegation",
             ),
+            Requirement(
+                "crates/paranoid-core/src/lib.rs",
+                "pub fn random_hex_token(byte_len: usize)",
+                "core exposes OpenSSL-backed random challenge token generation",
+            ),
+            Requirement(
+                "crates/paranoid-core/src/lib.rs",
+                "rand_bytes(bytes.as_mut_slice())",
+                "random challenge tokens delegate entropy to OpenSSL",
+            ),
+            Requirement(
+                "crates/paranoid-core/src/lib.rs",
+                "random_hex_token_uses_openssl_rng_shape",
+                "core tests cover random token shape and bounds",
+            ),
         ),
     ),
     Claim(
@@ -313,6 +328,36 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-audit/src/lib.rs",
+                "MtlsJsonlAckExternalAuditDeviceProbe",
+                "external audit-device has a live mTLS JSONL write-ack probe implementation",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                'EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE: &str = "mtls-jsonl-ack"',
+                "external audit-device mTLS JSONL ack probe mode is stable",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "probe_mtls_jsonl_write_ack",
+                "external audit-device readiness uses a dedicated write-ack probe path",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "paranoid_core::random_hex_token(16)",
+                "external audit-device write-ack challenges use core RNG delegation",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "validate_write_ack_response",
+                "external audit-device write-ack responses are validated before ready status",
+            ),
+            Requirement(
+                "crates/paranoid-audit/Cargo.toml",
+                "openssl.workspace = true",
+                "external audit-device mTLS probe uses the workspace OpenSSL dependency",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
                 "PARANOID_AUDIT_DEVICE_PROBE",
                 "external audit-device probe mode is explicit configuration",
             ),
@@ -345,6 +390,16 @@ CLAIMS: tuple[Claim, ...] = (
                 "crates/paranoid-audit/src/lib.rs",
                 "external_audit_device_probe_can_mark_ready_only_with_explicit_ack",
                 "audit tests require explicit probe acknowledgment before external sink readiness",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "external_audit_device_mtls_jsonl_ack_probe_marks_ready_after_matching_ack",
+                "audit tests cover mTLS JSONL write-ack readiness",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "external_audit_device_mtls_jsonl_ack_probe_rejects_mismatched_ack",
+                "audit tests reject mismatched mTLS JSONL write-ack challenges",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -407,9 +462,19 @@ CLAIMS: tuple[Claim, ...] = (
                 "federal readiness docs explain external audit-device posture limits",
             ),
             Requirement(
+                "docs/reference/federal-readiness.md",
+                "PARANOID_AUDIT_DEVICE_PROBE=mtls-jsonl-ack",
+                "federal readiness docs describe mTLS JSONL write-ack readiness",
+            ),
+            Requirement(
                 "docs/reference/testing.md",
                 "stable denied federal startup fixture",
                 "testing docs cover stable federal startup fixture",
+            ),
+            Requirement(
+                "docs/reference/testing.md",
+                "audit unit tests cover the mTLS JSONL write-ack probe",
+                "testing docs cover the mTLS JSONL write-ack tests",
             ),
             Requirement(
                 "docs/reference/ai-review.md",

@@ -591,7 +591,19 @@ fn ensure_requirements_possible(
 
 pub fn sha256_hex(input: &str) -> Result<String, ParanoidError> {
     let digest = sha256(input.as_bytes());
-    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+    Ok(hex_encode(&digest))
+}
+
+pub fn random_hex_token(byte_len: usize) -> Result<String, ParanoidError> {
+    if byte_len == 0 || byte_len > 64 {
+        return Err(ParanoidError::InvalidArguments(
+            "random token byte length must be 1..64".to_string(),
+        ));
+    }
+    let mut bytes = Zeroizing::new(vec![0_u8; byte_len]);
+    rand_bytes(bytes.as_mut_slice())
+        .map_err(|error| ParanoidError::RandomFailure(error.to_string()))?;
+    Ok(hex_encode(bytes.as_slice()))
 }
 
 pub fn openssl_version_text() -> &'static str {
@@ -1008,6 +1020,10 @@ pub fn pattern_issues(password: &str) -> usize {
     issues
 }
 
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 pub fn secure_preview(password: &str) -> String {
     if password.len() <= 4 {
         return password.to_string();
@@ -1030,6 +1046,20 @@ mod tests {
             sha256_hex("abc").expect("hash"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[test]
+    fn random_hex_token_uses_openssl_rng_shape() {
+        let first = random_hex_token(16).expect("token");
+        let second = random_hex_token(16).expect("token");
+
+        assert_eq!(first.len(), 32);
+        assert!(first.chars().all(|ch| ch.is_ascii_hexdigit()));
+        assert_ne!(first, second);
+        assert!(matches!(
+            random_hex_token(0),
+            Err(ParanoidError::InvalidArguments(_))
+        ));
     }
 
     #[test]

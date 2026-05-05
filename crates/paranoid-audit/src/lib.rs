@@ -1,9 +1,10 @@
+use openssl::ssl::{SslConnector, SslFiletype, SslMethod, SslVerifyMode, SslVersion};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     env,
     fs::OpenOptions,
-    io::{BufWriter, Write},
+    io::{BufRead, BufReader, BufWriter, Write},
     net::{TcpStream, ToSocketAddrs},
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -21,7 +22,10 @@ const PARANOID_AUDIT_DEVICE_CA_CERT: &str = "PARANOID_AUDIT_DEVICE_CA_CERT";
 const PARANOID_AUDIT_DEVICE_PROBE: &str = "PARANOID_AUDIT_DEVICE_PROBE";
 const EXTERNAL_AUDIT_DEVICE_DEFAULT_ID: &str = "external_audit_device";
 const EXTERNAL_AUDIT_DEVICE_TCP_PROBE: &str = "tcp-connect";
+const EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE: &str = "mtls-jsonl-ack";
 const EXTERNAL_AUDIT_DEVICE_PROBE_DISABLED: &str = "disabled";
+const EXTERNAL_AUDIT_DEVICE_ACK_PROTOCOL_VERSION: u16 = 1;
+const EXTERNAL_AUDIT_DEVICE_ACK_PROBE_NAME: &str = "external_audit_device_write_ack";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -403,6 +407,47 @@ impl ExternalAuditDeviceProbe for TcpConnectExternalAuditDeviceProbe {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MtlsJsonlAckExternalAuditDeviceProbe {
+    timeout: Duration,
+}
+
+impl Default for MtlsJsonlAckExternalAuditDeviceProbe {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(3),
+        }
+    }
+}
+
+impl MtlsJsonlAckExternalAuditDeviceProbe {
+    pub fn new(timeout: Duration) -> Self {
+        Self { timeout }
+    }
+}
+
+impl ExternalAuditDeviceProbe for MtlsJsonlAckExternalAuditDeviceProbe {
+    fn probe(&mut self, config: &ExternalAuditDeviceConfig) -> ExternalAuditDeviceProbeResult {
+        match probe_mtls_jsonl_write_ack(config, self.timeout) {
+            Ok(()) => {
+                ExternalAuditDeviceProbeResult::ready(EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE)
+            }
+            Err(ExternalAuditDeviceAckProbeError::Unverified(failure)) => {
+                ExternalAuditDeviceProbeResult::unverified(
+                    EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE,
+                    failure,
+                )
+            }
+            Err(ExternalAuditDeviceAckProbeError::Unavailable(failure)) => {
+                ExternalAuditDeviceProbeResult::unavailable(
+                    EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE,
+                    failure,
+                )
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditSurface {
@@ -667,6 +712,10 @@ fn assess_external_audit_device_from_lookup(
             let mut probe = TcpConnectExternalAuditDeviceProbe::default();
             assess_external_audit_device_from_lookup_with_probe(value_for, &mut probe)
         }
+        EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE => {
+            let mut probe = MtlsJsonlAckExternalAuditDeviceProbe::default();
+            assess_external_audit_device_from_lookup_with_probe(value_for, &mut probe)
+        }
         EXTERNAL_AUDIT_DEVICE_PROBE_DISABLED => {
             let mut probe = DisabledExternalAuditDeviceProbe::default();
             assess_external_audit_device_from_lookup_with_probe(value_for, &mut probe)
@@ -807,6 +856,206 @@ fn endpoint_authority(endpoint: &str) -> Result<String, String> {
         ));
     }
     Ok(authority.to_string())
+}
+
+#[derive(Debug, Serialize)]
+struct ExternalAuditDeviceAckRequest<'a> {
+    schema_version: u16,
+    probe: &'static str,
+    provider_id: &'a str,
+    challenge_id: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExternalAuditDeviceAckResponse {
+    schema_version: u16,
+    probe: String,
+    challenge_id: String,
+    status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ExternalAuditDeviceAckProbeError {
+    Unverified(String),
+    Unavailable(String),
+}
+
+fn probe_mtls_jsonl_write_ack(
+    config: &ExternalAuditDeviceConfig,
+    timeout: Duration,
+) -> Result<(), ExternalAuditDeviceAckProbeError> {
+    let host =
+        endpoint_host(config.endpoint()).map_err(ExternalAuditDeviceAckProbeError::Unavailable)?;
+    let addresses = socket_addresses_from_endpoint(config.endpoint())
+        .map_err(ExternalAuditDeviceAckProbeError::Unavailable)?;
+    let connector =
+        build_mtls_connector(config).map_err(ExternalAuditDeviceAckProbeError::Unavailable)?;
+    let challenge_id = format!(
+        "pp.audit-device.challenge.v1.{}",
+        paranoid_core::random_hex_token(16)
+            .map_err(|error| ExternalAuditDeviceAckProbeError::Unavailable(error.to_string()))?
+    );
+    let request = ExternalAuditDeviceAckRequest {
+        schema_version: EXTERNAL_AUDIT_DEVICE_ACK_PROTOCOL_VERSION,
+        probe: EXTERNAL_AUDIT_DEVICE_ACK_PROBE_NAME,
+        provider_id: config.provider_id(),
+        challenge_id: challenge_id.as_str(),
+    };
+    let mut request_line = serde_json::to_vec(&request).map_err(|error| {
+        ExternalAuditDeviceAckProbeError::Unavailable(format!(
+            "failed to serialize external audit-device write-ack probe: {error}"
+        ))
+    })?;
+    request_line.push(b'\n');
+
+    let mut failures = Vec::new();
+    for address in addresses {
+        let tcp_stream = match TcpStream::connect_timeout(&address, timeout) {
+            Ok(stream) => stream,
+            Err(error) => {
+                failures.push(format!("{address}: tcp connect failed: {error}"));
+                continue;
+            }
+        };
+        if let Err(error) = tcp_stream.set_read_timeout(Some(timeout)) {
+            failures.push(format!("{address}: failed to set read timeout: {error}"));
+            continue;
+        }
+        if let Err(error) = tcp_stream.set_write_timeout(Some(timeout)) {
+            failures.push(format!("{address}: failed to set write timeout: {error}"));
+            continue;
+        }
+
+        let mut tls_stream = match connector.connect(host.as_str(), tcp_stream) {
+            Ok(stream) => stream,
+            Err(error) => {
+                failures.push(format!("{address}: mTLS handshake failed: {error}"));
+                continue;
+            }
+        };
+        if let Err(error) = tls_stream.write_all(&request_line) {
+            return Err(ExternalAuditDeviceAckProbeError::Unavailable(format!(
+                "external audit-device write-ack probe write failed: {error}"
+            )));
+        }
+        if let Err(error) = tls_stream.flush() {
+            return Err(ExternalAuditDeviceAckProbeError::Unavailable(format!(
+                "external audit-device write-ack probe flush failed: {error}"
+            )));
+        }
+
+        let mut response_line = String::new();
+        let mut reader = BufReader::new(tls_stream);
+        match reader.read_line(&mut response_line) {
+            Ok(0) => {
+                return Err(ExternalAuditDeviceAckProbeError::Unverified(
+                    "external audit-device write-ack probe received no acknowledgement".to_string(),
+                ));
+            }
+            Ok(_) => {
+                return validate_write_ack_response(response_line.as_str(), challenge_id.as_str());
+            }
+            Err(error) => {
+                return Err(ExternalAuditDeviceAckProbeError::Unavailable(format!(
+                    "external audit-device write-ack probe read failed: {error}"
+                )));
+            }
+        }
+    }
+
+    Err(ExternalAuditDeviceAckProbeError::Unavailable(format!(
+        "external audit-device mTLS JSONL write-ack probe failed: {}",
+        failures.join("; ")
+    )))
+}
+
+fn validate_write_ack_response(
+    response_line: &str,
+    challenge_id: &str,
+) -> Result<(), ExternalAuditDeviceAckProbeError> {
+    let response: ExternalAuditDeviceAckResponse = serde_json::from_str(response_line.trim())
+        .map_err(|error| {
+            ExternalAuditDeviceAckProbeError::Unverified(format!(
+                "external audit-device write-ack response was not valid JSON: {error}"
+            ))
+        })?;
+    if response.schema_version != EXTERNAL_AUDIT_DEVICE_ACK_PROTOCOL_VERSION {
+        return Err(ExternalAuditDeviceAckProbeError::Unverified(format!(
+            "external audit-device write-ack schema mismatch: {}",
+            response.schema_version
+        )));
+    }
+    if response.probe != EXTERNAL_AUDIT_DEVICE_ACK_PROBE_NAME {
+        return Err(ExternalAuditDeviceAckProbeError::Unverified(
+            "external audit-device write-ack probe name mismatch".to_string(),
+        ));
+    }
+    if response.challenge_id != challenge_id {
+        return Err(ExternalAuditDeviceAckProbeError::Unverified(
+            "external audit-device write-ack challenge mismatch".to_string(),
+        ));
+    }
+    if response.status != "ready" {
+        return Err(ExternalAuditDeviceAckProbeError::Unverified(format!(
+            "external audit-device write-ack status was not ready: {}",
+            response.status
+        )));
+    }
+    Ok(())
+}
+
+fn build_mtls_connector(config: &ExternalAuditDeviceConfig) -> Result<SslConnector, String> {
+    let mut builder =
+        SslConnector::builder(SslMethod::tls_client()).map_err(|error| error.to_string())?;
+    builder
+        .set_min_proto_version(Some(SslVersion::TLS1_2))
+        .map_err(|error| error.to_string())?;
+    builder.set_verify(SslVerifyMode::PEER);
+    builder
+        .set_certificate_file(config.mtls_certificate_evidence(), SslFiletype::PEM)
+        .map_err(|error| {
+            format!("failed to load external audit-device mTLS certificate: {error}")
+        })?;
+    builder
+        .set_private_key_file(config.mtls_private_key_evidence(), SslFiletype::PEM)
+        .map_err(|error| {
+            format!("failed to load external audit-device mTLS private key: {error}")
+        })?;
+    builder
+        .set_ca_file(config.mtls_ca_certificate_evidence())
+        .map_err(|error| format!("failed to load external audit-device CA certificate: {error}"))?;
+    builder
+        .check_private_key()
+        .map_err(|error| format!("external audit-device mTLS private key check failed: {error}"))?;
+    Ok(builder.build())
+}
+
+fn endpoint_host(endpoint: &str) -> Result<String, String> {
+    let authority = endpoint_authority(endpoint)?;
+    if let Some(rest) = authority.strip_prefix('[') {
+        let Some((host, port)) = rest.split_once("]:") else {
+            return Err(format!(
+                "external audit-device endpoint {endpoint:?} must include [host]:port"
+            ));
+        };
+        if host.is_empty() || port.is_empty() {
+            return Err(format!(
+                "external audit-device endpoint {endpoint:?} must include [host]:port"
+            ));
+        }
+        return Ok(host.to_string());
+    }
+    let Some((host, port)) = authority.rsplit_once(':') else {
+        return Err(format!(
+            "external audit-device endpoint {endpoint:?} must include host:port"
+        ));
+    };
+    if host.is_empty() || port.is_empty() {
+        return Err(format!(
+            "external audit-device endpoint {endpoint:?} must include host:port"
+        ));
+    }
+    Ok(host.to_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -963,6 +1212,19 @@ fn current_epoch_ms() -> AuditTimestamp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openssl::{
+        asn1::Asn1Time,
+        bn::{BigNum, MsbOption},
+        hash::MessageDigest,
+        nid::Nid,
+        pkey::{PKey, Private},
+        rsa::Rsa,
+        ssl::{SslAcceptor, SslFiletype, SslMethod, SslVerifyMode},
+        x509::{
+            X509, X509Name,
+            extension::{BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAlternativeName},
+        },
+    };
 
     #[test]
     fn audit_trail_uses_deterministic_sequence_ids_without_randomness() {
@@ -1239,6 +1501,47 @@ mod tests {
     }
 
     #[test]
+    fn external_audit_device_mtls_jsonl_ack_probe_marks_ready_after_matching_ack() {
+        let material = TestMtlsMaterial::new();
+        let (endpoint, server) = spawn_ack_server(&material, AckServerMode::Ready);
+        let values = mtls_ack_values(&material, endpoint);
+
+        let health = assess_external_audit_device_from_lookup(|name| values.get(name).cloned());
+        server.join().expect("ack server joins");
+
+        assert_eq!(health.status, AuditSinkStatus::Ready);
+        assert!(health.is_available());
+        assert_eq!(
+            health.evidence_source.as_deref(),
+            Some(EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE)
+        );
+    }
+
+    #[test]
+    fn external_audit_device_mtls_jsonl_ack_probe_rejects_mismatched_ack() {
+        let material = TestMtlsMaterial::new();
+        let (endpoint, server) = spawn_ack_server(&material, AckServerMode::MismatchedChallenge);
+        let values = mtls_ack_values(&material, endpoint);
+
+        let health = assess_external_audit_device_from_lookup(|name| values.get(name).cloned());
+        server.join().expect("ack server joins");
+
+        assert_eq!(health.status, AuditSinkStatus::Unverified);
+        assert!(!health.is_available());
+        assert_eq!(
+            health.evidence_source.as_deref(),
+            Some(EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE)
+        );
+        assert!(
+            health
+                .failure
+                .as_deref()
+                .unwrap_or_default()
+                .contains("challenge mismatch")
+        );
+    }
+
+    #[test]
     fn external_audit_device_probe_can_mark_ready_only_with_explicit_ack() {
         struct ReadyProbe;
 
@@ -1307,5 +1610,216 @@ mod tests {
             verify_hash_chain(&chain),
             Err(AuditError::HashChainMismatch { .. })
         ));
+    }
+
+    struct TestMtlsMaterial {
+        _dir: tempfile::TempDir,
+        cert_path: String,
+        key_path: String,
+        ca_path: String,
+    }
+
+    impl TestMtlsMaterial {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let key = test_key();
+            let cert = test_certificate(&key);
+            let cert_path = dir.path().join("device.crt");
+            let key_path = dir.path().join("device.key");
+            let ca_path = dir.path().join("ca.crt");
+            let cert_pem = cert.to_pem().expect("cert pem");
+            std::fs::write(&cert_path, cert_pem.as_slice()).expect("write cert");
+            std::fs::write(&ca_path, cert_pem.as_slice()).expect("write ca");
+            std::fs::write(
+                &key_path,
+                key.private_key_to_pem_pkcs8()
+                    .expect("private key pem")
+                    .as_slice(),
+            )
+            .expect("write key");
+            Self {
+                _dir: dir,
+                cert_path: cert_path.display().to_string(),
+                key_path: key_path.display().to_string(),
+                ca_path: ca_path.display().to_string(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum AckServerMode {
+        Ready,
+        MismatchedChallenge,
+    }
+
+    fn mtls_ack_values(
+        material: &TestMtlsMaterial,
+        endpoint: String,
+    ) -> BTreeMap<&'static str, String> {
+        BTreeMap::from([
+            (
+                PARANOID_AUDIT_DEVICE_PROBE,
+                EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE.to_string(),
+            ),
+            (PARANOID_AUDIT_DEVICE_ENDPOINT, endpoint),
+            (PARANOID_AUDIT_DEVICE_ID, "siem-primary".to_string()),
+            (PARANOID_AUDIT_DEVICE_MTLS_CERT, material.cert_path.clone()),
+            (PARANOID_AUDIT_DEVICE_MTLS_KEY, material.key_path.clone()),
+            (PARANOID_AUDIT_DEVICE_CA_CERT, material.ca_path.clone()),
+        ])
+    }
+
+    fn spawn_ack_server(
+        material: &TestMtlsMaterial,
+        mode: AckServerMode,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind listener");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let endpoint = format!("mtls://{}", listener.local_addr().expect("listener addr"));
+        let acceptor = test_acceptor(material);
+        let server = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let tcp_stream = loop {
+                match listener.accept() {
+                    Ok((stream, _addr)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "timed out waiting for mTLS ack probe"
+                        );
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("accept mTLS ack probe: {error}"),
+                }
+            };
+            tcp_stream.set_nonblocking(false).expect("blocking stream");
+            let tls_stream = acceptor.accept(tcp_stream).expect("accept TLS");
+            let mut reader = BufReader::new(tls_stream);
+            let mut request_line = String::new();
+            reader
+                .read_line(&mut request_line)
+                .expect("read probe request");
+            let request: serde_json::Value =
+                serde_json::from_str(request_line.trim()).expect("parse probe request");
+            assert_eq!(
+                request["probe"].as_str(),
+                Some(EXTERNAL_AUDIT_DEVICE_ACK_PROBE_NAME)
+            );
+            let challenge_id = match mode {
+                AckServerMode::Ready => request["challenge_id"]
+                    .as_str()
+                    .expect("request challenge")
+                    .to_string(),
+                AckServerMode::MismatchedChallenge => {
+                    "pp.audit-device.challenge.v1.mismatch".to_string()
+                }
+            };
+            let response = serde_json::json!({
+                "schema_version": EXTERNAL_AUDIT_DEVICE_ACK_PROTOCOL_VERSION,
+                "probe": EXTERNAL_AUDIT_DEVICE_ACK_PROBE_NAME,
+                "challenge_id": challenge_id,
+                "status": "ready",
+            });
+            let mut tls_stream = reader.into_inner();
+            writeln!(tls_stream, "{response}").expect("write probe response");
+            tls_stream.flush().expect("flush probe response");
+        });
+        (endpoint, server)
+    }
+
+    fn test_acceptor(material: &TestMtlsMaterial) -> SslAcceptor {
+        let mut builder =
+            SslAcceptor::mozilla_intermediate(SslMethod::tls_server()).expect("acceptor builder");
+        builder
+            .set_certificate_file(&material.cert_path, SslFiletype::PEM)
+            .expect("server cert");
+        builder
+            .set_private_key_file(&material.key_path, SslFiletype::PEM)
+            .expect("server key");
+        builder.set_ca_file(&material.ca_path).expect("server ca");
+        builder.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+        builder.check_private_key().expect("server key check");
+        builder.build()
+    }
+
+    fn test_key() -> PKey<Private> {
+        let rsa = Rsa::generate(2048).expect("rsa");
+        PKey::from_rsa(rsa).expect("pkey")
+    }
+
+    fn test_certificate(key: &PKey<Private>) -> X509 {
+        let mut name = X509Name::builder().expect("x509 name builder");
+        name.append_entry_by_nid(Nid::COMMONNAME, "127.0.0.1")
+            .expect("common name");
+        let name = name.build();
+
+        let mut serial = BigNum::new().expect("serial");
+        serial
+            .rand(128, MsbOption::MAYBE_ZERO, false)
+            .expect("rand serial");
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("unix epoch")
+            .as_secs() as i64;
+        let mut builder = X509::builder().expect("x509 builder");
+        builder.set_version(2).expect("set version");
+        builder
+            .set_serial_number(&serial.to_asn1_integer().expect("asn1 serial"))
+            .expect("set serial");
+        builder.set_subject_name(&name).expect("set subject");
+        builder.set_issuer_name(&name).expect("set issuer");
+        builder
+            .set_not_before(&Asn1Time::from_unix(now - 60).expect("not before"))
+            .expect("apply not before");
+        builder
+            .set_not_after(&Asn1Time::from_unix(now + 86_400).expect("not after"))
+            .expect("apply not after");
+        builder.set_pubkey(key).expect("set pubkey");
+        builder
+            .append_extension(
+                BasicConstraints::new()
+                    .critical()
+                    .ca()
+                    .build()
+                    .expect("basic constraints"),
+            )
+            .expect("append basic constraints");
+        builder
+            .append_extension(
+                KeyUsage::new()
+                    .digital_signature()
+                    .key_encipherment()
+                    .key_cert_sign()
+                    .build()
+                    .expect("key usage"),
+            )
+            .expect("append key usage");
+        builder
+            .append_extension(
+                ExtendedKeyUsage::new()
+                    .server_auth()
+                    .client_auth()
+                    .build()
+                    .expect("extended key usage"),
+            )
+            .expect("append extended key usage");
+        let san = {
+            let context = builder.x509v3_context(None, None);
+            SubjectAlternativeName::new()
+                .ip("127.0.0.1")
+                .dns("localhost")
+                .build(&context)
+                .expect("subject alt name")
+        };
+        builder
+            .append_extension(san)
+            .expect("append subject alt name");
+        builder
+            .sign(key, MessageDigest::sha256())
+            .expect("sign cert");
+        builder.build()
     }
 }

@@ -25,7 +25,7 @@ surface small, concrete, evidence-driven, and hard to forget while the product c
 |------|----------|-------------------------------|
 | Chi-squared audit | `crates/paranoid-core/src/lib.rs` | Verify the chi-squared upper-tail interpretation, `p > 0.01` thresholding, and how that maps to the intended generator verdict using cited math references and known-answer tests. |
 | Serial correlation audit | `crates/paranoid-core/src/lib.rs` | Verify the serial-correlation coefficient implementation matches the intended estimator and normalization using cited references and known-answer tests. |
-| External audit-device posture | `crates/paranoid-audit/src/lib.rs` | Verify external audit-device posture, TCP reachability probing, and ready write-ack semantics do not overstate sink availability or federal audit coverage. |
+| External audit-device posture | `crates/paranoid-audit/src/lib.rs` | Verify external audit-device posture, TCP reachability probing, and mTLS JSONL write-ack readiness semantics do not overstate sink availability or federal audit coverage. |
 | Ops policy boundary | `crates/paranoid-ops/src/lib.rs` | Verify the shared ops evaluator is the right authorization and audit-evidence boundary for CLI, TUI, GUI, automation adapters, and seal-provider unlock policy. |
 | Seal lifecycle posture model | `crates/paranoid-seal/src/lib.rs` | Verify the seal/posture model represents unlock, recovery, and auto-unseal provider posture without overstating provider availability. |
 | Device-bound keyslot design | `crates/paranoid-vault/src/lib.rs` | Verify storing the raw master key in platform secure storage plus an AES-GCM verification blob is acceptable for the supported macOS, Windows, and Linux secret-store assumptions. |
