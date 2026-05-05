@@ -495,39 +495,87 @@ impl VaultSealMachine {
         event: VaultSealEvent,
     ) -> Result<VaultSealTransition, VaultSealTransitionError> {
         let from = self.state;
-        let to = match (from, event) {
-            (_, VaultSealEvent::RecoveryRequired) => VaultSealState::RecoveryRequired,
-            (
-                VaultSealState::Sealed | VaultSealState::SealedAfterTimeout,
-                VaultSealEvent::UnlockRequested,
-            ) => VaultSealState::ChallengePending,
-            (VaultSealState::ChallengePending, VaultSealEvent::ChallengeIssued) => {
-                VaultSealState::ChallengePending
-            }
-            (VaultSealState::ChallengePending, VaultSealEvent::ChallengeSatisfied)
-            | (VaultSealState::ChallengePending, VaultSealEvent::UnlockSucceeded) => {
-                VaultSealState::Unsealed
-            }
-            (VaultSealState::ChallengePending, VaultSealEvent::UnlockFailed) => {
-                VaultSealState::Sealed
-            }
-            (VaultSealState::Unsealed, VaultSealEvent::IdleTimeoutStarted) => {
-                VaultSealState::IdleLockPending
-            }
-            (VaultSealState::IdleLockPending, VaultSealEvent::ActivityObserved) => {
-                VaultSealState::Unsealed
-            }
-            (VaultSealState::IdleLockPending, VaultSealEvent::IdleTimeoutExpired) => {
-                VaultSealState::SealedAfterTimeout
-            }
-            (
-                VaultSealState::Unsealed | VaultSealState::IdleLockPending,
-                VaultSealEvent::ManualLock,
-            ) => VaultSealState::Sealed,
-            _ => return Err(VaultSealTransitionError { from, event }),
-        };
+        let to = self
+            .next_state(event)
+            .ok_or(VaultSealTransitionError { from, event })?;
         self.state = to;
         Ok(VaultSealTransition { from, event, to })
+    }
+
+    fn next_state(&self, event: VaultSealEvent) -> Option<VaultSealState> {
+        match event {
+            VaultSealEvent::RecoveryRequired => Some(VaultSealState::RecoveryRequired),
+            VaultSealEvent::UnlockRequested => self.unlock_requested_transition(),
+            VaultSealEvent::ChallengeIssued => self.challenge_issued_transition(),
+            VaultSealEvent::ChallengeSatisfied | VaultSealEvent::UnlockSucceeded => {
+                self.challenge_satisfied_transition()
+            }
+            VaultSealEvent::UnlockFailed => self.unlock_failed_transition(),
+            VaultSealEvent::IdleTimeoutStarted => self.idle_timeout_started_transition(),
+            VaultSealEvent::ActivityObserved => self.activity_observed_transition(),
+            VaultSealEvent::IdleTimeoutExpired => self.idle_timeout_expired_transition(),
+            VaultSealEvent::ManualLock => self.manual_lock_transition(),
+        }
+    }
+
+    fn unlock_requested_transition(&self) -> Option<VaultSealState> {
+        match self.state {
+            VaultSealState::Sealed | VaultSealState::SealedAfterTimeout => {
+                Some(VaultSealState::ChallengePending)
+            }
+            _ => None,
+        }
+    }
+
+    fn challenge_issued_transition(&self) -> Option<VaultSealState> {
+        match self.state {
+            VaultSealState::ChallengePending => Some(VaultSealState::ChallengePending),
+            _ => None,
+        }
+    }
+
+    fn challenge_satisfied_transition(&self) -> Option<VaultSealState> {
+        match self.state {
+            VaultSealState::ChallengePending => Some(VaultSealState::Unsealed),
+            _ => None,
+        }
+    }
+
+    fn unlock_failed_transition(&self) -> Option<VaultSealState> {
+        match self.state {
+            VaultSealState::ChallengePending => Some(VaultSealState::Sealed),
+            _ => None,
+        }
+    }
+
+    fn idle_timeout_started_transition(&self) -> Option<VaultSealState> {
+        match self.state {
+            VaultSealState::Unsealed => Some(VaultSealState::IdleLockPending),
+            _ => None,
+        }
+    }
+
+    fn activity_observed_transition(&self) -> Option<VaultSealState> {
+        match self.state {
+            VaultSealState::IdleLockPending => Some(VaultSealState::Unsealed),
+            _ => None,
+        }
+    }
+
+    fn idle_timeout_expired_transition(&self) -> Option<VaultSealState> {
+        match self.state {
+            VaultSealState::IdleLockPending => Some(VaultSealState::SealedAfterTimeout),
+            _ => None,
+        }
+    }
+
+    fn manual_lock_transition(&self) -> Option<VaultSealState> {
+        match self.state {
+            VaultSealState::Unsealed | VaultSealState::IdleLockPending => {
+                Some(VaultSealState::Sealed)
+            }
+            _ => None,
+        }
     }
 }
 

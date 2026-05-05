@@ -284,12 +284,25 @@ impl AuditRedactor {
 
     fn is_sensitive_key(&self, key: &str) -> bool {
         let normalized = key.to_ascii_lowercase();
-        self.sensitive_keys.iter().any(|sensitive| {
-            normalized == *sensitive
-                || normalized.ends_with(&format!("_{sensitive}"))
-                || normalized.contains(&format!("{sensitive}_"))
-        })
+        self.sensitive_keys
+            .iter()
+            .any(|sensitive| matches_sensitive_key(&normalized, sensitive))
     }
+}
+
+fn matches_sensitive_key(normalized_key: &str, sensitive_key: &str) -> bool {
+    if normalized_key == sensitive_key {
+        return true;
+    }
+    if normalized_key
+        .strip_suffix(sensitive_key)
+        .is_some_and(|prefix| prefix.ends_with('_'))
+    {
+        return true;
+    }
+    normalized_key
+        .match_indices(sensitive_key)
+        .any(|(offset, _)| normalized_key[offset + sensitive_key.len()..].starts_with('_'))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -429,12 +442,22 @@ mod tests {
             "password".to_string(),
             "correct horse battery staple".to_string(),
         );
+        attributes.insert("api_secret_value".to_string(), "token".to_string());
+        attributes.insert("ssh_private_key".to_string(), "key material".to_string());
         attributes.insert("vault_path".to_string(), "/tmp/vault.db".to_string());
 
         let redacted = redactor.redact_attributes(&attributes);
 
         assert_eq!(
             redacted.get("password").map(String::as_str),
+            Some("[redacted]")
+        );
+        assert_eq!(
+            redacted.get("api_secret_value").map(String::as_str),
+            Some("[redacted]")
+        );
+        assert_eq!(
+            redacted.get("ssh_private_key").map(String::as_str),
             Some("[redacted]")
         );
         assert_eq!(
