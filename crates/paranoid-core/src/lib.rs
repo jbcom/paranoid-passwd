@@ -1060,6 +1060,10 @@ mod tests {
             random_hex_token(0),
             Err(ParanoidError::InvalidArguments(_))
         ));
+        assert!(matches!(
+            random_hex_token(65),
+            Err(ParanoidError::InvalidArguments(_))
+        ));
     }
 
     #[test]
