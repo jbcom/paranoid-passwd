@@ -389,6 +389,10 @@ pub fn record_ops_request<'a>(
     event
         .attributes
         .insert("request_id".to_string(), envelope.request_id.clone());
+    event.attributes.insert(
+        "session_surface".to_string(),
+        envelope.session.surface.as_str().to_string(),
+    );
     event
         .attributes
         .insert("profile".to_string(), envelope.profile.as_str().to_string());
@@ -427,6 +431,10 @@ pub fn record_ops_response<'a>(
     event
         .attributes
         .insert("request_id".to_string(), envelope.request_id.clone());
+    event.attributes.insert(
+        "session_surface".to_string(),
+        envelope.session.surface.as_str().to_string(),
+    );
     event
         .attributes
         .insert("decision".to_string(), decision.status().to_string());
@@ -454,13 +462,13 @@ impl OpsCommandEvaluation {
     }
 }
 
+// TODO: HUMAN_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.
 pub fn evaluate_ops_command(
     surface: AuditSurface,
-    profile: OpsProfile,
     command: OpsCommand,
     context: &OpsPolicyContext,
 ) -> OpsCommandEvaluation {
-    let envelope = OpsCommandEnvelope::local(surface, profile, command);
+    let envelope = OpsCommandEnvelope::local(surface, context.profile, command);
     let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
     record_ops_request(&mut trail, &envelope);
     let decision = evaluate_policy(&envelope, context);
@@ -474,14 +482,12 @@ pub fn evaluate_ops_command(
 
 pub fn evaluate_vault_operation(
     surface: AuditSurface,
-    profile: OpsProfile,
     name: impl Into<String>,
     access: VaultOperationAccess,
     context: &OpsPolicyContext,
 ) -> OpsCommandEvaluation {
     evaluate_ops_command(
         surface,
-        profile,
         OpsCommand::VaultOperation {
             name: name.into(),
             access,
@@ -1210,7 +1216,6 @@ mod tests {
 
         let evaluation = evaluate_vault_operation(
             AuditSurface::Gui,
-            OpsProfile::Default,
             "mutate_item",
             VaultOperationAccess::Mutate,
             &context,
@@ -1218,14 +1223,29 @@ mod tests {
 
         assert!(evaluation.is_allowed());
         assert_eq!(evaluation.envelope.session.surface, AuditSurface::Gui);
+        assert_eq!(evaluation.envelope.profile, OpsProfile::Default);
         assert_eq!(evaluation.audit_events.len(), 2);
         assert_eq!(evaluation.audit_events[0].action, "vault_operation.request");
+        assert_eq!(
+            evaluation.audit_events[0]
+                .attributes
+                .get("session_surface")
+                .map(String::as_str),
+            Some("gui")
+        );
         assert_eq!(
             evaluation.audit_events[1]
                 .attributes
                 .get("decision")
                 .map(String::as_str),
             Some("allow")
+        );
+        assert_eq!(
+            evaluation.audit_events[1]
+                .attributes
+                .get("session_surface")
+                .map(String::as_str),
+            Some("gui")
         );
     }
 

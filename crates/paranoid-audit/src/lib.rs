@@ -101,6 +101,20 @@ pub enum AuditSurface {
     SupplyChain,
 }
 
+impl AuditSurface {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Core => "core",
+            Self::Vault => "vault",
+            Self::Cli => "cli",
+            Self::Tui => "tui",
+            Self::Gui => "gui",
+            Self::Ops => "ops",
+            Self::SupplyChain => "supply_chain",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditOutcome {

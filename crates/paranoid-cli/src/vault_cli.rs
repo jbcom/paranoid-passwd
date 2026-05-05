@@ -1015,12 +1015,7 @@ fn evaluate_vault_command_policy(
         audit_sink_available: audit_sink_health.is_available(),
         crypto_provider: paranoid_ops::FederalCryptoProviderEvidence::collect_from_environment(),
     };
-    let evaluation = evaluate_ops_command(
-        AuditSurface::Vault,
-        invocation.profile,
-        ops_command,
-        &context,
-    );
+    let evaluation = evaluate_ops_command(AuditSurface::Vault, ops_command, &context);
     write_optional_vault_audit_jsonl(
         &invocation.audit_jsonl,
         audit_sink_health,

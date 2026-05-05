@@ -183,6 +183,38 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
+        "ops.shared-policy-boundary",
+        "Shared ops policy boundary tracking",
+        "ops-security",
+        (
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "TODO: HUMAN_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.",
+                "shared ops policy boundary remains tracked for human review",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "let envelope = OpsCommandEnvelope::local(surface, context.profile, command);",
+                "ops command envelopes derive profile from the authoritative policy context",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                '"session_surface".to_string()',
+                "ops request/response events preserve adapter session surface metadata",
+            ),
+            Requirement(
+                "docs/reference/human-review.md",
+                "Ops policy boundary",
+                "open ops policy boundary disposition remains tracked",
+            ),
+            Requirement(
+                "scripts/verify_human_review_inventory.sh",
+                "centralized policy boundary for ops/vault authorization and audit evidence across adapters",
+                "inventory check tracks the ops policy boundary TODO",
+            ),
+        ),
+    ),
+    Claim(
         "supply-chain.locked-offline-cargo",
         "Locked offline Cargo policy",
         "supply-chain",
@@ -290,6 +322,7 @@ GLOBAL_REQUIREMENTS: tuple[Requirement, ...] = (
 SURFACE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core-security", ("crates/paranoid-core/",)),
     ("vault-security", ("crates/paranoid-vault/",)),
+    ("ops-security", ("crates/paranoid-audit/", "crates/paranoid-ops/")),
     ("supply-chain", (".cargo/", "Cargo.lock", "vendor/", ".github/", "scripts/", "Makefile")),
     ("security-docs", ("AGENTS.md", "SECURITY.md", "docs/reference/")),
 )

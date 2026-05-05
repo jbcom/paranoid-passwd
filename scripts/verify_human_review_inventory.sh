@@ -32,6 +32,7 @@ expected_inventory() {
   cat <<'EOF'
 crates/paranoid-core/src/lib.rs:    // TODO: HUMAN_REVIEW - verify chi-squared upper-tail interpretation and thresholding.
 crates/paranoid-core/src/lib.rs:    // TODO: HUMAN_REVIEW - verify the serial-correlation coefficient matches the intended estimator.
+crates/paranoid-ops/src/lib.rs:// TODO: HUMAN_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.
 crates/paranoid-vault/src/lib.rs:        // TODO: HUMAN_REVIEW - confirm the device-bound keyslot design of storing the raw master key in OS secure storage plus an AES-GCM verification blob is acceptable across macOS, Windows, and Linux secret stores.
 crates/paranoid-vault/src/lib.rs:        // TODO: HUMAN_REVIEW - confirm using 24-word BIP39 entropy directly as the AES-256-GCM wrapping key for mnemonic recovery slots is the right recovery construction.
 crates/paranoid-vault/src/lib.rs:    // TODO: HUMAN_REVIEW - confirm CMS recipient selection and content-encryption policy for certificate-wrapped keyslots.
@@ -71,6 +72,7 @@ fi
 for required in \
   "Chi-squared audit" \
   "Serial correlation audit" \
+  "Ops policy boundary" \
   "Device-bound keyslot design" \
   "Mnemonic recovery construction" \
   "Certificate-wrapped keyslots"

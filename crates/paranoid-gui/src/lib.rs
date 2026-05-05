@@ -212,13 +212,7 @@ impl GuiState {
         access: VaultOperationAccess,
     ) -> Result<(), String> {
         let context = gui_ops_policy_context();
-        let evaluation = evaluate_vault_operation(
-            AuditSurface::Gui,
-            OpsProfile::Default,
-            operation,
-            access,
-            &context,
-        );
+        let evaluation = evaluate_vault_operation(AuditSurface::Gui, operation, access, &context);
         self.ops_audit_events
             .extend(evaluation.audit_events.iter().cloned());
         self.audit_details = summarize_gui_ops_audit(self.ops_audit_events.as_slice());
