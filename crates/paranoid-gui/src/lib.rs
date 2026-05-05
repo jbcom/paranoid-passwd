@@ -247,22 +247,20 @@ fn gui_ops_policy_context() -> OpsPolicyContext {
 fn summarize_gui_ops_audit(events: &[AuditEvent]) -> String {
     let event_count = events.len();
     let operation_count = event_count / 2;
-    let last_operation = events
+    let last_response = events
         .iter()
         .rev()
-        .find_map(|event| event.attributes.get("vault_operation"))
+        .find(|event| event.attributes.contains_key("decision"));
+    let last_operation = last_response
+        .and_then(|event| event.attributes.get("vault_operation"))
         .map(String::as_str)
         .unwrap_or("unknown");
-    let last_access = events
-        .iter()
-        .rev()
-        .find_map(|event| event.attributes.get("vault_access"))
+    let last_access = last_response
+        .and_then(|event| event.attributes.get("vault_access"))
         .map(String::as_str)
         .unwrap_or("unknown");
-    let last_decision = events
-        .iter()
-        .rev()
-        .find_map(|event| event.attributes.get("decision"))
+    let last_decision = last_response
+        .and_then(|event| event.attributes.get("decision"))
         .map(String::as_str)
         .unwrap_or("pending");
 
