@@ -5,13 +5,531 @@ use paranoid_audit::{
 use paranoid_core::{AuditStage, AuditSummary, GenerationReport, ParanoidError, ParanoidRequest};
 use serde::{Deserialize, Serialize};
 use std::{
-    process,
+    env, process,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 
 static LOCAL_OPERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+pub const OPS_SCHEMA_VERSION: u16 = 1;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpsProfile {
+    #[default]
+    Default,
+    FederalReady,
+}
+
+impl OpsProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::FederalReady => "federal_ready",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpsActorKind {
+    LocalOperator,
+    Automation,
+    ServiceAccount,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpsActor {
+    pub actor_id: String,
+    pub kind: OpsActorKind,
+}
+
+impl Default for OpsActor {
+    fn default() -> Self {
+        Self {
+            actor_id: "local_operator".to_string(),
+            kind: OpsActorKind::LocalOperator,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpsTransport {
+    InProcess,
+    LocalTty,
+    Mtls,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpsSession {
+    pub session_id: String,
+    pub surface: AuditSurface,
+    pub transport: OpsTransport,
+}
+
+impl OpsSession {
+    pub fn local(surface: AuditSurface) -> Self {
+        Self {
+            session_id: new_local_operation_id(),
+            surface,
+            transport: OpsTransport::InProcess,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultUnlockMethod {
+    PasswordRecovery,
+    MnemonicRecovery,
+    DeviceBound,
+    CertificateWrapped,
+}
+
+impl VaultUnlockMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PasswordRecovery => "password_recovery",
+            Self::MnemonicRecovery => "mnemonic_recovery",
+            Self::DeviceBound => "device_bound",
+            Self::CertificateWrapped => "certificate_wrapped",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum OpsCommand {
+    GeneratePassword,
+    VaultSealStatus,
+    VaultUnlock { method: VaultUnlockMethod },
+    FederalEvidence,
+}
+
+impl OpsCommand {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::GeneratePassword => "generate_password",
+            Self::VaultSealStatus => "vault_seal_status",
+            Self::VaultUnlock { .. } => "vault_unlock",
+            Self::FederalEvidence => "federal_evidence",
+        }
+    }
+
+    pub fn subject(&self) -> AuditSubject {
+        match self {
+            Self::GeneratePassword => AuditSubject::PasswordGeneration,
+            Self::VaultSealStatus | Self::VaultUnlock { .. } => AuditSubject::VaultOperation,
+            Self::FederalEvidence => AuditSubject::ReleaseAssurance,
+        }
+    }
+
+    fn is_security_relevant(&self) -> bool {
+        !matches!(self, Self::FederalEvidence)
+    }
+
+    fn requires_fips_evidence(&self) -> bool {
+        matches!(self, Self::GeneratePassword | Self::VaultUnlock { .. })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpsCommandEnvelope {
+    pub schema_version: u16,
+    pub request_id: String,
+    pub operation_id: String,
+    pub profile: OpsProfile,
+    pub actor: OpsActor,
+    pub session: OpsSession,
+    pub command: OpsCommand,
+}
+
+impl OpsCommandEnvelope {
+    pub fn local(surface: AuditSurface, profile: OpsProfile, command: OpsCommand) -> Self {
+        let operation_id = new_local_operation_id();
+        Self {
+            schema_version: OPS_SCHEMA_VERSION,
+            request_id: format!("{operation_id}.request"),
+            operation_id,
+            profile,
+            actor: OpsActor::default(),
+            session: OpsSession::local(surface),
+            command,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FederalApprovedMode {
+    Confirmed,
+    NotConfirmed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FederalCryptoProviderEvidence {
+    pub provider_name: String,
+    pub provider_version: String,
+    pub provider_platform: String,
+    pub approved_mode: FederalApprovedMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_reference: Option<String>,
+    pub evidence_source: String,
+}
+
+impl FederalCryptoProviderEvidence {
+    pub fn collect_from_environment() -> Self {
+        let approved_mode = match env::var("PARANOID_FEDERAL_APPROVED_MODE") {
+            Ok(value) if matches!(value.as_str(), "1" | "true" | "confirmed") => {
+                FederalApprovedMode::Confirmed
+            }
+            _ => FederalApprovedMode::NotConfirmed,
+        };
+        Self {
+            provider_name: "OpenSSL".to_string(),
+            provider_version: paranoid_core::openssl_version_text().to_string(),
+            provider_platform: paranoid_core::openssl_platform_text().to_string(),
+            approved_mode,
+            certificate_reference: env::var("PARANOID_FEDERAL_CERTIFICATE_REFERENCE").ok(),
+            evidence_source: "runtime".to_string(),
+        }
+    }
+
+    pub fn confirmed_for_tests(certificate_reference: impl Into<String>) -> Self {
+        Self {
+            provider_name: "OpenSSL".to_string(),
+            provider_version: "OpenSSL test provider".to_string(),
+            provider_platform: env::consts::OS.to_string(),
+            approved_mode: FederalApprovedMode::Confirmed,
+            certificate_reference: Some(certificate_reference.into()),
+            evidence_source: "test".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpsPolicyContext {
+    pub profile: OpsProfile,
+    pub audit_sink_required: bool,
+    pub audit_sink_available: bool,
+    pub crypto_provider: FederalCryptoProviderEvidence,
+}
+
+impl OpsPolicyContext {
+    pub fn default_local() -> Self {
+        Self {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+        }
+    }
+
+    pub fn federal_ready(audit_sink_available: bool) -> Self {
+        Self {
+            profile: OpsProfile::FederalReady,
+            audit_sink_required: true,
+            audit_sink_available,
+            crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "decision")]
+pub enum OpsPolicyDecision {
+    Allow {
+        reason: String,
+    },
+    Challenge {
+        challenge_id: String,
+        reason: String,
+        required_actions: Vec<String>,
+    },
+    Deny {
+        reason: String,
+        missing_controls: Vec<String>,
+    },
+}
+
+impl OpsPolicyDecision {
+    pub fn is_allowed(&self) -> bool {
+        matches!(self, Self::Allow { .. })
+    }
+
+    pub fn status(&self) -> &'static str {
+        match self {
+            Self::Allow { .. } => "allow",
+            Self::Challenge { .. } => "challenge",
+            Self::Deny { .. } => "deny",
+        }
+    }
+}
+
+pub fn evaluate_policy(
+    envelope: &OpsCommandEnvelope,
+    context: &OpsPolicyContext,
+) -> OpsPolicyDecision {
+    let profile = envelope.profile;
+    if matches!(envelope.command, OpsCommand::FederalEvidence) {
+        return OpsPolicyDecision::Allow {
+            reason: "federal evidence collection is allowed so missing controls can be reported"
+                .to_string(),
+        };
+    }
+
+    let mut missing_controls = Vec::new();
+    if envelope.command.is_security_relevant()
+        && (profile == OpsProfile::FederalReady || context.audit_sink_required)
+        && !context.audit_sink_available
+    {
+        missing_controls.push("required_audit_sink".to_string());
+    }
+
+    if profile == OpsProfile::Default {
+        if missing_controls.is_empty() {
+            return OpsPolicyDecision::Allow {
+                reason: "default profile permits local in-process operation".to_string(),
+            };
+        }
+        return OpsPolicyDecision::Deny {
+            reason: "required audit controls are missing".to_string(),
+            missing_controls,
+        };
+    }
+
+    if envelope.command.requires_fips_evidence()
+        && context.crypto_provider.approved_mode != FederalApprovedMode::Confirmed
+    {
+        missing_controls.push("fips_approved_mode".to_string());
+    }
+    if let OpsCommand::VaultUnlock { method } = envelope.command
+        && !matches!(method, VaultUnlockMethod::CertificateWrapped)
+    {
+        missing_controls.push(format!("non_federal_unlock_method:{}", method.as_str()));
+    }
+
+    if !missing_controls.is_empty() {
+        return OpsPolicyDecision::Deny {
+            reason: "federal-ready profile is missing required controls".to_string(),
+            missing_controls,
+        };
+    }
+
+    if matches!(envelope.command, OpsCommand::VaultUnlock { .. }) {
+        return OpsPolicyDecision::Challenge {
+            challenge_id: format!("{}.challenge.1", envelope.request_id),
+            reason: "vault unlock requires fresh operator proof under federal-ready policy"
+                .to_string(),
+            required_actions: vec!["fresh_operator_proof".to_string()],
+        };
+    }
+
+    OpsPolicyDecision::Allow {
+        reason: "federal-ready controls satisfied".to_string(),
+    }
+}
+
+pub fn record_ops_request<'a>(
+    trail: &'a mut AuditTrail,
+    envelope: &OpsCommandEnvelope,
+) -> &'a mut AuditEvent {
+    let event = trail.record(
+        AuditSurface::Ops,
+        envelope.command.subject(),
+        format!("{}.request", envelope.command.name()),
+        AuditOutcome::Started,
+        AuditSeverity::Info,
+        "typed ops command request accepted for policy evaluation",
+    );
+    event
+        .attributes
+        .insert("request_id".to_string(), envelope.request_id.clone());
+    event
+        .attributes
+        .insert("profile".to_string(), envelope.profile.as_str().to_string());
+    event
+        .attributes
+        .insert("command".to_string(), envelope.command.name().to_string());
+    event
+}
+
+pub fn record_ops_response<'a>(
+    trail: &'a mut AuditTrail,
+    envelope: &OpsCommandEnvelope,
+    decision: &OpsPolicyDecision,
+) -> &'a mut AuditEvent {
+    let (outcome, severity) = match decision {
+        OpsPolicyDecision::Allow { .. } => (AuditOutcome::Success, AuditSeverity::Notice),
+        OpsPolicyDecision::Challenge { .. } => (AuditOutcome::Review, AuditSeverity::Warning),
+        OpsPolicyDecision::Deny { .. } => (AuditOutcome::Blocked, AuditSeverity::Error),
+    };
+    let event = trail.record(
+        AuditSurface::Ops,
+        envelope.command.subject(),
+        format!("{}.response", envelope.command.name()),
+        outcome,
+        severity,
+        "typed ops command policy response emitted",
+    );
+    event
+        .attributes
+        .insert("request_id".to_string(), envelope.request_id.clone());
+    event
+        .attributes
+        .insert("decision".to_string(), decision.status().to_string());
+    event
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FederalStartupEvidence {
+    pub schema_version: u16,
+    pub profile: OpsProfile,
+    pub product_version: String,
+    pub build_commit: String,
+    pub build_date: String,
+    pub operating_system: String,
+    pub architecture: String,
+    pub audit_schema_version: u16,
+    pub crypto_provider: FederalCryptoProviderEvidence,
+    pub policy_decision: OpsPolicyDecision,
+}
+
+pub fn collect_federal_startup_evidence(
+    profile: OpsProfile,
+    audit_sink_available: bool,
+    build_commit: impl Into<String>,
+    build_date: impl Into<String>,
+) -> FederalStartupEvidence {
+    let crypto_provider = FederalCryptoProviderEvidence::collect_from_environment();
+    let context = OpsPolicyContext {
+        profile,
+        audit_sink_required: profile == OpsProfile::FederalReady,
+        audit_sink_available,
+        crypto_provider: crypto_provider.clone(),
+    };
+    let envelope =
+        OpsCommandEnvelope::local(AuditSurface::Cli, profile, OpsCommand::GeneratePassword);
+    let policy_decision = evaluate_policy(&envelope, &context);
+    FederalStartupEvidence {
+        schema_version: OPS_SCHEMA_VERSION,
+        profile,
+        product_version: paranoid_core::VERSION.to_string(),
+        build_commit: build_commit.into(),
+        build_date: build_date.into(),
+        operating_system: env::consts::OS.to_string(),
+        architecture: env::consts::ARCH.to_string(),
+        audit_schema_version: AUDIT_SCHEMA_VERSION,
+        crypto_provider,
+        policy_decision,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultSealState {
+    Sealed,
+    ChallengePending,
+    Unsealed,
+    IdleLockPending,
+    SealedAfterTimeout,
+    RecoveryRequired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultSealEvent {
+    UnlockRequested,
+    ChallengeIssued,
+    ChallengeSatisfied,
+    UnlockSucceeded,
+    UnlockFailed,
+    IdleTimeoutStarted,
+    ActivityObserved,
+    IdleTimeoutExpired,
+    ManualLock,
+    RecoveryRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VaultSealTransition {
+    pub from: VaultSealState,
+    pub event: VaultSealEvent,
+    pub to: VaultSealState,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error("invalid vault seal transition from {from:?} via {event:?}")]
+pub struct VaultSealTransitionError {
+    pub from: VaultSealState,
+    pub event: VaultSealEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultSealMachine {
+    state: VaultSealState,
+}
+
+impl Default for VaultSealMachine {
+    fn default() -> Self {
+        Self {
+            state: VaultSealState::Sealed,
+        }
+    }
+}
+
+impl VaultSealMachine {
+    pub fn new(state: VaultSealState) -> Self {
+        Self { state }
+    }
+
+    pub fn state(&self) -> VaultSealState {
+        self.state
+    }
+
+    pub fn apply(
+        &mut self,
+        event: VaultSealEvent,
+    ) -> Result<VaultSealTransition, VaultSealTransitionError> {
+        let from = self.state;
+        let to = match (from, event) {
+            (_, VaultSealEvent::RecoveryRequired) => VaultSealState::RecoveryRequired,
+            (
+                VaultSealState::Sealed | VaultSealState::SealedAfterTimeout,
+                VaultSealEvent::UnlockRequested,
+            ) => VaultSealState::ChallengePending,
+            (VaultSealState::ChallengePending, VaultSealEvent::ChallengeIssued) => {
+                VaultSealState::ChallengePending
+            }
+            (VaultSealState::ChallengePending, VaultSealEvent::ChallengeSatisfied)
+            | (VaultSealState::ChallengePending, VaultSealEvent::UnlockSucceeded) => {
+                VaultSealState::Unsealed
+            }
+            (VaultSealState::ChallengePending, VaultSealEvent::UnlockFailed) => {
+                VaultSealState::Sealed
+            }
+            (VaultSealState::Unsealed, VaultSealEvent::IdleTimeoutStarted) => {
+                VaultSealState::IdleLockPending
+            }
+            (VaultSealState::IdleLockPending, VaultSealEvent::ActivityObserved) => {
+                VaultSealState::Unsealed
+            }
+            (VaultSealState::IdleLockPending, VaultSealEvent::IdleTimeoutExpired) => {
+                VaultSealState::SealedAfterTimeout
+            }
+            (
+                VaultSealState::Unsealed | VaultSealState::IdleLockPending,
+                VaultSealEvent::ManualLock,
+            ) => VaultSealState::Sealed,
+            _ => return Err(VaultSealTransitionError { from, event }),
+        };
+        self.state = to;
+        Ok(VaultSealTransition { from, event, to })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GeneratePasswordOperation {
@@ -309,5 +827,202 @@ mod tests {
         assert!(first.starts_with("pp.operation.v1."));
         assert!(second.starts_with("pp.operation.v1."));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn federal_policy_fails_closed_without_required_controls() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::FederalReady,
+            OpsCommand::GeneratePassword,
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::FederalReady,
+            audit_sink_required: true,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence {
+                provider_name: "OpenSSL".to_string(),
+                provider_version: "OpenSSL test provider".to_string(),
+                provider_platform: "test".to_string(),
+                approved_mode: FederalApprovedMode::NotConfirmed,
+                certificate_reference: None,
+                evidence_source: "test".to_string(),
+            },
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert!(missing_controls.contains(&"required_audit_sink".to_string()));
+                assert!(missing_controls.contains(&"fips_approved_mode".to_string()));
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_required_audit_sink_fails_closed_in_default_profile() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::Default,
+            OpsCommand::GeneratePassword,
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: true,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert_eq!(missing_controls, vec!["required_audit_sink".to_string()]);
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn federal_policy_challenges_certificate_unlock_after_controls_pass() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::FederalReady,
+            OpsCommand::VaultUnlock {
+                method: VaultUnlockMethod::CertificateWrapped,
+            },
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::FederalReady,
+            audit_sink_required: true,
+            audit_sink_available: true,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Challenge {
+                required_actions, ..
+            } => {
+                assert!(required_actions.contains(&"fresh_operator_proof".to_string()));
+            }
+            other => panic!("expected challenge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn federal_policy_denies_non_federal_unlock_methods() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::FederalReady,
+            OpsCommand::VaultUnlock {
+                method: VaultUnlockMethod::MnemonicRecovery,
+            },
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::FederalReady,
+            audit_sink_required: true,
+            audit_sink_available: true,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert!(
+                    missing_controls
+                        .iter()
+                        .any(|control| control == "non_federal_unlock_method:mnemonic_recovery")
+                );
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ops_request_and_response_events_share_request_id() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::Default,
+            OpsCommand::VaultSealStatus,
+        );
+        let decision = OpsPolicyDecision::Allow {
+            reason: "test".to_string(),
+        };
+        let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
+
+        record_ops_request(&mut trail, &envelope);
+        record_ops_response(&mut trail, &envelope, &decision);
+
+        assert_eq!(trail.events().len(), 2);
+        assert_eq!(
+            trail.events()[0].attributes.get("request_id"),
+            Some(&envelope.request_id)
+        );
+        assert_eq!(
+            trail.events()[1].attributes.get("request_id"),
+            Some(&envelope.request_id)
+        );
+        assert_eq!(
+            trail.events()[1]
+                .attributes
+                .get("decision")
+                .map(String::as_str),
+            Some("allow")
+        );
+    }
+
+    #[test]
+    fn seal_machine_models_idle_timeout_and_reunlock() {
+        let mut seal = VaultSealMachine::default();
+
+        assert_eq!(seal.state(), VaultSealState::Sealed);
+        seal.apply(VaultSealEvent::UnlockRequested)
+            .expect("unlock request");
+        seal.apply(VaultSealEvent::ChallengeSatisfied)
+            .expect("challenge satisfied");
+        assert_eq!(seal.state(), VaultSealState::Unsealed);
+        seal.apply(VaultSealEvent::IdleTimeoutStarted)
+            .expect("idle start");
+        assert_eq!(seal.state(), VaultSealState::IdleLockPending);
+        seal.apply(VaultSealEvent::IdleTimeoutExpired)
+            .expect("idle expired");
+        assert_eq!(seal.state(), VaultSealState::SealedAfterTimeout);
+        seal.apply(VaultSealEvent::UnlockRequested)
+            .expect("unlock after timeout");
+        assert_eq!(seal.state(), VaultSealState::ChallengePending);
+    }
+
+    #[test]
+    fn federal_startup_evidence_reports_denied_default_runtime() {
+        let evidence = collect_federal_startup_evidence(
+            OpsProfile::FederalReady,
+            false,
+            "test-commit",
+            "test-date",
+        );
+
+        assert_eq!(evidence.profile, OpsProfile::FederalReady);
+        assert_eq!(evidence.audit_schema_version, AUDIT_SCHEMA_VERSION);
+        assert!(matches!(
+            evidence.policy_decision,
+            OpsPolicyDecision::Deny { .. }
+        ));
     }
 }

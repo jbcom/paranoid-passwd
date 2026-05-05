@@ -1,4 +1,4 @@
-use openssl::{rand::rand_bytes, sha::sha256};
+use openssl::{rand::rand_bytes, sha::sha256, version};
 use serde::{Deserialize, Serialize};
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 use std::collections::HashSet;
@@ -592,6 +592,14 @@ fn ensure_requirements_possible(
 pub fn sha256_hex(input: &str) -> Result<String, ParanoidError> {
     let digest = sha256(input.as_bytes());
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+pub fn openssl_version_text() -> &'static str {
+    version::version()
+}
+
+pub fn openssl_platform_text() -> &'static str {
+    version::platform()
 }
 
 pub fn generate_password(charset: &str, length: usize) -> Result<String, ParanoidError> {

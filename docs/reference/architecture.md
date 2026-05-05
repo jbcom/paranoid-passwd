@@ -61,59 +61,60 @@ The shared report model is split between:
 
 ## Ops, Audit, and Seal Lifecycle
 
-The first ops/audit foundation is implemented for generator automation: CLI `--json` runs through
-`paranoid-ops`, returns a stable operation report, and carries `paranoid-audit` events with an
-operation id shared by every event in the report. Audit events are evidence metadata only; generated
-passwords remain in the typed report and are not copied into audit messages or attributes.
-Current operation ids are process-local correlation identifiers, not authentication tokens or
-cryptographic nonces.
+The ops/audit layer is now a typed local control plane, not UI-local logging. CLI `--json` runs
+through `paranoid-ops`, returns a stable operation report, and carries `paranoid-audit` events with
+an operation id shared by every event in the report. Current operation ids are process-local
+correlation identifiers, not authentication tokens or cryptographic nonces.
+
+`paranoid-ops` owns:
+
+- command envelopes with request ids, actor context, session surface, transport, profile, and
+  command identity
+- an explicit `allow`, `challenge`, and `deny` policy decision model
+- federal-ready startup evidence over build id, platform, audit schema, and OpenSSL provider
+  evidence
+- a fail-closed federal policy that requires an audit sink and confirmed approved-provider evidence
+  before security-relevant operations can run
+- a vault seal state machine covering `sealed`, `challenge_pending`, `unsealed`,
+  `idle_lock_pending`, `sealed_after_timeout`, and `recovery_required`
+- request/response audit event helpers so every command that reaches policy evaluation can be
+  paired by request id
+
+This is challenge/response in the security sense, not prompt-engineering in the LLM sense. Sensitive
+operations declare the command, surface, profile, and preconditions; policy returns a typed
+challenge when fresh proof is required, or a typed denial when controls are missing.
+
+`paranoid-audit` owns:
+
+- structured audit events with per-operation sequence ids
+- append-only JSONL file sinks through `--audit-jsonl`
+- strict redaction markers for sensitive attributes
+- SHA-256 hash-chain evidence generated through the `paranoid-core` OpenSSL-backed hash path
+- fail-closed integration when a required audit sink is unavailable
+
+Audit events are evidence metadata only. They must not contain plaintext passwords, recovery
+phrases, private keys, or unwrapped vault material. Generated passwords remain in the typed
+generation report and are not copied into audit messages or attributes.
+
+The CLI exposes the first automation surface:
+
+- `--audit-jsonl PATH` appends policy and operation audit events to a JSONL sink
+- `--require-audit-sink` fails closed unless the sink is writable
+- `--profile federal-ready` and `--federal-ready` enforce the federal-ready startup policy
+- `--federal-evidence` emits assessor-readable startup evidence as JSON
+- `vault seal-status` reports the local vault seal posture without decrypting item payloads
+- `vault federal-evidence` emits the same federal startup evidence from the vault namespace
 
 The UI surfaces should continue converging on this shared typed operations protocol instead of
-calling each other. The CLI can emit JSON/JSONL for automation, the TUI can render the same
-operation results in a terminal, and the GUI can render them in Slint, but all three should submit
-the same `paranoid-ops` command envelopes and receive the same typed responses.
+calling each other. The remaining implementation work is to route all vault mutations, TUI actions,
+and GUI actions through the same command envelopes and audit sinks.
 
-`paranoid-ops` currently owns generator operation execution and automation response shaping. It
-should grow into:
-
-- command envelopes with request ids, actor context, surface identity, policy version, and optional
-  challenge metadata
-- an explicit allow / challenge / deny decision model for sensitive operations
-- vault session state transitions such as `sealed`, `challenge_pending`, `unsealed`,
-  `idle_lock_pending`, `sealed_after_timeout`, and `recovery_required`
-- auto-unseal provider orchestration for device-bound, certificate-backed, and future external
-  provider paths
-- mTLS or local transport authorization policy when commands cross process boundaries
-- stable JSON response schemas for headless automation
-
-This should be challenge/response in the security sense, not prompt-engineering in the LLM sense.
-Sensitive operations should declare the capability, subject, target, preconditions, and expected
-side effects, then require a typed challenge when policy says the operation needs confirmation,
-fresh proof, or stronger unlock material. The challenge result should be verified by the ops layer
-and recorded by the audit layer before the vault mutation runs.
-
-`paranoid-audit` currently owns structured events, per-operation sequence ids, JSONL rendering, and
-the redaction boundary for evidence fields. It should grow into an append-oriented audit stream that
-is safe by default:
-
-- one request event and one response event for every ops command that reaches policy evaluation
-- stable request ids so request/response pairs can be correlated
-- typed actor, surface, command, target, decision, and outcome fields
-- no plaintext secrets, generated passwords, recovery phrases, private keys, or unwrapped vault
-  material
-- keyed hashes or deterministic redaction markers for values that need later correlation without
-  disclosure
-- event hash chaining so local JSONL reports can show tampering or truncation
-- pluggable audit-device sinks, starting with local JSONL and test memory sinks
-- fail-closed policy for required audit sinks, with an explicit degraded mode only for optional
-  sinks
-
-The seal model should stay local-first but borrow the operational shape of Vault: a sealed vault can
-read metadata needed to decide how to unlock, but it cannot decrypt stored item payloads. Auto-unseal
+The seal model stays local-first but borrows the operational shape of Vault: a sealed vault can read
+metadata needed to decide how to unlock, but it cannot decrypt stored item payloads. Auto-unseal
 providers are convenience paths for retrieving unwrap material under policy; they do not remove the
 need for recovery coverage. If a seal provider is rotated, disabled, or becomes unavailable, the ops
-layer should expose that as posture and state, and the vault layer should only perform rewraps through
-typed, audited operations.
+layer should expose that as posture and state, and the vault layer should only perform rewraps
+through typed, audited operations.
 
 This split keeps the trust boundaries narrow:
 

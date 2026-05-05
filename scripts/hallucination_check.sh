@@ -94,7 +94,7 @@ else
   fail "chi-squared degrees of freedom changed away from N - 1"
 fi
 
-if rg -q '^use openssl::\{rand::rand_bytes, sha::sha256\};' "$CORE"; then
+if rg -q -P '^use openssl::\{(?=[^}]*rand::rand_bytes)(?=[^}]*sha::sha256)[^}]*\};' "$CORE"; then
   pass "core still delegates RNG and SHA-256 to OpenSSL"
 else
   fail "OpenSSL-backed RNG/SHA-256 delegation missing from paranoid-core"

@@ -203,6 +203,106 @@ assert data["audit_events"][0]["operation_id"] == data["operation_id"]
 }
 check "--json emits structured error report" t_json_error_output
 
+# --- Test 16: --audit-jsonl writes request/response audit evidence
+t_audit_jsonl_sink() {
+    local out err dir audit
+    dir="$(mktemp -d)" || return 1
+    err="$dir/stderr"
+    audit="$dir/audit.jsonl"
+    out="$("$BIN" --cli --json --length 12 --charset hex --no-audit --audit-jsonl "$audit" 2>"$err")"
+    if [[ -s "$err" || ! -s "$audit" ]]; then
+        rm -rf "$dir"
+        return 1
+    fi
+    printf '%s' "$out" | AUDIT_JSONL="$audit" python3 -c '
+import json
+import os
+import sys
+
+report = json.load(sys.stdin)
+with open(os.environ["AUDIT_JSONL"], encoding="utf-8") as handle:
+    events = [json.loads(line) for line in handle]
+
+assert report["operation_id"].startswith("pp.operation.v1.")
+assert len(events) >= 4
+assert events[0]["action"] == "generate_password.request"
+assert events[1]["action"] == "generate_password.response"
+assert all(event["operation_id"] == report["operation_id"] for event in events)
+'
+    rm -rf "$dir"
+}
+check "--audit-jsonl writes typed request/response events" t_audit_jsonl_sink
+
+# --- Test 17: federal-ready mode fails closed without approved provider evidence
+t_federal_ready_policy_denial() {
+    local out err dir audit rc
+    dir="$(mktemp -d)" || return 1
+    err="$dir/stderr"
+    audit="$dir/audit.jsonl"
+    rc=0
+    out="$("$BIN" --cli --json --federal-ready --length 12 --audit-jsonl "$audit" 2>"$err")" || rc=$?
+    if [[ "$rc" -ne 6 || -s "$err" || ! -s "$audit" ]]; then
+        rm -rf "$dir"
+        return 1
+    fi
+    printf '%s' "$out" | AUDIT_JSONL="$audit" python3 -c '
+import json
+import os
+import sys
+
+report = json.load(sys.stdin)
+with open(os.environ["AUDIT_JSONL"], encoding="utf-8") as handle:
+    events = [json.loads(line) for line in handle]
+
+assert report["status"] == "error"
+assert report["error_kind"] == "policy_denied"
+assert "fips_approved_mode" in report["policy_decision"]["missing_controls"]
+assert events[-1]["outcome"] == "blocked"
+'
+    rm -rf "$dir"
+}
+check "federal-ready profile fails closed without approved provider evidence" t_federal_ready_policy_denial
+
+# --- Test 18: federal evidence emits startup profile report
+t_federal_evidence() {
+    local out
+    out="$("$BIN" --federal-evidence)"
+    printf '%s' "$out" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["schema_version"] == 1
+assert data["profile"] == "federal_ready"
+assert data["crypto_provider"]["provider_name"] == "OpenSSL"
+assert data["policy_decision"]["decision"] == "deny"
+'
+}
+check "--federal-evidence emits startup profile report" t_federal_evidence
+
+# --- Test 19: explicit required sink fails closed without a sink path
+t_required_audit_sink_denial() {
+    local out err rc
+    err="$(mktemp)" || return 1
+    rc=0
+    out="$("$BIN" --cli --json --require-audit-sink --length 12 2>"$err")" || rc=$?
+    if [[ "$rc" -ne 6 || -s "$err" ]]; then
+        rm -f "$err"
+        return 1
+    fi
+    printf '%s' "$out" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["status"] == "error"
+assert data["error_kind"] == "policy_denied"
+assert data["policy_decision"]["missing_controls"] == ["required_audit_sink"]
+'
+    rm -f "$err"
+}
+check "--require-audit-sink fails closed without --audit-jsonl" t_required_audit_sink_denial
+
 # --- Summary
 printf '\n'
 printf '%d passed, %d failed\n' "$PASSES" "$FAILS"

@@ -66,11 +66,25 @@ Structured automation report:
 cargo run -p paranoid-cli -- --cli --json --length 24 --count 1 --framework nist
 ```
 
+Structured audit evidence:
+
+```bash
+cargo run -p paranoid-cli -- --cli --json --audit-jsonl audit.jsonl --length 24 --framework nist
+cargo run -p paranoid-cli -- --federal-evidence
+cargo run -p paranoid-cli -- --cli --federal-ready --audit-jsonl audit.jsonl --length 24
+```
+
+`--federal-ready` fails closed unless a required audit sink is available and the runtime evidence
+confirms an approved cryptographic provider mode. The default vendored OpenSSL build reports
+provider evidence but does not claim approved mode.
+
 Local vault:
 
 ```bash
 export PARANOID_MASTER_PASSWORD='correct horse battery staple'
 cargo run -p paranoid-cli -- vault init
+cargo run -p paranoid-cli -- vault seal-status
+cargo run -p paranoid-cli -- vault federal-evidence
 cargo run -p paranoid-cli -- vault generate-store --title GitHub --username jon@example.com --length 24
 cargo run -p paranoid-cli -- vault keyslots
 cargo run -p paranoid-cli -- vault inspect-keyslot --id device-0123456789abcdef

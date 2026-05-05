@@ -1,4 +1,5 @@
 use paranoid_core::{CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, VERSION};
+use paranoid_ops::{OpsProfile, VaultSealMachine, collect_federal_startup_evidence};
 use paranoid_vault::{
     GenerateStoreLoginRecord, NewCardRecord, NewIdentityRecord, NewLoginRecord,
     NewSecureNoteRecord, UpdateCardRecord, UpdateIdentityRecord, UpdateLoginRecord,
@@ -83,6 +84,35 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
                     println!("health_warning\t{warning}");
                 }
             }
+            Ok(0)
+        }
+        VaultCommand::FederalEvidence => {
+            let evidence = collect_federal_startup_evidence(
+                OpsProfile::FederalReady,
+                false,
+                option_env!("PARANOID_CLI_BUILD_COMMIT").unwrap_or("dev"),
+                option_env!("PARANOID_CLI_BUILD_DATE").unwrap_or("dev"),
+            );
+            serde_json::to_writer_pretty(io::stdout(), &evidence)?;
+            println!();
+            Ok(0)
+        }
+        VaultCommand::SealStatus => {
+            let vault_exists = invocation.open_options.path.exists();
+            let state = if vault_exists {
+                VaultSealMachine::default().state()
+            } else {
+                paranoid_ops::VaultSealState::RecoveryRequired
+            };
+            let report = serde_json::json!({
+                "schema_version": paranoid_ops::OPS_SCHEMA_VERSION,
+                "operation": "vault_seal_status",
+                "path": invocation.open_options.path,
+                "state": state,
+                "vault_exists": vault_exists,
+            });
+            serde_json::to_writer_pretty(io::stdout(), &report)?;
+            println!();
             Ok(0)
         }
         VaultCommand::InspectKeyslot { id } => {
@@ -560,6 +590,8 @@ enum VaultCommand {
     Help,
     Init,
     Keyslots,
+    FederalEvidence,
+    SealStatus,
     InspectKeyslot {
         id: String,
     },
@@ -758,6 +790,8 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
         Some("help") => Some(VaultCommand::Help),
         Some("init") => Some(VaultCommand::Init),
         Some("keyslots") => Some(VaultCommand::Keyslots),
+        Some("federal-evidence") => Some(VaultCommand::FederalEvidence),
+        Some("seal-status") => Some(VaultCommand::SealStatus),
         Some("inspect-keyslot") => Some(parse_inspect_keyslot(command_args.as_slice())?),
         Some("list") => Some(parse_list(command_args.as_slice())?),
         Some("show") => Some(parse_show(command_args.as_slice())?),
@@ -2412,6 +2446,8 @@ Usage:
 Subcommands:
   init
   keyslots
+  seal-status
+  federal-evidence
   inspect-keyslot --id ID
   list [--query TEXT] [--kind login|secure_note|card|identity] [--folder NAME] [--tag TAG]
   show --id ID
@@ -2624,6 +2660,18 @@ mod tests {
             }
             _ => panic!("expected inspect-keyslot command"),
         }
+    }
+
+    #[test]
+    fn parse_vault_evidence_and_seal_status_commands() {
+        let evidence = parse_vault_args(&[OsString::from("federal-evidence")]).expect("parse");
+        assert!(matches!(
+            evidence.command,
+            Some(VaultCommand::FederalEvidence)
+        ));
+
+        let seal = parse_vault_args(&[OsString::from("seal-status")]).expect("parse");
+        assert!(matches!(seal.command, Some(VaultCommand::SealStatus)));
     }
 
     #[test]
