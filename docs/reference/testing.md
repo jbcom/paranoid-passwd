@@ -90,9 +90,11 @@ validation remain product work before WASM can become a supported secret-handlin
 
 ## Ops, Audit, and Federal Profile Tests
 
-The next comprehensive PR should move command orchestration and security audit behavior into
-dedicated `paranoid-ops` and `paranoid-audit` crates. That refactor should add focused tests before
-UI work expands:
+The ops/audit foundation now has dedicated `paranoid-ops` and `paranoid-audit` crates. Current
+coverage proves that generator automation runs through the ops boundary, emits structured JSON, and
+records redacted audit events that do not copy generated password values into evidence metadata.
+
+The remaining comprehensive test expansion should add:
 
 - typed command-envelope serialization and compatibility fixtures
 - allow / challenge / deny policy decisions for sensitive vault operations

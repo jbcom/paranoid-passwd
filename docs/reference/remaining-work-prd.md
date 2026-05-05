@@ -78,16 +78,16 @@ Ship a local-first password manager and generator whose implementation, release 
 
 ## Next Comprehensive PR Boundary
 
-After the current PR is finished and merged, the next PR should be a comprehensive architecture PR,
-not a sequence of partial UI patches. It should add the new shared crates, migrate security-relevant
-command flows onto them, and land the first federal-ready profile evidence path in one coherent
-change.
+The current ops/audit foundation adds the shared crates and migrates generator automation onto
+them. The next comprehensive architecture PR should finish the security-relevant vault command
+flows, seal lifecycle, required audit sinks, and first federal-ready profile evidence path in one
+coherent change rather than drifting back into UI-local patches.
 
 That PR should be scoped around:
 
-- `crates/paranoid-ops`
-- `crates/paranoid-audit`
-- CLI JSON/JSONL automation output over the typed ops protocol
+- expanding `crates/paranoid-ops`
+- expanding `crates/paranoid-audit`
+- CLI JSONL fixtures and additional automation output over the typed ops protocol
 - TUI and GUI adapters over the same protocol
 - seal / auto-unseal state and policy
 - federal-ready profile scaffolding and evidence fixtures
@@ -112,10 +112,12 @@ product grows.
 
 ### Requirements
 
-1. Add `crates/paranoid-ops` for typed command envelopes, actor/surface/session metadata, policy
-   evaluation, challenge decisions, and stable command responses.
-2. Add `crates/paranoid-audit` for request/response audit events, redaction, keyed hashing,
-   hash-chain verification, JSON/JSONL rendering, and audit-device sinks.
+1. Expand `crates/paranoid-ops` beyond generator automation into typed command envelopes,
+   actor/surface/session metadata, policy evaluation, challenge decisions, and stable command
+   responses.
+2. Expand `crates/paranoid-audit` beyond structured event metadata into request/response audit
+   events, redaction, keyed hashing, hash-chain verification, JSON/JSONL rendering, and audit-device
+   sinks.
 3. Ensure every security-relevant command that reaches policy evaluation emits one request event and
    one response event with the same request id.
 4. Define a typed `allow`, `challenge`, and `deny` decision model. Challenge/response is a policy

@@ -38,11 +38,13 @@ Launch behavior is standardized:
 ## Workspace
 
 - [`crates/paranoid-core`](crates/paranoid-core/src/lib.rs)
+- [`crates/paranoid-audit`](crates/paranoid-audit/src/lib.rs)
+- [`crates/paranoid-ops`](crates/paranoid-ops/src/lib.rs)
 - [`crates/paranoid-cli`](crates/paranoid-cli/src/main.rs)
 - [`crates/paranoid-gui`](crates/paranoid-gui/src/main.rs)
 - [`crates/paranoid-vault`](crates/paranoid-vault/src/lib.rs)
 
-`paranoid-core` owns generation, rejection sampling, OpenSSL-backed RNG and hashing, statistical audit math, pattern detection, and compliance checks. The CLI, TUI, GUI, and vault flows consume typed Rust results instead of the old raw-memory WASM bridge.
+`paranoid-core` owns generation, rejection sampling, OpenSSL-backed RNG and hashing, statistical audit math, pattern detection, and compliance checks. `paranoid-ops` is the typed operation boundary for automation-facing workflows, and `paranoid-audit` owns redacted structured audit events. The CLI, TUI, GUI, and vault flows consume typed Rust results instead of the old raw-memory WASM bridge.
 
 ## Quick Start
 
@@ -56,6 +58,12 @@ Scriptable CLI:
 
 ```bash
 cargo run -p paranoid-cli -- --cli --length 24 --count 3 --framework nist,pci_dss
+```
+
+Structured automation report:
+
+```bash
+cargo run -p paranoid-cli -- --cli --json --length 24 --count 1 --framework nist
 ```
 
 Local vault:

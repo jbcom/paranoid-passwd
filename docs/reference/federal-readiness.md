@@ -78,10 +78,12 @@ automatically enough for a federal authorization.
 
 ## Ops and Audit Controls
 
-The planned `paranoid-ops` and `paranoid-audit` crates are the right place to satisfy federal
-readiness without bloating UI code.
+`paranoid-ops` and `paranoid-audit` are the right place to satisfy federal readiness without
+bloating UI code. The current foundation covers generator automation reports and redacted structured
+audit events; vault seal policy, required sinks, and federal profile evidence remain explicit
+follow-on work.
 
-`paranoid-ops` should provide:
+`paranoid-ops` should continue toward:
 
 - typed command envelopes with request id, actor, surface, session, profile, target, and operation
 - policy decisions of `allow`, `challenge`, or `deny`
@@ -90,7 +92,7 @@ readiness without bloating UI code.
 - mTLS policy when operations cross process boundaries
 - stable JSON responses for automation and evidence capture
 
-`paranoid-audit` should provide:
+`paranoid-audit` should continue toward:
 
 - request and response events for every command that reaches policy evaluation
 - stable JSONL schemas suitable for SIEM ingestion

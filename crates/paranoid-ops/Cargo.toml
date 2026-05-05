@@ -1,0 +1,19 @@
+[package]
+name = "paranoid-ops"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+paranoid-audit.workspace = true
+paranoid-core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

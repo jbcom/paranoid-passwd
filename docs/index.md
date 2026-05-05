@@ -12,6 +12,7 @@ promise: secrets stay local, and trust is verified instead of assumed.
 It ships native tools for daily use, scripting, and recovery operations:
 
 - `paranoid-core` owns password generation, rejection sampling, OpenSSL-backed hashing and RNG, compliance policy, and the 7-layer audit.
+- `paranoid-ops` and `paranoid-audit` provide the first typed operation and structured evidence boundary for automation-facing generator workflows.
 - `paranoid-passwd` is the primary user binary. It defaults to the TUI on an interactive terminal and keeps the scriptable CLI for automation.
 - `paranoid-passwd-gui` is the dedicated Slint-native GUI surface over the same generator and vault model.
 - `paranoid-vault` stores encrypted local `Login`, `SecureNote`, `Card`, and `Identity` records with explicit recovery posture.

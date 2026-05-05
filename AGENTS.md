@@ -96,16 +96,23 @@ Before committing:
 | Crate | Responsibility |
 |-------|----------------|
 | `crates/paranoid-core` | password generation, OpenSSL-backed RNG/SHA-256, statistical audit, compliance checks |
+| `crates/paranoid-audit` | redacted structured audit events and JSON/JSONL evidence primitives |
+| `crates/paranoid-ops` | typed operation orchestration, automation reports, and policy boundary scaffolding |
 | `crates/paranoid-cli` | scriptable CLI plus full-screen wizard TUI |
 | `crates/paranoid-gui` | Slint-native GUI surface plus target-gated desktop, mobile, and WASM build checks |
+| `crates/paranoid-vault` | encrypted local storage, keyslots, backup/transfer packages, and recovery posture |
 
-Never duplicate generation, hashing, or audit logic outside `paranoid-core`.
+Never duplicate generation, hashing, or statistical audit math outside `paranoid-core`. `paranoid-audit`
+may record redacted evidence about an operation, but it must not compute generator verdicts or handle
+plaintext secrets. `paranoid-ops` may orchestrate requests, but it must delegate generation,
+hashing, compliance checks, vault cryptography, and keyslot mechanics to the core and vault crates.
 
 The GUI crate uses `unsafe_code = "deny"` instead of the workspace `forbid` because Slint's
 generated Rust lowers that lint internally and Rust 2024 marks exported Android/WASM ABI entrypoint
 attributes as unsafe. Handwritten GUI Rust remains checked by `scripts/hallucination_check.sh`;
 only exact `#[unsafe(no_mangle)]` ABI attributes are allowed there, and `paranoid-core`,
-`paranoid-cli`, and `paranoid-vault` keep the workspace-level `forbid` policy.
+`paranoid-audit`, `paranoid-ops`, `paranoid-cli`, and `paranoid-vault` keep the workspace-level
+`forbid` policy.
 
 ### Product Surface
 
