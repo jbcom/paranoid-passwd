@@ -39,7 +39,9 @@ elif [ "${ARCHIVE}" = "dmg" ]; then
 else
   artifact="${OUT_DIR}/${stage_name}.${ARCHIVE}"
 fi
-binary_path="target/release/${PRODUCT_NAME}${EXT}"
+target_root="${CARGO_TARGET_DIR:-target}"
+target_root="${target_root%/}"
+binary_path="${target_root}/release/${PRODUCT_NAME}${EXT}"
 
 add_linux_gui_metadata() {
   local share_root="$1"

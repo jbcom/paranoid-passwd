@@ -1,19 +1,24 @@
 {
   "packages": {
     ".": {
-      "release-type": "simple",
+      "release-type": "rust",
       "package-name": "paranoid-passwd",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        "Cargo.toml",
-        "crates/paranoid-core/Cargo.toml",
-        "crates/paranoid-cli/Cargo.toml",
-        "crates/paranoid-gui/Cargo.toml",
-        "docs/conf.py"
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.workspace.package.version"
+        }
       ]
     }
   },
+  "plugins": [
+    {
+      "type": "cargo-workspace"
+    }
+  ],
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
 }
