@@ -605,18 +605,10 @@ fn seal_posture_for_path(path: &Path) -> (bool, VaultSealPosture) {
 
     match read_vault_header(path) {
         Ok(header) => (true, seal_posture_for_header(&header)),
-        Err(error) => {
-            let provider = VaultSealProviderEvidence::unavailable(
-                "vault_header",
-                VaultSealProviderKind::PasswordRecovery,
-                "vault_header",
-                format!("Vault header could not be read: {error}"),
-            );
-            (
-                true,
-                VaultSealPosture::from_providers(VaultSealState::RecoveryRequired, vec![provider]),
-            )
-        }
+        Err(_) => (
+            true,
+            VaultSealPosture::from_providers(VaultSealState::RecoveryRequired, Vec::new()),
+        ),
     }
 }
 
@@ -2936,6 +2928,21 @@ mod tests {
         assert!(!vault_exists);
         assert_eq!(posture.state, VaultSealState::RecoveryRequired);
         assert!(posture.recovery_required);
+        assert_eq!(posture.provider_count, 0);
+    }
+
+    #[test]
+    fn seal_posture_for_unreadable_vault_does_not_synthesize_provider() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let path = temp_dir.path().join("corrupt.vault");
+        fs::write(&path, b"not a sqlite vault").expect("write corrupt vault");
+
+        let (vault_exists, posture) = seal_posture_for_path(&path);
+
+        assert!(vault_exists);
+        assert_eq!(posture.state, VaultSealState::RecoveryRequired);
+        assert!(posture.recovery_required);
+        assert!(!posture.operator_recovery_configured);
         assert_eq!(posture.provider_count, 0);
     }
 

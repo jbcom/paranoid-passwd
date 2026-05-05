@@ -108,6 +108,8 @@ crates. Current coverage proves that:
 - the seal state machine covers unlock, idle-lock, timeout, and relock transitions
 - seal posture reports configured recovery, certificate, and auto-unseal providers without claiming
   provider availability before a health check confirms it
+- headless `vault seal-status` output includes the same seal posture payload and is covered by the
+  vault CLI e2e script
 - redaction removes sensitive attributes instead of copying or hashing secrets
 - hash-chain verification detects tampered event streams
 

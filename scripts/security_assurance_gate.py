@@ -231,18 +231,26 @@ CLAIMS: tuple[Claim, ...] = (
         (
             Requirement(
                 "crates/paranoid-seal/src/lib.rs",
-                "pub enum VaultSealState",
-                "paranoid-seal owns the seal state enum",
+                r"#\[derive\([^\n]*Serialize[^\n]*Deserialize[^\n]*\)\]\n#\[serde\([^\n]*\)\]\npub enum VaultSealState",
+                "paranoid-seal owns a serializable seal state enum",
+                True,
             ),
             Requirement(
                 "crates/paranoid-seal/src/lib.rs",
-                "pub struct VaultSealPosture",
-                "paranoid-seal owns the non-secret seal posture model",
+                r"#\[derive\([^\n]*Serialize[^\n]*Deserialize[^\n]*\)\]\npub struct VaultSealPosture",
+                "paranoid-seal owns a serializable non-secret seal posture model",
+                True,
             ),
             Requirement(
                 "crates/paranoid-seal/src/lib.rs",
-                "pub enum VaultSealProviderKind",
-                "paranoid-seal models seal provider kinds",
+                r"#\[derive\([^\n]*Serialize[^\n]*Deserialize[^\n]*\)\]\n#\[serde\([^\n]*\)\]\npub enum VaultSealProviderKind",
+                "paranoid-seal models serializable seal provider kinds",
+                True,
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "TODO: HUMAN_REVIEW - confirm the seal/posture model correctly represents unlock and recovery posture without overstating provider availability.",
+                "seal posture model remains tracked for human review",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -251,8 +259,203 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_cli.rs",
-                "seal_posture_for_path",
-                "vault seal-status emits seal posture without unlocking items",
+                "let (vault_exists, posture) = seal_posture_for_path(&invocation.open_options.path);",
+                "vault seal-status command evaluates seal posture",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_cli.rs",
+                '"seal": posture',
+                "vault seal-status command includes posture in JSON output",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_cli.rs",
+                "serde_json::to_writer_pretty(io::stdout(), &report)",
+                "vault seal-status command serializes the posture report",
+            ),
+            Requirement(
+                "tests/test_vault_cli.sh",
+                "seal_status=\"$(source_vault seal-status)\"",
+                "headless vault e2e exercises seal-status output",
+            ),
+            Requirement(
+                "tests/test_vault_cli.sh",
+                'seal = data["seal"]',
+                "headless vault e2e asserts the seal posture payload",
+            ),
+            Requirement(
+                "scripts/verify_human_review_inventory.sh",
+                "seal/posture model correctly represents unlock and recovery posture",
+                "inventory check tracks the seal posture TODO",
+            ),
+            Requirement(
+                "docs/reference/human-review.md",
+                "Seal lifecycle posture model",
+                "open seal posture disposition remains tracked",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`seal.lifecycle-boundary` | `tracked-open`",
+                "assurance claim tracks the open seal posture review",
+            ),
+            Requirement(
+                "docs/reference/testing.md",
+                "`vault seal-status` output",
+                "testing docs cover seal-status posture output",
+            ),
+            Requirement(
+                "docs/reference/architecture.md",
+                "`paranoid-seal` owns:",
+                "architecture docs name the seal lifecycle boundary",
+            ),
+            Requirement(
+                "docs/reference/architecture.md",
+                "distinguishes configured auto-unseal from confirmed provider",
+                "architecture docs document provider availability semantics",
+            ),
+            Requirement(
+                "docs/reference/federal-readiness.md",
+                "so evidence does not overstate what the local process has actually checked",
+                "federal readiness docs document provider availability evidence semantics",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_cli.rs",
+                "VaultSealPosture::from_providers(VaultSealState::RecoveryRequired, Vec::new())",
+                "unreadable vault headers do not synthesize recovery providers",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_cli.rs",
+                "seal_posture_for_unreadable_vault_does_not_synthesize_provider",
+                "CLI tests cover unreadable header posture behavior",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_cli.rs",
+                "seal_posture_for_initialized_vault_reports_header_providers_only",
+                "CLI tests cover initialized vault posture behavior",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "posture_reports_configured_recovery_and_auto_unseal_without_claiming_availability",
+                "seal crate tests cover configured versus available provider posture",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "posture_requires_operator_recovery_when_only_auto_unseal_exists",
+                "seal crate tests require operator recovery coverage",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "posture_reports_confirmed_auto_unseal_availability",
+                "seal crate tests cover confirmed auto-unseal availability",
+            ),
+            Requirement(
+                "docs/reference/remaining-work-prd.md",
+                "seal-state transitions and seal-provider posture have unit tests and e2e coverage",
+                "remaining-work PRD tracks seal posture acceptance criteria",
+            ),
+            Requirement(
+                "README.md",
+                "`paranoid-seal` owns vault seal state and non-secret provider posture",
+                "README names the seal lifecycle boundary",
+            ),
+            Requirement(
+                "docs/conf.py",
+                '"paranoid_seal": str(repo_root / "crates" / "paranoid-seal")',
+                "docs build includes generated Rust API docs for paranoid-seal",
+            ),
+            Requirement(
+                "docs/api/index.md",
+                "crates/paranoid_seal/lib",
+                "Rust API index links the paranoid-seal crate docs",
+            ),
+            Requirement(
+                "Cargo.toml",
+                '"crates/paranoid-seal"',
+                "workspace includes the paranoid-seal crate",
+            ),
+            Requirement(
+                "Cargo.toml",
+                'paranoid-seal = { path = "crates/paranoid-seal" }',
+                "workspace dependency exposes the paranoid-seal crate",
+            ),
+            Requirement(
+                "crates/paranoid-ops/Cargo.toml",
+                "paranoid-seal.workspace = true",
+                "paranoid-ops depends on paranoid-seal through workspace dependency",
+            ),
+            Requirement(
+                "crates/paranoid-seal/Cargo.toml",
+                'name = "paranoid-seal"',
+                "paranoid-seal crate manifest exists",
+            ),
+            Requirement(
+                "crates/paranoid-seal/Cargo.toml",
+                "serde.workspace = true",
+                "paranoid-seal depends on serde through the workspace",
+            ),
+            Requirement(
+                "crates/paranoid-seal/Cargo.toml",
+                "thiserror.workspace = true",
+                "paranoid-seal depends on thiserror through the workspace",
+            ),
+            Requirement(
+                "crates/paranoid-seal/Cargo.toml",
+                "[lints]",
+                "paranoid-seal inherits workspace lints",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "pub const SEAL_SCHEMA_VERSION: u16 = 1;",
+                "seal posture schema version is explicit",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "SEAL_SCHEMA_VERSION",
+                "ops re-exports the seal schema version",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_cli.rs",
+                '"schema_version": SEAL_SCHEMA_VERSION',
+                "seal-status JSON uses the seal schema version",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "pub fn is_auto_unseal(self) -> bool",
+                "seal provider kind exposes auto-unseal classification",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "pub fn is_operator_recovery(self) -> bool",
+                "seal provider kind exposes operator recovery classification",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "pub fn is_certificate_unseal(self) -> bool",
+                "seal provider kind exposes certificate unwrap classification",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "pub fn is_available(self) -> bool",
+                "seal provider status exposes confirmed availability classification",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "pub fn from_providers(",
+                "seal posture aggregates provider evidence",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "recovery_required: state == VaultSealState::RecoveryRequired",
+                "seal posture marks recovery-required state explicitly",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "|| !operator_recovery_configured",
+                "seal posture requires an operator recovery path",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "provider.status.is_available()",
+                "seal posture only marks auto-unseal available after provider availability is confirmed",
             ),
             Requirement(
                 "docs/reference/architecture.md",

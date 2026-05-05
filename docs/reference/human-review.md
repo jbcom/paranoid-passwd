@@ -14,7 +14,7 @@ small, concrete, and hard to forget while the product continues to evolve.
 ## Current Status
 
 - review status: **open**
-- expected open review sites: **6**
+- expected open review sites: **7**
 - policy: every `TODO: HUMAN_REVIEW` location in source must be listed here and in the inventory check
 - assurance mapping: each open site is represented in [assurance-claims.md](./assurance-claims.md)
   as a `tracked-open` claim
@@ -26,6 +26,7 @@ small, concrete, and hard to forget while the product continues to evolve.
 | Chi-squared audit | `crates/paranoid-core/src/lib.rs` | Confirm the chi-squared upper-tail interpretation, `p > 0.01` thresholding, and how that maps to the intended generator verdict. |
 | Serial correlation audit | `crates/paranoid-core/src/lib.rs` | Confirm the serial-correlation coefficient implementation matches the intended estimator and normalization. |
 | Ops policy boundary | `crates/paranoid-ops/src/lib.rs` | Confirm the shared ops evaluator is the right authorization and audit-evidence boundary for CLI, TUI, GUI, and automation adapters. |
+| Seal lifecycle posture model | `crates/paranoid-seal/src/lib.rs` | Confirm the seal/posture model correctly represents unlock and recovery posture without overstating provider availability. |
 | Device-bound keyslot design | `crates/paranoid-vault/src/lib.rs` | Confirm storing the raw master key in platform secure storage plus an AES-GCM verification blob is acceptable across macOS, Windows, and Linux secret stores. |
 | Mnemonic recovery construction | `crates/paranoid-vault/src/lib.rs` | Confirm whether the current 24-word BIP39-derived material should be used directly as the AES-256-GCM wrapping key for mnemonic recovery slots, or replaced by a stronger derivation scheme. |
 | Certificate-wrapped keyslots | `crates/paranoid-vault/src/lib.rs` | Confirm CMS recipient selection, content-encryption policy, and the broader certificate-wrapped keyslot design. |

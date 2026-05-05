@@ -267,6 +267,7 @@ impl VaultSealProviderEvidence {
     }
 }
 
+// TODO: HUMAN_REVIEW - confirm the seal/posture model correctly represents unlock and recovery posture without overstating provider availability.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VaultSealPosture {
     pub schema_version: u16,
