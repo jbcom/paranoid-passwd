@@ -1,6 +1,6 @@
 ---
 title: Changelog
-updated: 2026-04-09
+updated: 2026-05-05
 status: current
 domain: technical
 ---
@@ -11,6 +11,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [3.6.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.5.2...paranoid-passwd-v3.6.0) (2026-05-05)
+
+
+### Features
+
+* complete Rust-native generator replatform ([#72](https://github.com/jbcom/paranoid-passwd/issues/72)) ([b6b3ca4](https://github.com/jbcom/paranoid-passwd/commit/b6b3ca4a5a8b0416cfbb1956bb641ba7797cc8e1))
+* add audit ops foundation ([65f9d3a](https://github.com/jbcom/paranoid-passwd/commit/65f9d3ad586205cf187924fae4ee6b16c027d8e9))
+* add federal ops audit hardening ([8ee884d](https://github.com/jbcom/paranoid-passwd/commit/8ee884d6240883510812004cb772b87d5cb561ea))
+* add audit sink health policy ([72f6679](https://github.com/jbcom/paranoid-passwd/commit/72f66795711c53e070b41a520fe8d01f7386b7f2))
+* finalize Slint release hardening ([#76](https://github.com/jbcom/paranoid-passwd/issues/76)) ([8762da5](https://github.com/jbcom/paranoid-passwd/commit/8762da51ebcd16f24204bf531c7cd22c22d141ba))
+* route vault CLI through ops audit policy ([8e7e8b0](https://github.com/jbcom/paranoid-passwd/commit/8e7e8b01d5d9c3d9bc43e24217ba068e21a7998e))
+* route GUI vault operations through ops policy ([9f964b0](https://github.com/jbcom/paranoid-passwd/commit/9f964b0b0a2369598e95f3f334856b5fb714c817))
+* route native vault surfaces through ops audit policy ([f0c1358](https://github.com/jbcom/paranoid-passwd/commit/f0c1358278c765ba68786ca244017e69fcb34546))
+* split vault seal lifecycle into a dedicated crate ([5a4cf45](https://github.com/jbcom/paranoid-passwd/commit/5a4cf45b05257d0dc4a31bdb3d1a46f69a891660))
+* add AI assessor evidence fixtures ([#85](https://github.com/jbcom/paranoid-passwd/issues/85)) ([5e77686](https://github.com/jbcom/paranoid-passwd/commit/5e776863471ac285fd6aca13f5fd347938b49447))
+* add external audit probe and seal policy evidence ([#86](https://github.com/jbcom/paranoid-passwd/issues/86)) ([1710d0f](https://github.com/jbcom/paranoid-passwd/commit/1710d0f74c406ca73ca0d57280514e33b32aecf0))
+* add ops trace fixtures and control mapping evidence ([#87](https://github.com/jbcom/paranoid-passwd/issues/87)) ([9a0374b](https://github.com/jbcom/paranoid-passwd/commit/9a0374b8eccb8a034268acdd4303e32e223ffd4b))
+* add mTLS audit-device write acknowledgement probe ([0addf4e](https://github.com/jbcom/paranoid-passwd/commit/0addf4e81af04f628fe9a1ebfba6ca427807b28e))
+* add mTLS process-boundary ops evidence ([5f97756](https://github.com/jbcom/paranoid-passwd/commit/5f97756313ea43a771d96404da1a519afd01f81c))
+
+
+### Bug Fixes
+
+* **release:** standardize launch contract and verify published releases ([#74](https://github.com/jbcom/paranoid-passwd/issues/74)) ([77bf464](https://github.com/jbcom/paranoid-passwd/commit/77bf464314d1164e4fbe08da0815254dd525ecdd))
+
+
+### Chores
+
+* bump pinned GitHub Actions ([#77](https://github.com/jbcom/paranoid-passwd/issues/77)) ([e3441b8](https://github.com/jbcom/paranoid-passwd/commit/e3441b893add92421e6fc626b19c255629ffd024))
 
 ## [3.5.2](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.5.1...paranoid-passwd-v3.5.2) (2026-04-15)
 
