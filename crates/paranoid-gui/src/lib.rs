@@ -308,6 +308,7 @@ impl GuiState {
             audit_sink_required: self.audit_jsonl.is_some() || self.require_audit_sink,
             audit_sink_available: self.audit_sink_health.is_available(),
             crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+            seal_posture: None,
         }
     }
 }

@@ -273,6 +273,7 @@ t_federal_evidence() {
         -u PARANOID_AUDIT_DEVICE_MTLS_CERT \
         -u PARANOID_AUDIT_DEVICE_MTLS_KEY \
         -u PARANOID_AUDIT_DEVICE_CA_CERT \
+        -u PARANOID_AUDIT_DEVICE_PROBE \
         -u PARANOID_FEDERAL_APPROVED_MODE \
         -u PARANOID_FEDERAL_CERTIFICATE_REFERENCE \
         "$BIN" --federal-evidence)"

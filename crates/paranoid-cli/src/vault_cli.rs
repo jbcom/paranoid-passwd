@@ -1069,6 +1069,7 @@ fn evaluate_vault_command_policy(
             || invocation.profile == OpsProfile::FederalReady,
         audit_sink_available: audit_sink_health.is_available(),
         crypto_provider: paranoid_ops::FederalCryptoProviderEvidence::collect_from_environment(),
+        seal_posture: None,
     };
     let evaluation = evaluate_ops_command(AuditSurface::Vault, ops_command, &context);
     write_optional_vault_audit_jsonl(

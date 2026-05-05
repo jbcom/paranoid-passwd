@@ -4,8 +4,9 @@ use std::{
     env,
     fs::OpenOptions,
     io::{BufWriter, Write},
+    net::{TcpStream, ToSocketAddrs},
     path::Path,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 
@@ -17,6 +18,10 @@ const PARANOID_AUDIT_DEVICE_ID: &str = "PARANOID_AUDIT_DEVICE_ID";
 const PARANOID_AUDIT_DEVICE_MTLS_CERT: &str = "PARANOID_AUDIT_DEVICE_MTLS_CERT";
 const PARANOID_AUDIT_DEVICE_MTLS_KEY: &str = "PARANOID_AUDIT_DEVICE_MTLS_KEY";
 const PARANOID_AUDIT_DEVICE_CA_CERT: &str = "PARANOID_AUDIT_DEVICE_CA_CERT";
+const PARANOID_AUDIT_DEVICE_PROBE: &str = "PARANOID_AUDIT_DEVICE_PROBE";
+const EXTERNAL_AUDIT_DEVICE_DEFAULT_ID: &str = "external_audit_device";
+const EXTERNAL_AUDIT_DEVICE_TCP_PROBE: &str = "tcp-connect";
+const EXTERNAL_AUDIT_DEVICE_PROBE_DISABLED: &str = "disabled";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -130,6 +135,20 @@ impl AuditSinkHealth {
         endpoint: impl Into<String>,
         failure: impl Into<String>,
     ) -> Self {
+        Self::unavailable_external_device_with_evidence_source(
+            provider_id,
+            endpoint,
+            "environment",
+            failure,
+        )
+    }
+
+    pub fn unavailable_external_device_with_evidence_source(
+        provider_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        evidence_source: impl Into<String>,
+        failure: impl Into<String>,
+    ) -> Self {
         Self {
             schema_version: AUDIT_SCHEMA_VERSION,
             kind: AuditSinkKind::ExternalDevice,
@@ -141,7 +160,7 @@ impl AuditSinkHealth {
             path: None,
             endpoint: Some(endpoint.into()),
             provider_id: Some(provider_id.into()),
-            evidence_source: Some("environment".to_string()),
+            evidence_source: Some(evidence_source.into()),
             failure: Some(failure.into()),
         }
     }
@@ -149,6 +168,20 @@ impl AuditSinkHealth {
     pub fn unverified_external_device(
         provider_id: impl Into<String>,
         endpoint: impl Into<String>,
+        failure: impl Into<String>,
+    ) -> Self {
+        Self::unverified_external_device_with_evidence_source(
+            provider_id,
+            endpoint,
+            "environment",
+            failure,
+        )
+    }
+
+    pub fn unverified_external_device_with_evidence_source(
+        provider_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        evidence_source: impl Into<String>,
         failure: impl Into<String>,
     ) -> Self {
         Self {
@@ -162,7 +195,7 @@ impl AuditSinkHealth {
             path: None,
             endpoint: Some(endpoint.into()),
             provider_id: Some(provider_id.into()),
-            evidence_source: Some("environment".to_string()),
+            evidence_source: Some(evidence_source.into()),
             failure: Some(failure.into()),
         }
     }
@@ -190,6 +223,183 @@ impl AuditSinkHealth {
 
     pub fn is_available(&self) -> bool {
         self.status == AuditSinkStatus::Ready && self.configured && self.writable
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalAuditDeviceConfig {
+    provider_id: String,
+    endpoint: String,
+    mtls_certificate_evidence: String,
+    mtls_private_key_evidence: String,
+    mtls_ca_certificate_evidence: String,
+}
+
+impl ExternalAuditDeviceConfig {
+    pub fn new(
+        provider_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        mtls_certificate_evidence: impl Into<String>,
+        mtls_private_key_evidence: impl Into<String>,
+        mtls_ca_certificate_evidence: impl Into<String>,
+    ) -> Self {
+        Self {
+            provider_id: provider_id.into(),
+            endpoint: endpoint.into(),
+            mtls_certificate_evidence: mtls_certificate_evidence.into(),
+            mtls_private_key_evidence: mtls_private_key_evidence.into(),
+            mtls_ca_certificate_evidence: mtls_ca_certificate_evidence.into(),
+        }
+    }
+
+    pub fn provider_id(&self) -> &str {
+        &self.provider_id
+    }
+
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub fn mtls_certificate_evidence(&self) -> &str {
+        &self.mtls_certificate_evidence
+    }
+
+    pub fn mtls_private_key_evidence(&self) -> &str {
+        &self.mtls_private_key_evidence
+    }
+
+    pub fn mtls_ca_certificate_evidence(&self) -> &str {
+        &self.mtls_ca_certificate_evidence
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalAuditDeviceProbeStatus {
+    Ready,
+    Unverified,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalAuditDeviceProbeResult {
+    status: ExternalAuditDeviceProbeStatus,
+    evidence_source: String,
+    failure: Option<String>,
+}
+
+impl ExternalAuditDeviceProbeResult {
+    pub fn ready(evidence_source: impl Into<String>) -> Self {
+        Self {
+            status: ExternalAuditDeviceProbeStatus::Ready,
+            evidence_source: evidence_source.into(),
+            failure: None,
+        }
+    }
+
+    pub fn unverified(evidence_source: impl Into<String>, failure: impl Into<String>) -> Self {
+        Self {
+            status: ExternalAuditDeviceProbeStatus::Unverified,
+            evidence_source: evidence_source.into(),
+            failure: Some(failure.into()),
+        }
+    }
+
+    pub fn unavailable(evidence_source: impl Into<String>, failure: impl Into<String>) -> Self {
+        Self {
+            status: ExternalAuditDeviceProbeStatus::Unavailable,
+            evidence_source: evidence_source.into(),
+            failure: Some(failure.into()),
+        }
+    }
+}
+
+pub trait ExternalAuditDeviceProbe {
+    fn probe(&mut self, config: &ExternalAuditDeviceConfig) -> ExternalAuditDeviceProbeResult;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisabledExternalAuditDeviceProbe {
+    failure: String,
+}
+
+impl Default for DisabledExternalAuditDeviceProbe {
+    fn default() -> Self {
+        Self {
+            failure:
+                "external audit-device live probe disabled; configured mTLS material is evidence only"
+                    .to_string(),
+        }
+    }
+}
+
+impl DisabledExternalAuditDeviceProbe {
+    pub fn unsupported_mode(mode: impl Into<String>) -> Self {
+        Self {
+            failure: format!(
+                "unsupported external audit-device probe mode: {}",
+                mode.into()
+            ),
+        }
+    }
+}
+
+impl ExternalAuditDeviceProbe for DisabledExternalAuditDeviceProbe {
+    fn probe(&mut self, _config: &ExternalAuditDeviceConfig) -> ExternalAuditDeviceProbeResult {
+        ExternalAuditDeviceProbeResult::unverified(
+            EXTERNAL_AUDIT_DEVICE_PROBE_DISABLED,
+            self.failure.clone(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TcpConnectExternalAuditDeviceProbe {
+    timeout: Duration,
+}
+
+impl Default for TcpConnectExternalAuditDeviceProbe {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(2),
+        }
+    }
+}
+
+impl TcpConnectExternalAuditDeviceProbe {
+    pub fn new(timeout: Duration) -> Self {
+        Self { timeout }
+    }
+}
+
+impl ExternalAuditDeviceProbe for TcpConnectExternalAuditDeviceProbe {
+    fn probe(&mut self, config: &ExternalAuditDeviceConfig) -> ExternalAuditDeviceProbeResult {
+        let addresses = match socket_addresses_from_endpoint(config.endpoint()) {
+            Ok(addresses) => addresses,
+            Err(error) => {
+                return ExternalAuditDeviceProbeResult::unavailable(
+                    EXTERNAL_AUDIT_DEVICE_TCP_PROBE,
+                    error,
+                );
+            }
+        };
+
+        let mut failures = Vec::new();
+        for address in addresses {
+            match TcpStream::connect_timeout(&address, self.timeout) {
+                Ok(_stream) => {
+                    return ExternalAuditDeviceProbeResult::unverified(
+                        EXTERNAL_AUDIT_DEVICE_TCP_PROBE,
+                        "live tcp-connect probe reached endpoint; audit write acknowledgement is not implemented",
+                    );
+                }
+                Err(error) => failures.push(format!("{address}: {error}")),
+            }
+        }
+
+        ExternalAuditDeviceProbeResult::unavailable(
+            EXTERNAL_AUDIT_DEVICE_TCP_PROBE,
+            format!("live tcp-connect probe failed: {}", failures.join("; ")),
+        )
     }
 }
 
@@ -450,21 +660,52 @@ pub fn assess_external_audit_device_from_environment() -> AuditSinkHealth {
 fn assess_external_audit_device_from_lookup(
     mut value_for: impl FnMut(&str) -> Option<String>,
 ) -> AuditSinkHealth {
+    let probe_mode = non_empty_lookup_value(value_for(PARANOID_AUDIT_DEVICE_PROBE))
+        .unwrap_or_else(|| EXTERNAL_AUDIT_DEVICE_PROBE_DISABLED.to_string());
+    match probe_mode.as_str() {
+        EXTERNAL_AUDIT_DEVICE_TCP_PROBE => {
+            let mut probe = TcpConnectExternalAuditDeviceProbe::default();
+            assess_external_audit_device_from_lookup_with_probe(value_for, &mut probe)
+        }
+        EXTERNAL_AUDIT_DEVICE_PROBE_DISABLED => {
+            let mut probe = DisabledExternalAuditDeviceProbe::default();
+            assess_external_audit_device_from_lookup_with_probe(value_for, &mut probe)
+        }
+        unsupported => {
+            let mut probe = DisabledExternalAuditDeviceProbe::unsupported_mode(unsupported);
+            assess_external_audit_device_from_lookup_with_probe(value_for, &mut probe)
+        }
+    }
+}
+
+pub fn assess_external_audit_device_from_lookup_with_probe(
+    mut value_for: impl FnMut(&str) -> Option<String>,
+    probe: &mut impl ExternalAuditDeviceProbe,
+) -> AuditSinkHealth {
     let Some(endpoint) = non_empty_lookup_value(value_for(PARANOID_AUDIT_DEVICE_ENDPOINT)) else {
         return AuditSinkHealth::not_configured_external_device();
     };
     let provider_id = non_empty_lookup_value(value_for(PARANOID_AUDIT_DEVICE_ID))
-        .unwrap_or_else(|| "external_audit_device".to_string());
+        .unwrap_or_else(|| EXTERNAL_AUDIT_DEVICE_DEFAULT_ID.to_string());
 
-    let required_mtls_vars = [
-        PARANOID_AUDIT_DEVICE_MTLS_CERT,
-        PARANOID_AUDIT_DEVICE_MTLS_KEY,
-        PARANOID_AUDIT_DEVICE_CA_CERT,
-    ];
+    let required_mtls_vars = BTreeMap::from([
+        (
+            PARANOID_AUDIT_DEVICE_MTLS_CERT,
+            non_empty_lookup_value(value_for(PARANOID_AUDIT_DEVICE_MTLS_CERT)),
+        ),
+        (
+            PARANOID_AUDIT_DEVICE_MTLS_KEY,
+            non_empty_lookup_value(value_for(PARANOID_AUDIT_DEVICE_MTLS_KEY)),
+        ),
+        (
+            PARANOID_AUDIT_DEVICE_CA_CERT,
+            non_empty_lookup_value(value_for(PARANOID_AUDIT_DEVICE_CA_CERT)),
+        ),
+    ]);
     let mut missing_mtls = Vec::new();
-    for name in required_mtls_vars {
-        if non_empty_lookup_value(value_for(name)).is_none() {
-            missing_mtls.push(name);
+    for (name, value) in &required_mtls_vars {
+        if value.is_none() {
+            missing_mtls.push(*name);
         }
     }
     if !missing_mtls.is_empty() {
@@ -475,15 +716,97 @@ fn assess_external_audit_device_from_lookup(
         );
     }
 
-    AuditSinkHealth::unverified_external_device(
+    let config = ExternalAuditDeviceConfig::new(
         provider_id,
         endpoint,
-        "external audit-device health probe is not implemented; configured mTLS material is evidence only",
-    )
+        required_mtls_vars
+            .get(PARANOID_AUDIT_DEVICE_MTLS_CERT)
+            .and_then(Option::clone)
+            .unwrap_or_default(),
+        required_mtls_vars
+            .get(PARANOID_AUDIT_DEVICE_MTLS_KEY)
+            .and_then(Option::clone)
+            .unwrap_or_default(),
+        required_mtls_vars
+            .get(PARANOID_AUDIT_DEVICE_CA_CERT)
+            .and_then(Option::clone)
+            .unwrap_or_default(),
+    );
+    let probe_result = probe.probe(&config);
+    match probe_result.status {
+        ExternalAuditDeviceProbeStatus::Ready => AuditSinkHealth::ready_external_device(
+            config.provider_id,
+            config.endpoint,
+            probe_result.evidence_source,
+        ),
+        ExternalAuditDeviceProbeStatus::Unverified => {
+            AuditSinkHealth::unverified_external_device_with_evidence_source(
+                config.provider_id,
+                config.endpoint,
+                probe_result.evidence_source,
+                probe_result.failure.unwrap_or_else(|| {
+                    "external audit-device probe did not return readiness".to_string()
+                }),
+            )
+        }
+        ExternalAuditDeviceProbeStatus::Unavailable => {
+            AuditSinkHealth::unavailable_external_device_with_evidence_source(
+                config.provider_id,
+                config.endpoint,
+                probe_result.evidence_source,
+                probe_result
+                    .failure
+                    .unwrap_or_else(|| "external audit-device probe failed".to_string()),
+            )
+        }
+    }
 }
 
 fn non_empty_lookup_value(value: Option<String>) -> Option<String> {
     value.filter(|value| !value.trim().is_empty())
+}
+
+fn socket_addresses_from_endpoint(endpoint: &str) -> Result<Vec<std::net::SocketAddr>, String> {
+    let authority = endpoint_authority(endpoint)?;
+    let addresses: Vec<std::net::SocketAddr> = authority
+        .to_socket_addrs()
+        .map_err(|error| format!("invalid external audit-device endpoint {endpoint:?}: {error}"))?
+        .collect();
+    if addresses.is_empty() {
+        return Err(format!(
+            "invalid external audit-device endpoint {endpoint:?}: no socket addresses resolved"
+        ));
+    }
+    Ok(addresses)
+}
+
+fn endpoint_authority(endpoint: &str) -> Result<String, String> {
+    let trimmed = endpoint.trim();
+    if trimmed.is_empty() {
+        return Err("external audit-device endpoint is empty".to_string());
+    }
+    let without_scheme = match trimmed.split_once("://") {
+        Some((scheme, rest)) => match scheme {
+            "mtls" | "tls" | "tcp" => rest,
+            unsupported => {
+                return Err(format!(
+                    "unsupported external audit-device endpoint scheme: {unsupported}"
+                ));
+            }
+        },
+        None => trimmed,
+    };
+    let authority = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    if authority.is_empty() || !authority.contains(':') {
+        return Err(format!(
+            "external audit-device endpoint {endpoint:?} must include host:port"
+        ));
+    }
+    Ok(authority.to_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -859,7 +1182,101 @@ mod tests {
             unverified.provider_id.as_deref(),
             Some("external_audit_device")
         );
+        assert_eq!(
+            unverified.evidence_source.as_deref(),
+            Some(EXTERNAL_AUDIT_DEVICE_PROBE_DISABLED)
+        );
+        assert!(
+            unverified
+                .failure
+                .as_deref()
+                .unwrap_or_default()
+                .contains("live probe disabled")
+        );
         assert!(!unverified.is_available());
+    }
+
+    #[test]
+    fn external_audit_device_tcp_probe_reaches_open_listener_without_claiming_ready() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind listener");
+        let endpoint = format!("mtls://{}", listener.local_addr().expect("listener addr"));
+        let accept_thread = std::thread::spawn(move || {
+            let _accepted = listener.accept().expect("accept tcp probe");
+        });
+
+        let values = BTreeMap::from([
+            (
+                PARANOID_AUDIT_DEVICE_PROBE,
+                EXTERNAL_AUDIT_DEVICE_TCP_PROBE.to_string(),
+            ),
+            (PARANOID_AUDIT_DEVICE_ENDPOINT, endpoint),
+            (
+                PARANOID_AUDIT_DEVICE_MTLS_CERT,
+                "/tmp/device.crt".to_string(),
+            ),
+            (
+                PARANOID_AUDIT_DEVICE_MTLS_KEY,
+                "/tmp/device.key".to_string(),
+            ),
+            (PARANOID_AUDIT_DEVICE_CA_CERT, "/tmp/ca.crt".to_string()),
+        ]);
+        let health = assess_external_audit_device_from_lookup(|name| values.get(name).cloned());
+        accept_thread.join().expect("accept thread joins");
+
+        assert_eq!(health.status, AuditSinkStatus::Unverified);
+        assert_eq!(
+            health.evidence_source.as_deref(),
+            Some(EXTERNAL_AUDIT_DEVICE_TCP_PROBE)
+        );
+        assert!(
+            health
+                .failure
+                .as_deref()
+                .unwrap_or_default()
+                .contains("reached endpoint")
+        );
+        assert!(!health.is_available());
+    }
+
+    #[test]
+    fn external_audit_device_probe_can_mark_ready_only_with_explicit_ack() {
+        struct ReadyProbe;
+
+        impl ExternalAuditDeviceProbe for ReadyProbe {
+            fn probe(
+                &mut self,
+                _config: &ExternalAuditDeviceConfig,
+            ) -> ExternalAuditDeviceProbeResult {
+                ExternalAuditDeviceProbeResult::ready("test-ack")
+            }
+        }
+
+        let values = BTreeMap::from([
+            (
+                PARANOID_AUDIT_DEVICE_ENDPOINT,
+                "mtls://audit.example.invalid:6514".to_string(),
+            ),
+            (PARANOID_AUDIT_DEVICE_ID, "siem-primary".to_string()),
+            (
+                PARANOID_AUDIT_DEVICE_MTLS_CERT,
+                "/tmp/device.crt".to_string(),
+            ),
+            (
+                PARANOID_AUDIT_DEVICE_MTLS_KEY,
+                "/tmp/device.key".to_string(),
+            ),
+            (PARANOID_AUDIT_DEVICE_CA_CERT, "/tmp/ca.crt".to_string()),
+        ]);
+        let mut probe = ReadyProbe;
+
+        let health = assess_external_audit_device_from_lookup_with_probe(
+            |name| values.get(name).cloned(),
+            &mut probe,
+        );
+
+        assert_eq!(health.status, AuditSinkStatus::Ready);
+        assert_eq!(health.evidence_source.as_deref(), Some("test-ack"));
+        assert!(health.is_available());
     }
 
     #[test]

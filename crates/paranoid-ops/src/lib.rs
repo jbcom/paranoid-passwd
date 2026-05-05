@@ -263,6 +263,8 @@ pub struct OpsPolicyContext {
     pub audit_sink_required: bool,
     pub audit_sink_available: bool,
     pub crypto_provider: FederalCryptoProviderEvidence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seal_posture: Option<VaultSealPosture>,
 }
 
 impl OpsPolicyContext {
@@ -272,6 +274,7 @@ impl OpsPolicyContext {
             audit_sink_required: false,
             audit_sink_available: false,
             crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+            seal_posture: None,
         }
     }
 
@@ -281,7 +284,13 @@ impl OpsPolicyContext {
             audit_sink_required: true,
             audit_sink_available,
             crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+            seal_posture: None,
         }
+    }
+
+    pub fn with_seal_posture(mut self, seal_posture: VaultSealPosture) -> Self {
+        self.seal_posture = Some(seal_posture);
+        self
     }
 }
 
@@ -336,6 +345,10 @@ pub fn evaluate_policy(
         missing_controls.push("required_audit_sink".to_string());
     }
 
+    if let OpsCommand::VaultUnlock { method } = envelope.command {
+        append_seal_policy_missing_controls(method, context, &mut missing_controls);
+    }
+
     if profile == OpsProfile::Default {
         if missing_controls.is_empty() {
             return OpsPolicyDecision::Allow {
@@ -343,7 +356,7 @@ pub fn evaluate_policy(
             };
         }
         return OpsPolicyDecision::Deny {
-            reason: "required audit controls are missing".to_string(),
+            reason: "default profile is missing required controls".to_string(),
             missing_controls,
         };
     }
@@ -354,9 +367,14 @@ pub fn evaluate_policy(
         missing_controls.push("fips_approved_mode".to_string());
     }
     if let OpsCommand::VaultUnlock { method } = envelope.command
-        && !matches!(method, VaultUnlockMethod::CertificateWrapped)
+        && profile == OpsProfile::FederalReady
     {
-        missing_controls.push(format!("non_federal_unlock_method:{}", method.as_str()));
+        if context.seal_posture.is_none() {
+            missing_controls.push("seal_posture_evidence".to_string());
+        }
+        if !matches!(method, VaultUnlockMethod::CertificateWrapped) {
+            missing_controls.push(format!("non_federal_unlock_method:{}", method.as_str()));
+        }
     }
 
     if !missing_controls.is_empty() {
@@ -377,6 +395,34 @@ pub fn evaluate_policy(
 
     OpsPolicyDecision::Allow {
         reason: "federal-ready controls satisfied".to_string(),
+    }
+}
+
+fn append_seal_policy_missing_controls(
+    method: VaultUnlockMethod,
+    context: &OpsPolicyContext,
+    missing_controls: &mut Vec<String>,
+) {
+    let Some(posture) = &context.seal_posture else {
+        return;
+    };
+
+    match method {
+        VaultUnlockMethod::PasswordRecovery | VaultUnlockMethod::MnemonicRecovery => {
+            if !posture.operator_recovery_configured {
+                missing_controls.push("operator_recovery_provider".to_string());
+            }
+        }
+        VaultUnlockMethod::DeviceBound => {
+            if !posture.auto_unseal_available {
+                missing_controls.push("auto_unseal_provider_available".to_string());
+            }
+        }
+        VaultUnlockMethod::CertificateWrapped => {
+            if !posture.certificate_unseal_configured {
+                missing_controls.push("certificate_unseal_provider".to_string());
+            }
+        }
     }
 }
 
@@ -585,6 +631,7 @@ pub fn collect_federal_startup_evidence_from_input(
         audit_sink_available: input.audit_sink.is_available()
             || input.external_audit_device.is_available(),
         crypto_provider: input.crypto_provider.clone(),
+        seal_posture: None,
     };
     let envelope = OpsCommandEnvelope::local(
         AuditSurface::Cli,
@@ -925,6 +972,7 @@ mod tests {
                 certificate_reference: None,
                 evidence_source: "test".to_string(),
             },
+            seal_posture: None,
         };
 
         let decision = evaluate_policy(&envelope, &context);
@@ -954,6 +1002,7 @@ mod tests {
             crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
                 "CMVP test certificate",
             ),
+            seal_posture: None,
         };
 
         let decision = evaluate_policy(&envelope, &context);
@@ -984,6 +1033,21 @@ mod tests {
             crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
                 "CMVP test certificate",
             ),
+            seal_posture: Some(VaultSealPosture::from_providers(
+                VaultSealState::Sealed,
+                vec![
+                    VaultSealProviderEvidence::configured(
+                        "password",
+                        VaultSealProviderKind::PasswordRecovery,
+                        "test",
+                    ),
+                    VaultSealProviderEvidence::configured(
+                        "certificate",
+                        VaultSealProviderKind::CertificateWrapped,
+                        "test",
+                    ),
+                ],
+            )),
         };
 
         let decision = evaluate_policy(&envelope, &context);
@@ -995,6 +1059,37 @@ mod tests {
                 assert!(required_actions.contains(&"fresh_operator_proof".to_string()));
             }
             other => panic!("expected challenge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn federal_certificate_unlock_requires_seal_posture_evidence() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::FederalReady,
+            OpsCommand::VaultUnlock {
+                method: VaultUnlockMethod::CertificateWrapped,
+            },
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::FederalReady,
+            audit_sink_required: true,
+            audit_sink_available: true,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: None,
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert!(missing_controls.contains(&"seal_posture_evidence".to_string()));
+            }
+            other => panic!("expected deny, got {other:?}"),
         }
     }
 
@@ -1014,6 +1109,7 @@ mod tests {
             crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
                 "CMVP test certificate",
             ),
+            seal_posture: None,
         };
 
         let decision = evaluate_policy(&envelope, &context);
@@ -1026,6 +1122,54 @@ mod tests {
                     missing_controls
                         .iter()
                         .any(|control| control == "non_federal_unlock_method:mnemonic_recovery")
+                );
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn device_bound_unlock_requires_available_auto_unseal_provider() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::Default,
+            OpsCommand::VaultUnlock {
+                method: VaultUnlockMethod::DeviceBound,
+            },
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: Some(VaultSealPosture::from_providers(
+                VaultSealState::Sealed,
+                vec![
+                    VaultSealProviderEvidence::configured(
+                        "password",
+                        VaultSealProviderKind::PasswordRecovery,
+                        "test",
+                    ),
+                    VaultSealProviderEvidence::configured(
+                        "device",
+                        VaultSealProviderKind::DeviceBound,
+                        "test",
+                    ),
+                ],
+            )),
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert_eq!(
+                    missing_controls,
+                    vec!["auto_unseal_provider_available".to_string()]
                 );
             }
             other => panic!("expected deny, got {other:?}"),
@@ -1113,6 +1257,7 @@ mod tests {
             audit_sink_required: false,
             audit_sink_available: false,
             crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+            seal_posture: None,
         };
 
         let evaluation = evaluate_vault_operation(
@@ -1221,7 +1366,7 @@ mod tests {
             external_audit_device: AuditSinkHealth::unverified_external_device(
                 "siem-primary",
                 "mtls://audit.example.invalid:6514",
-                "probe not implemented",
+                "live tcp-connect probe reached endpoint; audit write acknowledgement is not implemented",
             ),
             crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
                 "CMVP test certificate",

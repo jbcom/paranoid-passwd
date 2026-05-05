@@ -1182,6 +1182,7 @@ impl App {
                 || self.profile == OpsProfile::FederalReady,
             audit_sink_available: self.audit_sink_health.is_available(),
             crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+            seal_posture: None,
         }
     }
 

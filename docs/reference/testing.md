@@ -105,10 +105,15 @@ crates. Current coverage proves that:
 - `--federal-ready` fails closed without confirmed approved-provider evidence
 - federal startup evidence is emitted as JSON
 - federal startup evidence includes external audit-device posture without treating configured-only
-  mTLS evidence as an available sink
-- a stable denied federal startup fixture is checked against the serialized evidence schema; the
-  external audit-device wire shape is versioned as federal startup evidence schema `2`
+  mTLS evidence or TCP reachability as an available sink
+- audit unit tests cover disabled probes, live TCP reachability probes, and the explicit ready-ack
+  path required before an external audit device can satisfy required audit policy
+- a stable denied federal startup fixture and an external-device-ready fixture are checked against
+  the serialized evidence schema; the external audit-device wire shape is versioned as federal
+  startup evidence schema `2`
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
+- ops policy tests require seal posture evidence for federal certificate unlock and require confirmed
+  auto-unseal availability for device-bound unlock
 - the seal state machine covers unlock, idle-lock, timeout, and relock transitions
 - seal posture reports configured recovery, certificate, and auto-unseal providers without claiming
   provider availability before a health check confirms it
@@ -120,7 +125,7 @@ crates. Current coverage proves that:
 The remaining test expansion is now narrower:
 
 - additional JSON/JSONL compatibility fixtures for vault operation traces
-- live external audit-device probes beyond the current evidence-only mTLS configuration posture
+- external audit-device write-ack probe implementations beyond the current TCP reachability probe
 - keyed correlation hashes only after the approved primitive and low-entropy secret risk are
   dispositioned
 - broader PTY e2e coverage for each TUI vault mutation routed through typed ops envelopes

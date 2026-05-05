@@ -98,6 +98,8 @@ challenge when fresh proof is required, or a typed denial when controls are miss
 - structured audit events with per-operation sequence ids
 - append-only JSONL file sinks through `--audit-jsonl`
 - JSONL sink health evidence covering configured, writable, unavailable, and not-configured states
+- external audit-device probe boundaries, including TCP reachability evidence that remains
+  `unverified` until a write acknowledgement proves readiness
 - strict redaction markers for sensitive attributes
 - SHA-256 hash-chain evidence generated through the `paranoid-core` OpenSSL-backed hash path
 - fail-closed integration when a required audit sink is unavailable
@@ -122,16 +124,18 @@ The native TUI and GUI now evaluate local vault actions through the same typed o
 calling `paranoid-vault`, and their tests record non-secret request/response policy events for read,
 mutate, keyslot, and export flows. TUI launches inherit `vault --audit-jsonl` / `--require-audit-sink`
 policy, and the GUI exposes the same durable local JSONL sink controls for deterministic automation.
-The remaining implementation work is live external audit-device probes, seal / auto-unseal provider
-health checks, seal / auto-unseal provider policy, and broader assessor fixtures over those same
-command envelopes.
+The remaining implementation work is external audit-device write-ack probes, additional
+seal-provider health checks, and broader operation trace fixtures over those same command
+envelopes.
 
 The seal model stays local-first but borrows the operational shape of Vault: a sealed vault can read
 metadata needed to decide how to unlock, but it cannot decrypt stored item payloads. Auto-unseal
 providers are convenience paths for retrieving unwrap material under policy; they do not remove the
 need for recovery coverage. If a seal provider is rotated, disabled, or becomes unavailable, the ops
 and seal layers should expose that as posture and state, and the vault layer should only perform
-rewraps through typed, audited operations.
+rewraps through typed, audited operations. The ops policy context now accepts non-secret seal
+posture evidence: federal certificate unlock requires that posture to be present, and device-bound
+unlock requires confirmed auto-unseal availability rather than configured-only provider metadata.
 
 This split keeps the trust boundaries narrow:
 
@@ -146,8 +150,9 @@ This split keeps the trust boundaries narrow:
 This same split is the path toward a federal-ready profile. FedRAMP High, GovCloud, and DoD IL5
 customers need evidence and enforceable operating modes, not UI-local logging. The ops/audit crates
 should therefore emit stable JSON/JSONL evidence, support SIEM ingestion, report external
-audit-device posture without overstating health, prove required audit sinks are healthy, and expose
-FIPS-provider and policy-profile evidence without claiming authorization for an unassessed boundary.
+audit-device posture without overstating health, prove required audit sinks are healthy, separate
+TCP reachability from durable audit ingestion, and expose FIPS-provider and policy-profile evidence
+without claiming authorization for an unassessed boundary.
 See [Federal Readiness](./federal-readiness.md).
 
 ## GUI

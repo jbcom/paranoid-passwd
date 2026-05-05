@@ -131,6 +131,7 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
             || options.profile == OpsProfile::FederalReady,
         audit_sink_available: audit_sink_health.is_available(),
         crypto_provider: paranoid_ops::FederalCryptoProviderEvidence::collect_from_environment(),
+        seal_posture: None,
     };
     let mut policy_trail = AuditTrail::for_operation(envelope.operation_id.clone());
     record_ops_request(&mut policy_trail, &envelope);

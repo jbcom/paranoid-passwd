@@ -246,6 +246,21 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-audit/src/lib.rs",
+                "pub trait ExternalAuditDeviceProbe",
+                "external audit-device live probes use an explicit probe boundary",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "TcpConnectExternalAuditDeviceProbe",
+                "external audit-device transport reachability has a live probe implementation",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "PARANOID_AUDIT_DEVICE_PROBE",
+                "external audit-device probe mode is explicit configuration",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
                 "TODO: AI_REVIEW - confirm external audit-device posture and health semantics do not overstate sink availability or federal audit coverage.",
                 "external audit-device posture remains tracked for AI review",
             ),
@@ -263,6 +278,16 @@ CLAIMS: tuple[Claim, ...] = (
                 "crates/paranoid-audit/src/lib.rs",
                 "external_audit_device_environment_lookup_never_claims_ready",
                 "audit tests cover external audit-device environment lookup states",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "external_audit_device_tcp_probe_reaches_open_listener_without_claiming_ready",
+                "audit tests cover live tcp probe reachability without claiming sink readiness",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "external_audit_device_probe_can_mark_ready_only_with_explicit_ack",
+                "audit tests require explicit probe acknowledgment before external sink readiness",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -295,9 +320,19 @@ CLAIMS: tuple[Claim, ...] = (
                 "stable federal startup evidence fixture is asserted by tests",
             ),
             Requirement(
+                "crates/paranoid-ops/tests/federal_startup_fixtures.rs",
+                "federal_startup_evidence_external_device_ready_fixture_is_stable",
+                "stable federal startup evidence fixture covers ready external audit-device acknowledgment",
+            ),
+            Requirement(
                 "crates/paranoid-ops/tests/fixtures/federal_startup_denied.json",
                 '"external_audit_device"',
                 "stable federal startup evidence fixture includes external audit posture",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/fixtures/federal_startup_external_device_ready.json",
+                '"evidence_source": "fixture-write-ack"',
+                "stable federal startup evidence fixture requires explicit external write acknowledgment",
             ),
             Requirement(
                 "crates/paranoid-ops/tests/fixtures/federal_startup_denied.json",
@@ -311,7 +346,7 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "docs/reference/federal-readiness.md",
-                "configured mTLS material is not considered a healthy audit sink",
+                "tcp-connect proves reachability, not durable audit ingestion",
                 "federal readiness docs explain external audit-device posture limits",
             ),
             Requirement(
@@ -518,6 +553,31 @@ CLAIMS: tuple[Claim, ...] = (
                 "crates/paranoid-ops/src/lib.rs",
                 "SEAL_SCHEMA_VERSION",
                 "ops re-exports the seal schema version",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "pub seal_posture: Option<VaultSealPosture>",
+                "ops policy context can consume non-secret seal posture evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "seal_posture_evidence",
+                "federal unlock policy requires seal posture evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "auto_unseal_provider_available",
+                "device-bound unlock policy requires available auto-unseal evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "federal_certificate_unlock_requires_seal_posture_evidence",
+                "ops tests prove federal certificate unlock requires seal posture evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "device_bound_unlock_requires_available_auto_unseal_provider",
+                "ops tests prove device-bound unlock requires confirmed auto-unseal availability",
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_cli.rs",
