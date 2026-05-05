@@ -12,7 +12,7 @@ use crate::{Line, QuadSpline, Vec2};
 use arrayvec::ArrayVec;
 
 use crate::common::{
-    solve_quadratic, GAUSS_LEGENDRE_COEFFS_16_HALF, GAUSS_LEGENDRE_COEFFS_24_HALF,
+    solve_quadratic, solve_quartic, GAUSS_LEGENDRE_COEFFS_16_HALF, GAUSS_LEGENDRE_COEFFS_24_HALF,
     GAUSS_LEGENDRE_COEFFS_8, GAUSS_LEGENDRE_COEFFS_8_HALF,
 };
 use crate::{
@@ -55,7 +55,7 @@ pub enum CuspType {
 
 impl CubicBez {
     /// Create a new cubic Bézier segment.
-    #[inline]
+    #[inline(always)]
     pub fn new<P: Into<Point>>(p0: P, p1: P, p2: P, p3: P) -> CubicBez {
         CubicBez {
             p0: p0.into(),
@@ -163,7 +163,16 @@ impl CubicBez {
     /// Returns a quadratic approximating the given cubic that maintains
     /// endpoint tangents if that is within tolerance, or `None` otherwise.
     fn try_approx_quadratic(&self, accuracy: f64) -> Option<QuadBez> {
-        if let Some(q1) = Line::new(self.p0, self.p1).crossing_point(Line::new(self.p2, self.p3)) {
+        if let Some(q1) = Line::new(self.p0, self.p1)
+            .crossing_point(Line::new(self.p2, self.p3))
+            .or_else(|| {
+                // with 3 to 4 consecutive equal points (with no valid crossing_point),
+                // we can try to use the common point as the quadratic control point.
+                // This matches fonttools' cu2qu: https://github.com/fonttools/fonttools/pull/3904
+                (self.p1 == self.p2 && (self.p0 == self.p1 || self.p2 == self.p3))
+                    .then_some(self.p1)
+            })
+        {
             let c1 = self.p0.lerp(q1, 2.0 / 3.0);
             let c2 = self.p3.lerp(q1, 2.0 / 3.0);
             if !CubicBez::new(
@@ -330,13 +339,13 @@ impl CubicBez {
 
     /// Is this cubic Bezier curve finite?
     #[inline]
-    pub fn is_finite(&self) -> bool {
+    pub const fn is_finite(&self) -> bool {
         self.p0.is_finite() && self.p1.is_finite() && self.p2.is_finite() && self.p3.is_finite()
     }
 
     /// Is this cubic Bezier curve NaN?
     #[inline]
-    pub fn is_nan(&self) -> bool {
+    pub const fn is_nan(&self) -> bool {
         self.p0.is_nan() || self.p1.is_nan() || self.p2.is_nan() || self.p3.is_nan()
     }
 
@@ -358,38 +367,36 @@ impl CubicBez {
             .collect()
     }
 
+    /// Find points on the curve where the tangent line passes through the
+    /// given point.
+    ///
+    /// Result is array of t values such that the tangent line from the curve
+    /// evaluated at that point goes through the argument point.
+    pub fn tangents_to_point(&self, p: Point) -> ArrayVec<f64, 4> {
+        let (a, b, c, d_orig) = self.parameters();
+        let d = d_orig - p.to_vec2();
+        // coefficients of x(t) \cross x'(t)
+        let c4 = b.cross(a);
+        let c3 = 2.0 * c.cross(a);
+        let c2 = c.cross(b) + 3.0 * d.cross(a);
+        let c1 = 2.0 * d.cross(b);
+        let c0 = d.cross(c);
+        solve_quartic(c0, c1, c2, c3, c4)
+            .iter()
+            .copied()
+            .filter(|t| *t >= 0.0 && *t <= 1.0)
+            .collect()
+    }
+
     /// Preprocess a cubic Bézier to ease numerical robustness.
     ///
-    /// If the cubic Bézier segment has zero or near-zero derivatives, perturb
-    /// the control points to make it easier to process (especially offset and
-    /// stroke), avoiding numerical robustness problems.
-    pub(crate) fn regularize(&self, dimension: f64) -> CubicBez {
+    /// If the cubic Bézier segment has zero or near-zero derivatives as an interior
+    /// cusp, perturb the control points to make curvature finite, avoiding
+    /// numerical robustness problems in offset and stroke.
+    pub(crate) fn regularize_cusp(&self, dimension: f64) -> CubicBez {
         let mut c = *self;
         // First step: if control point is too near the endpoint, nudge it away
         // along the tangent.
-        let dim2 = dimension * dimension;
-        if c.p0.distance_squared(c.p1) < dim2 {
-            let d02 = c.p0.distance_squared(c.p2);
-            if d02 >= dim2 {
-                // TODO: moderate if this would move closer to p3
-                c.p1 = c.p0.lerp(c.p2, (dim2 / d02).sqrt());
-            } else {
-                c.p1 = c.p0.lerp(c.p3, 1.0 / 3.0);
-                c.p2 = c.p3.lerp(c.p0, 1.0 / 3.0);
-                return c;
-            }
-        }
-        if c.p3.distance_squared(c.p2) < dim2 {
-            let d13 = c.p1.distance_squared(c.p2);
-            if d13 >= dim2 {
-                // TODO: moderate if this would move closer to p0
-                c.p2 = c.p3.lerp(c.p1, (dim2 / d13).sqrt());
-            } else {
-                c.p1 = c.p0.lerp(c.p3, 1.0 / 3.0);
-                c.p2 = c.p3.lerp(c.p0, 1.0 / 3.0);
-                return c;
-            }
-        }
         if let Some(cusp_type) = self.detect_cusp(dimension) {
             let d01 = c.p1 - c.p0;
             let d01h = d01.hypot();
@@ -470,6 +477,7 @@ impl Shape for CubicBez {
         }
     }
 
+    #[inline(always)]
     fn area(&self) -> f64 {
         0.0
     }
@@ -479,6 +487,7 @@ impl Shape for CubicBez {
         self.arclen(accuracy)
     }
 
+    #[inline(always)]
     fn winding(&self, _pt: Point) -> i32 {
         0
     }
@@ -546,12 +555,12 @@ impl ParamCurve for CubicBez {
         )
     }
 
-    #[inline]
+    #[inline(always)]
     fn start(&self) -> Point {
         self.p0
     }
 
-    #[inline]
+    #[inline(always)]
     fn end(&self) -> Point {
         self.p3
     }
@@ -709,6 +718,7 @@ impl Mul<CubicBez> for Affine {
 impl Iterator for ToQuads {
     type Item = (f64, f64, QuadBez);
 
+    #[inline]
     fn next(&mut self) -> Option<(f64, f64, QuadBez)> {
         if self.i == self.n {
             return None;
@@ -902,7 +912,7 @@ mod tests {
         verify((a * c).nearest(a * Point::new(0.1, 0.001), 1e-6), 0.1);
     }
 
-    // ensure to_quads returns something given colinear points
+    // ensure to_quads returns something given collinear points
     #[test]
     fn degenerate_to_quads() {
         let c = CubicBez::new((0., 9.), (6., 6.), (12., 3.0), (18., 0.0));
@@ -930,7 +940,7 @@ mod tests {
         for i in 0..10 {
             let accuracy = 0.1f64.powi(i);
             let mut worst: f64 = 0.0;
-            for (_count, (t0, t1, q)) in c.to_quads(accuracy).enumerate() {
+            for (t0, t1, q) in c.to_quads(accuracy) {
                 let epsilon = 1e-12;
                 assert!((q.start() - c.eval(t0)).hypot() < epsilon);
                 assert!((q.end() - c.eval(t1)).hypot() < epsilon);
@@ -978,7 +988,7 @@ mod tests {
         ];
         assert_eq!(spline.points().len(), expected.len());
         for (got, &wanted) in spline.points().iter().zip(expected.iter()) {
-            assert!(got.distance(wanted) < 5.0)
+            assert!(got.distance(wanted) < 5.0);
         }
 
         let spline = c1.approx_spline(5.0);
@@ -996,7 +1006,7 @@ mod tests {
         let spline = spline.unwrap();
         assert_eq!(spline.points().len(), expected.len());
         for (got, &wanted) in spline.points().iter().zip(expected.iter()) {
-            assert!(got.distance(wanted) < 5.0)
+            assert!(got.distance(wanted) < 5.0);
         }
     }
 
@@ -1057,7 +1067,7 @@ mod tests {
                 Point::new(301.0, 560.0),
                 Point::new(260.0, 560.0)
             ]
-        )
+        );
     }
 
     #[test]
@@ -1091,6 +1101,38 @@ mod tests {
 
         // FontTools can solve this with accuracy 0.001, we can too
         assert!(cubics_to_quadratic_splines(&[cubic], 0.001).is_some());
+    }
+
+    #[test]
+    fn cubic_to_quadratic_all_points_equal() {
+        let pt = Point::new(5.0, 5.0);
+        let cubic = CubicBez::new(pt, pt, pt, pt);
+        let quads = cubics_to_quadratic_splines(&[cubic], 0.1).unwrap();
+        assert_eq!(quads, [QuadSpline::new(vec![pt, pt, pt])]);
+    }
+
+    #[test]
+    fn cubic_to_quadratic_3_points_equal_single_quad_within_tolerance() {
+        let p0 = Point::new(5.0, 5.0);
+        let p1 = Point::new(5.0, 5.1);
+        let cubic = CubicBez::new(p0, p0, p0, p1);
+        let quads = cubics_to_quadratic_splines(&[cubic], 0.1).unwrap();
+        // a single quadratic bezier approximates this cubic for the given tolerance
+        assert_eq!(quads, [QuadSpline::new(vec![p0, p0, p1])]);
+    }
+
+    #[test]
+    fn cubic_to_quadratic_3_points_equal_exceeding_tolerance() {
+        let p0 = Point::new(5.0, 5.0);
+        let p1 = Point::new(5.0, 5.1);
+        let cubic = CubicBez::new(p0, p0, p0, p1);
+        let quads = cubics_to_quadratic_splines(&[cubic], 0.01).unwrap();
+        // 2 quadratic off-curves are required to approximate the same cubic
+        // given the smaller tolerance
+        assert_eq!(
+            quads,
+            [QuadSpline::new(vec![p0, p0, (5.0, 5.025).into(), p1])]
+        );
     }
 
     #[test]
@@ -1131,6 +1173,6 @@ mod tests {
                     (274.0, 485.95).into(),
                 ]),
             ]
-        )
+        );
     }
 }

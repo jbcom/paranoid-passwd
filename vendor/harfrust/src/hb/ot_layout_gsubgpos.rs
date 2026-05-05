@@ -63,6 +63,17 @@ pub fn match_input(
     }
 
     let count = usize::from(input_len) + 1;
+
+    if count == 1 {
+        *end_position = ctx.buffer.idx + 1;
+        ctx.match_positions_len = 1;
+        ctx.match_positions[0] = ctx.buffer.idx as u32;
+        if let Some(p_total_component_count) = p_total_component_count {
+            *p_total_component_count = ctx.buffer.cur(0).lig_num_comps();
+        }
+        return true;
+    }
+
     if count > MAX_CONTEXT_LENGTH {
         return false;
     }
@@ -152,8 +163,13 @@ pub fn match_backtrack(
     match_func: impl Fn(&mut GlyphInfo, u16) -> bool,
     match_start: &mut usize,
 ) -> bool {
+    if backtrack_len == 0 {
+        *match_start = ctx.buffer.backtrack_len();
+        return true;
+    }
+
     let mut iter = skipping_iterator_t::with_match_fn(ctx, true, Some(match_func));
-    iter.reset(iter.buffer.backtrack_len());
+    iter.reset_back(iter.buffer.backtrack_len());
     iter.set_glyph_data(0);
 
     for _ in 0..backtrack_len {
@@ -175,6 +191,11 @@ pub fn match_lookahead(
     start_index: usize,
     end_index: &mut usize,
 ) -> bool {
+    if lookahead_len == 0 {
+        *end_index = start_index;
+        return true;
+    }
+
     // Function should always be called with a non-zero starting index
     // c.f. https://github.com/harfbuzz/rustybuzz/issues/142
     debug_assert!(start_index >= 1);
@@ -223,7 +244,6 @@ pub struct matcher_t {
     ignore_zwj: bool,
     ignore_hidden: bool,
     per_syllable: bool,
-    cached_props: u32, // Cached glyph properties for the current lookup.
 }
 
 impl matcher_t {
@@ -243,7 +263,6 @@ impl matcher_t {
             },
             /* Per syllable matching is only for GSUB. */
             per_syllable: ctx.table_index == TableIndex::GSUB && ctx.per_syllable,
-            cached_props: ctx.cached_props,
         }
     }
 
@@ -273,7 +292,7 @@ impl matcher_t {
 
     #[inline(always)]
     fn may_skip(&self, info: &GlyphInfo, face: &hb_font_t, lookup_props: u32) -> may_skip_t {
-        if !check_glyph_property(face, info, lookup_props, self.cached_props) {
+        if !check_glyph_property(face, info, lookup_props) {
             return may_skip_t::SKIP_YES;
         }
 
@@ -436,13 +455,16 @@ where
     }
 
     pub fn reset(&mut self, start_index: usize) {
+        // For GSUB forward iterator
         self.buf_idx = start_index;
         self.buf_len = self.buffer.len;
-        self.syllable = if self.buf_idx == self.buffer.idx {
-            self.buffer.cur(0).syllable()
-        } else {
-            0
-        };
+        self.syllable = self.buffer.cur(0).syllable();
+    }
+
+    pub fn reset_back(&mut self, start_index: usize) {
+        // For GSUB backward iterator
+        self.buf_idx = start_index;
+        self.syllable = self.buffer.cur(0).syllable();
     }
 
     pub fn reset_fast(&mut self, start_index: usize) {
@@ -628,11 +650,20 @@ pub trait WouldApply {
     fn would_apply(&self, ctx: &WouldApplyContext) -> bool;
 }
 
+// HB uses a cache size of 128 here; we double it to reduce collisions
+// since our lookup is slower.
 pub(crate) type MappingCache = hb_cache_t<
-    15,  // KEY_BITS
+    16,  // KEY_BITS
     8,   // VALUE_BITS
-    128, // CACHE_SIZE
+    256, // CACHE_SIZE
     16,  // STORAGE_BITS
+>;
+
+pub(crate) type BinaryCache = hb_cache_t<
+    15,  // KEY_BITS
+    1,   // VALUE_BITS
+    256, // CACHE_SIZE
+    8,   // STORAGE_BITS
 >;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -703,6 +734,7 @@ pub(crate) struct PairPosFormat2SmallCache {
 pub(crate) struct ContextFormat2Cache {
     pub coverage: CoverageInfo,
     pub input: ClassDefInfo,
+    pub coverage_cache: BinaryCache,
 }
 
 pub(crate) struct ChainContextFormat2Cache {
@@ -710,6 +742,7 @@ pub(crate) struct ChainContextFormat2Cache {
     pub backtrack: ClassDefInfo,
     pub input: ClassDefInfo,
     pub lookahead: ClassDefInfo,
+    pub coverage_cache: BinaryCache,
 }
 
 pub(crate) enum SubtableExternalCache {
@@ -779,15 +812,10 @@ pub mod OT {
         info: &GlyphInfo,
         glyph_props: u16,
         match_props: u32,
-        cached_props: u32,
     ) -> bool {
         // If using mark filtering sets, the high short of
         // match_props has the set index.
         if match_props as u16 & lookup_flags::USE_MARK_FILTERING_SET != 0 {
-            if match_props == cached_props {
-                return info.matches();
-            }
-
             let set_index = (match_props >> 16) as u16;
             return face
                 .ot_tables
@@ -806,12 +834,7 @@ pub mod OT {
     }
 
     #[inline(always)]
-    pub fn check_glyph_property(
-        face: &hb_font_t,
-        info: &GlyphInfo,
-        match_props: u32,
-        cached_props: u32,
-    ) -> bool {
+    pub fn check_glyph_property(face: &hb_font_t, info: &GlyphInfo, match_props: u32) -> bool {
         let glyph_props = info.glyph_props();
 
         // Not covered, if, for example, glyph class is ligature and
@@ -821,7 +844,7 @@ pub mod OT {
         }
 
         if glyph_props & GlyphPropsFlags::MARK.bits() != 0 {
-            return match_properties_mark(face, info, glyph_props, match_props, cached_props);
+            return match_properties_mark(face, info, glyph_props, match_props);
         }
 
         true
@@ -835,7 +858,6 @@ pub mod OT {
         pub per_syllable: bool,
         pub lookup_index: u16,
         pub lookup_props: u32,
-        pub cached_props: u32, // Cached glyph properties for the current lookup.
         pub nesting_level_left: usize,
         pub auto_zwnj: bool,
         pub auto_zwj: bool,
@@ -864,7 +886,6 @@ pub mod OT {
                 per_syllable: false,
                 lookup_index: u16::MAX,
                 lookup_props: u32::MAX,
-                cached_props: u32::MAX,
                 nesting_level_left: MAX_NESTING_LEVEL,
                 auto_zwnj: true,
                 auto_zwj: true,
@@ -982,11 +1003,6 @@ pub mod OT {
                 cur.set_glyph_props(props | class_guess.bits());
             } else {
                 cur.set_glyph_props(props);
-            }
-
-            if self.cached_props != u32::MAX {
-                let matches = check_glyph_property(self.face, cur, self.lookup_props, u32::MAX);
-                cur.set_matches(matches);
             }
         }
 

@@ -1443,14 +1443,14 @@ impl UnlockedVault {
             login.username = username;
         }
         let updated_at_epoch = unix_epoch_now()?;
-        if let Some(password) = update.password {
-            if password != login.password {
-                login.password_history.push(PasswordHistoryEntry {
-                    password: login.password.clone(),
-                    changed_at_epoch: updated_at_epoch,
-                });
-                login.password = password;
-            }
+        if let Some(password) = update.password
+            && password != login.password
+        {
+            login.password_history.push(PasswordHistoryEntry {
+                password: login.password.clone(),
+                changed_at_epoch: updated_at_epoch,
+            });
+            login.password = password;
         }
         if let Some(url) = update.url {
             login.url = url;
@@ -3587,9 +3587,75 @@ fn select_device_keyslot<'a>(
     }
 }
 
+#[cfg(all(debug_assertions, not(test)))]
+fn debug_device_store_root() -> Option<PathBuf> {
+    std::env::var_os("PARANOID_TEST_DEVICE_STORE_DIR").and_then(|value| {
+        if value.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(value))
+        }
+    })
+}
+
+#[cfg(all(debug_assertions, not(test)))]
+fn debug_device_store_path(root: &Path, service: &str, account: &str) -> PathBuf {
+    root.join(hex_encode(format!("{service}\u{0}{account}").as_bytes()).as_str())
+}
+
+#[cfg(all(debug_assertions, not(test)))]
+fn debug_device_store_set_secret(
+    service: &str,
+    account: &str,
+    secret: &[u8],
+) -> Result<bool, VaultError> {
+    let Some(root) = debug_device_store_root() else {
+        return Ok(false);
+    };
+    fs::create_dir_all(root.as_path())?;
+    fs::write(
+        debug_device_store_path(root.as_path(), service, account),
+        secret,
+    )?;
+    Ok(true)
+}
+
+#[cfg(all(debug_assertions, not(test)))]
+fn debug_device_store_get_secret(
+    service: &str,
+    account: &str,
+) -> Result<Option<Vec<u8>>, VaultError> {
+    let Some(root) = debug_device_store_root() else {
+        return Ok(None);
+    };
+    let path = debug_device_store_path(root.as_path(), service, account);
+    match fs::read(path) {
+        Ok(secret) => Ok(Some(secret)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(VaultError::UnlockFailed),
+        Err(error) => Err(VaultError::Io(error)),
+    }
+}
+
+#[cfg(all(debug_assertions, not(test)))]
+fn debug_device_store_delete_secret(service: &str, account: &str) -> Result<bool, VaultError> {
+    let Some(root) = debug_device_store_root() else {
+        return Ok(false);
+    };
+    let path = debug_device_store_path(root.as_path(), service, account);
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(VaultError::UnlockFailed),
+        Err(error) => Err(VaultError::Io(error)),
+    }
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[cfg(not(test))]
 fn device_store_set_secret(service: &str, account: &str, secret: &[u8]) -> Result<(), VaultError> {
+    #[cfg(debug_assertions)]
+    if debug_device_store_set_secret(service, account, secret)? {
+        return Ok(());
+    }
     let entry = keyring::Entry::new(service, account)
         .map_err(|error| VaultError::DeviceStoreFailure(error.to_string()))?;
     entry
@@ -3600,6 +3666,10 @@ fn device_store_set_secret(service: &str, account: &str, secret: &[u8]) -> Resul
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[cfg(not(test))]
 fn device_store_get_secret(service: &str, account: &str) -> Result<Vec<u8>, VaultError> {
+    #[cfg(debug_assertions)]
+    if let Some(secret) = debug_device_store_get_secret(service, account)? {
+        return Ok(secret);
+    }
     let entry = keyring::Entry::new(service, account)
         .map_err(|error| VaultError::DeviceStoreFailure(error.to_string()))?;
     entry.get_secret().map_err(|error| match error {
@@ -3611,6 +3681,10 @@ fn device_store_get_secret(service: &str, account: &str) -> Result<Vec<u8>, Vaul
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[cfg(not(test))]
 fn device_store_delete_secret(service: &str, account: &str) -> Result<(), VaultError> {
+    #[cfg(debug_assertions)]
+    if debug_device_store_delete_secret(service, account)? {
+        return Ok(());
+    }
     let entry = keyring::Entry::new(service, account)
         .map_err(|error| VaultError::DeviceStoreFailure(error.to_string()))?;
     entry.delete_credential().map_err(|error| match error {
@@ -3694,7 +3768,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(input: &str) -> Result<Vec<u8>, VaultError> {
-    if input.len() % 2 != 0 {
+    if !input.len().is_multiple_of(2) {
         return Err(VaultError::InvalidArguments(
             "hex input must have even length".to_string(),
         ));

@@ -1,35 +1,37 @@
-use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
-use syn::{
-    spanned::Spanned, Attribute, Data, DataEnum, DeriveInput, Error, Fields, Generics, Ident,
-};
+use std::str::FromStr;
 
-use crate::utils::*;
+use proc_macro2::TokenStream;
+use quote::{ToTokens, quote};
+use syn::{
+    Attribute, Data, DataEnum, DeriveInput, Error, Fields, Generics, Ident, spanned::Spanned,
+};
+use zvariant_utils::signature::Signature;
+
+use crate::{signature::signature_to_tokens_with_crate, utils::*};
 
 pub fn expand_derive(ast: DeriveInput) -> Result<TokenStream, Error> {
-    let StructAttributes { signature, .. } = StructAttributes::parse(&ast.attrs)?;
+    let StructAttributes {
+        signature,
+        crate_path: crate_attr,
+        ..
+    } = StructAttributes::parse(&ast.attrs)?;
+    let crate_path = parse_crate_path(crate_attr.as_deref())?;
 
-    let zv = zvariant_path();
-    if let Some(signature) = signature {
-        let signature = match signature.as_str() {
-            "dict" => "a{sv}".to_string(),
-            _ => signature,
-        };
-
+    let zv = zvariant_path(crate_path.as_ref());
+    if let Some(signature_str) = signature {
         // Signature already provided, easy then!
+
+        let signature = match signature_str.as_str() {
+            "dict" => Signature::dict(Signature::Str, Signature::Variant),
+            s => Signature::from_str(s).map_err(|e| Error::new(ast.span(), e))?,
+        };
+        let signature_tokens = signature_to_tokens_with_crate(&signature, &zv);
+
         let name = ast.ident;
         let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
         return Ok(quote! {
             impl #impl_generics #zv::Type for #name #ty_generics #where_clause {
-                #[inline]
-                fn signature() -> #zv::Signature<'static> {
-                    // FIXME: Would be nice if we had a parsed `Signature` in the macro code already so
-                    // it's checked at the build time but currently that's not easily possible w/o
-                    // zvariant_derive requiring zvaraint and we don't want it as it creates a cyclic
-                    // dep. Maybe we can find a way to share the `Signature` type between the two
-                    // crates?
-                    #zv::Signature::from_static_str(#signature).unwrap()
-                }
+                const SIGNATURE: &'static #zv::Signature = &#signature_tokens;
             }
         });
     }
@@ -69,10 +71,7 @@ fn impl_struct(
 
     Ok(quote! {
         impl #impl_generics #zv::Type for #name #ty_generics #where_clause {
-            #[inline]
-            fn signature() -> #zv::Signature<'static> {
-                #signature
-            }
+            const SIGNATURE: &'static #zv::Signature = #signature;
         }
     })
 }
@@ -89,38 +88,32 @@ fn signature_for_struct(
         Fields::Unnamed(_) => false,
         Fields::Unit => panic!("signature_for_struct must not be called for unit fields"),
     };
-    let inner_impl = if new_type {
-        quote! {
-            #(
-                <#field_types as #zv::Type>::signature()
-             )*
-        }
+    let field_types_clone = field_types.clone();
+    let signature = if new_type {
+        quote! {#(
+            <#field_types_clone as #zv::Type>::SIGNATURE
+        )*}
     } else {
         quote! {
-            let mut s = <::std::string::String as ::std::convert::From<_>>::from("(");
-            #(
-                s.push_str(<#field_types as #zv::Type>::signature().as_str());
-            )*
-            s.push_str(")");
-
-            #zv::Signature::from_string_unchecked(s)
+            &#zv::Signature::Structure(#zv::signature::Fields::Static {
+                fields: &[#(
+                    <#field_types_clone as #zv::Type>::SIGNATURE
+                ),*],
+            })
         }
     };
 
     if insert_enum_variant {
         quote! {
-            let inner_signature = {
-                #inner_impl
-            };
-            let mut s = <::std::string::String as ::std::convert::From<_>>::from("(");
-            s.push_str(<u32 as #zv::Type>::signature().as_str());
-            s.push_str(inner_signature.as_str());
-            s.push_str(")");
-
-            #zv::Signature::from_string_unchecked(s)
+            &#zv::Signature::Structure(#zv::signature::Fields::Static {
+                fields: &[
+                    <u32 as #zv::Type>::SIGNATURE,
+                    #signature
+                ],
+            })
         }
     } else {
-        inner_impl
+        signature
     }
 }
 
@@ -133,10 +126,7 @@ fn impl_unit_struct(
 
     Ok(quote! {
         impl #impl_generics #zv::Type for #name #ty_generics #where_clause {
-            #[inline]
-            fn signature() -> #zv::Signature<'static> {
-                #zv::Signature::from_static_str_unchecked("")
-            }
+            const SIGNATURE: &'static #zv::Signature = &#zv::Signature::Unit;
         }
     })
 }
@@ -150,10 +140,7 @@ fn impl_empty_struct(
 
     Ok(quote! {
         impl #impl_generics #zv::Type for #name #ty_generics #where_clause {
-            #[inline]
-            fn signature() -> #zv::Signature<'static> {
-                #zv::Signature::from_static_str_unchecked("y")
-            }
+            const SIGNATURE: &'static #zv::Signature = &#zv::Signature::U8;
         }
     })
 }
@@ -185,10 +172,7 @@ fn impl_enum(
 
     Ok(quote! {
         impl #impl_generics #zv::Type for #name #ty_generics #where_clause {
-            #[inline]
-            fn signature() -> #zv::Signature<'static> {
-                #signature
-            }
+            const SIGNATURE: &'static #zv::Signature = #signature;
         }
     })
 }
@@ -206,7 +190,7 @@ fn signature_for_variant(
                 None => quote! { u32 },
             };
 
-            Ok(quote! { <#repr as #zv::Type>::signature() })
+            Ok(quote! { <#repr as #zv::Type>::SIGNATURE })
         }
         Fields::Named(_) => Ok(signature_for_struct(&variant.fields, zv, true)),
         Fields::Unnamed(_) => Ok(signature_for_struct(&variant.fields, zv, true)),

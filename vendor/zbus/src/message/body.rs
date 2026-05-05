@@ -1,6 +1,6 @@
 use zvariant::{
-    serialized::{self, Data},
     Signature, Type,
+    serialized::{self, Data},
 };
 
 use crate::{Error, Message, Result};
@@ -24,9 +24,7 @@ impl Body {
     where
         B: zvariant::DynamicDeserialize<'s>,
     {
-        let body_sig = self
-            .signature()
-            .unwrap_or_else(|| Signature::from_static_str_unchecked(""));
+        let body_sig = self.signature();
 
         self.data
             .deserialize_for_dynamic_signature(body_sig)
@@ -43,13 +41,8 @@ impl Body {
     }
 
     /// The signature of the body.
-    ///
-    /// **Note:** While zbus treats multiple arguments as a struct (to allow you to use the tuple
-    /// syntax), D-Bus does not. Since this method gives you the signature expected on the wire by
-    /// D-Bus, the trailing and leading STRUCT signature parenthesis will not be present in case of
-    /// multiple arguments.
-    pub fn signature(&self) -> Option<Signature<'_>> {
-        self.msg.inner.quick_fields.signature(&self.msg)
+    pub fn signature(&self) -> &Signature {
+        self.msg.quick_fields().signature()
     }
 
     /// The length of the body in bytes.

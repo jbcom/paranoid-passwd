@@ -1,19 +1,19 @@
 //! Bus match rule API.
 
 use std::{
+    borrow::Borrow,
     fmt::{Display, Write},
     ops::Deref,
 };
 
-use serde::{de, Deserialize, Serialize};
-use static_assertions::assert_impl_all;
+use serde::{Deserialize, Serialize, de};
 use zvariant::Structure;
 
 use crate::{
+    Error, Result,
     message::Type,
     names::{BusName, InterfaceName, MemberName, UniqueName},
     zvariant::{ObjectPath, Str, Type as VariantType},
-    Error, Result,
 };
 
 mod builder;
@@ -21,10 +21,10 @@ pub use builder::Builder;
 
 /// A bus match rule for subscribing to specific messages.
 ///
-/// This is mainly used by peer to subscribe to specific signals as by default the bus will not
-/// send out most broadcasted signals. This API is intended to make it easy to create and parse
-/// match rules. See the [match rules section of the D-Bus specification][mrs] for a description of
-/// each possible element of a match rule.
+/// This is mainly used to subscribe to specific signals as by default the bus will not send out
+/// most broadcasted signals. This API is intended to make it easy to create and parse match rules.
+/// See the [match rules section of the D-Bus specification][mrs] for a description of each
+/// possible element of a match rule.
 ///
 /// # Examples
 ///
@@ -57,7 +57,7 @@ pub use builder::Builder;
 /// let parsed_rule = MatchRule::try_from(rule_str.as_str())?;
 /// assert_eq!(rule, parsed_rule);
 ///
-/// // Now for `ObjectManager::InterfacesAdded` signal.
+/// // Now for the `ObjectManager::InterfacesAdded` signal.
 /// let rule = MatchRule::builder()
 ///     .msg_type(zbus::message::Type::Signal)
 ///     .sender("org.zbus")?
@@ -102,8 +102,6 @@ pub struct MatchRule<'m> {
     pub(crate) arg0ns: Option<Str<'m>>,
 }
 
-assert_impl_all!(MatchRule<'_>: Send, Sync, Unpin);
-
 impl<'m> MatchRule<'m> {
     /// Create a builder for `MatchRule`.
     pub fn builder() -> Builder<'m> {
@@ -120,12 +118,12 @@ impl<'m> MatchRule<'m> {
         self.msg_type
     }
 
-    /// The interfac, if set.
+    /// The interface, if set.
     pub fn interface(&self) -> Option<&InterfaceName<'_>> {
         self.interface.as_ref()
     }
 
-    /// The member name if set.
+    /// The member name, if set.
     pub fn member(&self) -> Option<&MemberName<'_>> {
         self.member.as_ref()
     }
@@ -155,7 +153,7 @@ impl<'m> MatchRule<'m> {
         self.arg0ns.as_ref()
     }
 
-    /// Creates an owned clone of `self`.
+    /// Create an owned clone of `self`.
     pub fn to_owned(&self) -> MatchRule<'static> {
         MatchRule {
             msg_type: self.msg_type,
@@ -174,7 +172,7 @@ impl<'m> MatchRule<'m> {
         }
     }
 
-    /// Creates an owned clone of `self`.
+    /// Convert into an owned clone of `self`.
     pub fn into_owned(self) -> MatchRule<'static> {
         MatchRule {
             msg_type: self.msg_type,
@@ -207,7 +205,7 @@ impl<'m> MatchRule<'m> {
     /// * `sender` in the rule (if set) that is a well-known name. The `sender` on a message is
     ///   always a unique name.
     /// * `destination` in the rule when `destination` on the `msg` is a well-known name. The
-    ///   `destination` on match rule is always a unique name.
+    ///   `destination` on a match rule is always a unique name.
     pub fn matches(&self, msg: &zbus::message::Message) -> Result<bool> {
         let hdr = msg.header();
 
@@ -323,6 +321,21 @@ impl<'m> MatchRule<'m> {
         }
 
         Ok(true)
+    }
+
+    pub(crate) fn fdo_signal_builder<S>(signal_name: S) -> Builder<'m>
+    where
+        S: TryInto<MemberName<'m>>,
+        S::Error: Into<Error>,
+    {
+        Builder::new()
+            .msg_type(Type::Signal)
+            .sender("org.freedesktop.DBus")
+            .unwrap()
+            .interface("org.freedesktop.DBus")
+            .unwrap()
+            .member(signal_name)
+            .unwrap()
     }
 }
 
@@ -484,10 +497,8 @@ pub enum PathSpec<'m> {
     PathNamespace(ObjectPath<'m>),
 }
 
-assert_impl_all!(PathSpec<'_>: Send, Sync, Unpin);
-
-impl<'m> PathSpec<'m> {
-    /// Creates an owned clone of `self`.
+impl PathSpec<'_> {
+    /// Create an owned clone of `self`.
     fn to_owned(&self) -> PathSpec<'static> {
         match self {
             PathSpec::Path(path) => PathSpec::Path(path.to_owned()),
@@ -495,7 +506,7 @@ impl<'m> PathSpec<'m> {
         }
     }
 
-    /// Creates an owned clone of `self`.
+    /// Convert into an owned clone of `self`.
     pub fn into_owned(self) -> PathSpec<'static> {
         match self {
             PathSpec::Path(path) => PathSpec::Path(path.into_owned()),
@@ -507,8 +518,6 @@ impl<'m> PathSpec<'m> {
 /// Owned sibling of [`MatchRule`].
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, VariantType)]
 pub struct OwnedMatchRule(#[serde(borrow)] MatchRule<'static>);
-
-assert_impl_all!(OwnedMatchRule: Send, Sync, Unpin);
 
 impl OwnedMatchRule {
     /// Convert to the inner `MatchRule`, consuming `self`.
@@ -526,6 +535,12 @@ impl Deref for OwnedMatchRule {
     type Target = MatchRule<'static>;
 
     fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'a> Borrow<MatchRule<'a>> for OwnedMatchRule {
+    fn borrow(&self) -> &MatchRule<'a> {
         &self.0
     }
 }

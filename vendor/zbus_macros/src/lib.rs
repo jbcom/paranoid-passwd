@@ -1,6 +1,6 @@
 #![deny(rust_2018_idioms)]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/dbus2/zbus/9f7a90d2b594ddc48b7a5f39fda5e00cd56a7dfb/logo.png"
+    html_logo_url = "https://raw.githubusercontent.com/z-galaxy/zbus/9f7a90d2b594ddc48b7a5f39fda5e00cd56a7dfb/logo.png"
 )]
 #![doc = include_str!("../README.md")]
 #![doc(test(attr(
@@ -13,7 +13,7 @@
 
 use proc_macro::TokenStream;
 use syn::{
-    parse_macro_input, punctuated::Punctuated, DeriveInput, ItemImpl, ItemTrait, Meta, Token,
+    DeriveInput, ItemImpl, ItemTrait, Meta, Token, parse_macro_input, punctuated::Punctuated,
 };
 
 mod error;
@@ -41,8 +41,8 @@ mod utils;
 ///
 /// * `gen_async` - Whether or not to generate the asynchronous Proxy type.
 ///
-/// * `gen_blocking` - Whether or not to generate the blocking Proxy type. If set to `false`, the
-///   asynchronous proxy type will take the name `TraitNameProxy` (i-e no `Async` prefix).
+/// * `gen_blocking` - Whether or not to generate the blocking Proxy type. If the `blocking-api`
+///   cargo feature is disabled, this attribute is ignored and blocking Proxy type is not generated.
 ///
 /// * `async_name` - Specify the exact name of the asynchronous proxy type.
 ///
@@ -52,6 +52,8 @@ mod utils;
 ///   if none are specified (default: `false`). `proxy` generates a warning if neither this
 ///   attribute nor one of the default values are specified. Please make sure to explicitly set
 ///   either this attribute or the default values, according to your needs.
+///
+/// * `crate` - specify the path to the `zbus` crate if it's renamed or re-exported.
 ///
 /// Each trait method will be expanded to call to the associated D-Bus remote interface.
 ///
@@ -87,14 +89,19 @@ mod utils;
 /// * `allow_interactive_auth` - declare a method call that is allowed to trigger an interactive
 ///   prompt for authorization or confirmation from the receiver.
 ///
-/// * `object` - methods that returns an [`ObjectPath`] can be annotated with the `object` attribute
-///   to specify the proxy object to be constructed from the returned [`ObjectPath`].
+/// * `object` - methods or properties that return an [`ObjectPath`] can be annotated with the
+///   `object` attribute to specify the proxy object to be constructed from the returned
+///   [`ObjectPath`].
 ///
 /// * `async_object` - if the assumptions made by `object` attribute about naming of the
 ///   asynchronous proxy type, don't fit your bill, you can use this to specify its exact name.
 ///
 /// * `blocking_object` - if the assumptions made by `object` attribute about naming of the blocking
 ///   proxy type, don't fit your bill, you can use this to specify its exact name.
+///
+/// * `object_vec` - this method returns a list of [`ObjectPath`]s (DBus signature `ao`) that should
+///   be converted to the proxy object type named by `object`, `async_object` and `blocking_object`
+///   attributes, and returned as a `Vec<_>`.
 ///
 ///   NB: Any doc comments provided shall be appended to the ones added by the macro.
 ///
@@ -107,11 +114,15 @@ mod utils;
 /// access to the signal arguments. It also implements `Deref<Target = Message>` to allow easy
 /// access to the underlying [`zbus::message::Message`].
 ///
+/// For each property with `emits_changed_signal` set to `"true"` (default) or `"invalidates"`,
+/// this macro will provide a method named `receive_<property_name>_changed` that creates a
+/// [`zbus::proxy::PropertyStream`] for the property.
+///
 /// # Example
 ///
 /// ```no_run
 /// # use std::error::Error;
-/// use zbus_macros::proxy;
+/// use zbus::proxy;
 /// use zbus::{blocking::Connection, Result, fdo, zvariant::Value};
 /// use futures_util::stream::StreamExt;
 /// use async_io::block_on;
@@ -141,6 +152,10 @@ mod utils;
 ///     // `SomeOtherIfaceProxyBlock` would have been assumed and expected. We could also specify
 ///     // the specific name of the asynchronous proxy types, using the `async_object` attribute.
 ///     fn some_method(&self, arg1: &str);
+///
+///     #[zbus(property, object = "SomeOtherIface", blocking_object = "SomeOtherInterfaceBlock")]
+///     // Properties that return an ObjectPath can also use the `object` attribute.
+///     fn related_object(&self);
 /// }
 ///
 /// #[proxy(
@@ -154,7 +169,7 @@ mod utils;
 /// // Use `builder` to override the default arguments, `new` otherwise.
 /// let proxy = SomeIfaceProxyBlocking::builder(&connection)
 ///                .destination("org.another.Service")?
-///                .cache_properties(zbus::CacheProperties::No)
+///                .cache_properties(zbus::proxy::CacheProperties::No)
 ///                .build()?;
 /// let _ = proxy.do_this("foo", 32, &Value::new(true));
 /// let _ = proxy.set_a_property("val");
@@ -166,7 +181,7 @@ mod utils;
 /// // Now the same again, but asynchronous.
 /// block_on(async move {
 ///     let proxy = SomeIfaceProxy::builder(&connection.into())
-///                    .cache_properties(zbus::CacheProperties::No)
+///                    .cache_properties(zbus::proxy::CacheProperties::No)
 ///                    .build()
 ///                    .await
 ///                    .unwrap();
@@ -188,6 +203,7 @@ mod utils;
 /// [`zbus_polkit`]: https://docs.rs/zbus_polkit/1.0.0/zbus_polkit/policykit1/index.html
 /// [`zbus::Proxy`]: https://docs.rs/zbus/latest/zbus/proxy/struct.Proxy.html
 /// [`zbus::message::Message`]: https://docs.rs/zbus/latest/zbus/message/struct.Message.html
+/// [`zbus::proxy::PropertyStream`]: https://docs.rs/zbus/latest/zbus/proxy/struct.PropertyStream.html
 /// [`zbus::blocking::Proxy`]: https://docs.rs/zbus/latest/zbus/blocking/proxy/struct.Proxy.html
 /// [`zbus::SignalStream`]: https://docs.rs/zbus/latest/zbus/proxy/struct.SignalStream.html
 /// [`zbus::blocking::SignalIterator`]: https://docs.rs/zbus/latest/zbus/blocking/proxy/struct.SignalIterator.html
@@ -197,17 +213,7 @@ mod utils;
 pub fn proxy(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr with Punctuated<Meta, Token![,]>::parse_terminated);
     let input = parse_macro_input!(item as ItemTrait);
-    proxy::expand::<proxy::TraitAttributes, proxy::MethodAttributes>(args, input)
-        .unwrap_or_else(|err| err.to_compile_error())
-        .into()
-}
-
-#[deprecated = "Use `#[proxy(...)]` proc macro with `#[zbus(...)]` item attributes instead."]
-#[proc_macro_attribute]
-pub fn dbus_proxy(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr with Punctuated<Meta, Token![,]>::parse_terminated);
-    let input = parse_macro_input!(item as ItemTrait);
-    proxy::expand::<proxy::old::TraitAttributes, proxy::old::MethodAttributes>(args, input)
+    proxy::expand(args, input)
         .unwrap_or_else(|err| err.to_compile_error())
         .into()
 }
@@ -228,18 +234,24 @@ pub fn dbus_proxy(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///   behavior.
 ///
 ///   - **When True (Default):** Suitable for interfaces where method calls are independent of each
-///   other or can be processed asynchronously without strict ordering. In scenarios where a client
-///   must wait for a reply before making further dependent calls, this default behavior is
-///   appropriate.
+///     other or can be processed asynchronously without strict ordering. In scenarios where a
+///     client must wait for a reply before making further dependent calls, this default behavior is
+///     appropriate.
 ///
 ///   - **When False:** Use this setting to ensure methods are handled in the order they are
-///   received, which is crucial for interfaces requiring sequential processing of method calls.
-///   However, care must be taken to avoid making D-Bus method calls from within your interface
-///   methods when this setting is false, as it may lead to deadlocks under certain conditions.
+///     received, which is crucial for interfaces requiring sequential processing of method calls.
+///     However, care must be taken to avoid making D-Bus method calls from within your interface
+///     methods when this setting is false, as it may lead to deadlocks under certain conditions.
 ///
 /// * `proxy` - If specified, a proxy type will also be generated for the interface. This attribute
 ///   supports all the [`macro@proxy`]-specific sub-attributes (e.g `gen_async`). The common
-///   sub-attributes (e.g `name`) are automatically forworded to the [`macro@proxy`] macro.
+///   sub-attributes (e.g `name`) are automatically forwarded to the [`macro@proxy`] macro.
+///
+/// * `introspection_docs` - whether to include the documentation in the introspection data
+///   (Default: `true`). If your interface is well-known or well-documented, you may want to set
+///   this to `false` to reduce the the size of your binary and D-Bus traffic.
+///
+/// * `crate` - specify the path to the `zbus` crate if it's renamed or re-exported.
 ///
 /// The methods accepts the `interface` attributes:
 ///
@@ -252,15 +264,20 @@ pub fn dbus_proxy(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///   * `emits_changed_signal` - specifies how property changes are signaled. Valid values are those
 ///     documented in [DBus specifications][dbus_emits_changed_signal]:
 ///     * `"true"` - (default) the change signal is always emitted when the property's setter is
-///     called. The value of the property is included in the signal.
+///       called. The value of the property is included in the signal.
 ///     * `"invalidates"` - the change signal is emitted, but the value is not included in the
-///     signal.
+///       signal.
 ///     * `"const"` - the property never changes, thus no signal is ever emitted for it.
-///     * `"false"` - the change signal is not emitted if the property changes.
-
+///     * `"false"` - the change signal is not emitted if the property changes. If a property is
+///       write-only, the change signal will not be emitted in this interface.
+///
 /// * `signal` - the method is a "signal". It must be a method declaration (without body). Its code
 ///   block will be expanded to emit the signal from the object path associated with the interface
-///   instance.
+///   instance. Moreover, `interface` will also generate a trait named `<Interface>Signals` that
+///   provides all the signal methods but without the `SignalEmitter` argument. The macro implements
+///   this trait for two types, `zbus::object_server::InterfaceRef<Interface>` and
+///   `SignalEmitter<'_>`. The former is useful for emitting signals from outside the context of an
+///   interface method and the latter is useful for emitting signals from inside interface methods.
 ///
 ///   You can call a signal method from a an interface method, or from an [`ObjectServer::with`]
 ///   function.
@@ -270,7 +287,8 @@ pub fn dbus_proxy(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// * `proxy` - Use this to specify the [`macro@proxy`]-specific method sub-attributes (e.g
 ///   `object`). The common sub-attributes (e.g `name`) are automatically forworded to the
-///   [`macro@proxy`] macro.
+///   [`macro@proxy`] macro. Moreover, you can use `visibility` sub-attribute to specify the
+///   visibility of the generated proxy type(s).
 ///
 ///   In such case, your method must return a tuple containing
 ///   your out arguments, in the same order as passed to `out_args`.
@@ -297,16 +315,18 @@ pub fn dbus_proxy(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// * `connection` - This marks the method argument to receive a reference to the [`Connection`] on
 ///   which the method call was received.
 /// * `header` - This marks the method argument to receive the message header associated with the
-///   D-Bus method call being handled.
-/// * `signal_context` - This marks the method argument to receive a [`SignalContext`] instance,
+///   D-Bus method call being handled. For property methods, this will be an `Option<Header<'_>>`,
+///   which will be set to `None` if the method is called for reasons other than to respond to an
+///   external property access.
+/// * `signal_emitter` - This marks the method argument to receive a [`SignalEmitter`] instance,
 ///   which is needed for emitting signals the easy way.
 ///
 /// # Example
 ///
 /// ```
 /// # use std::error::Error;
-/// use zbus_macros::interface;
-/// use zbus::{ObjectServer, object_server::SignalContext, message::Header};
+/// use zbus::interface;
+/// use zbus::{ObjectServer, object_server::SignalEmitter, message::Header};
 ///
 /// struct Example {
 ///     _some_data: String,
@@ -319,14 +339,14 @@ pub fn dbus_proxy(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///         &self,
 ///         #[zbus(header)]
 ///         hdr: Header<'_>,
-///         #[zbus(signal_context)]
-///         ctxt: SignalContext<'_>,
+///         #[zbus(signal_emitter)]
+///         emitter: SignalEmitter<'_>,
 ///         #[zbus(object_server)]
 ///         _server: &ObjectServer,
 ///     ) -> zbus::fdo::Result<()> {
 ///         let path = hdr.path().unwrap();
 ///         let msg = format!("You are leaving me on the {} path?", path);
-///         Example::bye(&ctxt, &msg).await?;
+///         emitter.bye(&msg).await?;
 ///
 ///         // Do some asynchronous tasks before quitting..
 ///
@@ -351,7 +371,7 @@ pub fn dbus_proxy(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 ///     // "Bye" signal (note: no implementation body).
 ///     #[zbus(signal)]
-///     async fn bye(signal_ctxt: &SignalContext<'_>, message: &str) -> zbus::Result<()>;
+///     async fn bye(signal_emitter: &SignalEmitter<'_>, message: &str) -> zbus::Result<()>;
 ///
 ///     #[zbus(out_args("answer", "question"))]
 ///     fn meaning_of_life(&self) -> zbus::fdo::Result<(i32, String)> {
@@ -368,24 +388,14 @@ pub fn dbus_proxy(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// [`ObjectServer::with`]: https://docs.rs/zbus/latest/zbus/object_server/struct.ObjectServer.html#method.with
 /// [`Connection`]: https://docs.rs/zbus/latest/zbus/connection/struct.Connection.html
 /// [`Connection::emit_signal()`]: https://docs.rs/zbus/latest/zbus/connection/struct.Connection.html#method.emit_signal
-/// [`SignalContext`]: https://docs.rs/zbus/latest/zbus/object_server/struct.SignalContext.html
+/// [`SignalEmitter`]: https://docs.rs/zbus/latest/zbus/object_server/struct.SignalEmitter.html
 /// [`Interface`]: https://docs.rs/zbus/latest/zbus/object_server/trait.Interface.html
 /// [dbus_emits_changed_signal]: https://dbus.freedesktop.org/doc/dbus-specification.html#introspection-format
 #[proc_macro_attribute]
 pub fn interface(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr with Punctuated<Meta, Token![,]>::parse_terminated);
     let input = parse_macro_input!(item as ItemImpl);
-    iface::expand::<iface::ImplAttributes, iface::MethodAttributes>(args, input)
-        .unwrap_or_else(|err| err.to_compile_error())
-        .into()
-}
-
-#[deprecated = "Use `#[interface(...)]` proc macro with `#[zbus(...)]` item attributes instead."]
-#[proc_macro_attribute]
-pub fn dbus_interface(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr with Punctuated<Meta, Token![,]>::parse_terminated);
-    let input = parse_macro_input!(item as ItemImpl);
-    iface::expand::<iface::old::ImplAttributes, iface::old::MethodAttributes>(args, input)
+    iface::expand(args, input)
         .unwrap_or_else(|err| err.to_compile_error())
         .into()
 }
@@ -403,10 +413,15 @@ pub fn dbus_interface(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Each variant (except for the special `zbus` one) can optionally have a (named or unnamed)
 /// `String` field (which is used as the human-readable error description).
 ///
+/// The following type-level attributes are supported:
+///
+/// * `prefix` - the D-Bus error name prefix.
+/// * `crate` - specify the path to the `zbus` crate if it's renamed or re-exported.
+///
 /// # Example
 ///
 /// ```
-/// use zbus_macros::DBusError;
+/// use zbus::DBusError;
 ///
 /// #[derive(DBusError, Debug)]
 /// #[zbus(prefix = "org.myservice.App")]

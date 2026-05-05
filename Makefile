@@ -1,10 +1,12 @@
-.PHONY: help build build-cli build-gui test lint verify-security verify-human-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci ci-emulate package-release smoke-release release-validate release-emulate clean
+.PHONY: help build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-e2e test-gui-e2e-emulate test-vault-e2e verify-security verify-assurance verify-human-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci builder-image ci-emulate package-release smoke-release release-validate release-emulate clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 RELEASE_VERSION ?= $(shell sed -n 's/^version = "\(.*\)"$$/\1/p' Cargo.toml | head -n 1)
 DIST_DIR ?= dist/release
+BUILDER_CONTEXT_HASH := $(shell if command -v shasum >/dev/null 2>&1; then cat .github/actions/builder/Dockerfile .github/actions/builder/entrypoint.sh | shasum -a 256 | awk '{print substr($$1,1,12)}'; else cat .github/actions/builder/Dockerfile .github/actions/builder/entrypoint.sh | sha256sum | awk '{print substr($$1,1,12)}'; fi)
+BUILDER_IMAGE ?= paranoid-passwd-builder:$(BUILDER_CONTEXT_HASH)
 HOST_OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 HOST_ARCH := $(shell uname -m | sed -e 's/^x86_64$$/amd64/' -e 's/^aarch64$$/arm64/')
 HOST_EXT := $(if $(filter windows,$(HOST_OS)),.exe,)
@@ -14,6 +16,8 @@ HOST_GUI_ARTIFACT := $(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-$(HOST_O
 HOST_GUI_DMG_ARTIFACT := $(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-$(HOST_OS)-$(HOST_ARCH).dmg
 HOST_DEB_ARTIFACT := $(DIST_DIR)/paranoid-passwd_$(RELEASE_VERSION)_$(HOST_ARCH).deb
 HOST_GUI_DEB_ARTIFACT := $(DIST_DIR)/paranoid-passwd-gui_$(RELEASE_VERSION)_$(HOST_ARCH).deb
+GUI_E2E_SCREENSHOT ?= $(DIST_DIR)/gui-e2e.png
+CI_GUI_E2E_TARGET := $(if $(filter linux,$(HOST_OS)),test-gui-e2e)
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -28,16 +32,43 @@ build-gui: ## Build the GUI app in release mode
 	PARANOID_GUI_BUILD_COMMIT="$(COMMIT)" PARANOID_GUI_BUILD_DATE="$(DATE)" cargo build -p paranoid-gui --release --locked --frozen --offline
 
 test: ## Run the Rust test suites
-	cargo test --workspace --locked --frozen --offline
+	bash scripts/cargo_test.sh --workspace --locked --frozen --offline
 
 lint: ## Run formatting and clippy gates
 	cargo fmt --check
 	cargo clippy --workspace --all-targets --locked --frozen --offline -- -D warnings
 
+test-cli-contract: ## Run the generator CLI contract script against the debug CLI binary
+	cargo build -p paranoid-cli --locked --frozen --offline
+	bash tests/test_cli.sh target/debug/paranoid-passwd
+
+test-tui-e2e: ## Run the real PTY-driven TUI binary workflow harness
+	cargo build -p paranoid-cli --locked --frozen --offline
+	python3 tests/test_tui_e2e.py target/debug/paranoid-passwd
+
+test-gui-e2e: ## Run the real GUI workflow harness under Xvfb and capture a screenshot artifact
+	cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline
+	bash tests/test_gui_e2e.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui "$(GUI_E2E_SCREENSHOT)"
+
+test-gui-e2e-emulate: builder-image ## Run the Linux GUI workflow harness through the custom builder image
+	mkdir -p "$(DIST_DIR)"
+	docker run --rm --entrypoint bash -v "$$(pwd)":/github/workspace -w /github/workspace \
+		-e CARGO_TARGET_DIR=/tmp/cargo-target \
+		"$(BUILDER_IMAGE)" \
+		-lc "cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline && bash tests/test_gui_e2e.sh /tmp/cargo-target/debug/paranoid-passwd /tmp/cargo-target/debug/paranoid-passwd-gui \"$(GUI_E2E_SCREENSHOT)\""
+
+test-vault-e2e: ## Run the headless vault CLI end-to-end suite against the debug CLI binary
+	cargo build -p paranoid-cli --locked --frozen --offline
+	bash tests/test_vault_cli.sh target/debug/paranoid-passwd
+
 verify-security: ## Run repository security and supply-chain verification scripts
+	$(MAKE) verify-assurance
+
+verify-assurance: ## Run deterministic security assurance protocol gates
 	bash scripts/hallucination_check.sh
 	bash scripts/supply_chain_verify.sh
 	bash scripts/verify_human_review_inventory.sh
+	python3 scripts/security_assurance_gate.py
 
 verify-human-review: ## Verify the tracked HUMAN_REVIEW inventory matches the source tree
 	bash scripts/verify_human_review_inventory.sh
@@ -61,17 +92,22 @@ docs-check: ## Validate the docs site, generated API docs, and external links
 ci: ## Run the local equivalent of the repository CI gates
 	cargo fmt --check
 	cargo clippy --workspace --all-targets --locked --frozen --offline -- -D warnings
-	cargo test --workspace --locked --frozen --offline
-	cargo build -p paranoid-cli --locked --frozen --offline
-	bash tests/test_cli.sh target/debug/paranoid-passwd
-	bash scripts/hallucination_check.sh
-	bash scripts/supply_chain_verify.sh
-	bash scripts/verify_human_review_inventory.sh
+	bash scripts/cargo_test.sh --workspace --locked --frozen --offline
+	$(MAKE) test-cli-contract
+	$(MAKE) test-tui-e2e
+	$(if $(CI_GUI_E2E_TARGET),$(MAKE) $(CI_GUI_E2E_TARGET))
+	$(MAKE) test-vault-e2e
+	$(MAKE) verify-assurance
 	python3 -m tox -e docs,docs-linkcheck
 
-ci-emulate: ## Build the custom builder image and run the CI target from the repository root
-	docker build -t paranoid-passwd-builder .github/actions/builder
-	docker run --rm -v "$$(pwd)":/github/workspace -w /github/workspace paranoid-passwd-builder bash -lc "make ci"
+builder-image: ## Build or reuse the local builder image keyed to the builder context hash
+	@docker image inspect "$(BUILDER_IMAGE)" >/dev/null 2>&1 || docker build -t "$(BUILDER_IMAGE)" .github/actions/builder
+
+ci-emulate: builder-image ## Run the CI target through the custom builder image
+	docker run --rm --entrypoint bash -v "$$(pwd)":/github/workspace -w /github/workspace \
+		-e CARGO_TARGET_DIR=/tmp/cargo-target \
+		"$(BUILDER_IMAGE)" \
+		-lc "make ci"
 
 package-release: ## Build and package the host-native CLI and GUI release archives into $(DIST_DIR)
 	mkdir -p "$(DIST_DIR)"
@@ -104,16 +140,16 @@ endif
 release-validate: ## Validate a populated release dist dir, generate package manifests, and smoke-test install.sh
 	bash scripts/release_validate.sh "$(RELEASE_VERSION)" "$(DIST_DIR)"
 
-release-emulate: ## Build and smoke-test the linux-amd64 CLI and GUI release paths through the custom builder image
-	docker build -t paranoid-passwd-builder .github/actions/builder
+release-emulate: builder-image ## Build and smoke-test the linux-amd64 CLI and GUI release paths through the custom builder image
 	mkdir -p "$(DIST_DIR)"
-	docker run --rm -v "$$(pwd)":/github/workspace -w /github/workspace \
+	docker run --rm --entrypoint bash -v "$$(pwd)":/github/workspace -w /github/workspace \
 		-e PARANOID_CLI_BUILD_COMMIT="$(COMMIT)" \
 		-e PARANOID_CLI_BUILD_DATE="$(DATE)" \
 		-e PARANOID_GUI_BUILD_COMMIT="$(COMMIT)" \
 		-e PARANOID_GUI_BUILD_DATE="$(DATE)" \
-		paranoid-passwd-builder \
-		bash -lc "bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" tar.gz \"$(DIST_DIR)\" && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd-$(RELEASE_VERSION)-linux-amd64.tar.gz\" && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" deb \"$(DIST_DIR)\" && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd_$(RELEASE_VERSION)_amd64.deb\" && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" tar.gz \"$(DIST_DIR)\" paranoid-passwd-gui paranoid-gui && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-linux-amd64.tar.gz\" paranoid-passwd-gui && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" deb \"$(DIST_DIR)\" paranoid-passwd-gui paranoid-gui && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd-gui_$(RELEASE_VERSION)_amd64.deb\" paranoid-passwd-gui"
+		-e CARGO_TARGET_DIR=/tmp/cargo-target \
+		"$(BUILDER_IMAGE)" \
+		-lc "bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" tar.gz \"$(DIST_DIR)\" && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd-$(RELEASE_VERSION)-linux-amd64.tar.gz\" && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" deb \"$(DIST_DIR)\" && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd_$(RELEASE_VERSION)_amd64.deb\" && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" tar.gz \"$(DIST_DIR)\" paranoid-passwd-gui paranoid-gui && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-linux-amd64.tar.gz\" paranoid-passwd-gui && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" deb \"$(DIST_DIR)\" paranoid-passwd-gui paranoid-gui && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd-gui_$(RELEASE_VERSION)_amd64.deb\" paranoid-passwd-gui"
 
 clean: ## Remove Rust and docs build artifacts
 	rm -rf target docs/_build .tox dist

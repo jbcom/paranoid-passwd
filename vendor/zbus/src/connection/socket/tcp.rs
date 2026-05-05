@@ -14,7 +14,7 @@ use super::{Socket, Split};
 #[async_trait::async_trait]
 impl ReadHalf for Arc<Async<TcpStream>> {
     async fn recvmsg(&mut self, buf: &mut [u8]) -> RecvmsgResult {
-        match futures_util::AsyncReadExt::read(&mut self.as_ref(), buf).await {
+        match futures_lite::AsyncReadExt::read(&mut self.as_ref(), buf).await {
             Err(e) => Err(e),
             Ok(len) => {
                 #[cfg(unix)]
@@ -31,7 +31,7 @@ impl ReadHalf for Arc<Async<TcpStream>> {
         let stream = self.clone();
         crate::Task::spawn_blocking(
             move || {
-                use crate::win32::{tcp_stream_get_peer_pid, ProcessToken};
+                use crate::win32::{ProcessToken, tcp_stream_get_peer_pid};
 
                 let pid = tcp_stream_get_peer_pid(stream.get_ref())? as _;
                 let sid = ProcessToken::open(if pid != 0 { Some(pid as _) } else { None })
@@ -44,7 +44,12 @@ impl ReadHalf for Arc<Async<TcpStream>> {
             },
             "peer credentials",
         )
-        .await
+        .await?
+    }
+
+    #[cfg(not(windows))]
+    fn auth_mechanism(&self) -> crate::conn::AuthMechanism {
+        crate::conn::AuthMechanism::Anonymous
     }
 }
 
@@ -64,7 +69,7 @@ impl WriteHalf for Arc<Async<TcpStream>> {
             ));
         }
 
-        futures_util::AsyncWriteExt::write(&mut self.as_ref(), buf).await
+        futures_lite::AsyncWriteExt::write(&mut self.as_ref(), buf).await
     }
 
     async fn close(&mut self) -> io::Result<()> {
@@ -73,7 +78,7 @@ impl WriteHalf for Arc<Async<TcpStream>> {
             move || stream.get_ref().shutdown(std::net::Shutdown::Both),
             "close socket",
         )
-        .await
+        .await?
     }
 
     async fn peer_credentials(&mut self) -> io::Result<crate::fdo::ConnectionCredentials> {
@@ -116,7 +121,12 @@ impl ReadHalf for tokio::net::tcp::OwnedReadHalf {
             move || win32_credentials_from_addr(&peer_addr),
             "peer credentials",
         )
-        .await
+        .await?
+    }
+
+    #[cfg(not(windows))]
+    fn auth_mechanism(&self) -> crate::conn::AuthMechanism {
+        crate::conn::AuthMechanism::Anonymous
     }
 }
 
@@ -152,7 +162,7 @@ impl WriteHalf for tokio::net::tcp::OwnedWriteHalf {
             move || win32_credentials_from_addr(&peer_addr),
             "peer credentials",
         )
-        .await
+        .await?
     }
 }
 
@@ -161,7 +171,7 @@ impl WriteHalf for tokio::net::tcp::OwnedWriteHalf {
 fn win32_credentials_from_addr(
     addr: &std::net::SocketAddr,
 ) -> io::Result<crate::fdo::ConnectionCredentials> {
-    use crate::win32::{socket_addr_get_pid, ProcessToken};
+    use crate::win32::{ProcessToken, socket_addr_get_pid};
 
     let pid = socket_addr_get_pid(addr)? as _;
     let sid = ProcessToken::open(if pid != 0 { Some(pid as _) } else { None })

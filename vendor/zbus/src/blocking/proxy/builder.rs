@@ -1,16 +1,13 @@
-use static_assertions::assert_impl_all;
 use zbus_names::{BusName, InterfaceName};
 use zvariant::ObjectPath;
 
-use crate::{blocking::Connection, proxy::CacheProperties, utils::block_on, Error, Result};
+use crate::{Error, Result, blocking::Connection, proxy::CacheProperties, utils::block_on};
 
-pub use crate::proxy::ProxyDefault;
+pub use crate::proxy::Defaults;
 
 /// Builder for proxies.
 #[derive(Debug, Clone)]
 pub struct Builder<'a, T = ()>(crate::proxy::Builder<'a, T>);
-
-assert_impl_all!(Builder<'_>: Send, Sync, Unpin);
 
 impl<'a, T> Builder<'a, T> {
     /// Set the proxy destination address.
@@ -65,23 +62,13 @@ impl<'a, T> Builder<'a, T> {
     }
 }
 
-impl<'a, T> Builder<'a, T>
+impl<T> Builder<'_, T>
 where
-    T: ProxyDefault,
+    T: Defaults,
 {
     /// Create a new [`Builder`] for the given connection.
     #[must_use]
     pub fn new(conn: &Connection) -> Self {
         Self(crate::proxy::Builder::new(&conn.clone().into()))
-    }
-
-    /// Create a new [`Builder`] for the given connection.
-    #[must_use]
-    #[deprecated(
-        since = "4.0.0",
-        note = "use `Builder::new` instead, which is now generic over the proxy type"
-    )]
-    pub fn new_bare(conn: &Connection) -> Self {
-        Self::new(conn)
     }
 }

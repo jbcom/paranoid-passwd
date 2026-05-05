@@ -3,10 +3,9 @@ use serde::{
     de::{self, Deserialize, Deserializer, Visitor},
     ser::{Serialize, Serializer},
 };
-use static_assertions::assert_impl_all;
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 
-use crate::{serialized::Format, Basic, Error, Result, Signature, Str, Type};
+use crate::{Basic, Error, Result, Str, Type};
 
 /// String that identifies objects at a given destination on the D-Bus bus.
 ///
@@ -35,8 +34,6 @@ use crate::{serialized::Format, Basic, Error, Result, Signature, Str, Type};
 #[derive(PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
 pub struct ObjectPath<'a>(Str<'a>);
 
-assert_impl_all!(ObjectPath<'_>: Send, Sync, Unpin);
-
 impl<'a> ObjectPath<'a> {
     /// This is faster than `Clone::clone` when `self` contains owned data.
     pub fn as_ref(&self) -> ObjectPath<'_> {
@@ -62,7 +59,7 @@ impl<'a> ObjectPath<'a> {
     ///
     /// See [`std::str::from_utf8_unchecked`].
     pub unsafe fn from_bytes_unchecked<'s: 'a>(bytes: &'s [u8]) -> Self {
-        Self(std::str::from_utf8_unchecked(bytes).into())
+        unsafe { Self(std::str::from_utf8_unchecked(bytes).into()) }
     }
 
     /// Create a new `ObjectPath` from the given string.
@@ -75,7 +72,7 @@ impl<'a> ObjectPath<'a> {
 
     /// Same as `try_from`, except it takes a `&'static str`.
     pub fn from_static_str(name: &'static str) -> Result<Self> {
-        ensure_correct_object_path_str(name.as_bytes())?;
+        validate(name.as_bytes())?;
 
         Ok(Self::from_static_str_unchecked(name))
     }
@@ -109,6 +106,8 @@ impl<'a> ObjectPath<'a> {
     }
 
     /// Creates an owned clone of `self`.
+    ///
+    /// Results in an extra allocation only if the lifetime of `self` is not static.
     pub fn into_owned(self) -> ObjectPath<'static> {
         ObjectPath(self.0.into_owned())
     }
@@ -120,30 +119,20 @@ impl std::default::Default for ObjectPath<'_> {
     }
 }
 
-impl<'a> Basic for ObjectPath<'a> {
+impl Basic for ObjectPath<'_> {
     const SIGNATURE_CHAR: char = 'o';
     const SIGNATURE_STR: &'static str = "o";
-
-    fn alignment(format: Format) -> usize {
-        match format {
-            Format::DBus => <&str>::alignment(format),
-            #[cfg(feature = "gvariant")]
-            Format::GVariant => 1,
-        }
-    }
 }
 
-impl<'a> Type for ObjectPath<'a> {
-    fn signature() -> Signature<'static> {
-        Signature::from_static_str_unchecked(Self::SIGNATURE_STR)
-    }
+impl Type for ObjectPath<'_> {
+    const SIGNATURE: &'static crate::Signature = &crate::Signature::ObjectPath;
 }
 
 impl<'a> TryFrom<&'a [u8]> for ObjectPath<'a> {
     type Error = Error;
 
     fn try_from(value: &'a [u8]) -> Result<Self> {
-        ensure_correct_object_path_str(value)?;
+        validate(value)?;
 
         // SAFETY: ensure_correct_object_path_str checks UTF-8
         unsafe { Ok(Self::from_bytes_unchecked(value)) }
@@ -159,11 +148,11 @@ impl<'a> TryFrom<&'a str> for ObjectPath<'a> {
     }
 }
 
-impl<'a> TryFrom<String> for ObjectPath<'a> {
+impl TryFrom<String> for ObjectPath<'_> {
     type Error = Error;
 
     fn try_from(value: String) -> Result<Self> {
-        ensure_correct_object_path_str(value.as_bytes())?;
+        validate(value.as_bytes())?;
 
         Ok(Self::from_string_unchecked(value))
     }
@@ -186,7 +175,7 @@ impl<'o> From<&ObjectPath<'o>> for ObjectPath<'o> {
     }
 }
 
-impl<'a> std::ops::Deref for ObjectPath<'a> {
+impl std::ops::Deref for ObjectPath<'_> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
@@ -194,31 +183,31 @@ impl<'a> std::ops::Deref for ObjectPath<'a> {
     }
 }
 
-impl<'a> PartialEq<str> for ObjectPath<'a> {
+impl PartialEq<str> for ObjectPath<'_> {
     fn eq(&self, other: &str) -> bool {
         self.as_str() == other
     }
 }
 
-impl<'a> PartialEq<&str> for ObjectPath<'a> {
+impl PartialEq<&str> for ObjectPath<'_> {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
     }
 }
 
-impl<'a> Debug for ObjectPath<'a> {
+impl Debug for ObjectPath<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ObjectPath").field(&self.as_str()).finish()
     }
 }
 
-impl<'a> std::fmt::Display for ObjectPath<'a> {
+impl std::fmt::Display for ObjectPath<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self.as_str(), f)
     }
 }
 
-impl<'a> Serialize for ObjectPath<'a> {
+impl Serialize for ObjectPath<'_> {
     fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -256,9 +245,8 @@ impl<'de> Visitor<'de> for ObjectPathVisitor {
     }
 }
 
-fn ensure_correct_object_path_str(path: &[u8]) -> Result<()> {
-    let mut prev = b'\0';
-
+fn validate(path: &[u8]) -> Result<()> {
+    use winnow::{Parser, combinator::separated, stream::AsChar, token::take_while};
     // Rules
     //
     // * At least 1 character.
@@ -266,45 +254,17 @@ fn ensure_correct_object_path_str(path: &[u8]) -> Result<()> {
     // * No trailing `/`
     // * No `//`
     // * Only ASCII alphanumeric, `_` or '/'
-    if path.is_empty() {
-        return Err(serde::de::Error::invalid_length(0, &"> 0 character"));
-    }
 
-    for i in 0..path.len() {
-        let c = path[i];
+    let allowed_chars = (AsChar::is_alphanum, b'_');
+    let name = take_while::<_, _, ()>(1.., allowed_chars);
+    let mut full_path = (b'/', separated(0.., name, b'/')).map(|_: (u8, ())| ());
 
-        if i == 0 && c != b'/' {
-            return Err(serde::de::Error::invalid_value(
-                serde::de::Unexpected::Char(c as char),
-                &"/",
-            ));
-        } else if c == b'/' && prev == b'/' {
-            return Err(serde::de::Error::invalid_value(
-                serde::de::Unexpected::Str("//"),
-                &"/",
-            ));
-        } else if path.len() > 1 && i == (path.len() - 1) && c == b'/' {
-            return Err(serde::de::Error::invalid_value(
-                serde::de::Unexpected::Char('/'),
-                &"an alphanumeric character or `_`",
-            ));
-        } else if !c.is_ascii_alphanumeric() && c != b'/' && c != b'_' {
-            return Err(serde::de::Error::invalid_value(
-                serde::de::Unexpected::Char(c as char),
-                &"an alphanumeric character, `_` or `/`",
-            ));
-        }
-        prev = c;
-    }
-
-    Ok(())
+    full_path.parse(path).map_err(|_| Error::InvalidObjectPath)
 }
 
 /// Owned [`ObjectPath`](struct.ObjectPath.html)
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, Type)]
 pub struct OwnedObjectPath(ObjectPath<'static>);
-
-assert_impl_all!(OwnedObjectPath: Send, Sync, Unpin);
 
 impl OwnedObjectPath {
     pub fn into_inner(self) -> ObjectPath<'static> {
@@ -315,16 +275,18 @@ impl OwnedObjectPath {
 impl Basic for OwnedObjectPath {
     const SIGNATURE_CHAR: char = ObjectPath::SIGNATURE_CHAR;
     const SIGNATURE_STR: &'static str = ObjectPath::SIGNATURE_STR;
-
-    fn alignment(format: Format) -> usize {
-        ObjectPath::alignment(format)
-    }
 }
 
 impl std::ops::Deref for OwnedObjectPath {
     type Target = ObjectPath<'static>;
 
     fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'a> Borrow<ObjectPath<'a>> for OwnedObjectPath {
+    fn borrow(&self) -> &ObjectPath<'a> {
         &self.0
     }
 }
@@ -392,7 +354,7 @@ mod unit {
 
     #[test]
     fn owned_from_reader() {
-        // See https://github.com/dbus2/zbus/issues/287
+        // See https://github.com/z-galaxy/zbus/issues/287
         let json_str = "\"/some/path\"";
         serde_json::de::from_reader::<_, OwnedObjectPath>(json_str.as_bytes()).unwrap();
     }

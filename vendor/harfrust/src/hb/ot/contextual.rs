@@ -1,11 +1,12 @@
-use super::{coverage_index, covered, glyph_class};
+use super::{coverage_binary_cached, coverage_index, covered, glyph_class};
 use crate::hb::buffer::GlyphInfo;
 use crate::hb::ot::{ClassDefInfo, CoverageInfo};
 use crate::hb::ot_layout_gsubgpos::OT::hb_ot_apply_context_t;
 use crate::hb::ot_layout_gsubgpos::{
     apply_lookup, match_always, match_backtrack, match_glyph, match_input, match_lookahead,
-    may_skip_t, skipping_iterator_t, Apply, ChainContextFormat2Cache, ContextFormat2Cache,
-    SubtableExternalCache, SubtableExternalCacheMode, WouldApply, WouldApplyContext,
+    may_skip_t, skipping_iterator_t, Apply, BinaryCache, ChainContextFormat2Cache,
+    ContextFormat2Cache, SubtableExternalCache, SubtableExternalCacheMode, WouldApply,
+    WouldApplyContext,
 };
 use read_fonts::tables::gsub::ClassDef;
 use read_fonts::tables::layout::{
@@ -94,7 +95,11 @@ impl Apply for SequenceContextFormat2<'_> {
             return None;
         };
         let offset_data = self.offset_data();
-        cache.coverage.index(&offset_data, glyph)?;
+        coverage_binary_cached(
+            |gid| cache.coverage.index(&offset_data, gid),
+            glyph,
+            &cache.coverage_cache,
+        )?;
         let input_class = |gid| cache.input.class(&offset_data, gid);
         let index = input_class(glyph) as usize;
         let set = self.class_seq_rule_sets().get(index)?.ok()?;
@@ -113,7 +118,11 @@ impl Apply for SequenceContextFormat2<'_> {
             return None;
         };
         let offset_data = self.offset_data();
-        cache.coverage.index(&offset_data, glyph)?;
+        coverage_binary_cached(
+            |gid| cache.coverage.index(&offset_data, gid),
+            glyph,
+            &cache.coverage_cache,
+        )?;
         let input_class = |gid| cache.input.class(&offset_data, gid);
         let index = get_class_cached(&input_class, &mut ctx.buffer.info[ctx.buffer.idx]) as usize;
         let set = self.class_seq_rule_sets().get(index)?.ok()?;
@@ -133,6 +142,7 @@ impl Apply for SequenceContextFormat2<'_> {
     fn external_cache_create(&self, _mode: SubtableExternalCacheMode) -> SubtableExternalCache {
         let data = self.offset_data();
         SubtableExternalCache::ContextFormat2Cache(ContextFormat2Cache {
+            coverage_cache: BinaryCache::new(),
             coverage: CoverageInfo::new(&data, self.coverage_offset().to_u32() as u16)
                 .unwrap_or_default(),
             input: ClassDefInfo::new(&data, self.class_def_offset().to_u32() as u16)
@@ -344,7 +354,11 @@ impl Apply for ChainedSequenceContextFormat2<'_> {
             return None;
         };
         let offset_data = self.offset_data();
-        cache.coverage.index(&offset_data, glyph)?;
+        coverage_binary_cached(
+            |gid| cache.coverage.index(&offset_data, gid),
+            glyph,
+            &cache.coverage_cache,
+        )?;
         let index = cache.input.class(&offset_data, glyph) as usize;
         let set = self.chained_class_seq_rule_sets().get(index)?.ok()?;
         apply_chain_context_rules(
@@ -367,7 +381,11 @@ impl Apply for ChainedSequenceContextFormat2<'_> {
             return None;
         };
         let offset_data = self.offset_data();
-        cache.coverage.index(&offset_data, glyph)?;
+        coverage_binary_cached(
+            |gid| cache.coverage.index(&offset_data, gid),
+            glyph,
+            &cache.coverage_cache,
+        )?;
         let input_class = |gid| cache.input.class(&offset_data, gid);
         let lookahead_class = |gid| cache.lookahead.class(&offset_data, gid);
         let index = get_class_cached2(&input_class, &mut ctx.buffer.info[ctx.buffer.idx]) as usize;
@@ -395,6 +413,7 @@ impl Apply for ChainedSequenceContextFormat2<'_> {
     fn external_cache_create(&self, _mode: SubtableExternalCacheMode) -> SubtableExternalCache {
         let data = self.offset_data();
         SubtableExternalCache::ChainContextFormat2Cache(ChainContextFormat2Cache {
+            coverage_cache: BinaryCache::new(),
             coverage: CoverageInfo::new(&data, self.coverage_offset().to_u32() as u16)
                 .unwrap_or_default(),
             backtrack: ClassDefInfo::new(&data, self.backtrack_class_def_offset().to_u32() as u16)
@@ -597,15 +616,20 @@ fn apply_context_rules<'a, 'b, R: ContextRule<'a>>(
     }
     // This version is optimized for speed by matching the first & second
     // components of the rule here, instead of calling into the matching code.
+    //
+    // We use the iter_context instead of iter_input, to avoid skipping
+    // default-ignorables and such.
+    //
+    // Related: https://github.com/harfbuzz/harfbuzz/issues/4813
     let mut skippy_iter = skipping_iterator_t::with_match_fn(ctx, true, Some(match_always));
     skippy_iter.reset(skippy_iter.buffer.idx);
     skippy_iter.set_glyph_data(0);
-    let mut unsafe_to;
+    let mut unsafe_to = None;
+    let unsafe_to1;
     let mut unsafe_to2 = 0;
     let mut second = None;
     let first = if skippy_iter.next(None) {
         let g1 = skippy_iter.index();
-        unsafe_to = Some(skippy_iter.index() + 1);
         if skippy_iter.may_skip(&skippy_iter.buffer.info[g1]) != may_skip_t::SKIP_NO {
             // Can't use the fast path if eg. the next char is a default-ignorable
             // or other skippable.
@@ -616,6 +640,7 @@ fn apply_context_rules<'a, 'b, R: ContextRule<'a>>(
             }
             return None;
         }
+        unsafe_to1 = skippy_iter.index() + 1;
         g1
     } else {
         // Failed to match a next glyph. Only try applying rules that have no
@@ -633,11 +658,26 @@ fn apply_context_rules<'a, 'b, R: ContextRule<'a>>(
     };
     let matched = skippy_iter.next(None);
     let g2 = skippy_iter.index();
-    if matched && skippy_iter.may_skip(&skippy_iter.buffer.info[g2]) == may_skip_t::SKIP_NO {
+    if matched {
         second = Some(g2);
         unsafe_to2 = skippy_iter.index() + 1;
+        if skippy_iter.may_skip(&skippy_iter.buffer.info[g2]) != may_skip_t::SKIP_NO {
+            // Can't use the fast path if eg. the next char is a default-ignorable
+            // or other skippable.
+            for rule in rules.iter().filter_map(|r| r.ok()) {
+                if rule.apply(ctx, &match_func).is_some() {
+                    return Some(());
+                };
+            }
+            return None;
+        }
     }
-    for rule in rules.iter().filter_map(|r| r.ok()) {
+    let mut rules_iter = rules.iter().filter_map(|r| r.ok());
+    let mut rule_box = rules_iter.next();
+    loop {
+        let Some(rule) = rule_box else {
+            break;
+        };
         let inputs = rule.input();
         let match_func2 = |info: &mut GlyphInfo, index| {
             if let Some(value) = inputs.get(index as usize).map(|v| v.to_u16()) {
@@ -660,6 +700,29 @@ fn apply_context_rules<'a, 'b, R: ContextRule<'a>>(
             } else {
                 unsafe_to = Some(unsafe_to2);
             }
+            rule_box = rules_iter.next();
+        } else {
+            if unsafe_to.is_none() {
+                unsafe_to = Some(unsafe_to1);
+            }
+
+            // Skip ahead to next possible first glyph match.
+            let first_glyph_value = inputs.first().unwrap().to_u16();
+            loop {
+                let next_rule_box = rules_iter.next();
+                if next_rule_box.is_none() {
+                    rule_box = None;
+                    break;
+                };
+
+                let next_inputs = next_rule_box.as_ref().unwrap().input();
+                if next_inputs.is_empty()
+                    || next_inputs.first().unwrap().to_u16() != first_glyph_value
+                {
+                    rule_box = next_rule_box;
+                    break;
+                }
+            }
         }
     }
     if let Some(unsafe_to) = unsafe_to {
@@ -672,69 +735,6 @@ fn apply_context_rules<'a, 'b, R: ContextRule<'a>>(
 trait ChainContextRule<'a>: ContextRule<'a> {
     fn backtrack(&self) -> &'a [Self::Input];
     fn lookahead(&self) -> &'a [Self::Input];
-
-    #[inline(always)]
-    fn apply_chain<
-        F1: Fn(&mut GlyphInfo, u16) -> bool,
-        F2: Fn(&mut GlyphInfo, u16) -> bool,
-        F3: Fn(&mut GlyphInfo, u16) -> bool,
-    >(
-        &self,
-        ctx: &mut hb_ot_apply_context_t,
-        match_funcs: &(F1, F2, F3),
-    ) -> Option<()> {
-        let input = self.input();
-        let backtrack = self.backtrack();
-        let lookahead = self.lookahead();
-
-        // NOTE: Whenever something in this method changes, we also need to
-        // change it in the `apply` implementation for ChainedContextLookup.
-        let f1 = |info: &mut GlyphInfo, index| {
-            let value = (*backtrack.get(index as usize).unwrap()).to_u16();
-            match_funcs.0(info, value)
-        };
-
-        let f2 = |info: &mut GlyphInfo, index| {
-            let value = (*lookahead.get(index as usize).unwrap()).to_u16();
-            match_funcs.2(info, value)
-        };
-
-        let f3 = |info: &mut GlyphInfo, index| {
-            let value = (*input.get(index as usize).unwrap()).to_u16();
-            match_funcs.1(info, value)
-        };
-
-        let mut end_index = ctx.buffer.idx;
-        let mut match_end = 0;
-
-        let input_matches = match_input(ctx, input.len() as u16, f3, &mut match_end, None);
-
-        if input_matches {
-            end_index = match_end;
-        }
-
-        if !(input_matches
-            && match_lookahead(ctx, lookahead.len() as u16, f2, match_end, &mut end_index))
-        {
-            ctx.buffer
-                .unsafe_to_concat(Some(ctx.buffer.idx), Some(end_index));
-            return None;
-        }
-
-        let mut start_index = ctx.buffer.out_len;
-
-        if !match_backtrack(ctx, backtrack.len() as u16, f1, &mut start_index) {
-            ctx.buffer
-                .unsafe_to_concat_from_outbuffer(Some(start_index), Some(end_index));
-            return None;
-        }
-
-        ctx.buffer
-            .unsafe_to_break_from_outbuffer(Some(start_index), Some(end_index));
-        apply_lookup(ctx, input.len(), match_end, self.lookup_records());
-
-        Some(())
-    }
 }
 
 impl<'a> ContextRule<'a> for ChainedSequenceRule<'a> {
@@ -781,6 +781,69 @@ impl<'a> ChainContextRule<'a> for ChainedClassSequenceRule<'a> {
     }
 }
 
+fn apply_chain_with_sequences<
+    'a,
+    T: ToU16 + 'a,
+    F1: Fn(&mut GlyphInfo, u16) -> bool,
+    F2: Fn(&mut GlyphInfo, u16) -> bool,
+    F3: Fn(&mut GlyphInfo, u16) -> bool,
+>(
+    ctx: &mut hb_ot_apply_context_t,
+    backtrack: &'a [T],
+    input: &'a [T],
+    lookahead: &'a [T],
+    lookup_records: &'a [SequenceLookupRecord],
+    match_funcs: &(F1, F2, F3),
+) -> Option<()> {
+    let f3 = |info: &mut GlyphInfo, index| {
+        let value = (*input.get(index as usize).unwrap()).to_u16();
+        match_funcs.1(info, value)
+    };
+
+    let mut end_index = ctx.buffer.idx;
+    let mut match_end = 0;
+
+    let input_matches = match_input(ctx, input.len() as u16, f3, &mut match_end, None);
+
+    if input_matches {
+        end_index = match_end;
+    } else {
+        ctx.buffer
+            .unsafe_to_concat(Some(ctx.buffer.idx), Some(end_index));
+        return None;
+    }
+
+    let f2 = |info: &mut GlyphInfo, index| {
+        let value = (*lookahead.get(index as usize).unwrap()).to_u16();
+        match_funcs.2(info, value)
+    };
+
+    if !match_lookahead(ctx, lookahead.len() as u16, f2, match_end, &mut end_index) {
+        ctx.buffer
+            .unsafe_to_concat(Some(ctx.buffer.idx), Some(end_index));
+        return None;
+    }
+
+    let mut start_index = ctx.buffer.out_len;
+
+    let f1 = |info: &mut GlyphInfo, index| {
+        let value = (*backtrack.get(index as usize).unwrap()).to_u16();
+        match_funcs.0(info, value)
+    };
+
+    if !match_backtrack(ctx, backtrack.len() as u16, f1, &mut start_index) {
+        ctx.buffer
+            .unsafe_to_concat_from_outbuffer(Some(start_index), Some(end_index));
+        return None;
+    }
+
+    ctx.buffer
+        .unsafe_to_break_from_outbuffer(Some(start_index), Some(end_index));
+    apply_lookup(ctx, input.len(), match_end, lookup_records);
+
+    Some(())
+}
+
 fn apply_chain_context_rules<
     'a,
     'b,
@@ -793,13 +856,18 @@ fn apply_chain_context_rules<
     rules: &'b ArrayOfOffsets<'a, R, Offset16>,
     match_funcs: (F1, F2, F3),
 ) -> Option<()> {
-    // If the input skippy has non-auto joiners behavior (as in Indic shapers),
-    // skip this fast path, as we don't distinguish between input & lookahead
-    // matching in the fast path.
-    // https://github.com/harfbuzz/harfbuzz/issues/4813
-    if rules.len() <= 4 || !ctx.auto_zwnj || !ctx.auto_zwj {
+    if rules.len() <= 4 {
         for rule in rules.iter().filter_map(|r| r.ok()) {
-            if rule.apply_chain(ctx, &match_funcs).is_some() {
+            if apply_chain_with_sequences(
+                ctx,
+                rule.backtrack(),
+                rule.input(),
+                rule.lookahead(),
+                rule.lookup_records(),
+                &match_funcs,
+            )
+            .is_some()
+            {
                 return Some(());
             };
         }
@@ -807,25 +875,40 @@ fn apply_chain_context_rules<
     }
     // This version is optimized for speed by matching the first & second
     // components of the rule here, instead of calling into the matching code.
+    //
+    // We use the iter_context instead of iter_input, to avoid skipping
+    // default-ignorables and such.
+    //
+    // Related: https://github.com/harfbuzz/harfbuzz/issues/4813
     let mut skippy_iter = skipping_iterator_t::with_match_fn(ctx, true, Some(match_always));
     skippy_iter.reset(skippy_iter.buffer.idx);
     skippy_iter.set_glyph_data(0);
-    let mut unsafe_to;
+    let mut unsafe_to = None;
+    let unsafe_to1;
     let mut unsafe_to2 = 0;
     let mut second = None;
     let first = if skippy_iter.next(None) {
         let g1 = skippy_iter.index();
-        unsafe_to = Some(skippy_iter.index() + 1);
         if skippy_iter.may_skip(&skippy_iter.buffer.info[g1]) != may_skip_t::SKIP_NO {
             // Can't use the fast path if eg. the next char is a default-ignorable
             // or other skippable.
             for rule in rules.iter().filter_map(|r| r.ok()) {
-                if rule.apply_chain(ctx, &match_funcs).is_some() {
+                if apply_chain_with_sequences(
+                    ctx,
+                    rule.backtrack(),
+                    rule.input(),
+                    rule.lookahead(),
+                    rule.lookup_records(),
+                    &match_funcs,
+                )
+                .is_some()
+                {
                     return Some(());
                 };
             }
             return None;
         }
+        unsafe_to1 = skippy_iter.index() + 1;
         g1
     } else {
         // Failed to match a next glyph. Only try applying rules that have no
@@ -835,7 +918,16 @@ fn apply_chain_context_rules<
             .filter_map(|r| r.ok())
             .filter(|r| r.input().len() <= 1 && r.lookahead().is_empty())
         {
-            if rule.apply_chain(ctx, &match_funcs).is_some() {
+            if apply_chain_with_sequences(
+                ctx,
+                rule.backtrack(),
+                rule.input(),
+                rule.lookahead(),
+                rule.lookup_records(),
+                &match_funcs,
+            )
+            .is_some()
+            {
                 return Some(());
             };
         }
@@ -843,11 +935,35 @@ fn apply_chain_context_rules<
     };
     let matched = skippy_iter.next(None);
     let g2 = skippy_iter.index();
-    if matched && skippy_iter.may_skip(&skippy_iter.buffer.info[g2]) == may_skip_t::SKIP_NO {
+    if matched {
         second = Some(g2);
         unsafe_to2 = skippy_iter.index() + 1;
+        if skippy_iter.may_skip(&skippy_iter.buffer.info[g2]) != may_skip_t::SKIP_NO {
+            // Can't use the fast path if eg. the next char is a default-ignorable
+            // or other skippable.
+            for rule in rules.iter().filter_map(|r| r.ok()) {
+                if apply_chain_with_sequences(
+                    ctx,
+                    rule.backtrack(),
+                    rule.input(),
+                    rule.lookahead(),
+                    rule.lookup_records(),
+                    &match_funcs,
+                )
+                .is_some()
+                {
+                    return Some(());
+                };
+            }
+            return None;
+        }
     }
-    for rule in rules.iter().filter_map(|r| r.ok()) {
+    let mut rules_iter = rules.iter().filter_map(|r| r.ok());
+    let mut rule_box = rules_iter.next();
+    loop {
+        let Some(rule) = rule_box else {
+            break;
+        };
         let input = rule.input();
         let lookahead = rule.lookahead();
         let match_input = |info: &mut GlyphInfo, index: usize| {
@@ -878,7 +994,16 @@ fn apply_chain_context_rules<
                 true
             };
             if matched_second {
-                if rule.apply_chain(ctx, &match_funcs).is_some() {
+                if apply_chain_with_sequences(
+                    ctx,
+                    rule.backtrack(),
+                    rule.input(),
+                    rule.lookahead(),
+                    rule.lookup_records(),
+                    &match_funcs,
+                )
+                .is_some()
+                {
                     if let Some(unsafe_to) = unsafe_to {
                         ctx.buffer
                             .unsafe_to_concat(Some(ctx.buffer.idx), Some(unsafe_to));
@@ -887,6 +1012,33 @@ fn apply_chain_context_rules<
                 }
             } else {
                 unsafe_to = Some(unsafe_to2);
+            }
+
+            rule_box = rules_iter.next();
+        } else {
+            if unsafe_to.is_none() {
+                unsafe_to = Some(unsafe_to1);
+            }
+
+            if len_p1 > 1 {
+                // Skip ahead to next possible first glyph match.
+                let first_glyph_value = input.first().unwrap().to_u16();
+                loop {
+                    let next_rule_box = rules_iter.next();
+                    if next_rule_box.is_none() {
+                        rule_box = None;
+                        break;
+                    }
+                    let next_inputs = next_rule_box.as_ref().unwrap().input();
+                    if next_inputs.is_empty()
+                        || next_inputs.first().unwrap().to_u16() != first_glyph_value
+                    {
+                        rule_box = next_rule_box;
+                        break;
+                    }
+                }
+            } else {
+                rule_box = rules_iter.next();
             }
         }
     }

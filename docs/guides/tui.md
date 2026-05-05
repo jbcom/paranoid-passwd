@@ -4,7 +4,8 @@ title: TUI Guide
 
 # TUI Guide
 
-The TUI is the phase-1 replacement for the old browser wizard. It keeps the same three-step flow:
+The TUI is the default terminal experience for the native generator. It keeps the product
+flow direct:
 
 1. Configure
 2. Generate & Audit
@@ -32,10 +33,10 @@ The TUI keeps the same branded three-step flow, but it now runs entirely on the 
 
 ```text
 paranoid-passwd · Configure
-Tune the same flow the old web wizard exposed.
+Configure the local generator and audit before any password is shown.
 
 Wizard                                  Audit Preview
-› Password length: 32                  Branding  deep navy + emerald, monospace-heavy, fail-closed.
+› Password length: 32                  Mission  local secrets, verifiable trust.
   Number of passwords: 1
   Audit batch size: 500                Effective charset: 72 characters
   Lowercase [a-z]: ON                  Manual requirements: 4 total constrained characters

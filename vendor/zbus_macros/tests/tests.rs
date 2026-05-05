@@ -1,10 +1,10 @@
 use futures_util::{
-    future::{select, Either},
+    future::{Either, select},
     stream::StreamExt,
 };
 use std::future::ready;
-use zbus::{block_on, fdo, object_server::SignalContext, proxy::CacheProperties};
-use zbus_macros::{interface, proxy, DBusError};
+use zbus::{block_on, fdo, object_server::SignalEmitter, proxy::CacheProperties};
+use zbus_macros::{DBusError, interface, proxy};
 
 mod param {
     #[zbus_macros::proxy(
@@ -29,7 +29,7 @@ mod test {
         interface = "org.freedesktop.zbus_macros.Test",
         default_service = "org.freedesktop.zbus_macros"
     )]
-    trait Test {
+    pub(super) trait Test {
         /// comment for a_test()
         fn a_test(&self, val: &str) -> zbus::Result<u32>;
 
@@ -107,8 +107,10 @@ fn test_proxy() {
     });
 }
 
+#[ignore]
 #[test]
 fn test_derive_error() {
+    #[allow(unused)]
     #[derive(Debug, DBusError)]
     #[zbus(prefix = "org.freedesktop.zbus")]
     enum Test {
@@ -130,6 +132,27 @@ fn test_interface() {
         object_server::Interface,
         zvariant::{Type, Value},
     };
+
+    // Test write-only property
+    struct TestWriteOnlyProperty;
+
+    #[interface(proxy)]
+    impl TestWriteOnlyProperty {
+        #[zbus(property)]
+        fn set_my_property(&self, _val: u32) {}
+    }
+
+    let mut writer = String::new();
+    TestWriteOnlyProperty.introspect_to_writer(&mut writer, 0);
+    assert_eq!(
+        writer,
+        r#"<interface name="org.freedesktop.TestWriteOnlyProperty">
+  <property name="MyProperty" type="u" access="write">
+    <annotation name="org.freedesktop.DBus.Property.EmitsChangedSignal" value="false"/>
+  </property>
+</interface>
+"#
+    );
 
     struct Test<T> {
         something: String,
@@ -215,7 +238,7 @@ fn test_interface() {
 
         /// Emit a signal.
         #[zbus(signal)]
-        async fn signal(ctxt: &SignalContext<'_>, arg: u8, other: &str) -> zbus::Result<()>;
+        async fn signal(emitter: &SignalEmitter<'_>, arg: u8, other: &str) -> zbus::Result<()>;
     }
 
     const EXPECTED_XML: &str = r#"<interface name="org.freedesktop.zbus.Test">
@@ -278,14 +301,56 @@ fn test_interface() {
             // check compilation
             let c = zbus::Connection::session().await.unwrap();
             let s = c.object_server();
-            let m = zbus::message::Message::method("/", "StrU32")
+            let m = zbus::message::Message::method_call("/", "StrU32")
                 .unwrap()
                 .build(&(42,))
                 .unwrap();
-            let _ = t.call(&s, &c, &m, "StrU32".try_into().unwrap());
-            let ctxt = SignalContext::new(&c, "/does/not/matter").unwrap();
-            block_on(Test::<u32>::signal(&ctxt, 23, "ergo sum")).unwrap();
+            let _ = t.call(s, &c, &m, "StrU32".try_into().unwrap());
+            let ctxt = SignalEmitter::new(&c, "/does/not/matter").unwrap();
+            ctxt.signal(23, "ergo sum").await.unwrap();
         });
+    }
+}
+
+// Test that the `crate` attribute works for custom crate paths.
+mod crate_attr_test {
+    #[zbus_macros::proxy(
+        interface = "org.freedesktop.zbus_macros.CrateAttrTest",
+        default_service = "org.freedesktop.zbus_macros",
+        default_path = "/org/freedesktop/zbus_macros/crate_attr_test",
+        crate = "zbus"
+    )]
+    trait CrateAttrTest {
+        fn test_method(&self) -> zbus::Result<String>;
+    }
+}
+
+#[test]
+fn test_interface_with_crate_attr() {
+    use zbus::object_server::Interface;
+
+    struct CrateAttrInterface;
+
+    #[interface(name = "org.freedesktop.zbus.CrateAttrTest", crate = "zbus")]
+    impl CrateAttrInterface {
+        fn test_method(&self) -> String {
+            "test".to_string()
+        }
+    }
+
+    assert_eq!(
+        CrateAttrInterface::name(),
+        "org.freedesktop.zbus.CrateAttrTest"
+    );
+}
+
+#[test]
+fn derive_error_with_crate_attr() {
+    #[allow(unused)]
+    #[derive(Debug, DBusError)]
+    #[zbus(prefix = "org.freedesktop.zbus.test", crate = "zbus")]
+    enum CrateAttrError {
+        TestError,
     }
 }
 
@@ -364,4 +429,64 @@ mod signal_from_message {
             .args()
             .expect_err("Message does not have correct data");
     }
+}
+
+#[test]
+fn test_proxy_object_list() {
+    #[derive(Clone)]
+    struct ObjectList {
+        paths: [zbus::zvariant::ObjectPath<'static>; 2],
+    }
+
+    #[zbus_macros::interface(
+        name = "org.freedesktop.zbus_macros.ObjectList",
+        proxy(default_service = "org.freedesktop.zbus_macros")
+    )]
+    impl ObjectList {
+        #[zbus(proxy(object = "ObjectList", object_vec))]
+        async fn get_test_objects(&self) -> Vec<zbus::zvariant::ObjectPath<'static>> {
+            self.paths.to_vec()
+        }
+
+        #[zbus(property, proxy(object = "ObjectList", object_vec))]
+        fn objects(&self) -> Vec<zbus::zvariant::ObjectPath<'static>> {
+            self.paths.to_vec()
+        }
+    }
+
+    static OBJECT_LIST: ObjectList = ObjectList {
+        paths: [
+            zbus::zvariant::ObjectPath::from_static_str_unchecked(
+                "/org/freedesktop/zbus_macros/object_list/0",
+            ),
+            zbus::zvariant::ObjectPath::from_static_str_unchecked(
+                "/org/freedesktop/zbus_macros/object_list/1",
+            ),
+        ],
+    };
+
+    fn check_return(list: Vec<ObjectListProxyBlocking<'_>>) {
+        for (correct, returned) in OBJECT_LIST.paths.iter().zip(list.into_iter()) {
+            assert!(returned.inner().path() == correct);
+        }
+    }
+
+    let connection = zbus::blocking::connection::Builder::session()
+        .unwrap()
+        .serve_at(OBJECT_LIST.paths[1].as_ref(), OBJECT_LIST.clone())
+        .unwrap()
+        .build()
+        .unwrap();
+    let destination = connection.unique_name().unwrap().clone();
+
+    let proxy = ObjectListProxyBlocking::builder(&connection)
+        .path(OBJECT_LIST.paths[1].as_ref())
+        .unwrap()
+        .destination(&destination)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    check_return(proxy.get_test_objects().unwrap());
+    check_return(proxy.objects().unwrap());
 }

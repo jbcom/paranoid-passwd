@@ -11,6 +11,13 @@ title: Architecture
 - `crates/paranoid-gui`
 - `crates/paranoid-vault`
 
+The next production refactor should add two shared crates rather than growing the UI crates:
+
+- `crates/paranoid-ops` for typed command envelopes, policy evaluation, challenge orchestration,
+  seal/unseal state, and automation responses
+- `crates/paranoid-audit` for structured audit events, redaction, hash chaining, JSON/JSONL
+  rendering, and audit-device sinks
+
 ## Core
 
 `paranoid-core` is the single source of truth for:
@@ -26,7 +33,8 @@ title: Architecture
 - pattern detection
 - compliance evaluation
 
-The old raw-memory WASM result struct is gone. The native application surface now passes typed Rust data structures between layers.
+The old raw-memory WASM result struct is gone. Application surfaces now pass typed Rust data structures between layers.
+Future Slint WASM/mobile targets must keep that typed Rust boundary and cannot revive the retired JavaScript browser app.
 
 The shared report model is split between:
 
@@ -52,13 +60,91 @@ The shared report model is split between:
 - Keyslot removal policy is now standardized across surfaces: `VaultHeader::assess_keyslot_removal()` computes the same before/after posture and warning set for CLI, TUI, and GUI; headless removal requires `--force` for posture-downgrading removals, while TUI and GUI arm a native confirmation step before proceeding.
 - Native interactive surfaces share a small session-hardening layer from `paranoid-vault`: copied secrets are cleared from the clipboard after 30 seconds if unchanged, and unlocked vault views auto-lock after 5 minutes of inactivity while clearing cached decrypted state.
 
+## Ops, Audit, and Seal Lifecycle
+
+The UI surfaces should converge on a shared typed operations protocol instead of calling each
+other. The CLI can emit JSON/JSONL for automation, the TUI can render the same operation results in
+a terminal, and the GUI can render them in Slint, but all three should submit the same
+`paranoid-ops` command envelopes and receive the same typed responses.
+
+`paranoid-ops` should own:
+
+- command envelopes with request ids, actor context, surface identity, policy version, and optional
+  challenge metadata
+- an explicit allow / challenge / deny decision model for sensitive operations
+- vault session state transitions such as `sealed`, `challenge_pending`, `unsealed`,
+  `idle_lock_pending`, `sealed_after_timeout`, and `recovery_required`
+- auto-unseal provider orchestration for device-bound, certificate-backed, and future external
+  provider paths
+- mTLS or local transport authorization policy when commands cross process boundaries
+- stable JSON response schemas for headless automation
+
+This should be challenge/response in the security sense, not prompt-engineering in the LLM sense.
+Sensitive operations should declare the capability, subject, target, preconditions, and expected
+side effects, then require a typed challenge when policy says the operation needs confirmation,
+fresh proof, or stronger unlock material. The challenge result should be verified by the ops layer
+and recorded by the audit layer before the vault mutation runs.
+
+`paranoid-audit` should replace primitive logging for security-relevant behavior. Its event model
+should be append-oriented and safe by default:
+
+- one request event and one response event for every ops command that reaches policy evaluation
+- stable request ids so request/response pairs can be correlated
+- typed actor, surface, command, target, decision, and outcome fields
+- no plaintext secrets, generated passwords, recovery phrases, private keys, or unwrapped vault
+  material
+- keyed hashes or deterministic redaction markers for values that need later correlation without
+  disclosure
+- event hash chaining so local JSONL reports can show tampering or truncation
+- pluggable audit-device sinks, starting with local JSONL and test memory sinks
+- fail-closed policy for required audit sinks, with an explicit degraded mode only for optional
+  sinks
+
+The seal model should stay local-first but borrow the operational shape of Vault: a sealed vault can
+read metadata needed to decide how to unlock, but it cannot decrypt stored item payloads. Auto-unseal
+providers are convenience paths for retrieving unwrap material under policy; they do not remove the
+need for recovery coverage. If a seal provider is rotated, disabled, or becomes unavailable, the ops
+layer should expose that as posture and state, and the vault layer should only perform rewraps through
+typed, audited operations.
+
+This split keeps the trust boundaries narrow:
+
+- `paranoid-core` remains responsible for generation, hashing, audit math, and compliance checks.
+- `paranoid-vault` remains responsible for encrypted storage, keyslots, and unwrap/rewrap
+  mechanics.
+- `paranoid-ops` becomes the command, policy, seal-state, and automation boundary.
+- `paranoid-audit` becomes the durable security-event boundary.
+- CLI, TUI, and GUI become presentation adapters over the shared protocol.
+
+This same split is the path toward a federal-ready profile. FedRAMP High, GovCloud, and DoD IL5
+customers need evidence and enforceable operating modes, not UI-local logging. The ops/audit crates
+should therefore emit stable JSON/JSONL evidence, support SIEM ingestion, prove required audit sinks
+are healthy, and expose FIPS-provider and policy-profile evidence without claiming authorization for
+an unassessed boundary. See [Federal Readiness](./federal-readiness.md).
+
 ## GUI
 
-`paranoid-passwd-gui` is the dedicated desktop surface. It uses `Iced`, shares the same core request/result model, includes native vault `Login`, `SecureNote`, `Card`, and `Identity` CRUD/filter flows plus folder-plus-tag organization, login password-history visibility, duplicate-password visibility, native keyslot management, recovery-posture reporting, direct native unlock, encrypted backup export/import, clipboard auto-clear, and vault idle auto-lock, and now ships as a separate direct-download artifact with Linux `.deb` packaging and a native macOS `.dmg` path while native installer work remains later roadmap work.
+`paranoid-passwd-gui` is the dedicated GUI surface. The project is now Slint-first for new GUI work
+under the GPLv3 licensing path. The current Iced surface remains in place while the Slint
+implementation reaches feature parity, and it continues to share the same core request/result
+model, native vault `Login`, `SecureNote`, `Card`, and `Identity` CRUD/filter flows plus
+folder-plus-tag organization, login password-history visibility, duplicate-password visibility,
+native keyslot management, recovery-posture reporting, direct native unlock, encrypted backup
+export/import, clipboard auto-clear, and vault idle auto-lock.
 
-## Vault Foundation
+The first checked-in Slint surface lives under `crates/paranoid-gui/ui/` and is compiled by the
+GUI crate build script. Desktop remains the primary target. Slint WASM and mobile targets are
+allowed roadmap surfaces only when they keep the Rust/Slint implementation boundary, avoid
+JavaScript secret-handling logic, and carry their own threat model and release gate.
 
-`paranoid-vault` is the first password-manager crate boundary.
+`crates/paranoid-gui` uses a crate-local `unsafe_code = "deny"` lint instead of the workspace
+`forbid` because Slint's generated Rust needs to lower that lint internally. The handwritten GUI
+sources are still checked by `scripts/hallucination_check.sh`, and all security-sensitive crates
+retain the workspace `forbid` policy.
+
+## Local Vault
+
+`paranoid-vault` is the encrypted local vault crate boundary.
 
 - SQLite is the explicit vault file format, not a temporary backend choice.
 - The vault stays local-device only and uses rollback-journal SQLite rather than a persistent WAL profile.

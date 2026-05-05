@@ -11,7 +11,7 @@ The supply-chain model is still builder-first, but the toolchain has changed.
 The custom GitHub Action builder image is the repository trust root for:
 
 - a digest-pinned Wolfi base image
-- pinned Rust `1.88.x` and pinned `tox`
+- pinned Rust `1.95.x` and pinned `tox`
 - Rust toolchain installation
 - OpenSSL development headers
 - Sphinx and Python docs tooling
@@ -60,4 +60,5 @@ The repository now carries `scripts/verify_branch_protection.sh` plus `make veri
 - Workspace Cargo commands run with `--locked --frozen --offline` in `make` and CI.
 - `scripts/hallucination_check.sh` verifies math/security invariants in `paranoid-core`.
 - `scripts/supply_chain_verify.sh` verifies vendoring, workflow pinning, and release prerequisites.
+- `scripts/security_assurance_gate.py` verifies the claim-led PR assurance protocol wiring.
 - Release packaging lives in repo-owned scripts instead of workflow-only inline shell.

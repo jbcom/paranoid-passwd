@@ -1,12 +1,23 @@
 use std::fmt::Display;
 
+use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream};
-use proc_macro_crate::{crate_name, FoundCrate};
 use quote::{format_ident, quote};
 use syn::{Attribute, FnArg, Ident, Pat, PatIdent, PatType};
 
-pub fn zbus_path() -> TokenStream {
-    if let Ok(FoundCrate::Name(name)) = crate_name("zbus") {
+/// Parses the `crate` attribute value into a path.
+pub fn parse_crate_path(crate_attr: Option<&str>) -> Result<Option<syn::Path>, syn::Error> {
+    crate_attr.map(syn::parse_str).transpose()
+}
+
+/// Returns the path to the zbus crate.
+///
+/// If a custom crate path is provided via the `crate` attribute, it will be used.
+/// Otherwise, uses `proc-macro-crate` to detect the crate name.
+pub fn zbus_path(crate_path: Option<&syn::Path>) -> TokenStream {
+    if let Some(path) = crate_path {
+        quote! { ::#path }
+    } else if let Ok(FoundCrate::Name(name)) = crate_name("zbus") {
         let ident = format_ident!("{}", name);
         quote! { ::#ident }
     } else {
@@ -74,7 +85,7 @@ impl Display for PropertyEmitsChangedSignal {
             PropertyEmitsChangedSignal::False => "false",
             PropertyEmitsChangedSignal::Invalidates => "invalidates",
         };
-        write!(f, "{}", emits_changed_signal)
+        write!(f, "{emits_changed_signal}")
     }
 }
 

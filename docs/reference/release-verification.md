@@ -18,6 +18,10 @@ make release-emulate
 
 `make smoke-release` packages and verifies the host-native CLI and GUI release artifacts. On Linux hosts that includes both the direct archives and the `.deb` packages. On macOS hosts that includes the direct archives and the GUI `.dmg` image. The smoke path includes checked-in payload-layout validation before any executable smoke assertions run.
 
+On Linux hosts with the repository builder toolchain, packaged GUI smoke validation also
+captures a screenshot of the rendered window under Xvfb and fails if the capture is blank or
+unexpectedly small.
+
 `make release-emulate` runs the Linux amd64 release path through the repository-owned builder container, including the Debian package outputs.
 
 ## Verify a Published Release End to End

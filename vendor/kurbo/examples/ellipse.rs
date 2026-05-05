@@ -13,10 +13,10 @@ fn main() {
     println!("<html>");
     println!("<body>");
     println!("<svg height=\"800\" width=\"800\" style=\"background-color: #999\">");
-    let path = ellipse.to_path(1e-3).to_svg();
-    println!("  <path d=\"{}\" stroke=\"black\" fill=\"none\" />", path);
-    let path = ellipse.to_path(1.0).to_svg();
-    println!("  <path d=\"{}\" stroke=\"red\" fill=\"none\" />", path);
+    let black_path = ellipse.to_path(1e-3).to_svg();
+    println!("  <path d=\"{black_path}\" stroke=\"black\" fill=\"none\" />");
+    let red_path = ellipse.to_path(1.0).to_svg();
+    println!("  <path d=\"{red_path}\" stroke=\"red\" fill=\"none\" />");
     println!("</svg>");
     println!("</body>");
     println!("</html>");

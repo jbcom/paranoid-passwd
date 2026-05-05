@@ -2,17 +2,16 @@
 
 use enumflags2::BitFlags;
 use event_listener::EventListener;
-use static_assertions::assert_impl_all;
-use std::{io, ops::Deref};
+use std::{io, ops::Deref, sync::Arc};
 use zbus_names::{BusName, ErrorName, InterfaceName, MemberName, OwnedUniqueName, WellKnownName};
 use zvariant::ObjectPath;
 
 use crate::{
+    DBusError, Error, Result,
     blocking::ObjectServer,
     fdo::{ConnectionCredentials, RequestNameFlags, RequestNameReply},
     message::Message,
     utils::block_on,
-    DBusError, Error, Result,
 };
 
 mod builder;
@@ -26,8 +25,6 @@ pub use builder::Builder;
 pub struct Connection {
     inner: crate::Connection,
 }
-
-assert_impl_all!(Connection: Send, Sync, Unpin);
 
 impl Connection {
     /// Create a `Connection` to the session/user message bus.
@@ -128,7 +125,7 @@ impl Connection {
     ///
     /// Given an existing message (likely a method call), send a reply back to the caller with the
     /// given `body`.
-    pub fn reply<B>(&self, call: &Message, body: &B) -> Result<()>
+    pub fn reply<B>(&self, call: &zbus::message::Header<'_>, body: &B) -> Result<()>
     where
         B: serde::ser::Serialize + zvariant::DynamicType,
     {
@@ -141,7 +138,12 @@ impl Connection {
     /// with the given `error_name` and `body`.
     ///
     /// Returns the message serial number.
-    pub fn reply_error<'e, E, B>(&self, call: &Message, error_name: E, body: &B) -> Result<()>
+    pub fn reply_error<'e, E, B>(
+        &self,
+        call: &zbus::message::Header<'_>,
+        error_name: E,
+        body: &B,
+    ) -> Result<()>
     where
         B: serde::ser::Serialize + zvariant::DynamicType,
         E: TryInto<ErrorName<'e>>,
@@ -208,7 +210,7 @@ impl Connection {
         block_on(self.inner.release_name(well_known_name))
     }
 
-    /// Checks if `self` is a connection to a message bus.
+    /// Check if `self` is a connection to a message bus.
     ///
     /// This will return `false` for p2p connections.
     pub fn is_bus(&self) -> bool {
@@ -219,7 +221,16 @@ impl Connection {
     ///
     /// The `ObjectServer` is created on-demand.
     pub fn object_server(&self) -> impl Deref<Target = ObjectServer> + '_ {
-        self.inner.sync_object_server(true, None)
+        struct Wrapper(ObjectServer);
+        impl Deref for Wrapper {
+            type Target = ObjectServer;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        Wrapper(ObjectServer::new(&self.inner))
     }
 
     /// Get a reference to the underlying async Connection.
@@ -232,22 +243,38 @@ impl Connection {
         self.inner
     }
 
-    /// Returns a listener, notified on various connection activity.
+    /// Return a listener, notified on various connection activity.
     ///
     /// This function is meant for the caller to implement idle or timeout on inactivity.
     pub fn monitor_activity(&self) -> EventListener {
         self.inner.monitor_activity()
     }
 
-    /// Returns the peer credentials.
+    /// Return the peer credentials.
+    ///
+    /// The fields are populated on the best effort basis. Some or all fields may not even make
+    /// sense for certain sockets or on certain platforms and hence will be set to `None`.
+    ///
+    /// This method caches the credentials on the first call for you.
+    ///
+    /// # Caveats
+    ///
+    /// Currently `linux_security_label` field is not populated.
+    pub async fn peer_creds(&self) -> io::Result<&Arc<ConnectionCredentials>> {
+        block_on(self.inner.peer_creds())
+    }
+
+    /// Return the peer credentials.
     ///
     /// The fields are populated on the best effort basis. Some or all fields may not even make
     /// sense for certain sockets or on certain platforms and hence will be set to `None`.
     ///
     /// # Caveats
     ///
-    /// Currently `unix_group_ids` and `linux_security_label` fields are not populated.
+    /// Currently `linux_security_label` field is not populated.
+    #[deprecated(since = "5.13.0", note = "Use `peer_creds` instead")]
     pub fn peer_credentials(&self) -> io::Result<ConnectionCredentials> {
+        #[allow(deprecated)]
         block_on(self.inner.peer_credentials())
     }
 
@@ -256,6 +283,19 @@ impl Connection {
     /// After this call, all reading and writing operations will fail.
     pub fn close(self) -> Result<()> {
         block_on(self.inner.close())
+    }
+
+    /// Gracefully close the connection, waiting for all other references to be dropped.
+    ///
+    /// Blocking version of [`crate::Connection::graceful_shutdown`]. See docs there for
+    /// more details and caveats.
+    pub fn graceful_shutdown(self) {
+        block_on(self.inner.graceful_shutdown())
+    }
+
+    /// The method_timeout (if any). See [Builder::method_timeout] for details.
+    pub fn method_timeout(&self) -> Option<std::time::Duration> {
+        self.inner.method_timeout()
     }
 }
 
@@ -280,8 +320,8 @@ mod tests {
     use uds_windows::UnixStream;
 
     use crate::{
-        blocking::{connection::Builder, MessageIterator},
         Guid,
+        blocking::{MessageIterator, connection::Builder},
     };
 
     #[test]
@@ -317,7 +357,7 @@ mod tests {
         tx.send(()).unwrap();
         let m = s.next().unwrap().unwrap();
         assert_eq!(m.to_string(), "Method call Test");
-        c.reply(&m, &("yay")).unwrap();
+        c.reply(&m.header(), &("yay")).unwrap();
 
         for _ in s {}
 

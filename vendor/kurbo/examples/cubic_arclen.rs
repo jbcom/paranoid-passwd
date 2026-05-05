@@ -3,18 +3,15 @@
 
 //! Research testbed for arclengths of cubic Bézier segments.
 
-// Lots of stuff is commented out or was just something to try.
-#![allow(unused)]
-#![allow(clippy::unreadable_literal)]
-#![allow(clippy::many_single_char_names)]
+#![allow(unused, reason = "a bunch of experiments in the code")]
 
-use kurbo::common::*;
+use kurbo::common::{GAUSS_LEGENDRE_COEFFS_11, GAUSS_LEGENDRE_COEFFS_7, GAUSS_LEGENDRE_COEFFS_9};
 use kurbo::{
     CubicBez, ParamCurve, ParamCurveArclen, ParamCurveCurvature, ParamCurveDeriv, Point, Vec2,
 };
 
 /// Calculate arclength using Gauss-Legendre quadrature using formula from Behdad
-/// in https://github.com/Pomax/BezierInfo-2/issues/77
+/// in <https://github.com/Pomax/BezierInfo-2/issues/77>
 fn gauss_arclen_5(c: CubicBez) -> f64 {
     let v0 = (c.p1 - c.p0).hypot() * 0.15;
     let v1 = (-0.558983582205757 * c.p0.to_vec2()
@@ -113,7 +110,10 @@ fn est_gauss11_error_2(c: CubicBez) -> f64 {
         .sum::<f64>()
 }
 
-#[allow(clippy::neg_cmp_op_on_partial_ord)]
+#[expect(
+    clippy::neg_cmp_op_on_partial_ord,
+    reason = "probably IEEE semantics nuance"
+)]
 fn est_max_curvature(c: CubicBez) -> f64 {
     let n = 100;
     let mut max = 0.0;
@@ -133,7 +133,7 @@ fn est_min_deriv_norm2(c: CubicBez) -> f64 {
     let mut min = d.eval(1.0).to_vec2().hypot2();
     for i in 0..n {
         let t = (i as f64) * (n as f64).recip();
-        min = min.min(d.eval(t).to_vec2().hypot2())
+        min = min.min(d.eval(t).to_vec2().hypot2());
     }
     min
 }

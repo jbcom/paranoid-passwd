@@ -19,18 +19,13 @@ use crate::geom::IntSizeExt;
 use tiny_skia_path::NoStdFloat;
 
 /// A path filling rule.
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub enum FillRule {
     /// Specifies that "inside" is computed by a non-zero sum of signed edge crossings.
+    #[default]
     Winding,
     /// Specifies that "inside" is computed by an odd number of edge crossings.
     EvenOdd,
-}
-
-impl Default for FillRule {
-    fn default() -> Self {
-        FillRule::Winding
-    }
 }
 
 /// Controls how a shape should be painted.
@@ -50,6 +45,15 @@ pub struct Paint<'a> {
     ///
     /// Default: true
     pub anti_alias: bool,
+
+    /// Colorspace for blending.
+    ///
+    /// This enables gamma correction during the blend operation.  While skia supports
+    /// full color-space conversions, we only support a few (simple) cases.  Note that
+    /// any color space other than Linear will force using the high-quality pipeline.
+    ///
+    /// Default: Linear
+    pub colorspace: ColorSpace,
 
     /// Forces the high quality/precision rendering pipeline.
     ///
@@ -76,12 +80,13 @@ impl Default for Paint<'_> {
             shader: Shader::SolidColor(Color::BLACK),
             blend_mode: BlendMode::default(),
             anti_alias: true,
+            colorspace: ColorSpace::default(),
             force_hq_pipeline: false,
         }
     }
 }
 
-impl<'a> Paint<'a> {
+impl Paint<'_> {
     /// Sets a paint source to a solid color.
     pub fn set_color(&mut self, color: Color) {
         self.shader = Shader::SolidColor(color);
@@ -177,8 +182,6 @@ impl PixmapMut<'_> {
     /// clipping of horizontal/vertical edges.
     ///
     /// Used mainly to render a pixmap onto a pixmap.
-    ///
-    /// Returns `None` when there is nothing to fill or in case of a numeric overflow.
     pub fn fill_rect(
         &mut self,
         rect: Rect,
@@ -495,6 +498,7 @@ impl PixmapMut<'_> {
             blend_mode: paint.blend_mode,
             anti_alias: false,        // Skia doesn't use it too.
             force_hq_pipeline: false, // Pattern will use hq anyway.
+            colorspace: ColorSpace::default(),
         };
 
         self.fill_rect(rect, &paint, transform, mask);

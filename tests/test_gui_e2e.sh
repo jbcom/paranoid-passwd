@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CLI_BINARY="${1:?path to paranoid-passwd required}"
+GUI_BINARY="${2:?path to paranoid-passwd-gui required}"
+SCREENSHOT_PATH="${3:?output screenshot path required}"
+
+for required in xvfb-run import identify; do
+  if ! command -v "${required}" >/dev/null 2>&1; then
+    echo "${required} is required for GUI e2e" >&2
+    exit 64
+  fi
+done
+
+mkdir -p "$(dirname "${SCREENSHOT_PATH}")"
+
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/paranoid-gui-e2e.XXXXXX")"
+cleanup() {
+  rm -rf "${tmpdir}"
+}
+trap cleanup EXIT
+
+vault_path="${tmpdir}/vault.sqlite"
+backup_path="${tmpdir}/vault.backup.json"
+outcome_path="${tmpdir}/gui.outcome"
+log_path="${tmpdir}/gui.log"
+
+export PARANOID_MASTER_PASSWORD="correct horse battery staple"
+"${CLI_BINARY}" vault --cli --path "${vault_path}" init >/dev/null
+
+xvfb-run -a env WINIT_UNIX_BACKEND=x11 bash -lc '
+  set -euo pipefail
+
+  gui_binary="$1"
+  screenshot_path="$2"
+  backup_path="$3"
+  outcome_path="$4"
+  log_path="$5"
+  vault_path="$6"
+
+  cleanup_gui() {
+    if [ -n "${gui_pid:-}" ]; then
+      kill "${gui_pid}" >/dev/null 2>&1 || true
+      wait "${gui_pid}" >/dev/null 2>&1 || true
+    fi
+  }
+  trap cleanup_gui EXIT
+
+  capture_gui_window() {
+    if ! import -descend -window "paranoid-passwd" "${screenshot_path}" 2>/dev/null; then
+      import -window root "${screenshot_path}"
+    fi
+  }
+
+  PARANOID_GUI_AUTOMATION_SCENARIO=operator-workflow \
+  PARANOID_GUI_AUTOMATION_VAULT_PATH="${vault_path}" \
+  PARANOID_GUI_AUTOMATION_BACKUP_PATH="${backup_path}" \
+  PARANOID_GUI_AUTOMATION_OUTPUT_PATH="${outcome_path}" \
+  "${gui_binary}" >"${log_path}" 2>&1 &
+  gui_pid=$!
+
+  for _ in $(seq 1 300); do
+    if [ -f "${outcome_path}" ]; then
+      break
+    fi
+    if ! kill -0 "${gui_pid}" >/dev/null 2>&1; then
+      cat "${log_path}" >&2 || true
+      echo "GUI exited before reporting the automation outcome" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+
+  if [ ! -f "${outcome_path}" ]; then
+    cat "${log_path}" >&2 || true
+    echo "GUI automation timed out without writing an outcome marker" >&2
+    exit 1
+  fi
+
+  if ! grep -q "^status=pass$" "${outcome_path}"; then
+    cat "${outcome_path}" >&2 || true
+    cat "${log_path}" >&2 || true
+    echo "GUI automation reported failure" >&2
+    exit 1
+  fi
+
+  if [ ! -f "${backup_path}" ]; then
+    cat "${outcome_path}" >&2 || true
+    cat "${log_path}" >&2 || true
+    echo "GUI automation did not write the expected backup package" >&2
+    exit 1
+  fi
+
+  sleep 1
+  screenshot_ready=0
+  for _ in $(seq 1 120); do
+    capture_gui_window "${screenshot_path}"
+    read -r width height colors scaled_mean < <(
+      identify -format "%w %h %k %[fx:int(mean*1000000)]\n" "${screenshot_path}"
+    )
+    if [ "${width}" -ge 400 ] \
+      && [ "${height}" -ge 300 ] \
+      && [ "${colors}" -gt 32 ] \
+      && [ "${scaled_mean}" -gt 10000 ]; then
+      screenshot_ready=1
+      break
+    fi
+    sleep 0.1
+  done
+
+  if [ "${screenshot_ready}" -ne 1 ]; then
+    cat "${outcome_path}" >&2 || true
+    cat "${log_path}" >&2 || true
+    echo "GUI automation screenshot was blank or undersized" >&2
+    exit 1
+  fi
+' _ "${GUI_BINARY}" "${SCREENSHOT_PATH}" "${backup_path}" "${outcome_path}" "${log_path}" "${vault_path}"
+
+printf 'GUI e2e passed: %s\n' "${SCREENSHOT_PATH}"

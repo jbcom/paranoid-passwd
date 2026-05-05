@@ -1,8 +1,7 @@
 use serde::ser::{Serialize, Serializer};
-use static_assertions::assert_impl_all;
 use std::fmt::Display;
 
-use crate::{value_display_fmt, Error, Signature, Type, Value};
+use crate::{Error, Signature, Type, Value, value_display_fmt};
 
 /// A helper type to wrap `Option<T>` (GVariant's Maybe type) in [`Value`].
 ///
@@ -12,11 +11,8 @@ use crate::{value_display_fmt, Error, Signature, Type, Value};
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Maybe<'a> {
     value: Box<Option<Value<'a>>>,
-    value_signature: Signature<'a>,
-    signature: Signature<'a>,
+    signature: Signature,
 }
-
-assert_impl_all!(Maybe<'_>: Send, Sync, Unpin);
 
 impl<'a> Maybe<'a> {
     /// Get a reference to underlying value.
@@ -26,40 +22,33 @@ impl<'a> Maybe<'a> {
 
     /// Create a new Just (Some) `Maybe`.
     pub fn just(value: Value<'a>) -> Self {
-        let value_signature = value.value_signature().to_owned();
-        let signature = create_signature(&value_signature);
+        let value_signature = value.value_signature().clone();
+        let signature = Signature::maybe(value_signature);
         Self {
-            value_signature,
             signature,
             value: Box::new(Some(value)),
         }
     }
 
-    pub(crate) fn just_full_signature<'v: 'a, 's: 'a>(
-        value: Value<'v>,
-        signature: Signature<'s>,
-    ) -> Self {
+    pub(crate) fn just_full_signature(value: Value<'a>, signature: &Signature) -> Self {
         Self {
-            value_signature: signature.slice(1..),
-            signature,
+            signature: signature.clone(),
             value: Box::new(Some(value)),
         }
     }
 
     /// Create a new Nothing (None) `Maybe`, given the signature of the type.
-    pub fn nothing<'s: 'a>(value_signature: Signature<'s>) -> Self {
-        let signature = create_signature(&value_signature);
+    pub fn nothing(value_signature: &Signature) -> Self {
+        let signature = Signature::maybe(value_signature.clone());
         Self {
-            value_signature,
             signature,
             value: Box::new(None),
         }
     }
 
-    pub(crate) fn nothing_full_signature<'s: 'a>(signature: Signature<'s>) -> Self {
+    pub(crate) fn nothing_full_signature(signature: &Signature) -> Self {
         Self {
-            value_signature: signature.slice(1..),
-            signature,
+            signature: signature.clone(),
             value: Box::new(None),
         }
     }
@@ -67,7 +56,7 @@ impl<'a> Maybe<'a> {
     /// Get the inner value as a concrete type
     pub fn get<T>(&'a self) -> core::result::Result<Option<T>, Error>
     where
-        T: ?Sized + TryFrom<&'a Value<'a>>,
+        T: TryFrom<&'a Value<'a>>,
         <T as TryFrom<&'a Value<'a>>>::Error: Into<crate::Error>,
     {
         self.value
@@ -78,28 +67,20 @@ impl<'a> Maybe<'a> {
     }
 
     /// Get the signature of `Maybe`.
-    ///
-    /// NB: This method potentially allocates and copies. Use [`full_signature`] if you'd like to
-    /// avoid that.
-    ///
-    /// [`full_signature`]: #method.full_signature
-    pub fn signature(&self) -> Signature<'static> {
-        self.signature.to_owned()
-    }
-
-    /// Get the signature of `Maybe`.
-    pub fn full_signature(&self) -> &Signature<'_> {
+    pub fn signature(&self) -> &Signature {
         &self.signature
     }
 
     /// Get the signature of the potential value in the `Maybe`.
-    pub fn value_signature(&self) -> &Signature<'_> {
-        &self.value_signature
+    pub fn value_signature(&self) -> &Signature {
+        match self.signature() {
+            Signature::Maybe(signature) => signature,
+            _ => unreachable!("Invalid `Maybe` signature"),
+        }
     }
 
     pub(crate) fn try_to_owned(&self) -> crate::Result<Maybe<'static>> {
         Ok(Maybe {
-            value_signature: self.value_signature.to_owned(),
             value: Box::new(
                 self.value
                     .as_ref()
@@ -107,19 +88,29 @@ impl<'a> Maybe<'a> {
                     .map(|v| v.try_to_owned().map(Into::into))
                     .transpose()?,
             ),
-            signature: self.signature.to_owned(),
+            signature: self.signature.clone(),
+        })
+    }
+
+    pub(crate) fn try_into_owned(self) -> crate::Result<Maybe<'static>> {
+        Ok(Maybe {
+            value: Box::new(
+                self.value
+                    .map(|v| v.try_into_owned().map(Into::into))
+                    .transpose()?,
+            ),
+            signature: self.signature,
         })
     }
 
     /// Attempt to clone `self`.
     pub fn try_clone(&self) -> Result<Self, crate::Error> {
         Ok(Maybe {
-            value_signature: self.value_signature.clone(),
             value: Box::new(
                 self.value
                     .as_ref()
                     .as_ref()
-                    .map(|v| v.try_clone().map(Into::into))
+                    .map(|v| v.try_clone())
                     .transpose()?,
             ),
             signature: self.signature.clone(),
@@ -139,7 +130,7 @@ pub(crate) fn maybe_display_fmt(
     type_annotate: bool,
 ) -> std::fmt::Result {
     if type_annotate {
-        write!(f, "@{} ", maybe.full_signature())?;
+        write!(f, "@{} ", maybe.signature())?;
     }
 
     let (last_inner, depth) = {
@@ -175,7 +166,7 @@ where
     fn from(value: Option<T>) -> Self {
         value
             .map(|v| Self::just(Value::new(v)))
-            .unwrap_or_else(|| Self::nothing(T::signature()))
+            .unwrap_or_else(|| Self::nothing(T::SIGNATURE))
     }
 }
 
@@ -187,7 +178,7 @@ where
         value
             .as_ref()
             .map(|v| Self::just(Value::new(v.clone())))
-            .unwrap_or_else(|| Self::nothing(T::signature()))
+            .unwrap_or_else(|| Self::nothing(T::SIGNATURE))
     }
 }
 
@@ -201,8 +192,4 @@ impl<'a> Serialize for Maybe<'a> {
             None => serializer.serialize_none(),
         }
     }
-}
-
-fn create_signature(value_signature: &Signature<'_>) -> Signature<'static> {
-    Signature::from_string_unchecked(format!("m{value_signature}"))
 }

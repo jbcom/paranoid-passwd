@@ -11,10 +11,11 @@
 
 [package]
 edition = "2021"
-rust-version = "1.60"
+rust-version = "1.71"
 name = "objc2-metal"
-version = "0.2.2"
+version = "0.3.2"
 build = false
+autolib = false
 autobins = false
 autoexamples = false
 autotests = false
@@ -34,82 +35,135 @@ categories = [
     "external-ffi-bindings",
     "os::macos-apis",
 ]
-license = "MIT"
+license = "Zlib OR Apache-2.0 OR MIT"
 repository = "https://github.com/madsmtm/objc2"
 
 [package.metadata.docs.rs]
 default-target = "aarch64-apple-darwin"
-features = ["all"]
+rustc-args = [
+    "--cfg",
+    "docsrs",
+]
 targets = [
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",
     "aarch64-apple-ios",
     "aarch64-apple-tvos",
     "aarch64-apple-ios-macabi",
+    "aarch64-apple-visionos",
 ]
-
-[lib]
-name = "objc2_metal"
-path = "src/lib.rs"
-
-[[example]]
-name = "triangle"
-path = "examples/triangle.rs"
-required-features = [
-    "objc2-app-kit/NSGraphics",
-    "objc2-app-kit/NSWindow",
-    "objc2-app-kit/NSResponder",
-    "objc2-app-kit/NSApplication",
-    "objc2-app-kit/NSRunningApplication",
-    "objc2-app-kit/NSView",
-    "objc2-foundation/NSError",
-    "objc2-foundation/NSString",
-    "objc2-foundation/NSDate",
-    "objc2-foundation/NSNotification",
-    "objc2-foundation/NSThread",
-    "objc2-foundation/NSGeometry",
-    "MTLAccelerationStructureTypes",
-    "MTLLibrary",
-    "MTLRenderPipeline",
-    "MTLRenderCommandEncoder",
-    "MTLCommandBuffer",
-    "MTLCommandEncoder",
-    "MTLCommandQueue",
-    "MTLPixelFormat",
-    "MTLDevice",
-    "MTLDrawable",
-    "MTLRenderPass",
-    "objc2-quartz-core/objc2-metal",
-    "objc2-metal-kit/MTKView",
-    "objc2-metal-kit/objc2-app-kit",
-    "objc2-metal-kit/objc2-quartz-core",
-]
-
-[[test]]
-name = "runs_with_core_graphics"
-path = "tests/runs_with_core_graphics.rs"
-
-[dependencies.bitflags]
-version = "2.5.0"
-optional = true
-default-features = false
-
-[dependencies.block2]
-version = "0.5.1"
-optional = true
-default-features = false
-
-[dependencies.objc2]
-version = "0.5.2"
-default-features = false
-
-[dependencies.objc2-foundation]
-version = "0.2.2"
-default-features = false
-
-[dev-dependencies]
+features = ["objc2-io-surface"]
 
 [features]
+MTL4AccelerationStructure = [
+    "objc2-foundation/NSArray",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
+MTL4Archive = [
+    "objc2-foundation/NSError",
+    "objc2-foundation/NSString",
+]
+MTL4ArgumentTable = [
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
+MTL4BinaryFunction = ["objc2-foundation/NSString"]
+MTL4BinaryFunctionDescriptor = [
+    "bitflags",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
+MTL4BufferRange = []
+MTL4CommandAllocator = [
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
+MTL4CommandBuffer = [
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSRange",
+    "objc2-foundation/NSString",
+]
+MTL4CommandEncoder = [
+    "bitflags",
+    "objc2-foundation/NSString",
+]
+MTL4CommandQueue = [
+    "objc2-foundation/NSError",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSRange",
+    "objc2-foundation/NSString",
+]
+MTL4CommitFeedback = ["objc2-foundation/NSError"]
+MTL4Compiler = [
+    "objc2-foundation/NSArray",
+    "objc2-foundation/NSError",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+    "objc2-foundation/NSURL",
+]
+MTL4CompilerTask = []
+MTL4ComputeCommandEncoder = ["objc2-foundation/NSRange"]
+MTL4ComputePipeline = ["objc2-foundation/NSObject"]
+MTL4Counters = [
+    "objc2-foundation/NSData",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSRange",
+    "objc2-foundation/NSString",
+]
+MTL4FunctionDescriptor = ["objc2-foundation/NSObject"]
+MTL4LibraryDescriptor = [
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
+MTL4LibraryFunctionDescriptor = [
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
+MTL4LinkingDescriptor = [
+    "objc2-foundation/NSArray",
+    "objc2-foundation/NSDictionary",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
+MTL4MachineLearningCommandEncoder = []
+MTL4MachineLearningPipeline = [
+    "objc2-foundation/NSArray",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSRange",
+    "objc2-foundation/NSString",
+]
+MTL4MeshRenderPipeline = ["objc2-foundation/NSObject"]
+MTL4PipelineDataSetSerializer = [
+    "bitflags",
+    "objc2-foundation/NSData",
+    "objc2-foundation/NSError",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSURL",
+]
+MTL4PipelineState = [
+    "bitflags",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
+MTL4RenderCommandEncoder = [
+    "bitflags",
+    "objc2-foundation/NSRange",
+]
+MTL4RenderPass = ["objc2-foundation/NSObject"]
+MTL4RenderPipeline = [
+    "objc2-foundation/NSArray",
+    "objc2-foundation/NSObject",
+]
+MTL4SpecializedFunctionDescriptor = [
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
+MTL4StitchedFunctionDescriptor = [
+    "objc2-foundation/NSArray",
+    "objc2-foundation/NSObject",
+]
+MTL4TileRenderPipeline = ["objc2-foundation/NSObject"]
 MTLAccelerationStructure = [
     "bitflags",
     "objc2-foundation/NSArray",
@@ -117,13 +171,15 @@ MTLAccelerationStructure = [
     "objc2-foundation/NSString",
 ]
 MTLAccelerationStructureCommandEncoder = [
-    "bitflags",
     "objc2-foundation/NSObject",
+    "MTLAccelerationStructure",
 ]
 MTLAccelerationStructureTypes = []
+MTLAllocation = []
 MTLArgument = [
     "objc2-foundation/NSArray",
     "objc2-foundation/NSString",
+    "MTLDataType",
 ]
 MTLArgumentEncoder = [
     "objc2-foundation/NSRange",
@@ -141,6 +197,7 @@ MTLBlitCommandEncoder = [
 ]
 MTLBlitPass = ["objc2-foundation/NSObject"]
 MTLBuffer = [
+    "objc2-foundation/NSError",
     "objc2-foundation/NSRange",
     "objc2-foundation/NSString",
 ]
@@ -163,7 +220,10 @@ MTLCommandEncoder = [
     "bitflags",
     "objc2-foundation/NSString",
 ]
-MTLCommandQueue = ["objc2-foundation/NSString"]
+MTLCommandQueue = [
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
 MTLComputeCommandEncoder = ["objc2-foundation/NSRange"]
 MTLComputePass = ["objc2-foundation/NSObject"]
 MTLComputePipeline = [
@@ -171,6 +231,7 @@ MTLComputePipeline = [
     "objc2-foundation/NSError",
     "objc2-foundation/NSObject",
     "objc2-foundation/NSString",
+    "MTLAllocation",
 ]
 MTLCounters = [
     "objc2-foundation/NSArray",
@@ -180,6 +241,7 @@ MTLCounters = [
     "objc2-foundation/NSRange",
     "objc2-foundation/NSString",
 ]
+MTLDataType = []
 MTLDefines = []
 MTLDepthStencil = [
     "objc2-foundation/NSObject",
@@ -193,6 +255,14 @@ MTLDevice = [
     "objc2-foundation/NSObject",
     "objc2-foundation/NSString",
     "objc2-foundation/NSURL",
+    "MTLLibrary",
+    "MTLResource",
+    "MTLGPUAddress",
+]
+MTLDeviceCertification = [
+    "objc2-foundation/NSNotification",
+    "objc2-foundation/NSProcessInfo",
+    "objc2-foundation/NSString",
 ]
 MTLDrawable = []
 MTLDynamicLibrary = [
@@ -223,10 +293,12 @@ MTLFunctionLog = [
     "objc2-foundation/NSURL",
 ]
 MTLFunctionStitching = [
+    "bitflags",
     "objc2-foundation/NSArray",
     "objc2-foundation/NSObject",
     "objc2-foundation/NSString",
 ]
+MTLGPUAddress = []
 MTLHeap = [
     "objc2-foundation/NSObject",
     "objc2-foundation/NSString",
@@ -265,6 +337,11 @@ MTLLinkedFunctions = [
     "objc2-foundation/NSObject",
     "objc2-foundation/NSString",
 ]
+MTLLogState = [
+    "objc2-foundation/NSError",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
 MTLParallelRenderCommandEncoder = []
 MTLPipeline = ["objc2-foundation/NSObject"]
 MTLPixelFormat = []
@@ -287,6 +364,12 @@ MTLRenderPipeline = [
     "objc2-foundation/NSError",
     "objc2-foundation/NSObject",
     "objc2-foundation/NSString",
+    "MTLAllocation",
+]
+MTLResidencySet = [
+    "objc2-foundation/NSArray",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
 ]
 MTLResource = [
     "bitflags",
@@ -294,27 +377,78 @@ MTLResource = [
 ]
 MTLResourceStateCommandEncoder = []
 MTLResourceStatePass = ["objc2-foundation/NSObject"]
+MTLResourceViewPool = [
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSRange",
+    "objc2-foundation/NSString",
+]
 MTLSampler = [
     "objc2-foundation/NSObject",
     "objc2-foundation/NSString",
 ]
-MTLStageInputOutputDescriptor = ["objc2-foundation/NSObject"]
+MTLStageInputOutputDescriptor = [
+    "objc2-foundation/NSObject",
+    "MTLArgument",
+]
+MTLTensor = [
+    "bitflags",
+    "objc2-foundation/NSError",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSString",
+]
 MTLTexture = [
     "bitflags",
     "objc2-foundation/NSObject",
     "objc2-foundation/NSRange",
     "objc2-foundation/NSString",
 ]
+MTLTextureViewPool = []
 MTLTypes = []
 MTLVertexDescriptor = ["objc2-foundation/NSObject"]
 MTLVisibleFunctionTable = [
     "objc2-foundation/NSObject",
     "objc2-foundation/NSRange",
 ]
-all = [
+alloc = []
+bitflags = ["dep:bitflags"]
+block2 = ["dep:block2"]
+default = [
+    "std",
+    "MTL4AccelerationStructure",
+    "MTL4Archive",
+    "MTL4ArgumentTable",
+    "MTL4BinaryFunction",
+    "MTL4BinaryFunctionDescriptor",
+    "MTL4BufferRange",
+    "MTL4CommandAllocator",
+    "MTL4CommandBuffer",
+    "MTL4CommandEncoder",
+    "MTL4CommandQueue",
+    "MTL4CommitFeedback",
+    "MTL4Compiler",
+    "MTL4CompilerTask",
+    "MTL4ComputeCommandEncoder",
+    "MTL4ComputePipeline",
+    "MTL4Counters",
+    "MTL4FunctionDescriptor",
+    "MTL4LibraryDescriptor",
+    "MTL4LibraryFunctionDescriptor",
+    "MTL4LinkingDescriptor",
+    "MTL4MachineLearningCommandEncoder",
+    "MTL4MachineLearningPipeline",
+    "MTL4MeshRenderPipeline",
+    "MTL4PipelineDataSetSerializer",
+    "MTL4PipelineState",
+    "MTL4RenderCommandEncoder",
+    "MTL4RenderPass",
+    "MTL4RenderPipeline",
+    "MTL4SpecializedFunctionDescriptor",
+    "MTL4StitchedFunctionDescriptor",
+    "MTL4TileRenderPipeline",
     "MTLAccelerationStructure",
     "MTLAccelerationStructureCommandEncoder",
     "MTLAccelerationStructureTypes",
+    "MTLAllocation",
     "MTLArgument",
     "MTLArgumentEncoder",
     "MTLBinaryArchive",
@@ -330,9 +464,11 @@ all = [
     "MTLComputePass",
     "MTLComputePipeline",
     "MTLCounters",
+    "MTLDataType",
     "MTLDefines",
     "MTLDepthStencil",
     "MTLDevice",
+    "MTLDeviceCertification",
     "MTLDrawable",
     "MTLDynamicLibrary",
     "MTLEvent",
@@ -342,6 +478,7 @@ all = [
     "MTLFunctionHandle",
     "MTLFunctionLog",
     "MTLFunctionStitching",
+    "MTLGPUAddress",
     "MTLHeap",
     "MTLIOCommandBuffer",
     "MTLIOCommandQueue",
@@ -351,6 +488,7 @@ all = [
     "MTLIntersectionFunctionTable",
     "MTLLibrary",
     "MTLLinkedFunctions",
+    "MTLLogState",
     "MTLParallelRenderCommandEncoder",
     "MTLPipeline",
     "MTLPixelFormat",
@@ -358,52 +496,106 @@ all = [
     "MTLRenderCommandEncoder",
     "MTLRenderPass",
     "MTLRenderPipeline",
+    "MTLResidencySet",
     "MTLResource",
     "MTLResourceStateCommandEncoder",
     "MTLResourceStatePass",
+    "MTLResourceViewPool",
     "MTLSampler",
     "MTLStageInputOutputDescriptor",
+    "MTLTensor",
     "MTLTexture",
+    "MTLTextureViewPool",
     "MTLTypes",
     "MTLVertexDescriptor",
     "MTLVisibleFunctionTable",
     "bitflags",
     "block2",
+    "dispatch2",
+    "objc2-core-foundation",
 ]
-alloc = [
-    "block2?/alloc",
-    "objc2/alloc",
-    "objc2-foundation/alloc",
-]
-bitflags = [
-    "dep:bitflags",
-    "objc2-foundation/bitflags",
-]
-block2 = [
-    "dep:block2",
-    "objc2-foundation/block2",
-]
-default = ["std"]
-std = [
-    "alloc",
-    "bitflags?/std",
-    "block2?/std",
-    "objc2/std",
-    "objc2-foundation/std",
-]
+dispatch2 = ["dep:dispatch2"]
+objc2-core-foundation = ["dep:objc2-core-foundation"]
+objc2-io-surface = ["dep:objc2-io-surface"]
+std = ["alloc"]
+unstable-darwin-objc = []
 unstable-private = [
     "objc2-foundation/NSString",
     "objc2-foundation/NSError",
 ]
 
+[lib]
+name = "objc2_metal"
+path = "src/lib.rs"
+
+[[test]]
+name = "null_error_handling"
+path = "tests/null_error_handling.rs"
+
+[[test]]
+name = "runs_with_core_graphics"
+path = "tests/runs_with_core_graphics.rs"
+
+[dependencies.bitflags]
+version = "2.5.0"
+features = ["std"]
+optional = true
+default-features = false
+
+[dependencies.block2]
+version = ">=0.6.1, <0.8.0"
+features = ["alloc"]
+optional = true
+default-features = false
+
+[dependencies.dispatch2]
+version = ">=0.3.0, <0.5.0"
+features = [
+    "alloc",
+    "objc2",
+]
+optional = true
+default-features = false
+
+[dependencies.objc2]
+version = ">=0.6.2, <0.8.0"
+features = ["std"]
+default-features = false
+
+[dependencies.objc2-core-foundation]
+version = "0.3.2"
+features = [
+    "CFDate",
+    "objc2",
+]
+optional = true
+default-features = false
+
+[dependencies.objc2-foundation]
+version = "0.3.2"
+features = ["alloc"]
+default-features = false
+
+[dependencies.objc2-io-surface]
+version = "0.3.2"
+features = [
+    "IOSurfaceRef",
+    "objc2",
+]
+optional = true
+default-features = false
+
 [lints.clippy]
-cargo = "warn"
 ptr_as_ptr = "warn"
+redundant_feature_names = "allow"
+
+[lints.clippy.cargo]
+level = "warn"
+priority = -1
 
 [lints.rust]
 elided_lifetimes_in_paths = "warn"
 missing_copy_implementations = "warn"
-missing_debug_implementations = "warn"
 non_ascii_idents = "deny"
 unreachable_pub = "warn"
 unsafe_op_in_unsafe_fn = "deny"

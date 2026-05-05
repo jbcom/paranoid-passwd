@@ -1,10 +1,9 @@
 use serde::{Deserialize, Deserializer, Serialize};
-use static_assertions::assert_impl_all;
-use std::{collections::HashMap, hash::BuildHasher};
+use std::{borrow::Borrow, collections::HashMap, hash::BuildHasher};
 
 use crate::{
-    Array, Dict, NoneValue, ObjectPath, Optional, OwnedObjectPath, OwnedSignature, Signature, Str,
-    Structure, Type, Value,
+    Array, Dict, NoneValue, ObjectPath, Optional, OwnedObjectPath, Signature, Str, Structure, Type,
+    Value,
 };
 
 #[cfg(unix)]
@@ -14,13 +13,11 @@ use crate::Fd;
 use crate::Maybe;
 
 // FIXME: Replace with a generic impl<T: TryFrom<Value>> TryFrom<OwnedValue> for T?
-// https://github.com/dbus2/zbus/issues/138
+// https://github.com/z-galaxy/zbus/issues/138
 
 /// Owned [`Value`](enum.Value.html)
 #[derive(Debug, PartialEq, Serialize, Type)]
 pub struct OwnedValue(pub(crate) Value<'static>);
-
-assert_impl_all!(OwnedValue: Send, Sync, Unpin);
 
 impl OwnedValue {
     /// Attempt to clone the value.
@@ -71,8 +68,7 @@ ov_try_from!(i64);
 ov_try_from!(u64);
 ov_try_from!(f64);
 ov_try_from!(String);
-ov_try_from!(Signature<'static>);
-ov_try_from!(OwnedSignature);
+ov_try_from!(Signature);
 ov_try_from!(ObjectPath<'static>);
 ov_try_from!(OwnedObjectPath);
 ov_try_from!(Array<'static>);
@@ -94,7 +90,7 @@ ov_try_from_ref!(i64);
 ov_try_from_ref!(u64);
 ov_try_from_ref!(f64);
 ov_try_from_ref!(&'a str);
-ov_try_from_ref!(&'a Signature<'a>);
+ov_try_from_ref!(&'a Signature);
 ov_try_from_ref!(&'a ObjectPath<'a>);
 ov_try_from_ref!(&'a Array<'a>);
 ov_try_from_ref!(&'a Dict<'a, 'a>);
@@ -191,8 +187,7 @@ impl<'a> TryFrom<Value<'a>> for OwnedValue {
     type Error = crate::Error;
 
     fn try_from(v: Value<'a>) -> crate::Result<Self> {
-        // TODO: add into_owned, avoiding copy if already owned..
-        v.try_to_owned()
+        v.try_into_owned()
     }
 }
 
@@ -224,8 +219,13 @@ to_value!(i64, I64);
 to_value!(u64, U64);
 to_value!(f64, F64);
 to_value!(Str<'a>, Str);
-to_value!(Signature<'a>, Signature);
 to_value!(ObjectPath<'a>, ObjectPath);
+
+impl From<Signature> for OwnedValue {
+    fn from(v: Signature) -> Self {
+        OwnedValue(<Value<'static>>::Signature(v))
+    }
+}
 
 macro_rules! try_to_value {
     ($from:ty) => {
@@ -269,6 +269,12 @@ impl std::ops::Deref for OwnedValue {
     }
 }
 
+impl<'a> Borrow<Value<'a>> for OwnedValue {
+    fn borrow(&self) -> &Value<'a> {
+        &self.0
+    }
+}
+
 impl<'de> Deserialize<'de> for OwnedValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -279,11 +285,24 @@ impl<'de> Deserialize<'de> for OwnedValue {
     }
 }
 
+impl Clone for OwnedValue {
+    /// Clone the value.
+    ///
+    /// # Panics
+    ///
+    /// This method can only fail on Unix platforms for [`Value::Fd`] variant containing an
+    /// [`Fd::Owned`] variant. This happens when the current process exceeds the limit on maximum
+    /// number of open file descriptors.
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, error::Error};
 
-    use crate::{serialized::Context, to_bytes, OwnedValue, Value, LE};
+    use crate::{LE, OwnedValue, Value, serialized::Context, to_bytes};
 
     #[cfg(feature = "enumflags2")]
     #[test]

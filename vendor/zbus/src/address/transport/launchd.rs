@@ -1,5 +1,5 @@
 use super::{Transport, Unix, UnixSocket};
-use crate::{process::run, Result};
+use crate::{Result, process::run};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,7 +22,7 @@ impl Launchd {
         &self.env
     }
 
-    /// Determine the actual transport details behin a launchd address.
+    /// Determine the actual transport details behind a launchd address.
     pub(super) async fn bus_address(&self) -> Result<Transport> {
         let output = run("launchctl", ["getenv", self.env()])
             .await
@@ -36,7 +36,7 @@ impl Launchd {
         }
 
         let addr = String::from_utf8(output.stdout).map_err(|e| {
-            crate::Error::Address(format!("Unable to parse launchctl output as UTF-8: {}", e))
+            crate::Error::Address(format!("Unable to parse launchctl output as UTF-8: {e}"))
         })?;
 
         Ok(Transport::Unix(Unix::new(UnixSocket::File(

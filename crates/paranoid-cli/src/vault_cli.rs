@@ -62,7 +62,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             for recommendation in header.recovery_recommendations() {
                 println!("recommendation\t{recommendation}");
             }
-            for (keyslot, health) in header.keyslots.into_iter().zip(keyslot_health.into_iter()) {
+            for (keyslot, health) in header.keyslots.into_iter().zip(keyslot_health) {
                 println!(
                     "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     keyslot.id,
@@ -522,7 +522,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
                     url: url.clone(),
                     notes: notes.clone(),
                     folder: folder.clone(),
-                    tags: Some(tags.clone()),
+                    tags: tags.clone(),
                 },
             )?;
             print_generated_passwords(&report)?;
@@ -669,7 +669,7 @@ enum VaultCommand {
         url: Option<String>,
         notes: Option<String>,
         folder: Option<String>,
-        tags: Vec<String>,
+        tags: Option<Vec<String>>,
         quiet: bool,
     },
 }
@@ -1909,6 +1909,7 @@ fn parse_generate_store(args: &[String]) -> anyhow::Result<VaultCommand> {
     let mut notes = None;
     let mut folder = None;
     let mut tags = Vec::new();
+    let mut tags_specified = false;
     let mut iter = args.iter();
 
     while let Some(arg) = iter.next() {
@@ -2007,6 +2008,7 @@ fn parse_generate_store(args: &[String]) -> anyhow::Result<VaultCommand> {
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--tag requires a value"))?,
                 );
+                tags_specified = true;
             }
             "--tags" => {
                 append_tag_argument(
@@ -2014,6 +2016,7 @@ fn parse_generate_store(args: &[String]) -> anyhow::Result<VaultCommand> {
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--tags requires a value"))?,
                 );
+                tags_specified = true;
             }
             other => {
                 return Err(anyhow::anyhow!(
@@ -2035,7 +2038,7 @@ fn parse_generate_store(args: &[String]) -> anyhow::Result<VaultCommand> {
         url,
         notes,
         folder,
-        tags,
+        tags: tags_specified.then_some(tags),
         quiet,
     })
 }
@@ -3164,12 +3167,35 @@ mod tests {
                 title,
                 username,
                 request,
+                tags,
                 ..
             }) => {
                 assert_eq!(target_login_id.as_deref(), Some("login-123"));
                 assert!(title.is_none());
                 assert!(username.is_none());
                 assert_eq!(request.length, 24);
+                assert!(tags.is_none());
+            }
+            _ => panic!("expected generate-store command"),
+        }
+    }
+
+    #[test]
+    fn parse_generate_store_tracks_explicit_tags() {
+        let command = parse_vault_args(&[
+            OsString::from("generate-store"),
+            OsString::from("--title"),
+            OsString::from("GitHub"),
+            OsString::from("--username"),
+            OsString::from("octocat"),
+            OsString::from("--tags"),
+            OsString::from("work,code"),
+        ])
+        .expect("parse");
+
+        match command.command {
+            Some(VaultCommand::GenerateStore { tags, .. }) => {
+                assert_eq!(tags, Some(vec!["work".to_string(), "code".to_string()]));
             }
             _ => panic!("expected generate-store command"),
         }

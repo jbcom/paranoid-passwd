@@ -5,6 +5,7 @@ use objc2_foundation::*;
 
 use crate::*;
 
+/// [Apple's documentation](https://developer.apple.com/documentation/metal/mtlfunctionlogtype?language=objc)
 // NS_ENUM
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -23,46 +24,51 @@ unsafe impl RefEncode for MTLFunctionLogType {
 }
 
 extern_protocol!(
-    pub unsafe trait MTLLogContainer: NSFastEnumeration + IsRetainable {}
-
-    unsafe impl ProtocolType for dyn MTLLogContainer {}
+    /// [Apple's documentation](https://developer.apple.com/documentation/metal/mtllogcontainer?language=objc)
+    pub unsafe trait MTLLogContainer: NSObjectProtocol + NSFastEnumeration {}
 );
 
 extern_protocol!(
-    pub unsafe trait MTLFunctionLogDebugLocation: NSObjectProtocol + IsRetainable {
-        #[method_id(@__retain_semantics Other functionName)]
-        unsafe fn functionName(&self) -> Option<Retained<NSString>>;
+    /// [Apple's documentation](https://developer.apple.com/documentation/metal/mtlfunctionlogdebuglocation?language=objc)
+    pub unsafe trait MTLFunctionLogDebugLocation: NSObjectProtocol {
+        #[unsafe(method(functionName))]
+        #[unsafe(method_family = none)]
+        fn functionName(&self) -> Option<Retained<NSString>>;
 
-        #[method_id(@__retain_semantics Other URL)]
-        unsafe fn URL(&self) -> Option<Retained<NSURL>>;
+        #[unsafe(method(URL))]
+        #[unsafe(method_family = none)]
+        fn URL(&self) -> Option<Retained<NSURL>>;
 
-        #[method(line)]
-        unsafe fn line(&self) -> NSUInteger;
+        #[unsafe(method(line))]
+        #[unsafe(method_family = none)]
+        fn line(&self) -> NSUInteger;
 
-        #[method(column)]
-        unsafe fn column(&self) -> NSUInteger;
+        #[unsafe(method(column))]
+        #[unsafe(method_family = none)]
+        fn column(&self) -> NSUInteger;
     }
-
-    unsafe impl ProtocolType for dyn MTLFunctionLogDebugLocation {}
 );
 
 extern_protocol!(
-    pub unsafe trait MTLFunctionLog: NSObjectProtocol + IsRetainable {
-        #[method(type)]
-        unsafe fn r#type(&self) -> MTLFunctionLogType;
+    /// [Apple's documentation](https://developer.apple.com/documentation/metal/mtlfunctionlog?language=objc)
+    pub unsafe trait MTLFunctionLog: NSObjectProtocol {
+        #[unsafe(method(type))]
+        #[unsafe(method_family = none)]
+        fn r#type(&self) -> MTLFunctionLogType;
 
-        #[method_id(@__retain_semantics Other encoderLabel)]
-        unsafe fn encoderLabel(&self) -> Option<Retained<NSString>>;
+        #[unsafe(method(encoderLabel))]
+        #[unsafe(method_family = none)]
+        fn encoderLabel(&self) -> Option<Retained<NSString>>;
 
         #[cfg(feature = "MTLLibrary")]
-        #[method_id(@__retain_semantics Other function)]
-        unsafe fn function(&self) -> Option<Retained<ProtocolObject<dyn MTLFunction>>>;
+        #[unsafe(method(function))]
+        #[unsafe(method_family = none)]
+        fn function(&self) -> Option<Retained<ProtocolObject<dyn MTLFunction>>>;
 
-        #[method_id(@__retain_semantics Other debugLocation)]
-        unsafe fn debugLocation(
+        #[unsafe(method(debugLocation))]
+        #[unsafe(method_family = none)]
+        fn debugLocation(
             &self,
         ) -> Option<Retained<ProtocolObject<dyn MTLFunctionLogDebugLocation>>>;
     }
-
-    unsafe impl ProtocolType for dyn MTLFunctionLog {}
 );

@@ -485,12 +485,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> anyhow::Resu
         terminal
             .draw(|frame| render(frame, &app))
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        if event::poll(Duration::from_millis(80))? {
-            if let Event::Key(key) = event::read()? {
-                app.session.note_activity();
-                if app.handle_key(key) {
-                    break;
-                }
+        if event::poll(Duration::from_millis(80))?
+            && let Event::Key(key) = event::read()?
+        {
+            app.session.note_activity();
+            if app.handle_key(key) {
+                break;
             }
         }
     }
@@ -520,7 +520,7 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
         frame,
         chunks[0],
         "Configure",
-        "Tune the same flow the old web wizard exposed.",
+        "Configure the local generator and audit before any password is shown.",
     );
 
     let body = Layout::default()
@@ -657,10 +657,10 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let detail_text = Text::from(vec![
         Line::from(vec![
             Span::styled(
-                "Branding",
+                "Mission",
                 Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
             ),
-            Span::raw("  deep navy + emerald, monospace-heavy, fail-closed."),
+            Span::raw("  local secrets, verifiable trust."),
         ]),
         Line::raw(""),
         Line::from(format!(
@@ -988,7 +988,7 @@ fn result_tab_text(tab: usize, report: &GenerationReport) -> Text<'static> {
         0 => Text::from(vec![
             Line::styled(
                 if audit.overall_pass {
-                    "CRYPTOGRAPHICALLY SOUND"
+                    "AUDIT PASSED"
                 } else {
                     "REVIEW FLAGGED ITEMS"
                 },
@@ -1331,5 +1331,36 @@ mod tests {
         assert_eq!(app.screen, Screen::Configure);
         assert!(app.report.is_none());
         assert_eq!(app.detail_tab, 0);
+    }
+
+    #[test]
+    fn generator_key_driven_flow_reaches_results_and_entropy_tab() {
+        let mut app = App::default();
+
+        for _ in 0..app.focus_order().len() {
+            let should_quit = app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            assert!(!should_quit);
+        }
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_quit);
+        assert_eq!(app.screen, Screen::Audit);
+
+        wait_for_worker(&mut app);
+
+        assert_eq!(app.screen, Screen::Results);
+        assert!(app.report.is_some());
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(!should_quit);
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(!should_quit);
+
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("Total entropy"));
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+        assert!(!should_quit);
+        assert_eq!(app.screen, Screen::Configure);
     }
 }

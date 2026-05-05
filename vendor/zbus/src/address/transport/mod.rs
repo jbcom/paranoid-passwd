@@ -1,7 +1,9 @@
 //! D-Bus transport Information module.
 //!
-//! This module provides the trasport information for D-Bus addresses.
+//! This module provides the transport information for D-Bus addresses.
 
+#[cfg(unix)]
+use crate::connection::socket::Command;
 #[cfg(windows)]
 use crate::win32::autolaunch_bus_address;
 use crate::{Error, Result};
@@ -20,6 +22,10 @@ use tokio_vsock::VsockStream;
 use uds_windows::UnixStream;
 #[cfg(all(feature = "vsock", not(feature = "tokio")))]
 use vsock::VsockStream;
+#[cfg(unix)]
+mod unixexec;
+#[cfg(unix)]
+pub use unixexec::Unixexec;
 
 use std::{
     fmt::{Display, Formatter},
@@ -38,6 +44,10 @@ pub use autolaunch::{Autolaunch, AutolaunchScope};
 mod launchd;
 #[cfg(target_os = "macos")]
 pub use launchd::Launchd;
+#[cfg(unix)]
+mod ibus;
+#[cfg(unix)]
+pub use ibus::Ibus;
 #[cfg(any(
     all(feature = "vsock", not(feature = "tokio")),
     feature = "tokio-vsock"
@@ -59,28 +69,37 @@ pub use vsock_transport::Vsock;
 pub enum Transport {
     /// A Unix Domain Socket address.
     Unix(Unix),
-    /// TCP address details
+    /// A TCP address.
     Tcp(Tcp),
-    /// autolaunch D-Bus address.
+    /// An autolaunch D-Bus address.
     #[cfg(windows)]
     Autolaunch(Autolaunch),
-    /// launchd D-Bus address.
+    /// A launchd D-Bus address.
     #[cfg(target_os = "macos")]
     Launchd(Launchd),
+    /// An IBus D-Bus address.
+    ///
+    /// IBus (Intelligent Input Bus) is an input method framework. This transport queries the
+    /// IBus daemon for its D-Bus address using the `ibus address` command.
+    #[cfg(unix)]
+    Ibus(Ibus),
     #[cfg(any(
         all(feature = "vsock", not(feature = "tokio")),
         feature = "tokio-vsock"
     ))]
-    /// VSOCK address
+    /// A VSOCK address.
     ///
-    /// This variant is only available when either `vsock` or `tokio-vsock` feature is enabled. The
-    /// type of `stream` is `vsock::VsockStream` with `vsock` feature and
-    /// `tokio_vsock::VsockStream` with `tokio-vsock` feature.
+    /// This variant is only available when either the `vsock` or `tokio-vsock` feature is enabled.
+    /// The type of `stream` is `vsock::VsockStream` with the `vsock` feature and
+    /// `tokio_vsock::VsockStream` with the `tokio-vsock` feature.
     Vsock(Vsock),
+    /// A `unixexec` address.
+    #[cfg(unix)]
+    Unixexec(Unixexec),
 }
 
 impl Transport {
-    #[cfg_attr(any(target_os = "macos", windows), async_recursion::async_recursion)]
+    #[cfg_attr(any(unix, windows), async_recursion::async_recursion)]
     pub(super) async fn connect(self) -> Result<Stream> {
         match self {
             Transport::Unix(unix) => {
@@ -112,7 +131,7 @@ impl Transport {
                     },
                     "unix stream connection",
                 )
-                .await?;
+                .await??;
                 #[cfg(not(feature = "tokio"))]
                 {
                     Async::new(stream)
@@ -136,6 +155,8 @@ impl Transport {
                     }
                 }
             }
+            #[cfg(unix)]
+            Transport::Unixexec(unixexec) => unixexec.connect().await.map(Stream::Unixexec),
             #[cfg(all(feature = "vsock", not(feature = "tokio")))]
             Transport::Vsock(addr) => {
                 let stream = VsockStream::connect_with_cid_port(addr.cid(), addr.port())?;
@@ -143,10 +164,12 @@ impl Transport {
             }
 
             #[cfg(feature = "tokio-vsock")]
-            Transport::Vsock(addr) => VsockStream::connect(addr.cid(), addr.port())
-                .await
-                .map(Stream::Vsock)
-                .map_err(Into::into),
+            Transport::Vsock(addr) => {
+                VsockStream::connect(tokio_vsock::VsockAddr::new(addr.cid(), addr.port()))
+                    .await
+                    .map(Stream::Vsock)
+                    .map_err(Into::into)
+            }
 
             Transport::Tcp(mut addr) => match addr.take_nonce_file() {
                 Some(nonce_file) => {
@@ -204,6 +227,12 @@ impl Transport {
                 let addr = launchd.bus_address().await?;
                 addr.connect().await
             }
+
+            #[cfg(unix)]
+            Transport::Ibus(ibus) => {
+                let addr = ibus.bus_address().await?;
+                addr.connect().await
+            }
         }
     }
 
@@ -211,6 +240,8 @@ impl Transport {
     pub(super) fn from_options(transport: &str, options: HashMap<&str, &str>) -> Result<Self> {
         match transport {
             "unix" => Unix::from_options(options).map(Self::Unix),
+            #[cfg(unix)]
+            "unixexec" => Unixexec::from_options(options).map(Self::Unixexec),
             "tcp" => Tcp::from_options(options, false).map(Self::Tcp),
             "nonce-tcp" => Tcp::from_options(options, true).map(Self::Tcp),
             #[cfg(any(
@@ -222,6 +253,8 @@ impl Transport {
             "autolaunch" => Autolaunch::from_options(options).map(Self::Autolaunch),
             #[cfg(target_os = "macos")]
             "launchd" => Launchd::from_options(options).map(Self::Launchd),
+            #[cfg(unix)]
+            "ibus" => Ibus::from_options(options).map(Self::Ibus),
 
             _ => Err(Error::Address(format!(
                 "unsupported transport '{transport}'"
@@ -234,6 +267,8 @@ impl Transport {
 #[derive(Debug)]
 pub(crate) enum Stream {
     Unix(Async<UnixStream>),
+    #[cfg(unix)]
+    Unixexec(Command),
     Tcp(Async<TcpStream>),
     #[cfg(feature = "vsock")]
     Vsock(Async<VsockStream>),
@@ -244,6 +279,8 @@ pub(crate) enum Stream {
 pub(crate) enum Stream {
     #[cfg(unix)]
     Unix(tokio::net::UnixStream),
+    #[cfg(unix)]
+    Unixexec(Command),
     Tcp(TcpStream),
     #[cfg(feature = "tokio-vsock")]
     Vsock(VsockStream),
@@ -270,10 +307,10 @@ pub(crate) fn decode_percents(value: &str) -> Result<Vec<u8>> {
             decoded.push(c as u8)
         } else if c == '%' {
             decoded.push(
-                decode_hex(iter.next().ok_or_else(|| {
+                (decode_hex(iter.next().ok_or_else(|| {
                     Error::Address("incomplete percent-encoded sequence".to_owned())
                 })?)?
-                    << 4
+                    << 4)
                     | decode_hex(iter.next().ok_or_else(|| {
                         Error::Address("incomplete percent-encoded sequence".to_owned())
                     })?)?,
@@ -332,17 +369,21 @@ pub(super) fn encode_percents(f: &mut Formatter<'_>, mut value: &[u8]) -> std::f
 impl Display for Transport {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Tcp(tcp) => write!(f, "{}", tcp)?,
-            Self::Unix(unix) => write!(f, "{}", unix)?,
+            Self::Tcp(tcp) => write!(f, "{tcp}")?,
+            Self::Unix(unix) => write!(f, "{unix}")?,
+            #[cfg(unix)]
+            Self::Unixexec(unixexec) => write!(f, "{unixexec}")?,
             #[cfg(any(
                 all(feature = "vsock", not(feature = "tokio")),
                 feature = "tokio-vsock"
             ))]
             Self::Vsock(vsock) => write!(f, "{}", vsock)?,
             #[cfg(windows)]
-            Self::Autolaunch(autolaunch) => write!(f, "{}", autolaunch)?,
+            Self::Autolaunch(autolaunch) => write!(f, "{autolaunch}")?,
             #[cfg(target_os = "macos")]
-            Self::Launchd(launchd) => write!(f, "{}", launchd)?,
+            Self::Launchd(launchd) => write!(f, "{launchd}")?,
+            #[cfg(unix)]
+            Self::Ibus(ibus) => write!(f, "{ibus}")?,
         }
 
         Ok(())

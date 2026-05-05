@@ -4,6 +4,10 @@ title: Downloads
 
 # Downloads
 
+Choose the artifact that matches how you want to use the tool. `paranoid-passwd` is the
+CLI/TUI binary for automation and terminal workflows. `paranoid-passwd-gui` is the dedicated
+desktop app over the same generator and encrypted local vault model.
+
 ## Canonical Release Surface
 
 The canonical distribution point is [GitHub Releases](https://github.com/jbcom/paranoid-passwd/releases).

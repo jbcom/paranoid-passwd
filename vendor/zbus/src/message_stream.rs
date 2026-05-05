@@ -5,16 +5,14 @@ use std::{
 };
 
 use async_broadcast::Receiver as ActiveReceiver;
-use futures_core::stream;
-use futures_util::stream::FusedStream;
+use futures_core::stream::{self, FusedStream};
 use ordered_stream::{OrderedStream, PollResult};
-use static_assertions::assert_impl_all;
 use tracing::warn;
 
 use crate::{
+    AsyncDrop, Connection, MatchRule, OwnedMatchRule, Result,
     connection::ConnectionInner,
     message::{Message, Sequence},
-    AsyncDrop, Connection, MatchRule, OwnedMatchRule, Result,
 };
 
 /// A [`stream::Stream`] implementation that yields [`Message`] items.
@@ -24,7 +22,7 @@ use crate::{
 /// **NOTE**: You must ensure a `MessageStream` is continuously polled or you will experience hangs.
 /// If you don't need to continuously poll the `MessageStream` but need to keep it around for later
 /// use, keep the connection around and convert it into a `MessageStream` when needed. The
-/// conversion is not an expensive operation so you don't need to  worry about performance, unless
+/// conversion is not an expensive operation so you don't need to worry about performance, unless
 /// you do it very frequently. If you need to convert back and forth frequently, you may want to
 /// consider keeping both a connection and stream around.
 #[derive(Clone, Debug)]
@@ -33,21 +31,19 @@ pub struct MessageStream {
     inner: Inner,
 }
 
-assert_impl_all!(MessageStream: Send, Sync, Unpin);
-
 impl MessageStream {
     /// Create a message stream for the given match rule.
     ///
     /// If `conn` is a bus connection and match rule is for a signal, the match rule will be
     /// registered with the bus and queued for deregistration when the stream is dropped. If you'd
     /// like immediate deregistration, use [`AsyncDrop::async_drop`]. The reason match rules are
-    /// only registered with the bus for signals is that D-Bus specification only allows signals to
-    /// be broadcasted and unicast messages are always sent to their destination (regardless of any
-    /// match rules registered by the destination) by the bus. Hence there is no need to register
-    /// match rules for non-signal messages with the bus.
+    /// only registered with the bus for signals is that the D-Bus specification only allows signals
+    /// to be broadcasted and unicast messages are always sent to their destination (regardless
+    /// of any match rules registered by the destination) by the bus. Hence there is no need to
+    /// register match rules for non-signal messages with the bus.
     ///
-    /// Having said that, stream created by this method can still very useful as it allows you to
-    /// avoid needless task wakeups and simplify your stream consuming code.
+    /// Having said that, streams created by this method can still be very useful as it allows you
+    /// to avoid needless task wakeups and simplify your stream consuming code.
     ///
     /// You can optionally also request the capacity of the underlying message queue through
     /// `max_queued`. If specified, the capacity is guaranteed to be at least `max_queued`. If not
@@ -86,10 +82,10 @@ impl MessageStream {
     /// );
     ///
     /// // We register 2 names, starting with the uninteresting one. If `stream` wasn't filtering
-    /// // messages based on the match rule, we'd receive method return call for each of these 2
+    /// // messages based on the match rule, we'd receive method return calls for each of these 2
     /// // calls first.
     /// //
-    /// // Note that the `NameOwnerChanged` signal will not be sent by the bus  for the first name
+    /// // Note that the `NameOwnerChanged` signal will not be sent by the bus for the first name
     /// // we register since we setup an arg filter.
     /// conn.request_name("org.freedesktop.zbus.MatchRuleStreamTest44")
     ///     .await?;
@@ -154,7 +150,7 @@ impl MessageStream {
         self.inner.msg_receiver.capacity()
     }
 
-    /// Set maximum number of messages to queue for this stream.
+    /// Set the maximum number of messages to queue for this stream.
     ///
     /// After this call, the capacity is guaranteed to be at least `max_queued`.
     pub fn set_max_queued(&mut self, max_queued: usize) {

@@ -1,6 +1,6 @@
-use std::{fmt, str::FromStr};
+use std::{borrow::Cow, fmt, str::FromStr};
 
-use crate::{AuthMechanism, Error, Guid, OwnedGuid, Result};
+use crate::{Error, Guid, OwnedGuid, Result, conn::AuthMechanism};
 
 // The plain-text SASL profile authentication protocol described here:
 // <https://dbus.freedesktop.org/doc/dbus-specification.html#auth-protocol>
@@ -15,7 +15,7 @@ pub(super) enum Command {
     Data(Option<Vec<u8>>),
     Error(String),
     NegotiateUnixFD,
-    Rejected(Vec<AuthMechanism>),
+    Rejected(Cow<'static, str>),
     Ok(OwnedGuid),
     AgreeUnixFD,
 }
@@ -42,17 +42,7 @@ impl fmt::Display for Command {
             },
             Command::Error(expl) => write!(f, "ERROR {expl}"),
             Command::NegotiateUnixFD => write!(f, "NEGOTIATE_UNIX_FD"),
-            Command::Rejected(mechs) => {
-                write!(
-                    f,
-                    "REJECTED {}",
-                    mechs
-                        .iter()
-                        .map(|m| m.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                )
-            }
+            Command::Rejected(mechs) => write!(f, "REJECTED {mechs}"),
             Command::Ok(guid) => write!(f, "OK {guid}"),
             Command::AgreeUnixFD => write!(f, "AGREE_UNIX_FD"),
         }
@@ -90,7 +80,7 @@ impl FromStr for Command {
             Some("ERROR") => Command::Error(s.into()),
             Some("NEGOTIATE_UNIX_FD") => Command::NegotiateUnixFD,
             Some("REJECTED") => {
-                let mechs = words.map(|m| m.parse()).collect::<Result<_>>()?;
+                let mechs = words.collect::<Vec<_>>().join(" ").into();
                 Command::Rejected(mechs)
             }
             Some("OK") => {
@@ -103,5 +93,11 @@ impl FromStr for Command {
             _ => return Err(Error::Handshake(format!("Unknown command: {s}"))),
         };
         Ok(cmd)
+    }
+}
+
+impl From<hex::FromHexError> for Error {
+    fn from(e: hex::FromHexError) -> Self {
+        Error::Handshake(format!("Invalid hexcode: {e}"))
     }
 }

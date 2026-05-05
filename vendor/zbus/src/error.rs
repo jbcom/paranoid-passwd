@@ -1,4 +1,3 @@
-use static_assertions::assert_impl_all;
 use std::{convert::Infallible, error, fmt, io, sync::Arc};
 use zbus_names::{Error as NamesError, InterfaceName, OwnedErrorName};
 use zvariant::{Error as VariantError, ObjectPath};
@@ -15,7 +14,7 @@ use crate::{
 #[non_exhaustive]
 #[allow(clippy::upper_case_acronyms)]
 pub enum Error {
-    /// Interface not found
+    /// Interface not found.
     InterfaceNotFound,
     /// Invalid D-Bus address.
     Address(String),
@@ -25,9 +24,9 @@ pub enum Error {
     InvalidField,
     /// Data too large.
     ExcessData,
-    /// A [zvariant](../zvariant/index.html) error.
+    /// A [zvariant](https://docs.rs/zvariant) error.
     Variant(VariantError),
-    /// A [zbus_names](../zbus_names/index.html) error.
+    /// A [zbus_names](https://docs.rs/zbus_names) error.
     Names(NamesError),
     /// Endian signature invalid or doesn't match expectation.
     IncorrectEndian,
@@ -62,8 +61,6 @@ pub enum Error {
     /// The given interface already exists at the given path.
     InterfaceExists(InterfaceName<'static>, ObjectPath<'static>),
 }
-
-assert_impl_all!(Error: Send, Sync, Unpin);
 
 impl PartialEq for Error {
     fn eq(&self, other: &Self) -> bool {
@@ -148,10 +145,43 @@ impl fmt::Display for Error {
             Error::InvalidMatchRule => write!(f, "Invalid match rule string"),
             Error::Failure(e) => write!(f, "{e}"),
             Error::MissingParameter(p) => {
-                write!(f, "Parameter `{}` was not specified but it is required", p)
+                write!(f, "Parameter `{p}` was not specified but it is required")
             }
             Error::InvalidSerial => write!(f, "Serial number in the message header is 0"),
             Error::InterfaceExists(i, p) => write!(f, "Interface `{i}` already exists at `{p}`"),
+        }
+    }
+}
+
+impl Error {
+    /// A description of the error.
+    ///
+    /// This is a generic description of the error (if any). For a more detailed description
+    /// make use of the [`std::fmt::Display`] implementation, for example, through
+    /// [`std::string::ToString`].
+    pub fn description(&self) -> Option<&str> {
+        match self {
+            Error::InterfaceNotFound => Some("interface not found"),
+            Error::Address(e) => Some(e),
+            Error::ExcessData => Some("excess data"),
+            Error::InputOutput(_) => Some("i/o error"),
+            Error::Handshake(e) => Some(e),
+            Error::IncorrectEndian => Some("incorrect endian"),
+            Error::InvalidField => Some("invalid field"),
+            Error::Variant(_) => Some("variant error"),
+            Error::Names(_) => Some("names error"),
+            Error::InvalidReply => Some("invalid reply"),
+            Error::MissingField => Some("a required field is missing from message headers"),
+            Error::MethodError(_, desc, _) => desc.as_deref(),
+            Error::InvalidGUID => Some("invalid GUID"),
+            Error::Unsupported => Some("connection support is lacking"),
+            Error::FDO(_) => Some("FDO error"),
+            Error::NameTaken => Some("name already taken on the bus"),
+            Error::InvalidMatchRule => Some("invalid match rule string"),
+            Error::Failure(e) => Some(e),
+            Error::MissingParameter(_) => Some("A required parameter is missing"),
+            Error::InvalidSerial => Some("serial number in the message header is 0"),
+            Error::InterfaceExists(_, _) => Some("interface already exists"),
         }
     }
 }
@@ -192,16 +222,15 @@ impl From<io::Error> for Error {
     }
 }
 
-#[cfg(unix)]
-impl From<nix::Error> for Error {
-    fn from(val: nix::Error) -> Self {
-        io::Error::from_raw_os_error(val as i32).into()
-    }
-}
-
 impl From<VariantError> for Error {
     fn from(val: VariantError) -> Self {
         Error::Variant(val)
+    }
+}
+
+impl From<zvariant::signature::Error> for Error {
+    fn from(e: zvariant::signature::Error) -> Self {
+        zvariant::Error::from(e).into()
     }
 }
 

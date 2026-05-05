@@ -55,22 +55,22 @@ impl Tcp {
         self
     }
 
-    /// Returns the `tcp:` address `host` value.
+    /// The `tcp:` address `host` value.
     pub fn host(&self) -> &str {
         &self.host
     }
 
-    /// Returns the `tcp:` address `bind` value.
+    /// The `tcp:` address `bind` value.
     pub fn bind(&self) -> Option<&str> {
         self.bind.as_deref()
     }
 
-    /// Returns the `tcp:` address `port` value.
+    /// The `tcp:` address `port` value.
     pub fn port(&self) -> u16 {
         self.port
     }
 
-    /// Returns the `tcp:` address `family` value.
+    /// The `tcp:` address `family` value.
     pub fn family(&self) -> Option<TcpTransportFamily> {
         self.family
     }
@@ -147,7 +147,7 @@ impl Tcp {
             "connect tcp",
         )
         .await
-        .map_err(|e| Error::Address(format!("Failed to receive TCP addresses: {e}")))?;
+        .map_err(|e| Error::Address(format!("Failed to receive TCP addresses: {e}")))??;
 
         // we could attempt connections in parallel?
         let mut last_err = Error::Address("Failed to connect".into());

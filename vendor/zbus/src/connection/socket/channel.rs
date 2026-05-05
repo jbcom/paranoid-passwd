@@ -1,15 +1,15 @@
 use std::io;
 
-use async_broadcast::{broadcast, Receiver, Sender};
+use async_broadcast::{Receiver, Sender, broadcast};
 
-use crate::{fdo::ConnectionCredentials, Message};
+use crate::{Message, conn::AuthMechanism, fdo::ConnectionCredentials};
 
 /// An in-process channel-based socket.
 ///
 /// This is a pair of two cross-wired channels. Since all communication happens in-process, there is
 /// no need for any authentication.
 ///
-/// This type is only available when `p2p` feature is enabled.
+/// This type is only available when the `p2p` feature is enabled.
 #[derive(Debug)]
 pub struct Channel {
     writer: Writer,
@@ -52,7 +52,7 @@ impl super::Socket for Channel {
 
 /// The reader half of a [`Channel`].
 ///
-/// This type is only available when `p2p` feature is enabled.
+/// This type is only available when the `p2p` feature is enabled.
 #[derive(Debug)]
 pub struct Reader(Receiver<Message>);
 
@@ -69,14 +69,23 @@ impl super::ReadHalf for Reader {
         })
     }
 
+    /// Supports passing file descriptors.
+    fn can_pass_unix_fd(&self) -> bool {
+        true
+    }
+
     async fn peer_credentials(&mut self) -> io::Result<ConnectionCredentials> {
         self_credentials().await
+    }
+
+    fn auth_mechanism(&self) -> AuthMechanism {
+        AuthMechanism::Anonymous
     }
 }
 
 /// The writer half of a [`Channel`].
 ///
-/// This type is only available when `p2p` feature is enabled.
+/// This type is only available when the `p2p` feature is enabled.
 #[derive(Debug)]
 pub struct Writer(Sender<Message>);
 
@@ -101,22 +110,27 @@ impl super::WriteHalf for Writer {
         Ok(())
     }
 
+    /// Supports passing file descriptors.
+    fn can_pass_unix_fd(&self) -> bool {
+        true
+    }
+
     async fn peer_credentials(&mut self) -> io::Result<ConnectionCredentials> {
         self_credentials().await
     }
 }
 
-/// Return the credentials of the current process.
+/// The credentials of the current process.
 async fn self_credentials() -> io::Result<ConnectionCredentials> {
     let mut creds = ConnectionCredentials::default().set_process_id(std::process::id());
 
     #[cfg(unix)]
     {
-        use nix::unistd::{Gid, Uid};
+        use rustix::process::{getegid, geteuid};
 
         creds = creds
-            .set_unix_user_id(Uid::effective().into())
-            .add_unix_group_id(Gid::effective().into());
+            .set_unix_user_id(geteuid().as_raw())
+            .add_unix_group_id(getegid().as_raw());
     }
     #[cfg(windows)]
     {

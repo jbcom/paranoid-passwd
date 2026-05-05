@@ -113,12 +113,29 @@ pub const STAGES: &[StageFn; super::STAGES_COUNT] = &[
     repeat_x1,
     gradient,
     evenly_spaced_2_stop_gradient,
+    xy_to_unit_angle,
     xy_to_radius,
     xy_to_2pt_conical_focal_on_circle,
     xy_to_2pt_conical_well_behaved,
+    xy_to_2pt_conical_smaller,
     xy_to_2pt_conical_greater,
+    xy_to_2pt_conical_strip,
+    mask_2pt_conical_nan,
     mask_2pt_conical_degenerates,
     apply_vector_mask,
+    alter_2pt_conical_compensate_focal,
+    alter_2pt_conical_unswap,
+    negate_x,
+    apply_concentric_scale_bias,
+    gamma_expand_2,
+    gamma_expand_dst_2,
+    gamma_compress_2,
+    gamma_expand_22,
+    gamma_expand_dst_22,
+    gamma_compress_22,
+    gamma_expand_srgb,
+    gamma_expand_dst_srgb,
+    gamma_compress_srgb,
 ];
 
 pub fn fn_ptr(f: StageFn) -> *const () {
@@ -972,6 +989,34 @@ fn evenly_spaced_2_stop_gradient(p: &mut Pipeline) {
     p.next_stage();
 }
 
+fn xy_to_unit_angle(p: &mut Pipeline) {
+    let x = p.r;
+    let y = p.g;
+    let x_abs = x.abs();
+    let y_abs = y.abs();
+    let slope = x_abs.min(y_abs) / x_abs.max(y_abs);
+    let s = slope * slope;
+    // Use a 7th degree polynomial to approximate atan.
+    // This was generated using sollya.gforge.inria.fr.
+    // A float optimized polynomial was generated using the following command.
+    // P1 = fpminimax((1/(2*Pi))*atan(x),[|1,3,5,7|],[|24...|],[2^(-40),1],relative);
+    let phi = slope
+        * (f32x8::splat(0.15912117063999176025390625)
+           + s * (f32x8::splat(-5.185396969318389892578125e-2)
+                  + s * (f32x8::splat(2.476101927459239959716796875e-2)
+                         + s * (f32x8::splat(-7.0547382347285747528076171875e-3)))));
+    let phi = x_abs.cmp_lt(y_abs).blend(f32x8::splat(0.25) - phi, phi);
+    let phi = x
+        .cmp_lt(f32x8::splat(0.0))
+        .blend(f32x8::splat(0.5) - phi, phi);
+    let phi = y
+        .cmp_lt(f32x8::splat(0.0))
+        .blend(f32x8::splat(1.0) - phi, phi);
+    let phi = phi.cmp_ne(phi).blend(f32x8::splat(0.0), phi);
+    p.r = phi;
+    p.next_stage();
+}
+
 fn xy_to_radius(p: &mut Pipeline) {
     let x2 = p.r * p.r;
     let y2 = p.g * p.g;
@@ -1008,25 +1053,44 @@ fn xy_to_2pt_conical_greater(p: &mut Pipeline) {
     p.next_stage();
 }
 
+fn xy_to_2pt_conical_smaller(p: &mut Pipeline) {
+    let ctx = &p.ctx.two_point_conical_gradient;
+
+    let x = p.r;
+    let y = p.g;
+    p.r = -(x * x - y * y).sqrt() - x * f32x8::splat(ctx.p0);
+
+    p.next_stage();
+}
+
+fn xy_to_2pt_conical_strip(p: &mut Pipeline) {
+    let ctx = &p.ctx.two_point_conical_gradient;
+
+    let x = p.r;
+    let y = p.g;
+    p.r = x + (f32x8::splat(ctx.p0) - y * y).sqrt();
+
+    p.next_stage();
+}
+
+fn mask_2pt_conical_nan(p: &mut Pipeline) {
+    let ctx = &mut p.ctx.two_point_conical_gradient;
+
+    let t = p.r;
+    let is_degenerate = t.cmp_ne(t);
+    p.r = is_degenerate.blend(f32x8::default(), t);
+    ctx.mask = cond_to_mask(!is_degenerate.to_u32x8_bitcast());
+
+    p.next_stage();
+}
+
 fn mask_2pt_conical_degenerates(p: &mut Pipeline) {
     let ctx = &mut p.ctx.two_point_conical_gradient;
 
     let t = p.r;
     let is_degenerate = t.cmp_le(f32x8::default()) | t.cmp_ne(t);
     p.r = is_degenerate.blend(f32x8::default(), t);
-
-    let is_not_degenerate = !is_degenerate.to_u32x8_bitcast();
-    let is_not_degenerate: [u32; 8] = bytemuck::cast(is_not_degenerate);
-    ctx.mask = bytemuck::cast([
-        if is_not_degenerate[0] != 0 { !0 } else { 0 },
-        if is_not_degenerate[1] != 0 { !0 } else { 0 },
-        if is_not_degenerate[2] != 0 { !0 } else { 0 },
-        if is_not_degenerate[3] != 0 { !0 } else { 0 },
-        if is_not_degenerate[4] != 0 { !0 } else { 0 },
-        if is_not_degenerate[5] != 0 { !0 } else { 0 },
-        if is_not_degenerate[6] != 0 { !0 } else { 0 },
-        if is_not_degenerate[7] != 0 { !0 } else { 0 },
-    ]);
+    ctx.mask = cond_to_mask(!is_degenerate.to_u32x8_bitcast());
 
     p.next_stage();
 }
@@ -1042,8 +1106,139 @@ fn apply_vector_mask(p: &mut Pipeline) {
     p.next_stage();
 }
 
+fn alter_2pt_conical_compensate_focal(p: &mut Pipeline) {
+    let ctx = &p.ctx.two_point_conical_gradient;
+
+    p.r = p.r + f32x8::splat(ctx.p1);
+
+    p.next_stage();
+}
+
+fn alter_2pt_conical_unswap(p: &mut Pipeline) {
+    p.r = f32x8::splat(1.0) - p.r;
+
+    p.next_stage();
+}
+
+fn negate_x(p: &mut Pipeline) {
+    p.r = -p.r;
+
+    p.next_stage();
+}
+
+fn apply_concentric_scale_bias(p: &mut Pipeline) {
+    let ctx = &p.ctx.two_point_conical_gradient;
+
+    // Apply t = t * scale + bias for concentric gradients
+    let x = p.r;
+    p.r = x * f32x8::splat(ctx.p0) + f32x8::splat(ctx.p1);
+
+    p.next_stage();
+}
+
+fn gamma_expand_2(p: &mut Pipeline) {
+    p.r = p.r * p.r;
+    p.g = p.g * p.g;
+    p.b = p.b * p.b;
+
+    p.next_stage();
+}
+
+fn gamma_expand_dst_2(p: &mut Pipeline) {
+    p.dr = p.dr * p.dr;
+    p.dg = p.dg * p.dg;
+    p.db = p.db * p.db;
+
+    p.next_stage();
+}
+
+fn gamma_compress_2(p: &mut Pipeline) {
+    p.r = p.r.sqrt();
+    p.g = p.g.sqrt();
+    p.b = p.b.sqrt();
+
+    p.next_stage();
+}
+
+fn gamma_expand_22(p: &mut Pipeline) {
+    p.r = p.r.powf(2.2);
+    p.g = p.g.powf(2.2);
+    p.b = p.b.powf(2.2);
+
+    p.next_stage();
+}
+
+fn gamma_expand_dst_22(p: &mut Pipeline) {
+    p.dr = p.dr.powf(2.2);
+    p.dg = p.dg.powf(2.2);
+    p.db = p.db.powf(2.2);
+
+    p.next_stage();
+}
+
+fn gamma_compress_22(p: &mut Pipeline) {
+    p.r = p.r.powf(0.45454545);
+    p.g = p.g.powf(0.45454545);
+    p.b = p.b.powf(0.45454545);
+
+    p.next_stage();
+}
+
+fn srgb_expand(x: f32x8) -> f32x8 {
+    let small = x.cmp_le(f32x8::splat(0.04045));
+    let linear = x / f32x8::splat(12.92);
+    let exp = ((x + f32x8::splat(0.055)) / f32x8::splat(1.055)).powf(2.4);
+    small.blend(linear, exp)
+}
+
+fn srgb_compress(x: f32x8) -> f32x8 {
+    let small = x.cmp_le(f32x8::splat(0.0031308));
+    let linear = x * f32x8::splat(12.92);
+    let exp = x.powf(0.416666666) * f32x8::splat(1.055) - f32x8::splat(0.055);
+    small.blend(linear, exp)
+}
+
+fn gamma_expand_srgb(p: &mut Pipeline) {
+    p.r = srgb_expand(p.r);
+    p.g = srgb_expand(p.g);
+    p.b = srgb_expand(p.b);
+
+    p.next_stage();
+}
+
+fn gamma_expand_dst_srgb(p: &mut Pipeline) {
+    p.dr = srgb_expand(p.dr);
+    p.dg = srgb_expand(p.dg);
+    p.db = srgb_expand(p.db);
+
+    p.next_stage();
+}
+
+fn gamma_compress_srgb(p: &mut Pipeline) {
+    p.r = srgb_compress(p.r);
+    p.g = srgb_compress(p.g);
+    p.b = srgb_compress(p.b);
+
+    p.next_stage();
+}
+
 pub fn just_return(_: &mut Pipeline) {
     // Ends the loop.
+}
+
+#[inline(always)]
+fn cond_to_mask(cond: u32x8) -> u32x8 {
+    let cond: [u32; 8] = bytemuck::cast(cond);
+    bytemuck::cast([
+        if cond[0] != 0 { !0 } else { 0 },
+        if cond[1] != 0 { !0 } else { 0 },
+        if cond[2] != 0 { !0 } else { 0 },
+        if cond[3] != 0 { !0 } else { 0 },
+        if cond[4] != 0 { !0 } else { 0 },
+        if cond[5] != 0 { !0 } else { 0 },
+        if cond[6] != 0 { !0 } else { 0 },
+        if cond[7] != 0 { !0 } else { 0 },
+    ])
 }
 
 #[inline(always)]

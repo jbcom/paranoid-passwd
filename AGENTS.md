@@ -19,7 +19,9 @@ Before making any change, complete this self-audit:
 - [ ] I will not implement custom cryptographic primitives
 - [ ] I will not claim statistical formulas are correct without a human-verifiable source
 - [ ] I will not bypass rejection sampling; the boundary remains `(256/N)*N - 1`
-- [ ] I will not reintroduce browser, WASM, or JavaScript runtime paths
+- [ ] I will not reintroduce the retired browser, JavaScript, or webview product path
+- [ ] I will treat any Slint WASM or mobile target as a separately gated Rust-native surface with an explicit threat model
+- [ ] I will not add handwritten `unsafe` Rust; Slint-generated GUI code is the only current unsafe-code lint exception
 - [ ] I will keep security-sensitive logic in `crates/paranoid-core`, not in the CLI, TUI, GUI, or docs layer
 - [ ] I will flag math/security-sensitive changes with `TODO: HUMAN_REVIEW - <reason>`
 
@@ -31,10 +33,11 @@ If you cannot check all boxes, stop and request human guidance.
 1. Use `rand()`, `srand()`, LLM-generated randomness, or ad hoc entropy helpers
 2. Implement a custom hash, cipher, KDF, or PRNG
 3. Use modulo without rejection sampling
-4. Reintroduce JavaScript, WASM, or webview fallbacks into the product surface
+4. Reintroduce JavaScript, DOM, or webview fallbacks into the product surface
 5. Move cryptographic or audit math into the TUI, GUI, docs tooling, or shell scripts
 6. Unpin GitHub Actions from commit SHAs
-7. Remove audit layers to simplify the UX
+7. Add handwritten `unsafe` Rust without explicit human approval and assurance-script coverage
+8. Remove audit layers to simplify the UX
 
 ### Always
 1. Delegate RNG and SHA-256 to the audited `paranoid-core` path
@@ -42,7 +45,7 @@ If you cannot check all boxes, stop and request human guidance.
 3. Prefer `statrs` for distribution and special-function math instead of handwritten approximations
 4. Add or update known-answer tests when touching audit math
 5. Keep Cargo builds locked and offline against the vendored dependency tree
-6. Preserve the docs-site role of GitHub Pages; it is not an application surface anymore
+6. Preserve the docs-site role of GitHub Pages; it is not a secret-handling application surface
 
 ## Common Hallucination Patterns
 
@@ -68,6 +71,7 @@ Before committing:
 
 ### Source Code
 - [ ] No ad hoc RNG or custom crypto primitives in new code
+- [ ] No handwritten `unsafe` Rust in workspace sources
 - [ ] Rejection sampling still uses `(256/N)*N - 1`
 - [ ] Chi-squared pass logic still uses `p > 0.01`
 - [ ] Chi-squared degrees of freedom remain `df = N - 1`
@@ -93,17 +97,23 @@ Before committing:
 |-------|----------------|
 | `crates/paranoid-core` | password generation, OpenSSL-backed RNG/SHA-256, statistical audit, compliance checks |
 | `crates/paranoid-cli` | scriptable CLI plus full-screen wizard TUI |
-| `crates/paranoid-gui` | desktop GUI scaffold and follow-on parity path |
+| `crates/paranoid-gui` | Slint-first native GUI direction with the current Iced surface retained during migration |
 
 Never duplicate generation, hashing, or audit logic outside `paranoid-core`.
 
+The GUI crate uses `unsafe_code = "deny"` instead of the workspace `forbid` because Slint's
+generated Rust lowers that lint internally. Handwritten GUI Rust remains checked by
+`scripts/hallucination_check.sh`, and `paranoid-core`, `paranoid-cli`, and `paranoid-vault`
+keep the workspace-level `forbid` policy.
+
 ### Product Surface
 
-- The interactive web app is retired.
-- GitHub Pages now serves a Sphinx docs/download site only.
+- The retired HTML/CSS/JavaScript browser app is gone.
+- GitHub Pages now serves a Sphinx docs/download site only unless a future Slint WASM artifact is explicitly threat-modeled as a separate Rust/WASM target.
 - The TUI is the default interactive experience.
 - The CLI remains the scriptable automation surface.
-- The GUI is a native desktop follow-on, not a webview wrapper.
+- The GUI direction is Slint-first native desktop/mobile, not a webview wrapper.
+- Slint WASM can be considered only as a compiled Rust/Slint canvas target with no JavaScript secret-handling logic and no DOM/CSS application rewrite.
 
 ### Dependency Trust Model
 

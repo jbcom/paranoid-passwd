@@ -1,8 +1,7 @@
-use futures_util::StreamExt;
-use static_assertions::assert_impl_all;
+use futures_lite::StreamExt;
 
 use crate::{
-    blocking::Connection, message::Message, utils::block_on, MatchRule, OwnedMatchRule, Result,
+    MatchRule, OwnedMatchRule, Result, blocking::Connection, message::Message, utils::block_on,
 };
 
 /// A blocking wrapper of [`crate::MessageStream`].
@@ -18,8 +17,6 @@ pub struct MessageIterator {
     // dropped.
     pub(crate) azync: Option<crate::MessageStream>,
 }
-
-assert_impl_all!(MessageIterator: Send, Sync, Unpin);
 
 impl MessageIterator {
     /// Get a reference to the underlying async message stream.
@@ -67,11 +64,11 @@ impl MessageIterator {
     /// );
     ///
     /// // We register 2 names, starting with the uninteresting one. If `iter` wasn't filtering
-    /// // messages based on the match rule, we'd receive method return call for each of these 2
+    /// // messages based on the match rule, we'd receive method return calls for each of these 2
     /// // calls first.
     /// //
-    /// // Note that the `NameOwnerChanged` signal will not be sent by the bus  for the first name
-    /// // we register since we setup an arg filter.
+    /// // Note that the `NameOwnerChanged` signal will not be sent by the bus for the first name
+    /// // we register since we set up an arg filter.
     /// conn.request_name("org.freedesktop.zbus.MatchRuleIteratorTest44")?;
     /// conn.request_name("org.freedesktop.zbus.MatchRuleIteratorTest42")?;
     ///

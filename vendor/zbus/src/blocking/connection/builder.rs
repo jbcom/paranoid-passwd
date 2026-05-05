@@ -1,4 +1,3 @@
-use static_assertions::assert_impl_all;
 #[cfg(not(feature = "tokio"))]
 use std::net::TcpStream;
 #[cfg(all(unix, not(feature = "tokio")))]
@@ -10,21 +9,20 @@ use tokio::net::UnixStream;
 #[cfg(all(windows, not(feature = "tokio")))]
 use uds_windows::UnixStream;
 
-use zvariant::{ObjectPath, Str};
+use zvariant::ObjectPath;
 
 #[cfg(feature = "p2p")]
 use crate::Guid;
 use crate::{
-    address::Address, blocking::Connection, connection::socket::BoxedSplit, names::WellKnownName,
-    object_server::Interface, utils::block_on, AuthMechanism, Error, Result,
+    Error, Result, address::Address, blocking::Connection, conn::AuthMechanism,
+    connection::socket::BoxedSplit, names::WellKnownName, object_server::Interface,
+    utils::block_on,
 };
 
 /// A builder for [`zbus::blocking::Connection`].
 #[derive(Debug)]
 #[must_use]
 pub struct Builder<'a>(crate::connection::Builder<'a>);
-
-assert_impl_all!(Builder<'_>: Send, Sync, Unpin);
 
 impl<'a> Builder<'a> {
     /// Create a builder for the session/user message bus connection.
@@ -37,7 +35,40 @@ impl<'a> Builder<'a> {
         crate::connection::Builder::system().map(Self)
     }
 
-    /// Create a builder for connection that will use the given [D-Bus bus address].
+    /// Create a builder for an IBus connection.
+    ///
+    /// IBus (Intelligent Input Bus) is an input method framework. This method creates a builder
+    /// that will query the IBus daemon for its D-Bus address using the `ibus address` command.
+    ///
+    /// # Platform Support
+    ///
+    /// This method is available on Unix-like systems where IBus is installed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The `ibus` command is not found or fails to execute
+    /// - The IBus daemon is not running
+    /// - The command output cannot be parsed as a valid D-Bus address
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use std::error::Error;
+    /// # use zbus::blocking::connection;
+    /// #
+    /// let _conn = connection::Builder::ibus()?
+    ///     .build()?;
+    ///
+    /// // Use the connection to interact with IBus services.
+    /// # Ok::<_, Box<dyn Error + Send + Sync>>(())
+    /// ```
+    #[cfg(unix)]
+    pub fn ibus() -> Result<Self> {
+        crate::connection::Builder::ibus().map(Self)
+    }
+
+    /// Create a builder for a connection that will use the given [D-Bus bus address].
     ///
     /// [D-Bus bus address]: https://dbus.freedesktop.org/doc/dbus-specification.html#addresses
     pub fn address<A>(address: A) -> Result<Self>
@@ -48,9 +79,9 @@ impl<'a> Builder<'a> {
         crate::connection::Builder::address(address).map(Self)
     }
 
-    /// Create a builder for connection that will use the given unix stream.
+    /// Create a builder for a connection that will use the given unix stream.
     ///
-    /// If the default `async-io` feature is disabled, this method will expect
+    /// If the default `async-io` feature is disabled, this method will expect a
     /// [`tokio::net::UnixStream`](https://docs.rs/tokio/latest/tokio/net/struct.UnixStream.html)
     /// argument.
     ///
@@ -63,9 +94,9 @@ impl<'a> Builder<'a> {
         Self(crate::connection::Builder::unix_stream(stream))
     }
 
-    /// Create a builder for connection that will use the given TCP stream.
+    /// Create a builder for a connection that will use the given TCP stream.
     ///
-    /// If the default `async-io` feature is disabled, this method will expect
+    /// If the default `async-io` feature is disabled, this method will expect a
     /// [`tokio::net::TcpStream`](https://docs.rs/tokio/latest/tokio/net/struct.TcpStream.html)
     /// argument.
     pub fn tcp_stream(stream: TcpStream) -> Self {
@@ -85,7 +116,7 @@ impl<'a> Builder<'a> {
         crate::connection::Builder::authenticated_socket(socket, guid).map(Self)
     }
 
-    /// Create a builder for connection that will use the given socket.
+    /// Create a builder for a connection that will use the given socket.
     pub fn socket<S: Into<BoxedSplit>>(socket: S) -> Self {
         Self(crate::connection::Builder::socket(socket))
     }
@@ -95,38 +126,14 @@ impl<'a> Builder<'a> {
         Self(self.0.auth_mechanism(auth_mechanism))
     }
 
-    /// Specify the mechanisms to use during authentication.
-    #[deprecated(since = "4.1.3", note = "Use `auth_mechanism` instead.")]
-    pub fn auth_mechanisms(self, auth_mechanisms: &[AuthMechanism]) -> Self {
-        #[allow(deprecated)]
-        Self(self.0.auth_mechanisms(auth_mechanisms))
-    }
-
-    /// The cookie context to use during authentication.
+    /// Specify the user id during authentication.
     ///
-    /// This is only used when the `cookie` authentication mechanism is enabled and only valid for
-    /// server connection.
-    ///
-    /// If not specified, the default cookie context of `org_freedesktop_general` will be used.
-    ///
-    /// # Errors
-    ///
-    /// If the given string is not a valid cookie context.
-    pub fn cookie_context<C>(self, context: C) -> Result<Self>
-    where
-        C: Into<Str<'a>>,
-    {
-        self.0.cookie_context(context).map(Self)
-    }
-
-    /// The ID of the cookie to use during authentication.
-    ///
-    /// This is only used when the `cookie` authentication mechanism is enabled and only valid for
-    /// server connection.
-    ///
-    /// If not specified, the first cookie found in the cookie context file will be used.
-    pub fn cookie_id(self, id: usize) -> Self {
-        Self(self.0.cookie_id(id))
+    /// This can be useful when using [`AuthMechanism::External`] with `socat`
+    /// to avoid the host decide what uid to use and instead provide one
+    /// known to have access rights.
+    #[cfg(unix)]
+    pub fn user_id(self, id: u32) -> Self {
+        Self(self.0.user_id(id))
     }
 
     /// The to-be-created connection will be a peer-to-peer connection.
@@ -208,7 +215,19 @@ impl<'a> Builder<'a> {
         self.0.name(well_known_name).map(Self)
     }
 
-    /// Sets the unique name of the connection.
+    /// Whether the [`zbus::fdo::RequestNameFlags::AllowReplacement`] flag will be set when
+    /// requesting names.
+    pub fn allow_name_replacements(self, allow_replacement: bool) -> Self {
+        Self(self.0.allow_name_replacements(allow_replacement))
+    }
+
+    /// Whether the [`zbus::fdo::RequestNameFlags::ReplaceExisting`] flag will be set when
+    /// requesting names.
+    pub fn replace_existing_names(self, replace_existing: bool) -> Self {
+        Self(self.0.replace_existing_names(replace_existing))
+    }
+
+    /// Set the unique name of the connection.
     ///
     /// This method is only available when the `bus-impl` feature is enabled.
     ///
@@ -227,13 +246,41 @@ impl<'a> Builder<'a> {
         self.0.unique_name(unique_name).map(Self)
     }
 
+    /// Set a timeout for method calls.
+    ///
+    /// Method calls will return
+    /// `zbus::Error::InputOutput(std::io::Error(kind: ErrorKind::TimedOut))` if a client does not
+    /// receive an answer from a service in time.
+    pub fn method_timeout(self, timeout: std::time::Duration) -> Self {
+        Self(self.0.method_timeout(timeout))
+    }
+
     /// Build the connection, consuming the builder.
     ///
     /// # Errors
     ///
     /// Until server-side bus connection is supported, attempting to build such a connection will
-    /// result in [`Error::Unsupported`] error.
+    /// result in a [`Error::Unsupported`] error.
     pub fn build(self) -> Result<Connection> {
         block_on(self.0.build()).map(Into::into)
+    }
+
+    /// Build the connection and return a [`MessageIterator`] to receive messages from it.
+    ///
+    /// This is the blocking counterpart of [`crate::connection::Builder::build_message_stream`].
+    /// The iterator is set up **before** the socket-reader task is started, so no messages can
+    /// be lost in the window between the connection being built and the iterator being created.
+    /// Use this when the peer may pipeline traffic right after authentication — e.g. a bus
+    /// implementation reading a `Hello` method call from a just-connected client.
+    ///
+    /// To get the [`Connection`] out of the returned iterator, use `Connection::from(&iter)`.
+    ///
+    /// This method is only available when the `bus-impl` feature is enabled.
+    ///
+    /// [`MessageIterator`]: crate::blocking::MessageIterator
+    #[cfg(feature = "bus-impl")]
+    pub fn build_message_iterator(self) -> Result<crate::blocking::MessageIterator> {
+        block_on(self.0.build_message_stream())
+            .map(|azync| crate::blocking::MessageIterator { azync: Some(azync) })
     }
 }

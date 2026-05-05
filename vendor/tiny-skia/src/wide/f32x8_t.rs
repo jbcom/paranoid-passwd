@@ -43,11 +43,17 @@ impl f32x8 {
     }
 
     pub fn floor(self) -> Self {
-        let roundtrip: f32x8 = cast(self.trunc_int().to_f32x8());
-        roundtrip
-            - roundtrip
-                .cmp_gt(self)
-                .blend(f32x8::splat(1.0), f32x8::default())
+        cfg_if::cfg_if! {
+            if #[cfg(all(feature = "simd", target_feature = "simd128"))] {
+                Self(self.0.floor(), self.1.floor())
+            } else {
+                let roundtrip: f32x8 = cast(self.trunc_int().to_f32x8());
+                roundtrip
+                    - roundtrip
+                        .cmp_gt(self)
+                        .blend(f32x8::splat(1.0), f32x8::default())
+            }
+        }
     }
 
     pub fn fract(self) -> Self {
@@ -79,7 +85,9 @@ impl f32x8 {
     pub fn cmp_ne(self, rhs: Self) -> Self {
         cfg_if::cfg_if! {
             if #[cfg(all(feature = "simd", target_feature = "avx"))] {
-                Self(unsafe { _mm256_cmp_ps(self.0, rhs.0, _CMP_NEQ_OQ) })
+                // Use UQ (unordered quiet) to match SSE _mm_cmpneq_ps behavior,
+                // which returns true when either operand is NaN.
+                Self(unsafe { _mm256_cmp_ps(self.0, rhs.0, _CMP_NEQ_UQ) })
             } else {
                 Self(self.0.cmp_ne(rhs.0), self.1.cmp_ne(rhs.1))
             }
@@ -238,6 +246,39 @@ impl f32x8 {
                 Self(self.0.sqrt(), self.1.sqrt())
             }
         }
+    }
+
+    pub fn powf(self, exp: f32) -> Self {
+        let x = self;
+        // We assume sign(x) is positive so we can use vectorized i32->f32 conversions
+        let e = x.to_i32x8_bitcast().to_f32x8() * f32x8::splat(1.0f32 / ((1 << 23) as f32));
+        let m = (x.to_u32x8_bitcast() & u32x8::splat(0x007fffff) | u32x8::splat(0x3f000000))
+            .to_f32x8_bitcast();
+
+        let log2_x = e
+            - f32x8::splat(124.225514990)
+            - f32x8::splat(1.498030302) * m
+            - f32x8::splat(1.725879990) / (f32x8::splat(0.3520887068) + m);
+
+        let x = log2_x * f32x8::splat(exp);
+
+        let f = x - x.floor();
+
+        let mut a = x + f32x8::splat(121.274057500);
+        a = a - f * f32x8::splat(1.490129070);
+        a += f32x8::splat(27.728023300) / (f32x8::splat(4.84252568) - f);
+        a *= f32x8::splat((1 << 23) as f32);
+
+        let inf_bits = f32x8::splat(f32::INFINITY.to_bits() as f32);
+
+        let x = a
+            .max(f32x8::splat(0.0))
+            .min(inf_bits)
+            .round_int()
+            .to_f32x8_bitcast();
+
+        let skip = self.cmp_eq(f32x8::splat(0.0)) | self.cmp_eq(f32x8::splat(1.0));
+        skip.blend(self, x)
     }
 }
 

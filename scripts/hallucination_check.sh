@@ -38,10 +38,21 @@ else
   pass "no ad hoc randomness helpers detected"
 fi
 
-if rg -n '\bunsafe\b' "$REPO_ROOT/crates" >/dev/null 2>&1; then
-  fail "unsafe Rust detected in workspace crates"
+if rg -n '\bunsafe\b' \
+  "$REPO_ROOT/crates/paranoid-core/src" \
+  "$REPO_ROOT/crates/paranoid-cli/src" \
+  "$REPO_ROOT/crates/paranoid-vault/src" \
+  --glob '*.rs' >/dev/null 2>&1; then
+  fail "unsafe Rust detected in core, CLI, or vault Rust sources"
+elif rg -n '\bunsafe\b' \
+  "$REPO_ROOT/crates/paranoid-gui/src" \
+  "$REPO_ROOT/crates/paranoid-gui/build.rs" \
+  --glob '*.rs' >/dev/null 2>&1; then
+  fail "handwritten unsafe Rust detected in GUI sources"
+elif rg -q 'unsafe_code = "deny"' "$REPO_ROOT/crates/paranoid-gui/Cargo.toml"; then
+  pass "handwritten workspace Rust remains unsafe-free; GUI permits Slint generated code under deny-level linting"
 else
-  pass "workspace crates remain unsafe-free"
+  fail "GUI unsafe-code lint is not pinned to deny"
 fi
 
 if rg -q 'let max_valid = \(256 / charset_bytes\.len\(\)\) \* charset_bytes\.len\(\) - 1;' "$CORE" \

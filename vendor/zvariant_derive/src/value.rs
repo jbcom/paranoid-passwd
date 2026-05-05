@@ -1,9 +1,10 @@
 use proc_macro2::{Span, TokenStream};
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use syn::{
-    spanned::Spanned, Attribute, Data, DataEnum, DeriveInput, Error, Expr, Fields, Generics, Ident,
-    Lifetime, LifetimeParam,
+    Attribute, Data, DataEnum, DeriveInput, Error, Fields, Generics, Ident, Lifetime,
+    LifetimeParam, Variant, spanned::Spanned,
 };
+use zvariant_utils::macros;
 
 use crate::utils::*;
 
@@ -13,26 +14,31 @@ pub enum ValueType {
 }
 
 pub fn expand_derive(ast: DeriveInput, value_type: ValueType) -> Result<TokenStream, Error> {
-    let zv = zvariant_path();
+    let StructAttributes {
+        signature,
+        rename_all,
+        crate_path: crate_attr,
+        ..
+    } = StructAttributes::parse(&ast.attrs)?;
+    let crate_path = parse_crate_path(crate_attr.as_deref())?;
+    let zv = zvariant_path(crate_path.as_ref());
+
+    let signature = signature.map(|signature| match signature.as_str() {
+        "dict" => "a{sv}".to_string(),
+        _ => signature,
+    });
 
     match &ast.data {
         Data::Struct(ds) => match &ds.fields {
-            Fields::Named(_) | Fields::Unnamed(_) => {
-                let StructAttributes { signature, .. } = StructAttributes::parse(&ast.attrs)?;
-                let signature = signature.map(|signature| match signature.as_str() {
-                    "dict" => "a{sv}".to_string(),
-                    _ => signature,
-                });
-
-                impl_struct(
-                    value_type,
-                    ast.ident,
-                    ast.generics,
-                    &ds.fields,
-                    signature,
-                    &zv,
-                )
-            }
+            Fields::Named(_) | Fields::Unnamed(_) => impl_struct(
+                value_type,
+                ast.ident,
+                ast.generics,
+                &ds.fields,
+                signature,
+                &zv,
+                rename_all,
+            ),
             Fields::Unit => Err(Error::new(ast.span(), "Unit structures not supported")),
         },
         Data::Enum(data) => impl_enum(value_type, ast.ident, ast.generics, ast.attrs, data, &zv),
@@ -50,6 +56,7 @@ fn impl_struct(
     fields: &Fields,
     signature: Option<String>,
     zv: &TokenStream,
+    rename_all: Option<String>,
 ) -> Result<TokenStream, Error> {
     let statc_lifetime = LifetimeParam::new(Lifetime::new("'static", Span::call_site()));
     let (
@@ -123,32 +130,79 @@ fn impl_struct(
                 .map(|field| field.ident.to_token_stream())
                 .collect();
             let (from_value_impl, into_value_impl) = match signature {
-                Some(signature) if signature == "a{sv}" => (
+                Some(signature) if signature == "a{sv}" => {
                     // User wants the type to be encoded as a dict.
                     // FIXME: Not the most efficient implementation.
-                    quote! {
-                        let mut fields = <::std::collections::HashMap::<::std::string::String, #zv::Value>>::try_from(value)?;
+                    let (fields_init, entries_init): (TokenStream, TokenStream) = fields
+                        .iter()
+                        .map(|field| {
+                            let FieldAttributes { rename, .. } =
+                                FieldAttributes::parse(&field.attrs).unwrap_or_default();
+                            let field_name = field.ident.to_token_stream();
+                            let key_name = rename_identifier(
+                                field.ident.as_ref().unwrap().to_string(),
+                                field.span(),
+                                rename,
+                                rename_all.as_deref(),
+                            )
+                            .unwrap_or(field_name.to_string());
+                            let convert = if macros::ty_is_option(&field.ty) {
+                                quote! {
+                                    .map(#zv::Value::downcast)
+                                    .transpose()?
+                                }
+                            } else {
+                                quote! {
+                                    .ok_or_else(|| #zv::Error::IncorrectType)?
+                                    .downcast()?
+                                }
+                            };
 
-                        ::std::result::Result::Ok(Self {
-                            #(
-                                #field_names:
-                                    fields
-                                        .remove(stringify!(#field_names))
-                                        .ok_or_else(|| #zv::Error::IncorrectType)?
-                                        .downcast()?
-                            ),*
+                            let fields_init = quote! {
+                                #field_name: fields
+                                    .remove(#key_name)
+                                    #convert,
+                            };
+                            let entries_init = if macros::ty_is_option(&field.ty) {
+                                quote! {
+                                    if let Some(v) = s.#field_name {
+                                        fields.insert(
+                                            #key_name,
+                                            #zv::Value::from(v),
+                                        );
+                                    }
+                                }
+                            } else {
+                                quote! {
+                                    fields.insert(
+                                        #key_name,
+                                        #zv::Value::from(s.#field_name),
+                                    );
+                                }
+                            };
+
+                            (fields_init, entries_init)
                         })
-                    },
-                    quote! {
-                        let mut fields = ::std::collections::HashMap::new();
-                        #(
-                            fields.insert(stringify!(#field_names), #zv::Value::from(s.#field_names));
-                        )*
+                        .unzip();
 
-                        <#value_type>::#into_value_method(#zv::Value::from(fields))
-                            #into_value_error_transform
-                    },
-                ),
+                    (
+                        quote! {
+                            let mut fields = <::std::collections::HashMap::<
+                                ::std::string::String,
+                                #zv::Value,
+                            >>::try_from(value)?;
+
+                            ::std::result::Result::Ok(Self { #fields_init })
+                        },
+                        quote! {
+                            let mut fields = ::std::collections::HashMap::new();
+                            #entries_init
+
+                            <#value_type>::#into_value_method(#zv::Value::from(fields))
+                                #into_value_error_transform
+                        },
+                    )
+                }
                 Some(_) | None => (
                     quote! {
                         let mut fields = #zv::Structure::try_from(value)?.into_fields();
@@ -164,7 +218,7 @@ fn impl_struct(
                         #(
                             .add_field(s.#field_names)
                         )*
-                        .build())
+                        .build().unwrap())
                         #into_value_error_transform
                     },
                 ),
@@ -236,33 +290,44 @@ fn impl_enum(
         Some(repr_attr) => repr_attr.parse_args()?,
         None => quote! { u32 },
     };
+    let enum_attrs = EnumAttributes::parse(&attrs)?;
+    let str_enum = enum_attrs
+        .signature
+        .map(|sig| sig == "s")
+        .unwrap_or_default();
 
     let mut variant_names = vec![];
-    let mut variant_values = vec![];
+    let mut str_values = vec![];
     for variant in &data.variants {
+        let variant_attrs = VariantAttributes::parse(&variant.attrs)?;
         // Ensure all variants of the enum are unit type
         match variant.fields {
             Fields::Unit => {
                 variant_names.push(&variant.ident);
-                let value = match &variant
-                    .discriminant
-                    .as_ref()
-                    .ok_or_else(|| Error::new(variant.span(), "expected `Name = Value` variants"))?
-                    .1
-                {
-                    Expr::Lit(lit_exp) => &lit_exp.lit,
-                    _ => {
-                        return Err(Error::new(
-                            variant.span(),
-                            "expected `Name = Value` variants",
-                        ))
-                    }
-                };
-                variant_values.push(value);
+                if str_enum {
+                    let str_value = enum_name_for_variant(
+                        variant,
+                        variant_attrs.rename,
+                        enum_attrs.rename_all.as_ref().map(AsRef::as_ref),
+                    )?;
+                    str_values.push(str_value);
+                }
             }
             _ => return Err(Error::new(variant.span(), "must be a unit variant")),
         }
     }
+
+    let into_val = if str_enum {
+        quote! {
+            match e {
+                #(
+                    #name::#variant_names => #str_values,
+                )*
+            }
+        }
+    } else {
+        quote! { e as #repr }
+    };
 
     let (value_type, into_value) = match value_type {
         ValueType::Value => (
@@ -271,13 +336,7 @@ fn impl_enum(
                 impl ::std::convert::From<#name> for #zv::Value<'_> {
                     #[inline]
                     fn from(e: #name) -> Self {
-                        let u: #repr = match e {
-                            #(
-                                #name::#variant_names => #variant_values
-                            ),*
-                        };
-
-                        <#zv::Value as ::std::convert::From<_>>::from(u).into()
+                        <#zv::Value as ::std::convert::From<_>>::from(#into_val)
                     }
                 }
             },
@@ -290,19 +349,37 @@ fn impl_enum(
 
                     #[inline]
                     fn try_from(e: #name) -> #zv::Result<Self> {
-                        let u: #repr = match e {
-                            #(
-                                #name::#variant_names => #variant_values
-                            ),*
-                        };
-
                         <#zv::OwnedValue as ::std::convert::TryFrom<_>>::try_from(
-                            <#zv::Value as ::std::convert::From<_>>::from(u)
+                            <#zv::Value as ::std::convert::From<_>>::from(#into_val)
                         )
                     }
                 }
             },
         ),
+    };
+
+    let from_val = if str_enum {
+        quote! {
+            let v: #zv::Str = ::std::convert::TryInto::try_into(value)?;
+
+            ::std::result::Result::Ok(match v.as_str() {
+                #(
+                    #str_values => #name::#variant_names,
+                )*
+                _ => return ::std::result::Result::Err(#zv::Error::IncorrectType),
+            })
+        }
+    } else {
+        quote! {
+            let v: #repr = ::std::convert::TryInto::try_into(value)?;
+
+            ::std::result::Result::Ok(match v {
+                #(
+                    x if x == #name::#variant_names as #repr => #name::#variant_names
+                 ),*,
+                _ => return ::std::result::Result::Err(#zv::Error::IncorrectType),
+            })
+        }
     };
 
     Ok(quote! {
@@ -311,17 +388,20 @@ fn impl_enum(
 
             #[inline]
             fn try_from(value: #value_type) -> #zv::Result<Self> {
-                let v: #repr = ::std::convert::TryInto::try_into(value)?;
-
-                ::std::result::Result::Ok(match v {
-                    #(
-                        #variant_values => #name::#variant_names
-                     ),*,
-                    _ => return ::std::result::Result::Err(#zv::Error::IncorrectType),
-                })
+                #from_val
             }
         }
 
         #into_value
     })
+}
+
+fn enum_name_for_variant(
+    v: &Variant,
+    rename_attr: Option<String>,
+    rename_all_attr: Option<&str>,
+) -> Result<String, Error> {
+    let ident = v.ident.to_string();
+
+    rename_identifier(ident, v.span(), rename_attr, rename_all_attr)
 }

@@ -7,17 +7,26 @@ domain: product
 
 # paranoid-passwd
 
-## The Password Generator That Trusts No One
+## Local Secrets. Verifiable Trust.
 
-`paranoid-passwd` is a **Rust-native local password manager** with:
+`paranoid-passwd` is a **Rust-native password manager and generator** for people who want
+their secrets to stay local and their security story to be inspectable.
 
-- a scriptable CLI
-- a full-screen wizard TUI
-- a dedicated cross-platform GUI application
-- an encrypted local vault foundation
-- a docs-and-downloads website published from Sphinx
+It gives you:
 
-The old interactive GitHub Pages app is retired. `paranoid-passwd.com` now serves documentation, installation instructions, and release links only.
+- a scriptable password generator CLI
+- a full-screen terminal wizard
+- a dedicated cross-platform desktop GUI
+- an encrypted local vault for `Login`, `SecureNote`, `Card`, and `Identity` records
+- explicit recovery paths through recovery secrets, mnemonic slots, device-bound unlock,
+  and certificate-wrapped keyslots
+- verifiable release artifacts, checksums, attestations, and repo-owned validation scripts
+
+The mission is simple: keep secrets out of unnecessary runtimes, make recovery visible before
+it fails, and make the release pipeline something operators can verify. The old interactive
+HTML/CSS/JavaScript GitHub Pages app is retired. `paranoid-passwd.com` now serves documentation,
+installation instructions, and release links. Future Slint WASM or mobile artifacts must stay
+Rust/Slint-native and pass their own threat model before they become a supported product surface.
 
 Launch behavior is standardized:
 
@@ -49,7 +58,7 @@ Scriptable CLI:
 cargo run -p paranoid-cli -- --cli --length 24 --count 3 --framework nist,pci_dss
 ```
 
-Vault foundation:
+Local vault:
 
 ```bash
 export PARANOID_MASTER_PASSWORD='correct horse battery staple'
@@ -98,7 +107,7 @@ open docs/_build/html/index.html
 make build
 make test
 make lint
-make verify-security
+make verify-assurance
 make docs-build
 make smoke-release
 ```
@@ -134,6 +143,14 @@ The shipped release surface now has two native binaries, each published through 
 
 `install.sh` and package-manager flows remain intentionally focused on `paranoid-passwd`. The GUI is distributed as direct archives, native macOS `.dmg` images, and Linux `.deb` packages until native installer work is complete on every platform.
 
+## License
+
+`paranoid-passwd` is licensed under the GNU General Public License v3.0 only
+(`GPL-3.0-only`). This keeps the product open source under a reciprocal license
+and permits using Slint under Slint's GPLv3 open-source licensing path. The GUI
+direction is Slint-first; the current Iced surface remains in place while the
+Slint implementation reaches parity.
+
 ## Security Posture
 
 - RNG is delegated to OpenSSL through Rust bindings.
@@ -158,9 +175,15 @@ The shipped release surface now has two native binaries, each published through 
 - Encrypted transfer packages are now a distinct exchange path for selected vault items across CLI, TUI, and GUI. `export-transfer` encrypts decrypted item payloads under a fresh data key that can be unwrapped by a recovery secret, a certificate recipient, or both; `import-transfer` brings those items into an already unlocked vault while either preserving ids, replacing matching ids, or remapping conflicts safely.
 - Native interactive surfaces now auto-clear copied secrets from the clipboard after 30 seconds if the clipboard contents are unchanged.
 - Native interactive vault surfaces now auto-lock after 5 minutes of inactivity and clear cached decrypted state before returning to the unlock screen.
-- The remaining human cryptography/statistics review surface is tracked explicitly in `docs/reference/human-review.md`, and `scripts/verify_human_review_inventory.sh` keeps that inventory in sync with source `TODO: HUMAN_REVIEW` markers.
+- The remaining open crypto/statistics disposition surface is mapped to explicit assurance
+  claims in `docs/reference/assurance-claims.md`, and `scripts/verify_human_review_inventory.sh`
+  keeps source `TODO: HUMAN_REVIEW` markers synchronized with the docs.
 - Cargo dependencies are vendored and CI runs Cargo in locked, frozen, offline mode.
-- Security verification scripts assert the Rust-native invariants and workflow pinning.
-- The browser/WASM runtime path is gone from the product surface.
+- Security verification scripts assert the Rust-native invariants, workflow pinning, and
+  security assurance protocol wiring.
+- The retired browser/JavaScript runtime path is gone from the product surface.
+- Slint WASM and mobile targets are allowed only as explicit Rust/Slint surfaces with
+  separate threat models, release gates, and no JavaScript secret-handling logic.
 
-The statistical thresholds and compliance policies still require human review before production use. The project continues to treat the LLM author as an adversarial contributor by design.
+Tracked-open assurance claims are not external cryptographic approval. They are explicit
+release claims with deterministic gates, written evidence, and no hidden trust in an LLM author.

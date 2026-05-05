@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use zvariant::{
+    LE, OwnedValue, Type, Value,
+    as_value::{self, optional},
     serialized::{Context, Format},
-    DeserializeDict, OwnedValue, SerializeDict, Type, Value, LE,
 };
 
 #[test]
@@ -11,7 +13,7 @@ fn derive_unit_struct() {
     #[derive(Type)]
     struct FooF(f64);
 
-    assert_eq!(FooF::signature(), "d")
+    assert_eq!(FooF::SIGNATURE, "d")
 }
 
 #[test]
@@ -23,7 +25,7 @@ fn derive_struct() {
         blob: Vec<u8>,
     }
 
-    assert_eq!(TestStruct::signature(), "(syay)")
+    assert_eq!(TestStruct::SIGNATURE, "(syay)")
 }
 
 #[test]
@@ -36,17 +38,20 @@ fn derive_enum() {
         DoNotQueue = 0x04,
     }
 
-    assert_eq!(RequestNameFlags::signature(), "u")
+    assert_eq!(RequestNameFlags::SIGNATURE, "u")
 }
 
 #[test]
 fn derive_dict() {
-    #[derive(SerializeDict, DeserializeDict, Type)]
-    #[zvariant(deny_unknown_fields, signature = "a{sv}", rename_all = "camelCase")]
+    #[derive(Serialize, Deserialize, Type, Default)]
+    #[zvariant(signature = "a{sv}")]
+    #[serde(deny_unknown_fields, rename_all = "camelCase", default)]
     struct Test {
+        #[serde(with = "optional", skip_serializing_if = "Option::is_none")]
         field_a: Option<u32>,
-        #[zvariant(rename = "field-b")]
+        #[serde(with = "as_value", rename = "field-b")]
         field_b: String,
+        #[serde(with = "as_value")]
         field_c: Vec<u8>,
     }
 
@@ -80,5 +85,67 @@ fn derive_dict() {
     assert_eq!(deserialized.field_b.as_str(), "foo");
     assert_eq!(deserialized.field_c.as_slice(), &[1u8, 2, 3][..]);
 
-    assert_eq!(Test::signature(), "a{sv}")
+    assert_eq!(Test::SIGNATURE, "a{sv}")
+}
+
+#[test]
+#[ignore]
+fn issues_311() {
+    // Issue 311: Value macro not able to handle Option in Dict.
+    //
+    // org.freedesktop.ModemManager1.Modem.Signal props are a dict with optional values depending on
+    // the property you read.
+    #[derive(Debug, Type, Deserialize, OwnedValue, Value, Default)]
+    #[zbus(signature = "dict")]
+    #[serde(deny_unknown_fields, default)]
+    pub struct SignalInfo {
+        #[serde(with = "optional")]
+        pub rssi: Option<i32>,
+        #[serde(with = "optional")]
+        pub ecio: Option<i32>,
+        #[serde(with = "optional")]
+        pub io: Option<i32>,
+        #[serde(with = "optional")]
+        pub sinr: Option<i32>,
+    }
+}
+
+#[test]
+#[ignore]
+fn issues_1252() {
+    // Issue 1252: Naming a field `key` in a dict struct causes a conflict with variables created by
+    // `DeserializeDict` macro, ending up with a strange error.
+    #[derive(Type, Deserialize)]
+    #[zvariant(signature = "a{sv}")]
+    pub struct OwnedProperties {
+        #[serde(with = "as_value")]
+        key: String,
+        #[serde(with = "as_value")]
+        val: OwnedValue,
+    }
+}
+
+#[test]
+fn derive_with_crate_attr() {
+    // Test that the `crate` attribute works for custom crate paths.
+    // This is useful when zvariant is re-exported or renamed in Cargo.toml.
+    #[derive(Type)]
+    #[zvariant(crate = "zvariant")]
+    struct TestCrateAttr {
+        name: String,
+        value: u32,
+    }
+
+    assert_eq!(TestCrateAttr::SIGNATURE, "(su)");
+
+    // Also test on enums
+    #[repr(u8)]
+    #[derive(Type)]
+    #[zvariant(crate = "zvariant")]
+    enum TestCrateAttrEnum {
+        A = 1,
+        B = 2,
+    }
+
+    assert_eq!(TestCrateAttrEnum::SIGNATURE, "y");
 }

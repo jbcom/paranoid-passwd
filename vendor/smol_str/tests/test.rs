@@ -1,17 +1,15 @@
+#![allow(clippy::disallowed_types)]
 use std::sync::Arc;
 
 #[cfg(not(miri))]
 use proptest::{prop_assert, prop_assert_eq, proptest};
 
-use smol_str::SmolStr;
+use smol_str::{SmolStr, SmolStrBuilder};
 
 #[test]
 #[cfg(target_pointer_width = "64")]
 fn smol_str_is_smol() {
-    assert_eq!(
-        ::std::mem::size_of::<SmolStr>(),
-        ::std::mem::size_of::<String>(),
-    );
+    assert_eq!(::std::mem::size_of::<SmolStr>(), ::std::mem::size_of::<String>(),);
 }
 
 #[test]
@@ -37,20 +35,6 @@ fn const_fn_ctor() {
     const A: SmolStr = SmolStr::new_inline("A");
     const HELLO: SmolStr = SmolStr::new_inline("HELLO");
     const LONG: SmolStr = SmolStr::new_inline("ABCDEFGHIZKLMNOPQRSTUVW");
-
-    assert_eq!(EMPTY, SmolStr::from(""));
-    assert_eq!(A, SmolStr::from("A"));
-    assert_eq!(HELLO, SmolStr::from("HELLO"));
-    assert_eq!(LONG, SmolStr::from("ABCDEFGHIZKLMNOPQRSTUVW"));
-}
-
-#[allow(deprecated)]
-#[test]
-fn old_const_fn_ctor() {
-    const EMPTY: SmolStr = SmolStr::new_inline_from_ascii(0, b"");
-    const A: SmolStr = SmolStr::new_inline_from_ascii(1, b"A");
-    const HELLO: SmolStr = SmolStr::new_inline_from_ascii(5, b"HELLO");
-    const LONG: SmolStr = SmolStr::new_inline_from_ascii(23, b"ABCDEFGHIZKLMNOPQRSTUVW");
 
     assert_eq!(EMPTY, SmolStr::from(""));
     assert_eq!(A, SmolStr::from("A"));
@@ -253,11 +237,7 @@ fn test_bad_size_hint_char_iter() {
     let collected: SmolStr = BadSizeHint(data.chars()).collect();
     let new = SmolStr::new(data);
 
-    // Because of the bad size hint, `collected` will be heap allocated, but `new` will be inline
-
-    // If we try to use the type of the string (inline/heap) to quickly test for equality, we need to ensure
-    // `collected` is inline allocated instead
-    assert!(collected.is_heap_allocated());
+    assert!(!collected.is_heap_allocated());
     assert!(!new.is_heap_allocated());
     assert_eq!(new, collected);
 }
@@ -274,6 +254,84 @@ fn test_to_smolstr() {
     }
 }
 
+#[test]
+fn test_builder_push_str() {
+    //empty
+    let builder = SmolStrBuilder::new();
+    assert_eq!("", builder.finish());
+
+    // inline push
+    let mut builder = SmolStrBuilder::new();
+    builder.push_str("a");
+    builder.push_str("b");
+    let s = builder.finish();
+    assert!(!s.is_heap_allocated());
+    assert_eq!("ab", s);
+
+    // inline max push
+    let mut builder = SmolStrBuilder::new();
+    builder.push_str(&"a".repeat(23));
+    let s = builder.finish();
+    assert!(!s.is_heap_allocated());
+    assert_eq!("a".repeat(23), s);
+
+    // heap push immediate
+    let mut builder = SmolStrBuilder::new();
+    builder.push_str(&"a".repeat(24));
+    let s = builder.finish();
+    assert!(s.is_heap_allocated());
+    assert_eq!("a".repeat(24), s);
+
+    // heap push succession
+    let mut builder = SmolStrBuilder::new();
+    builder.push_str(&"a".repeat(23));
+    builder.push_str(&"a".repeat(23));
+    let s = builder.finish();
+    assert!(s.is_heap_allocated());
+    assert_eq!("a".repeat(46), s);
+
+    // heap push on multibyte char
+    let mut builder = SmolStrBuilder::new();
+    builder.push_str("ohnonononononononono!");
+    builder.push('🤯');
+    let s = builder.finish();
+    assert!(s.is_heap_allocated());
+    assert_eq!("ohnonononononononono!🤯", s);
+}
+
+#[test]
+fn test_builder_push() {
+    //empty
+    let builder = SmolStrBuilder::new();
+    assert_eq!("", builder.finish());
+
+    // inline push
+    let mut builder = SmolStrBuilder::new();
+    builder.push('a');
+    builder.push('b');
+    let s = builder.finish();
+    assert!(!s.is_heap_allocated());
+    assert_eq!("ab", s);
+
+    // inline max push
+    let mut builder = SmolStrBuilder::new();
+    for _ in 0..23 {
+        builder.push('a');
+    }
+    let s = builder.finish();
+    assert!(!s.is_heap_allocated());
+    assert_eq!("a".repeat(23), s);
+
+    // heap push
+    let mut builder = SmolStrBuilder::new();
+    for _ in 0..24 {
+        builder.push('a');
+    }
+    let s = builder.finish();
+    assert!(s.is_heap_allocated());
+    assert_eq!("a".repeat(24), s);
+}
+
 #[cfg(test)]
 mod test_str_ext {
     use smol_str::StrExt;
@@ -281,10 +339,7 @@ mod test_str_ext {
     #[test]
     fn large() {
         let lowercase = "aaaaaaAAAAAaaaaaaaaaaaaaaaaaaaaaAAAAaaaaaaaaaaaaaa".to_lowercase_smolstr();
-        assert_eq!(
-            lowercase,
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        );
+        assert_eq!(lowercase, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         assert!(lowercase.is_heap_allocated());
     }
 
@@ -328,5 +383,64 @@ mod test_str_ext {
         let result = "foo_bar_baz".replacen_smolstr("ba", "do", 1);
         assert_eq!(result, "foo_dor_baz");
         assert!(!result.is_heap_allocated());
+    }
+
+    #[test]
+    fn replacen_1_ascii() {
+        let result = "foo_bar_baz".replacen_smolstr("o", "u", 1);
+        assert_eq!(result, "fuo_bar_baz");
+        assert!(!result.is_heap_allocated());
+    }
+}
+
+#[cfg(all(feature = "borsh", feature = "std"))]
+mod borsh_tests {
+    use borsh::BorshDeserialize;
+    use smol_str::{SmolStr, ToSmolStr};
+    use std::io::Cursor;
+
+    #[test]
+    fn borsh_serialize_stack() {
+        let smolstr_on_stack = "aßΔCaßδc".to_smolstr();
+        let mut buffer = Vec::new();
+        borsh::BorshSerialize::serialize(&smolstr_on_stack, &mut buffer).unwrap();
+        let mut cursor = Cursor::new(buffer);
+        let decoded: SmolStr = borsh::BorshDeserialize::deserialize_reader(&mut cursor).unwrap();
+        assert_eq!(smolstr_on_stack, decoded);
+    }
+    #[test]
+    fn borsh_serialize_heap() {
+        let smolstr_on_heap = "aßΔCaßδcaßΔCaßδcaßΔCaßδcaßΔCaßδcaßΔCaßδcaßΔCaßδcaßΔCaßδcaßΔCaßδcaßΔCaßδcaßΔCaßδcaßΔCaßδc".to_smolstr();
+        let mut buffer = Vec::new();
+        borsh::BorshSerialize::serialize(&smolstr_on_heap, &mut buffer).unwrap();
+        let mut cursor = Cursor::new(buffer);
+        let decoded: SmolStr = borsh::BorshDeserialize::deserialize_reader(&mut cursor).unwrap();
+        assert_eq!(smolstr_on_heap, decoded);
+    }
+    #[test]
+    fn borsh_non_utf8_stack() {
+        let invalid_utf8: Vec<u8> = vec![0xF0, 0x9F, 0x8F]; // Incomplete UTF-8 sequence
+
+        let wrong_utf8 = SmolStr::from(unsafe { String::from_utf8_unchecked(invalid_utf8) });
+        let mut buffer = Vec::new();
+        borsh::BorshSerialize::serialize(&wrong_utf8, &mut buffer).unwrap();
+        let mut cursor = Cursor::new(buffer);
+        let result = SmolStr::deserialize_reader(&mut cursor);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn borsh_non_utf8_heap() {
+        let invalid_utf8: Vec<u8> = vec![
+            0xC1, 0x8A, 0x5F, 0xE2, 0x3A, 0x9E, 0x3B, 0xAA, 0x01, 0x08, 0x6F, 0x2F, 0xC0, 0x32,
+            0xAB, 0xE1, 0x9A, 0x2F, 0x4A, 0x3F, 0x25, 0x0D, 0x8A, 0x2A, 0x19, 0x11, 0xF0, 0x7F,
+            0x0E, 0x80,
+        ];
+        let wrong_utf8 = SmolStr::from(unsafe { String::from_utf8_unchecked(invalid_utf8) });
+        let mut buffer = Vec::new();
+        borsh::BorshSerialize::serialize(&wrong_utf8, &mut buffer).unwrap();
+        let mut cursor = Cursor::new(buffer);
+        let result = SmolStr::deserialize_reader(&mut cursor);
+        assert!(result.is_err());
     }
 }

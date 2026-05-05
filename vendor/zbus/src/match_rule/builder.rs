@@ -1,11 +1,9 @@
-use static_assertions::assert_impl_all;
-
 use crate::{
+    Error, MatchRule, Result,
     match_rule::PathSpec,
     message::Type,
     names::{BusName, InterfaceName, MemberName, UniqueName},
     zvariant::{ObjectPath, Str},
-    Error, MatchRule, Result,
 };
 
 const MAX_ARGS: u8 = 64;
@@ -15,8 +13,6 @@ const MAX_ARGS: u8 = 64;
 /// This is created by [`MatchRule::builder`].
 #[derive(Debug)]
 pub struct Builder<'m>(MatchRule<'m>);
-
-assert_impl_all!(Builder<'_>: Send, Sync, Unpin);
 
 impl<'m> Builder<'m> {
     /// Build the `MatchRule`.
@@ -111,7 +107,7 @@ impl<'m> Builder<'m> {
         Ok(self)
     }
 
-    /// Append an arguments.
+    /// Append an argument.
     ///
     /// Use this in instead of [`Builder::arg`] if you want to sequentially add args.
     ///
@@ -202,8 +198,8 @@ impl<'m> Builder<'m> {
 
     /// Set 0th argument's namespace.
     ///
-    /// The namespace be a valid bus name or a valid element of a bus name. For more information,
-    /// see [the spec](https://dbus.freedesktop.org/doc/dbus-specification.html#message-protocol-names-bus).
+    /// The namespace must be a valid bus name or a valid element of a bus name. For more
+    /// information, see [the spec](https://dbus.freedesktop.org/doc/dbus-specification.html#message-protocol-names-bus).
     ///
     /// # Examples
     ///

@@ -13,7 +13,7 @@ pub mod transport;
 
 use crate::{Error, Guid, OwnedGuid, Result};
 #[cfg(all(unix, not(target_os = "macos")))]
-use nix::unistd::Uid;
+use rustix::process::geteuid;
 use std::{collections::HashMap, env, str::FromStr};
 
 use std::fmt::{Display, Formatter};
@@ -21,7 +21,7 @@ use std::fmt::{Display, Formatter};
 use self::transport::Stream;
 pub use self::transport::Transport;
 
-/// A bus address
+/// A bus address.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Address {
@@ -59,9 +59,9 @@ impl Address {
         self.transport.connect().await
     }
 
-    /// Get the address for session socket respecting the DBUS_SESSION_BUS_ADDRESS environment
+    /// Get the address for the session socket respecting the `DBUS_SESSION_BUS_ADDRESS` environment
     /// variable. If we don't recognize the value (or it's not set) we fall back to
-    /// $XDG_RUNTIME_DIR/bus
+    /// `$XDG_RUNTIME_DIR/bus`.
     pub fn session() -> Result<Self> {
         match env::var("DBUS_SESSION_BUS_ADDRESS") {
             Ok(val) => Self::from_str(&val),
@@ -72,7 +72,7 @@ impl Address {
                 #[cfg(all(unix, not(target_os = "macos")))]
                 {
                     let runtime_dir = env::var("XDG_RUNTIME_DIR")
-                        .unwrap_or_else(|_| format!("/run/user/{}", Uid::effective()));
+                        .unwrap_or_else(|_| format!("/run/user/{}", geteuid().as_raw()));
                     let path = format!("unix:path={runtime_dir}/bus");
 
                     Self::from_str(&path)
@@ -84,9 +84,9 @@ impl Address {
         }
     }
 
-    /// Get the address for system bus respecting the DBUS_SYSTEM_BUS_ADDRESS environment
+    /// Get the address for the system bus respecting the `DBUS_SYSTEM_BUS_ADDRESS` environment
     /// variable. If we don't recognize the value (or it's not set) we fall back to
-    /// /var/run/dbus/system_bus_socket
+    /// `/var/run/dbus/system_bus_socket`.
     pub fn system() -> Result<Self> {
         match env::var("DBUS_SYSTEM_BUS_ADDRESS") {
             Ok(val) => Self::from_str(&val),
@@ -114,7 +114,7 @@ impl Display for Address {
         self.transport.fmt(f)?;
 
         if let Some(guid) = &self.guid {
-            write!(f, ",guid={}", guid)?;
+            write!(f, ",guid={guid}")?;
         }
 
         Ok(())
@@ -126,37 +126,46 @@ impl FromStr for Address {
 
     /// Parse the transport part of a D-Bus address into a `Transport`.
     fn from_str(address: &str) -> Result<Self> {
-        let col = address
-            .find(':')
-            .ok_or_else(|| Error::Address("address has no colon".to_owned()))?;
-        let transport = &address[..col];
-        let mut options = HashMap::new();
+        use std::str::from_utf8_unchecked;
+        use winnow::{
+            Parser,
+            ascii::alphanumeric1,
+            combinator::separated,
+            token::{take_until, take_while},
+        };
 
-        if address.len() > col + 1 {
-            for kv in address[col + 1..].split(',') {
-                let (k, v) = match kv.find('=') {
-                    Some(eq) => (&kv[..eq], &kv[eq + 1..]),
-                    None => {
-                        return Err(Error::Address(
-                            "missing = when parsing key/value".to_owned(),
-                        ))
-                    }
-                };
-                if options.insert(k, v).is_some() {
-                    return Err(Error::Address(format!(
-                        "Key `{k}` specified multiple times"
-                    )));
-                }
-            }
-        }
+        // All currently defined keys are alphanumber only. Change the paser when/if this changes.
+        let key = alphanumeric1::<_, ()>;
+        let value = take_while(1.., |b| b != b',');
+        let kv = (key, b'=', value).map(|(k, _, v)| {
+            // SAFETY: We got the bytes off a `&str` so they're guaranteed to be UTF-8 only.
+            unsafe { (from_utf8_unchecked(k), from_utf8_unchecked(v)) }
+        });
+        let options_parse = separated(0.., kv, b',');
 
-        Ok(Self {
-            guid: options
-                .remove("guid")
-                .map(|s| Guid::from_str(s).map(|guid| OwnedGuid::from(guid).to_owned()))
-                .transpose()?,
-            transport: Transport::from_options(transport, options)?,
-        })
+        let transport_parse = take_until(1.., b':').map(|bytes| {
+            // SAFETY: We got the bytes off a `&str` so they're guaranteed to be UTF-8 only.
+            unsafe { from_utf8_unchecked(bytes) }
+        });
+
+        (transport_parse, b':', options_parse)
+            .parse(address.as_bytes())
+            .map_err(|_| {
+                Error::Address(
+                    "Invalid address. \
+                    See https://dbus.freedesktop.org/doc/dbus-specification.html#addresses"
+                        .to_string(),
+                )
+            })
+            .and_then(|(transport, _, opts): (_, _, HashMap<_, _>)| {
+                let guid = opts
+                    .get("guid")
+                    .map(|s| Guid::from_str(s).map(|guid| OwnedGuid::from(guid).to_owned()))
+                    .transpose()?;
+                let transport = Transport::from_options(transport, opts)?;
+
+                Ok(Address { guid, transport })
+            })
     }
 }
 
@@ -177,61 +186,33 @@ impl From<Transport> for Address {
 #[cfg(test)]
 mod tests {
     use super::{
-        transport::{Tcp, TcpTransportFamily, Transport},
         Address,
+        transport::{Tcp, TcpTransportFamily, Transport},
     };
     #[cfg(target_os = "macos")]
     use crate::address::transport::Launchd;
+    #[cfg(unix)]
+    use crate::address::transport::Unixexec;
     #[cfg(windows)]
     use crate::address::transport::{Autolaunch, AutolaunchScope};
-    use crate::{
-        address::transport::{Unix, UnixSocket},
-        Error,
-    };
+    use crate::address::transport::{Unix, UnixSocket};
     use std::str::FromStr;
     use test_log::test;
 
     #[test]
     fn parse_dbus_addresses() {
-        match Address::from_str("").unwrap_err() {
-            Error::Address(e) => assert_eq!(e, "address has no colon"),
-            _ => panic!(),
-        }
-        match Address::from_str("foo").unwrap_err() {
-            Error::Address(e) => assert_eq!(e, "address has no colon"),
-            _ => panic!(),
-        }
-        match Address::from_str("foo:opt").unwrap_err() {
-            Error::Address(e) => assert_eq!(e, "missing = when parsing key/value"),
-            _ => panic!(),
-        }
-        match Address::from_str("foo:opt=1,opt=2").unwrap_err() {
-            Error::Address(e) => assert_eq!(e, "Key `opt` specified multiple times"),
-            _ => panic!(),
-        }
-        match Address::from_str("tcp:host=localhost").unwrap_err() {
-            Error::Address(e) => assert_eq!(e, "tcp address is missing `port`"),
-            _ => panic!(),
-        }
-        match Address::from_str("tcp:host=localhost,port=32f").unwrap_err() {
-            Error::Address(e) => assert_eq!(e, "invalid tcp `port`"),
-            _ => panic!(),
-        }
-        match Address::from_str("tcp:host=localhost,port=123,family=ipv7").unwrap_err() {
-            Error::Address(e) => assert_eq!(e, "invalid tcp address `family`: ipv7"),
-            _ => panic!(),
-        }
-        match Address::from_str("unix:foo=blah").unwrap_err() {
-            Error::Address(e) => assert_eq!(e, "unix: address is invalid"),
-            _ => panic!(),
-        }
+        assert!(Address::from_str("").is_err());
+        assert!(Address::from_str("foo").is_err());
+        assert!(Address::from_str("foo:opt").is_err());
+        assert!(Address::from_str("foo:opt=1,opt=2").is_err());
+        assert!(Address::from_str("tcp:host=localhost").is_err());
+        assert!(Address::from_str("tcp:host=localhost,port=32f").is_err());
+        assert!(Address::from_str("tcp:host=localhost,port=123,family=ipv7").is_err());
+        assert!(Address::from_str("unix:foo=blah").is_err());
         #[cfg(target_os = "linux")]
-        match Address::from_str("unix:path=/tmp,abstract=foo").unwrap_err() {
-            Error::Address(e) => {
-                assert_eq!(e, "unix: address is invalid")
-            }
-            _ => panic!(),
-        }
+        assert!(Address::from_str("unix:path=/tmp,abstract=foo").is_err());
+        #[cfg(unix)]
+        assert!(Address::from_str("unixexec:foo=blah").is_err());
         assert_eq!(
             Address::from_str("unix:path=/tmp/dbus-foo").unwrap(),
             Transport::Unix(Unix::new(UnixSocket::File("/tmp/dbus-foo".into()))).into(),
@@ -241,14 +222,22 @@ mod tests {
             Address::from_str("unix:abstract=/tmp/dbus-foo").unwrap(),
             Transport::Unix(Unix::new(UnixSocket::Abstract("/tmp/dbus-foo".into()))).into(),
         );
-        let guid = crate::Guid::generate();
+        #[cfg(feature = "p2p")]
+        {
+            let guid = crate::Guid::generate();
+            assert_eq!(
+                Address::from_str(&format!("unix:path=/tmp/dbus-foo,guid={guid}")).unwrap(),
+                Address::from(Transport::Unix(Unix::new(UnixSocket::File(
+                    "/tmp/dbus-foo".into()
+                ))))
+                .set_guid(guid.clone())
+                .unwrap(),
+            );
+        }
+        #[cfg(unix)]
         assert_eq!(
-            Address::from_str(&format!("unix:path=/tmp/dbus-foo,guid={guid}")).unwrap(),
-            Address::from(Transport::Unix(Unix::new(UnixSocket::File(
-                "/tmp/dbus-foo".into()
-            ))))
-            .set_guid(guid.clone())
-            .unwrap(),
+            Address::from_str("unixexec:path=/tmp/dbus-foo").unwrap(),
+            Transport::Unixexec(Unixexec::new("/tmp/dbus-foo".into(), None, Vec::new())).into(),
         );
         assert_eq!(
             Address::from_str("tcp:host=localhost,port=4142").unwrap(),
@@ -304,14 +293,22 @@ mod tests {
             Address::from_str("launchd:env=my_cool_env_key").unwrap(),
             Transport::Launchd(Launchd::new("my_cool_env_key")).into(),
         );
-
-        #[cfg(all(feature = "vsock", not(feature = "tokio")))]
+        #[cfg(unix)]
         assert_eq!(
-            Address::from_str(&format!("vsock:cid=98,port=2934,guid={guid}")).unwrap(),
-            Address::from(Transport::Vsock(super::transport::Vsock::new(98, 2934)))
-                .set_guid(guid)
-                .unwrap(),
+            Address::from_str("ibus:").unwrap(),
+            Transport::Ibus(crate::address::transport::Ibus::new()).into(),
         );
+
+        #[cfg(all(feature = "vsock", feature = "p2p", not(feature = "tokio")))]
+        {
+            let guid = crate::Guid::generate();
+            assert_eq!(
+                Address::from_str(&format!("vsock:cid=98,port=2934,guid={guid}")).unwrap(),
+                Address::from(Transport::Vsock(super::transport::Vsock::new(98, 2934)))
+                    .set_guid(guid)
+                    .unwrap(),
+            );
+        }
         assert_eq!(
             Address::from_str("unix:dir=/some/dir").unwrap(),
             Transport::Unix(Unix::new(UnixSocket::Dir("/some/dir".into()))).into(),
@@ -373,10 +370,11 @@ mod tests {
             "tcp:host=localhost,port=4142,family=ipv6"
         );
         assert_eq!(
-            Address::from(Transport::Tcp(Tcp::new("localhost", 4142)
-                .set_family(Some(TcpTransportFamily::Ipv6))
-                .set_nonce_file(Some(b"/a/file/path to file 1234".to_vec())
-            )))
+            Address::from(Transport::Tcp(
+                Tcp::new("localhost", 4142)
+                    .set_family(Some(TcpTransportFamily::Ipv6))
+                    .set_nonce_file(Some(b"/a/file/path to file 1234".to_vec()))
+            ))
             .to_string(),
             "nonce-tcp:noncefile=/a/file/path%20to%20file%201234,host=localhost,port=4142,family=ipv6"
         );
@@ -398,8 +396,13 @@ mod tests {
             Address::from(Transport::Launchd(Launchd::new("my_cool_key"))).to_string(),
             "launchd:env=my_cool_key"
         );
+        #[cfg(unix)]
+        assert_eq!(
+            Address::from(Transport::Ibus(crate::address::transport::Ibus::new())).to_string(),
+            "ibus:"
+        );
 
-        #[cfg(all(feature = "vsock", not(feature = "tokio")))]
+        #[cfg(all(feature = "vsock", feature = "p2p", not(feature = "tokio")))]
         {
             let guid = crate::Guid::generate();
             assert_eq!(

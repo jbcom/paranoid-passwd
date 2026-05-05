@@ -42,32 +42,32 @@ fi
 binary_path="target/release/${PRODUCT_NAME}${EXT}"
 
 add_linux_gui_metadata() {
-  local root_dir="$1"
+  local share_root="$1"
 
-  mkdir -p "${root_dir}/share/applications"
-  mkdir -p "${root_dir}/share/metainfo"
-  cat > "${root_dir}/share/applications/paranoid-passwd-gui.desktop" <<'DESKTOP'
+  mkdir -p "${share_root}/applications"
+  mkdir -p "${share_root}/metainfo"
+  cat > "${share_root}/applications/paranoid-passwd-gui.desktop" <<'DESKTOP'
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=Paranoid Passwd
-Comment=Local-first password manager
+Comment=Local-first password manager and generator
 Exec=paranoid-passwd-gui
 Terminal=false
 Categories=Utility;Security;
 DESKTOP
-  cat > "${root_dir}/share/metainfo/paranoid-passwd-gui.appdata.xml" <<APPDATA
+  cat > "${share_root}/metainfo/paranoid-passwd-gui.appdata.xml" <<APPDATA
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>com.jbcom.paranoid-passwd.gui</id>
   <name>Paranoid Passwd</name>
-  <summary>Local-first password manager</summary>
-  <metadata_license>MIT</metadata_license>
-  <project_license>MIT</project_license>
+  <summary>Local-first password manager and generator</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
   <developer_name>Jon Bogaty</developer_name>
   <launchable type="desktop-id">paranoid-passwd-gui.desktop</launchable>
   <description>
-    <p>Paranoid Passwd is a local-first password manager with a Rust-native vault, CLI, TUI, and desktop GUI.</p>
+    <p>Paranoid Passwd is a local-first password manager and generator with a Rust-native vault, CLI, TUI, and desktop GUI.</p>
   </description>
   <url type="homepage">https://paranoid-passwd.com</url>
   <url type="bugtracker">https://github.com/jbcom/paranoid-passwd/issues</url>
@@ -107,12 +107,12 @@ build_deb_package() {
 
   if [ "${PRODUCT_NAME}" = "paranoid-passwd-gui" ]; then
     mkdir -p "${package_root}/usr/share"
-    add_linux_gui_metadata "${package_root}/usr"
-    package_summary="Local-first password manager desktop GUI"
-    package_description=" Local-first password manager desktop GUI with encrypted vault, native unlock flows, and release-verifiable packaging."
+    add_linux_gui_metadata "${package_root}/usr/share"
+    package_summary="Local-first password manager and generator desktop GUI"
+    package_description=" Local-first password manager and generator desktop GUI with encrypted vault, native unlock flows, and release-verifiable packaging."
   else
-    package_summary="Local-first password manager CLI and TUI"
-    package_description=" Scriptable CLI and full-screen TUI for the Paranoid Passwd local-first password manager."
+    package_summary="Local-first password manager and generator CLI and TUI"
+    package_description=" Scriptable CLI and full-screen TUI for the Paranoid Passwd local-first password manager and generator."
   fi
 
   cat > "${control_root}/control" <<CONTROL

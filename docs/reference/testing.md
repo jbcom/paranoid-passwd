@@ -4,9 +4,45 @@ title: Testing
 
 # Testing
 
-The Rust replatform keeps the audit behavior covered in native tests and removes the old browser/WASM test surface.
+The native product line keeps generator, vault, and release behavior covered in tests while
+keeping the browser/WASM surface retired.
 
-The remaining human-review surface is tracked separately in [Human Review Surface](./human-review.md), and the repository now enforces that inventory with `scripts/verify_human_review_inventory.sh`.
+The remaining open disposition surface is tracked separately in
+[Human Review Surface](./human-review.md) and mapped to [Assurance Claims](./assurance-claims.md).
+The repository enforces that inventory with `scripts/verify_human_review_inventory.sh` and the
+claim-led gate in `scripts/security_assurance_gate.py`.
+
+Run the full assurance gate with:
+
+```bash
+make verify-assurance
+```
+
+That command verifies the hallucination checks, supply-chain checks, open review inventory, and
+security assurance protocol wiring.
+
+## Ops, Audit, and Federal Profile Tests
+
+The next comprehensive PR should move command orchestration and security audit behavior into
+dedicated `paranoid-ops` and `paranoid-audit` crates. That refactor should add focused tests before
+UI work expands:
+
+- typed command-envelope serialization and compatibility fixtures
+- allow / challenge / deny policy decisions for sensitive vault operations
+- seal, unseal, auto-unseal, idle-lock, and recovery-required state transitions
+- request/response audit-event pairing by stable request id
+- audit redaction and keyed-hash behavior for sensitive fields
+- event hash-chain verification and tamper/truncation detection
+- fail-closed behavior when a required audit sink is unavailable
+- CLI JSON and JSONL output fixtures for automation consumers
+- TUI and GUI adapter tests that prove controls submit typed ops commands instead of reimplementing
+  policy
+- federal-ready profile startup checks for FIPS-provider availability, approved mode evidence,
+  required audit sinks, and disabled non-federal recovery paths
+
+The federal-ready profile should have its own evidence fixtures so a release candidate can show what
+would be attached to a FedRAMP High, GovCloud, or DoD IL5 customer assessment package without
+claiming that this standalone project is itself authorized.
 
 ## Core Tests
 
@@ -33,7 +69,22 @@ cargo test -p paranoid-core --locked --frozen --offline
 `paranoid-cli` includes:
 
 - TUI reducer / rendering smoke tests
+- real PTY-driven binary TUI workflow coverage in
+  [`tests/test_tui_e2e.py`](../../../tests/test_tui_e2e.py), proving the
+  generator wizard and vault TUI can be driven end to end with actual terminal
+  keystrokes
+- a Linux GUI-binary workflow harness in
+  [`tests/test_gui_e2e.sh`](../../../tests/test_gui_e2e.sh), proving the native
+  `iced` desktop app can run an operator workflow end to end under `xvfb-run`
+  and leave a screenshot artifact for review
 - vault TUI rendering and launch-policy smoke tests
+- headless CLI end-to-end coverage for the documented vault workflows in
+  [`tests/test_vault_cli.sh`](../../../tests/test_vault_cli.sh), including
+  real binary CRUD, structured filtering, `generate-store` create and rotate
+  flows, encrypted backup restore plus `--force` overwrite behavior,
+  transfer-package import/export plus remap and `--replace-existing` conflict
+  handling, mnemonic recovery, device-bound unlock, certificate-backed unlock,
+  recovery-secret rotation, and keyslot removal guards
 - vault TUI add, edit, delete, generate-and-store, generate-and-rotate, `SecureNote`, `Card`, `Identity`, folder, tag, password-history, duplicate-password visibility, native direct unlock for recovery-secret, mnemonic, device-bound, and certificate-backed paths, keyslot-enrollment, mnemonic-slot rotation, certificate-slot rewrap, keyslot-relabel, recovery-secret rotation, keyslot-removal, device-slot rebind, and structured `/` filter workflow tests
 - vault TUI encrypted backup export/import round-trip tests, invalid backup restore fail-closed coverage, transfer-package export/import round-trip tests, invalid transfer import fail-closed coverage, and backup/transfer summary preview coverage
 - headless encrypted transfer-package export/import coverage for recovery-secret unwrap, certificate unwrap, and conflict remapping
@@ -48,9 +99,16 @@ Run them with:
 cargo test -p paranoid-cli --locked --frozen --offline
 cargo build -p paranoid-cli --locked --frozen --offline
 tests/test_cli.sh target/debug/paranoid-passwd
+tests/test_tui_e2e.py target/debug/paranoid-passwd
+tests/test_gui_e2e.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui dist/gui-e2e.png
+tests/test_vault_cli.sh target/debug/paranoid-passwd
 bash scripts/hallucination_check.sh
 bash scripts/supply_chain_verify.sh
 ```
+
+The headless vault e2e suite uses a debug-only file-backed device-store override
+when `PARANOID_TEST_DEVICE_STORE_DIR` is set. Release builds do not include that
+test backend.
 
 `paranoid-vault` includes:
 
@@ -84,11 +142,24 @@ bash scripts/supply_chain_verify.sh
 `paranoid-gui` includes:
 
 - shared generator request/result model coverage
+- a checked-in Slint shell compiled by `build.rs` from `crates/paranoid-gui/ui/paranoid.slint`,
+  with a focused Rust test that verifies the generated component bindings under locked,
+  frozen, offline Cargo
+- a comprehensive operator workflow test that crosses the generator and vault
+  surfaces in one run, covering audit completion, vault CRUD, generate-and-rotate,
+  keyslot navigation, mnemonic enrollment, backup export, and transfer export/import
+- a real GUI-binary operator harness that launches the desktop app under Xvfb,
+  drives the same native update path used by interactive controls, attests the
+  workflow result to disk, and captures a rendered screenshot artifact
 - vault refresh, CRUD, `SecureNote`, `Card`, `Identity`, folder, tag, password-history, duplicate-password visibility, structured filtering, generate-and-rotate, encrypted backup export/import, invalid backup restore fail-closed coverage, encrypted transfer export/import, invalid transfer import fail-closed coverage, and backup/transfer summary preview coverage
 - native GUI keyslot inspection, mnemonic-slot rotation, certificate-slot rewrap, relabel, recovery-secret rotation, enrollment, posture-aware removal, device-slot rebind coverage, and active-session continuity after device rebind
 - native GUI direct unlock coverage for recovery-secret, mnemonic, device-bound, and certificate-backed flows
 - native GUI idle auto-lock coverage
 - GUI launch-policy coverage for `--version` and `--help` without creating a window
+
+The GUI crate permits Slint-generated Rust to lower the unsafe-code lint, but handwritten GUI Rust
+is still scanned by `scripts/hallucination_check.sh`; security-sensitive crates remain under the
+workspace `unsafe_code = "forbid"` lint.
 
 ## Docs
 
@@ -112,5 +183,10 @@ make release-emulate
 
 - `make smoke-release` builds and smoke-tests the host-native CLI and GUI artifacts, including Linux `.deb` packages on Linux hosts and the GUI `.dmg` image on macOS hosts.
 - `make release-emulate` drives the Linux release packaging path through the custom builder image, including `.deb` outputs.
+- Linux GUI smoke validation now includes an Xvfb-backed screenshot capture of the packaged
+  GUI window so the release path proves a real frame renders instead of only checking
+  `--help`.
+- `make test-gui-e2e` runs the actionable GUI workflow harness on Linux hosts, while
+  `make test-gui-e2e-emulate` drives the same path through the custom builder image on macOS.
 - `scripts/release_validate.sh` is used in CI after the full matrix build to verify all CLI and GUI artifacts, Linux `.deb` packages, package-manager manifests, and `install.sh`.
 - `make verify-branch-protection` checks that GitHub branch protection still matches the active Rust-native required checks.

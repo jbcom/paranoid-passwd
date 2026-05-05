@@ -57,7 +57,7 @@ html_extra_path = ["public"]
 
 html_theme_options = {
     "accent_color": "green",
-    "announcement": "Rust-native generator now ships as a TUI-first local app; the website is docs + downloads only.",
+    "announcement": "Local-first password manager and generator; native apps, encrypted vault, verifiable releases.",
     "nav_links": [
         {"name": "Get Started", "url": "https://paranoid-passwd.com/getting-started/"},
         {"name": "TUI Guide", "url": "https://paranoid-passwd.com/guides/tui/"},

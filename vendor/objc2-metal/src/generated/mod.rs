@@ -12,10 +12,107 @@
 #![allow(clippy::upper_case_acronyms)]
 #![allow(clippy::identity_op)]
 #![allow(clippy::missing_safety_doc)]
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(rustdoc::broken_intra_doc_links)]
+#![allow(rustdoc::bare_urls)]
+#![allow(rustdoc::invalid_html_tags)]
 
 #[link(name = "Metal", kind = "framework")]
 extern "C" {}
 
+#[cfg(feature = "MTL4AccelerationStructure")]
+#[path = "MTL4AccelerationStructure.rs"]
+mod __MTL4AccelerationStructure;
+#[cfg(feature = "MTL4Archive")]
+#[path = "MTL4Archive.rs"]
+mod __MTL4Archive;
+#[cfg(feature = "MTL4ArgumentTable")]
+#[path = "MTL4ArgumentTable.rs"]
+mod __MTL4ArgumentTable;
+#[cfg(feature = "MTL4BinaryFunction")]
+#[path = "MTL4BinaryFunction.rs"]
+mod __MTL4BinaryFunction;
+#[cfg(feature = "MTL4BinaryFunctionDescriptor")]
+#[path = "MTL4BinaryFunctionDescriptor.rs"]
+mod __MTL4BinaryFunctionDescriptor;
+#[cfg(feature = "MTL4BufferRange")]
+#[path = "MTL4BufferRange.rs"]
+mod __MTL4BufferRange;
+#[cfg(feature = "MTL4CommandAllocator")]
+#[path = "MTL4CommandAllocator.rs"]
+mod __MTL4CommandAllocator;
+#[cfg(feature = "MTL4CommandBuffer")]
+#[path = "MTL4CommandBuffer.rs"]
+mod __MTL4CommandBuffer;
+#[cfg(feature = "MTL4CommandEncoder")]
+#[path = "MTL4CommandEncoder.rs"]
+mod __MTL4CommandEncoder;
+#[cfg(feature = "MTL4CommandQueue")]
+#[path = "MTL4CommandQueue.rs"]
+mod __MTL4CommandQueue;
+#[cfg(feature = "MTL4CommitFeedback")]
+#[path = "MTL4CommitFeedback.rs"]
+mod __MTL4CommitFeedback;
+#[cfg(feature = "MTL4Compiler")]
+#[path = "MTL4Compiler.rs"]
+mod __MTL4Compiler;
+#[cfg(feature = "MTL4CompilerTask")]
+#[path = "MTL4CompilerTask.rs"]
+mod __MTL4CompilerTask;
+#[cfg(feature = "MTL4ComputeCommandEncoder")]
+#[path = "MTL4ComputeCommandEncoder.rs"]
+mod __MTL4ComputeCommandEncoder;
+#[cfg(feature = "MTL4ComputePipeline")]
+#[path = "MTL4ComputePipeline.rs"]
+mod __MTL4ComputePipeline;
+#[cfg(feature = "MTL4Counters")]
+#[path = "MTL4Counters.rs"]
+mod __MTL4Counters;
+#[cfg(feature = "MTL4FunctionDescriptor")]
+#[path = "MTL4FunctionDescriptor.rs"]
+mod __MTL4FunctionDescriptor;
+#[cfg(feature = "MTL4LibraryDescriptor")]
+#[path = "MTL4LibraryDescriptor.rs"]
+mod __MTL4LibraryDescriptor;
+#[cfg(feature = "MTL4LibraryFunctionDescriptor")]
+#[path = "MTL4LibraryFunctionDescriptor.rs"]
+mod __MTL4LibraryFunctionDescriptor;
+#[cfg(feature = "MTL4LinkingDescriptor")]
+#[path = "MTL4LinkingDescriptor.rs"]
+mod __MTL4LinkingDescriptor;
+#[cfg(feature = "MTL4MachineLearningCommandEncoder")]
+#[path = "MTL4MachineLearningCommandEncoder.rs"]
+mod __MTL4MachineLearningCommandEncoder;
+#[cfg(feature = "MTL4MachineLearningPipeline")]
+#[path = "MTL4MachineLearningPipeline.rs"]
+mod __MTL4MachineLearningPipeline;
+#[cfg(feature = "MTL4MeshRenderPipeline")]
+#[path = "MTL4MeshRenderPipeline.rs"]
+mod __MTL4MeshRenderPipeline;
+#[cfg(feature = "MTL4PipelineDataSetSerializer")]
+#[path = "MTL4PipelineDataSetSerializer.rs"]
+mod __MTL4PipelineDataSetSerializer;
+#[cfg(feature = "MTL4PipelineState")]
+#[path = "MTL4PipelineState.rs"]
+mod __MTL4PipelineState;
+#[cfg(feature = "MTL4RenderCommandEncoder")]
+#[path = "MTL4RenderCommandEncoder.rs"]
+mod __MTL4RenderCommandEncoder;
+#[cfg(feature = "MTL4RenderPass")]
+#[path = "MTL4RenderPass.rs"]
+mod __MTL4RenderPass;
+#[cfg(feature = "MTL4RenderPipeline")]
+#[path = "MTL4RenderPipeline.rs"]
+mod __MTL4RenderPipeline;
+#[cfg(feature = "MTL4SpecializedFunctionDescriptor")]
+#[path = "MTL4SpecializedFunctionDescriptor.rs"]
+mod __MTL4SpecializedFunctionDescriptor;
+#[cfg(feature = "MTL4StitchedFunctionDescriptor")]
+#[path = "MTL4StitchedFunctionDescriptor.rs"]
+mod __MTL4StitchedFunctionDescriptor;
+#[cfg(feature = "MTL4TileRenderPipeline")]
+#[path = "MTL4TileRenderPipeline.rs"]
+mod __MTL4TileRenderPipeline;
 #[cfg(feature = "MTLAccelerationStructure")]
 #[path = "MTLAccelerationStructure.rs"]
 mod __MTLAccelerationStructure;
@@ -25,6 +122,9 @@ mod __MTLAccelerationStructureCommandEncoder;
 #[cfg(feature = "MTLAccelerationStructureTypes")]
 #[path = "MTLAccelerationStructureTypes.rs"]
 mod __MTLAccelerationStructureTypes;
+#[cfg(feature = "MTLAllocation")]
+#[path = "MTLAllocation.rs"]
+mod __MTLAllocation;
 #[cfg(feature = "MTLArgument")]
 #[path = "MTLArgument.rs"]
 mod __MTLArgument;
@@ -70,6 +170,9 @@ mod __MTLComputePipeline;
 #[cfg(feature = "MTLCounters")]
 #[path = "MTLCounters.rs"]
 mod __MTLCounters;
+#[cfg(feature = "MTLDataType")]
+#[path = "MTLDataType.rs"]
+mod __MTLDataType;
 #[cfg(feature = "MTLDefines")]
 #[path = "MTLDefines.rs"]
 mod __MTLDefines;
@@ -79,6 +182,9 @@ mod __MTLDepthStencil;
 #[cfg(feature = "MTLDevice")]
 #[path = "MTLDevice.rs"]
 mod __MTLDevice;
+#[cfg(feature = "MTLDeviceCertification")]
+#[path = "MTLDeviceCertification.rs"]
+mod __MTLDeviceCertification;
 #[cfg(feature = "MTLDrawable")]
 #[path = "MTLDrawable.rs"]
 mod __MTLDrawable;
@@ -106,6 +212,9 @@ mod __MTLFunctionLog;
 #[cfg(feature = "MTLFunctionStitching")]
 #[path = "MTLFunctionStitching.rs"]
 mod __MTLFunctionStitching;
+#[cfg(feature = "MTLGPUAddress")]
+#[path = "MTLGPUAddress.rs"]
+mod __MTLGPUAddress;
 #[cfg(feature = "MTLHeap")]
 #[path = "MTLHeap.rs"]
 mod __MTLHeap;
@@ -133,6 +242,9 @@ mod __MTLLibrary;
 #[cfg(feature = "MTLLinkedFunctions")]
 #[path = "MTLLinkedFunctions.rs"]
 mod __MTLLinkedFunctions;
+#[cfg(feature = "MTLLogState")]
+#[path = "MTLLogState.rs"]
+mod __MTLLogState;
 #[cfg(feature = "MTLParallelRenderCommandEncoder")]
 #[path = "MTLParallelRenderCommandEncoder.rs"]
 mod __MTLParallelRenderCommandEncoder;
@@ -154,6 +266,9 @@ mod __MTLRenderPass;
 #[cfg(feature = "MTLRenderPipeline")]
 #[path = "MTLRenderPipeline.rs"]
 mod __MTLRenderPipeline;
+#[cfg(feature = "MTLResidencySet")]
+#[path = "MTLResidencySet.rs"]
+mod __MTLResidencySet;
 #[cfg(feature = "MTLResource")]
 #[path = "MTLResource.rs"]
 mod __MTLResource;
@@ -163,15 +278,24 @@ mod __MTLResourceStateCommandEncoder;
 #[cfg(feature = "MTLResourceStatePass")]
 #[path = "MTLResourceStatePass.rs"]
 mod __MTLResourceStatePass;
+#[cfg(feature = "MTLResourceViewPool")]
+#[path = "MTLResourceViewPool.rs"]
+mod __MTLResourceViewPool;
 #[cfg(feature = "MTLSampler")]
 #[path = "MTLSampler.rs"]
 mod __MTLSampler;
 #[cfg(feature = "MTLStageInputOutputDescriptor")]
 #[path = "MTLStageInputOutputDescriptor.rs"]
 mod __MTLStageInputOutputDescriptor;
+#[cfg(feature = "MTLTensor")]
+#[path = "MTLTensor.rs"]
+mod __MTLTensor;
 #[cfg(feature = "MTLTexture")]
 #[path = "MTLTexture.rs"]
 mod __MTLTexture;
+#[cfg(feature = "MTLTextureViewPool")]
+#[path = "MTLTextureViewPool.rs"]
+mod __MTLTextureViewPool;
 #[cfg(feature = "MTLTypes")]
 #[path = "MTLTypes.rs"]
 mod __MTLTypes;
@@ -182,7 +306,213 @@ mod __MTLVertexDescriptor;
 #[path = "MTLVisibleFunctionTable.rs"]
 mod __MTLVisibleFunctionTable;
 
-#[cfg(all(feature = "MTLAccelerationStructure", feature = "MTLResource"))]
+#[cfg(feature = "MTL4AccelerationStructure")]
+pub use self::__MTL4AccelerationStructure::MTL4AccelerationStructureBoundingBoxGeometryDescriptor;
+#[cfg(feature = "MTL4AccelerationStructure")]
+pub use self::__MTL4AccelerationStructure::MTL4AccelerationStructureCurveGeometryDescriptor;
+#[cfg(all(
+    feature = "MTL4AccelerationStructure",
+    feature = "MTLAccelerationStructure"
+))]
+pub use self::__MTL4AccelerationStructure::MTL4AccelerationStructureDescriptor;
+#[cfg(feature = "MTL4AccelerationStructure")]
+pub use self::__MTL4AccelerationStructure::MTL4AccelerationStructureGeometryDescriptor;
+#[cfg(feature = "MTL4AccelerationStructure")]
+pub use self::__MTL4AccelerationStructure::MTL4AccelerationStructureMotionBoundingBoxGeometryDescriptor;
+#[cfg(feature = "MTL4AccelerationStructure")]
+pub use self::__MTL4AccelerationStructure::MTL4AccelerationStructureMotionCurveGeometryDescriptor;
+#[cfg(feature = "MTL4AccelerationStructure")]
+pub use self::__MTL4AccelerationStructure::MTL4AccelerationStructureMotionTriangleGeometryDescriptor;
+#[cfg(feature = "MTL4AccelerationStructure")]
+pub use self::__MTL4AccelerationStructure::MTL4AccelerationStructureTriangleGeometryDescriptor;
+#[cfg(all(
+    feature = "MTL4AccelerationStructure",
+    feature = "MTLAccelerationStructure"
+))]
+pub use self::__MTL4AccelerationStructure::MTL4IndirectInstanceAccelerationStructureDescriptor;
+#[cfg(all(
+    feature = "MTL4AccelerationStructure",
+    feature = "MTLAccelerationStructure"
+))]
+pub use self::__MTL4AccelerationStructure::MTL4InstanceAccelerationStructureDescriptor;
+#[cfg(all(
+    feature = "MTL4AccelerationStructure",
+    feature = "MTLAccelerationStructure"
+))]
+pub use self::__MTL4AccelerationStructure::MTL4PrimitiveAccelerationStructureDescriptor;
+#[cfg(feature = "MTL4Archive")]
+pub use self::__MTL4Archive::MTL4Archive;
+#[cfg(feature = "MTL4ArgumentTable")]
+pub use self::__MTL4ArgumentTable::MTL4ArgumentTable;
+#[cfg(feature = "MTL4ArgumentTable")]
+pub use self::__MTL4ArgumentTable::MTL4ArgumentTableDescriptor;
+#[cfg(feature = "MTL4BinaryFunction")]
+pub use self::__MTL4BinaryFunction::MTL4BinaryFunction;
+#[cfg(feature = "MTL4BinaryFunctionDescriptor")]
+pub use self::__MTL4BinaryFunctionDescriptor::MTL4BinaryFunctionDescriptor;
+#[cfg(feature = "MTL4BinaryFunctionDescriptor")]
+pub use self::__MTL4BinaryFunctionDescriptor::MTL4BinaryFunctionOptions;
+#[cfg(all(feature = "MTL4BufferRange", feature = "MTLGPUAddress"))]
+pub use self::__MTL4BufferRange::MTL4BufferRange;
+#[cfg(feature = "MTL4CommandAllocator")]
+pub use self::__MTL4CommandAllocator::MTL4CommandAllocator;
+#[cfg(feature = "MTL4CommandAllocator")]
+pub use self::__MTL4CommandAllocator::MTL4CommandAllocatorDescriptor;
+#[cfg(feature = "MTL4CommandBuffer")]
+pub use self::__MTL4CommandBuffer::MTL4CommandBuffer;
+#[cfg(feature = "MTL4CommandBuffer")]
+pub use self::__MTL4CommandBuffer::MTL4CommandBufferOptions;
+#[cfg(feature = "MTL4CommandEncoder")]
+pub use self::__MTL4CommandEncoder::MTL4CommandEncoder;
+#[cfg(feature = "MTL4CommandEncoder")]
+pub use self::__MTL4CommandEncoder::MTL4VisibilityOptions;
+#[cfg(feature = "MTL4CommandQueue")]
+pub use self::__MTL4CommandQueue::MTL4CommandQueue;
+#[cfg(feature = "MTL4CommandQueue")]
+pub use self::__MTL4CommandQueue::MTL4CommandQueueDescriptor;
+#[cfg(feature = "MTL4CommandQueue")]
+pub use self::__MTL4CommandQueue::MTL4CommandQueueError;
+#[cfg(feature = "MTL4CommandQueue")]
+pub use self::__MTL4CommandQueue::MTL4CommandQueueErrorDomain;
+#[cfg(feature = "MTL4CommandQueue")]
+pub use self::__MTL4CommandQueue::MTL4CommitOptions;
+#[cfg(feature = "MTL4CommandQueue")]
+pub use self::__MTL4CommandQueue::MTL4CopySparseBufferMappingOperation;
+#[cfg(all(feature = "MTL4CommandQueue", feature = "MTLTypes"))]
+pub use self::__MTL4CommandQueue::MTL4CopySparseTextureMappingOperation;
+#[cfg(all(
+    feature = "MTL4CommandQueue",
+    feature = "MTLResourceStateCommandEncoder"
+))]
+pub use self::__MTL4CommandQueue::MTL4UpdateSparseBufferMappingOperation;
+#[cfg(all(
+    feature = "MTL4CommandQueue",
+    feature = "MTLResourceStateCommandEncoder",
+    feature = "MTLTypes"
+))]
+pub use self::__MTL4CommandQueue::MTL4UpdateSparseTextureMappingOperation;
+#[cfg(feature = "MTL4CommitFeedback")]
+pub use self::__MTL4CommitFeedback::MTL4CommitFeedback;
+#[cfg(all(feature = "MTL4CommitFeedback", feature = "block2"))]
+pub use self::__MTL4CommitFeedback::MTL4CommitFeedbackHandler;
+#[cfg(feature = "MTL4Compiler")]
+pub use self::__MTL4Compiler::MTL4Compiler;
+#[cfg(feature = "MTL4Compiler")]
+pub use self::__MTL4Compiler::MTL4CompilerDescriptor;
+#[cfg(feature = "MTL4Compiler")]
+pub use self::__MTL4Compiler::MTL4CompilerTaskOptions;
+#[cfg(all(
+    feature = "MTL4BinaryFunction",
+    feature = "MTL4Compiler",
+    feature = "block2"
+))]
+pub use self::__MTL4Compiler::MTL4NewBinaryFunctionCompletionHandler;
+#[cfg(all(
+    feature = "MTL4Compiler",
+    feature = "MTL4MachineLearningPipeline",
+    feature = "MTLAllocation",
+    feature = "block2"
+))]
+pub use self::__MTL4Compiler::MTL4NewMachineLearningPipelineStateCompletionHandler;
+#[cfg(feature = "MTL4CompilerTask")]
+pub use self::__MTL4CompilerTask::MTL4CompilerTask;
+#[cfg(feature = "MTL4CompilerTask")]
+pub use self::__MTL4CompilerTask::MTL4CompilerTaskStatus;
+#[cfg(all(feature = "MTL4CommandEncoder", feature = "MTL4ComputeCommandEncoder"))]
+pub use self::__MTL4ComputeCommandEncoder::MTL4ComputeCommandEncoder;
+#[cfg(all(feature = "MTL4ComputePipeline", feature = "MTL4PipelineState"))]
+pub use self::__MTL4ComputePipeline::MTL4ComputePipelineDescriptor;
+#[cfg(feature = "MTL4Counters")]
+pub use self::__MTL4Counters::MTL4CounterHeap;
+#[cfg(feature = "MTL4Counters")]
+pub use self::__MTL4Counters::MTL4CounterHeapDescriptor;
+#[cfg(feature = "MTL4Counters")]
+pub use self::__MTL4Counters::MTL4CounterHeapType;
+#[cfg(feature = "MTL4Counters")]
+pub use self::__MTL4Counters::MTL4TimestampGranularity;
+#[cfg(feature = "MTL4Counters")]
+pub use self::__MTL4Counters::MTL4TimestampHeapEntry;
+#[cfg(feature = "MTL4FunctionDescriptor")]
+pub use self::__MTL4FunctionDescriptor::MTL4FunctionDescriptor;
+#[cfg(feature = "MTL4LibraryDescriptor")]
+pub use self::__MTL4LibraryDescriptor::MTL4LibraryDescriptor;
+#[cfg(all(
+    feature = "MTL4FunctionDescriptor",
+    feature = "MTL4LibraryFunctionDescriptor"
+))]
+pub use self::__MTL4LibraryFunctionDescriptor::MTL4LibraryFunctionDescriptor;
+#[cfg(feature = "MTL4LinkingDescriptor")]
+pub use self::__MTL4LinkingDescriptor::MTL4PipelineStageDynamicLinkingDescriptor;
+#[cfg(feature = "MTL4LinkingDescriptor")]
+pub use self::__MTL4LinkingDescriptor::MTL4RenderPipelineDynamicLinkingDescriptor;
+#[cfg(feature = "MTL4LinkingDescriptor")]
+pub use self::__MTL4LinkingDescriptor::MTL4StaticLinkingDescriptor;
+#[cfg(all(
+    feature = "MTL4CommandEncoder",
+    feature = "MTL4MachineLearningCommandEncoder"
+))]
+pub use self::__MTL4MachineLearningCommandEncoder::MTL4MachineLearningCommandEncoder;
+#[cfg(all(feature = "MTL4MachineLearningPipeline", feature = "MTL4PipelineState"))]
+pub use self::__MTL4MachineLearningPipeline::MTL4MachineLearningPipelineDescriptor;
+#[cfg(feature = "MTL4MachineLearningPipeline")]
+pub use self::__MTL4MachineLearningPipeline::MTL4MachineLearningPipelineReflection;
+#[cfg(all(feature = "MTL4MachineLearningPipeline", feature = "MTLAllocation"))]
+pub use self::__MTL4MachineLearningPipeline::MTL4MachineLearningPipelineState;
+#[cfg(all(feature = "MTL4MeshRenderPipeline", feature = "MTL4PipelineState"))]
+pub use self::__MTL4MeshRenderPipeline::MTL4MeshRenderPipelineDescriptor;
+#[cfg(feature = "MTL4PipelineDataSetSerializer")]
+pub use self::__MTL4PipelineDataSetSerializer::MTL4PipelineDataSetSerializer;
+#[cfg(feature = "MTL4PipelineDataSetSerializer")]
+pub use self::__MTL4PipelineDataSetSerializer::MTL4PipelineDataSetSerializerConfiguration;
+#[cfg(feature = "MTL4PipelineDataSetSerializer")]
+pub use self::__MTL4PipelineDataSetSerializer::MTL4PipelineDataSetSerializerDescriptor;
+#[cfg(feature = "MTL4PipelineState")]
+pub use self::__MTL4PipelineState::MTL4AlphaToCoverageState;
+#[cfg(feature = "MTL4PipelineState")]
+pub use self::__MTL4PipelineState::MTL4AlphaToOneState;
+#[cfg(feature = "MTL4PipelineState")]
+pub use self::__MTL4PipelineState::MTL4BlendState;
+#[cfg(feature = "MTL4PipelineState")]
+pub use self::__MTL4PipelineState::MTL4IndirectCommandBufferSupportState;
+#[cfg(feature = "MTL4PipelineState")]
+pub use self::__MTL4PipelineState::MTL4PipelineDescriptor;
+#[cfg(feature = "MTL4PipelineState")]
+pub use self::__MTL4PipelineState::MTL4PipelineOptions;
+#[cfg(feature = "MTL4PipelineState")]
+pub use self::__MTL4PipelineState::MTL4ShaderReflection;
+#[cfg(all(feature = "MTL4CommandEncoder", feature = "MTL4RenderCommandEncoder"))]
+pub use self::__MTL4RenderCommandEncoder::MTL4RenderCommandEncoder;
+#[cfg(feature = "MTL4RenderCommandEncoder")]
+pub use self::__MTL4RenderCommandEncoder::MTL4RenderEncoderOptions;
+#[cfg(feature = "MTL4RenderPass")]
+pub use self::__MTL4RenderPass::MTL4RenderPassDescriptor;
+#[cfg(feature = "MTL4RenderPipeline")]
+pub use self::__MTL4RenderPipeline::MTL4LogicalToPhysicalColorAttachmentMappingState;
+#[cfg(feature = "MTL4RenderPipeline")]
+pub use self::__MTL4RenderPipeline::MTL4RenderPipelineBinaryFunctionsDescriptor;
+#[cfg(feature = "MTL4RenderPipeline")]
+pub use self::__MTL4RenderPipeline::MTL4RenderPipelineColorAttachmentDescriptor;
+#[cfg(feature = "MTL4RenderPipeline")]
+pub use self::__MTL4RenderPipeline::MTL4RenderPipelineColorAttachmentDescriptorArray;
+#[cfg(all(feature = "MTL4PipelineState", feature = "MTL4RenderPipeline"))]
+pub use self::__MTL4RenderPipeline::MTL4RenderPipelineDescriptor;
+#[cfg(all(
+    feature = "MTL4FunctionDescriptor",
+    feature = "MTL4SpecializedFunctionDescriptor"
+))]
+pub use self::__MTL4SpecializedFunctionDescriptor::MTL4SpecializedFunctionDescriptor;
+#[cfg(all(
+    feature = "MTL4FunctionDescriptor",
+    feature = "MTL4StitchedFunctionDescriptor"
+))]
+pub use self::__MTL4StitchedFunctionDescriptor::MTL4StitchedFunctionDescriptor;
+#[cfg(all(feature = "MTL4PipelineState", feature = "MTL4TileRenderPipeline"))]
+pub use self::__MTL4TileRenderPipeline::MTL4TileRenderPipelineDescriptor;
+#[cfg(all(
+    feature = "MTLAccelerationStructure",
+    feature = "MTLAllocation",
+    feature = "MTLResource"
+))]
 pub use self::__MTLAccelerationStructure::MTLAccelerationStructure;
 #[cfg(feature = "MTLAccelerationStructure")]
 pub use self::__MTLAccelerationStructure::MTLAccelerationStructureBoundingBoxGeometryDescriptor;
@@ -209,6 +539,8 @@ pub use self::__MTLAccelerationStructure::MTLAccelerationStructureMotionCurveGeo
 pub use self::__MTLAccelerationStructure::MTLAccelerationStructureMotionInstanceDescriptor;
 #[cfg(feature = "MTLAccelerationStructure")]
 pub use self::__MTLAccelerationStructure::MTLAccelerationStructureMotionTriangleGeometryDescriptor;
+#[cfg(feature = "MTLAccelerationStructure")]
+pub use self::__MTLAccelerationStructure::MTLAccelerationStructureRefitOptions;
 #[cfg(feature = "MTLAccelerationStructure")]
 pub use self::__MTLAccelerationStructure::MTLAccelerationStructureTriangleGeometryDescriptor;
 #[cfg(feature = "MTLAccelerationStructure")]
@@ -237,11 +569,15 @@ pub use self::__MTLAccelerationStructure::MTLIndirectInstanceAccelerationStructu
 #[cfg(feature = "MTLAccelerationStructure")]
 pub use self::__MTLAccelerationStructure::MTLInstanceAccelerationStructureDescriptor;
 #[cfg(feature = "MTLAccelerationStructure")]
+pub use self::__MTLAccelerationStructure::MTLMatrixLayout;
+#[cfg(feature = "MTLAccelerationStructure")]
 pub use self::__MTLAccelerationStructure::MTLMotionBorderMode;
 #[cfg(feature = "MTLAccelerationStructure")]
 pub use self::__MTLAccelerationStructure::MTLMotionKeyframeData;
 #[cfg(feature = "MTLAccelerationStructure")]
 pub use self::__MTLAccelerationStructure::MTLPrimitiveAccelerationStructureDescriptor;
+#[cfg(feature = "MTLAccelerationStructure")]
+pub use self::__MTLAccelerationStructure::MTLTransformType;
 #[cfg(all(
     feature = "MTLAccelerationStructureCommandEncoder",
     feature = "MTLCommandEncoder"
@@ -253,16 +589,16 @@ pub use self::__MTLAccelerationStructureCommandEncoder::MTLAccelerationStructure
 pub use self::__MTLAccelerationStructureCommandEncoder::MTLAccelerationStructurePassSampleBufferAttachmentDescriptor;
 #[cfg(feature = "MTLAccelerationStructureCommandEncoder")]
 pub use self::__MTLAccelerationStructureCommandEncoder::MTLAccelerationStructurePassSampleBufferAttachmentDescriptorArray;
-#[cfg(feature = "MTLAccelerationStructureCommandEncoder")]
-pub use self::__MTLAccelerationStructureCommandEncoder::MTLAccelerationStructureRefitOptions;
 #[cfg(feature = "MTLAccelerationStructureTypes")]
 pub use self::__MTLAccelerationStructureTypes::MTLAxisAlignedBoundingBox;
 #[cfg(feature = "MTLAccelerationStructureTypes")]
+pub use self::__MTLAccelerationStructureTypes::MTLComponentTransform;
+#[cfg(feature = "MTLAccelerationStructureTypes")]
 pub use self::__MTLAccelerationStructureTypes::MTLPackedFloat4x3;
 #[cfg(feature = "MTLAccelerationStructureTypes")]
-pub(crate) use self::__MTLAccelerationStructureTypes::_MTLAxisAlignedBoundingBox;
-#[cfg(feature = "MTLAccelerationStructureTypes")]
-pub(crate) use self::__MTLAccelerationStructureTypes::_MTLPackedFloat4x3;
+pub use self::__MTLAccelerationStructureTypes::MTLPackedFloatQuaternion;
+#[cfg(feature = "MTLAllocation")]
+pub use self::__MTLAllocation::MTLAllocation;
 #[cfg(feature = "MTLArgument")]
 pub use self::__MTLArgument::MTLArgument;
 #[cfg(feature = "MTLArgument")]
@@ -280,7 +616,7 @@ pub use self::__MTLArgument::MTLBindingType;
 #[cfg(feature = "MTLArgument")]
 pub use self::__MTLArgument::MTLBufferBinding;
 #[cfg(feature = "MTLArgument")]
-pub use self::__MTLArgument::MTLDataType;
+pub use self::__MTLArgument::MTLIndexType;
 #[cfg(feature = "MTLArgument")]
 pub use self::__MTLArgument::MTLObjectPayloadBinding;
 #[cfg(feature = "MTLArgument")]
@@ -289,6 +625,10 @@ pub use self::__MTLArgument::MTLPointerType;
 pub use self::__MTLArgument::MTLStructMember;
 #[cfg(feature = "MTLArgument")]
 pub use self::__MTLArgument::MTLStructType;
+#[cfg(feature = "MTLArgument")]
+pub use self::__MTLArgument::MTLTensorBinding;
+#[cfg(feature = "MTLArgument")]
+pub use self::__MTLArgument::MTLTensorReferenceType;
 #[cfg(feature = "MTLArgument")]
 pub use self::__MTLArgument::MTLTextureBinding;
 #[cfg(feature = "MTLArgument")]
@@ -319,7 +659,11 @@ pub use self::__MTLBlitPass::MTLBlitPassDescriptor;
 pub use self::__MTLBlitPass::MTLBlitPassSampleBufferAttachmentDescriptor;
 #[cfg(feature = "MTLBlitPass")]
 pub use self::__MTLBlitPass::MTLBlitPassSampleBufferAttachmentDescriptorArray;
-#[cfg(all(feature = "MTLBuffer", feature = "MTLResource"))]
+#[cfg(all(
+    feature = "MTLAllocation",
+    feature = "MTLBuffer",
+    feature = "MTLResource"
+))]
 pub use self::__MTLBuffer::MTLBuffer;
 #[cfg(feature = "MTLCaptureManager")]
 pub use self::__MTLCaptureManager::MTLCaptureDescriptor;
@@ -361,12 +705,18 @@ pub use self::__MTLCommandEncoder::MTLBarrierScope;
 pub use self::__MTLCommandEncoder::MTLCommandEncoder;
 #[cfg(feature = "MTLCommandEncoder")]
 pub use self::__MTLCommandEncoder::MTLResourceUsage;
+#[cfg(feature = "MTLCommandEncoder")]
+pub use self::__MTLCommandEncoder::MTLStages;
 #[cfg(feature = "MTLCommandQueue")]
 pub use self::__MTLCommandQueue::MTLCommandQueue;
+#[cfg(feature = "MTLCommandQueue")]
+pub use self::__MTLCommandQueue::MTLCommandQueueDescriptor;
 #[cfg(all(feature = "MTLCommandEncoder", feature = "MTLComputeCommandEncoder"))]
 pub use self::__MTLComputeCommandEncoder::MTLComputeCommandEncoder;
 #[cfg(feature = "MTLComputeCommandEncoder")]
 pub use self::__MTLComputeCommandEncoder::MTLDispatchThreadgroupsIndirectArguments;
+#[cfg(feature = "MTLComputeCommandEncoder")]
+pub use self::__MTLComputeCommandEncoder::MTLDispatchThreadsIndirectArguments;
 #[cfg(feature = "MTLComputeCommandEncoder")]
 pub use self::__MTLComputeCommandEncoder::MTLStageInRegionIndirectArguments;
 #[cfg(feature = "MTLComputePass")]
@@ -379,7 +729,7 @@ pub use self::__MTLComputePass::MTLComputePassSampleBufferAttachmentDescriptorAr
 pub use self::__MTLComputePipeline::MTLComputePipelineDescriptor;
 #[cfg(feature = "MTLComputePipeline")]
 pub use self::__MTLComputePipeline::MTLComputePipelineReflection;
-#[cfg(feature = "MTLComputePipeline")]
+#[cfg(all(feature = "MTLAllocation", feature = "MTLComputePipeline"))]
 pub use self::__MTLComputePipeline::MTLComputePipelineState;
 #[cfg(feature = "MTLCounters")]
 pub use self::__MTLCounters::MTLCommonCounter;
@@ -439,6 +789,8 @@ pub use self::__MTLCounters::MTLCounterSampleBufferDescriptor;
 pub use self::__MTLCounters::MTLCounterSampleBufferError;
 #[cfg(feature = "MTLCounters")]
 pub use self::__MTLCounters::MTLCounterSet;
+#[cfg(feature = "MTLDataType")]
+pub use self::__MTLDataType::MTLDataType;
 #[cfg(feature = "MTLDepthStencil")]
 pub use self::__MTLDepthStencil::MTLCompareFunction;
 #[cfg(feature = "MTLDepthStencil")]
@@ -457,8 +809,8 @@ pub use self::__MTLDevice::MTLArchitecture;
 pub use self::__MTLDevice::MTLArgumentBuffersTier;
 #[cfg(feature = "MTLDevice")]
 pub use self::__MTLDevice::MTLArgumentDescriptor;
-#[cfg(feature = "MTLDevice")]
-pub use self::__MTLDevice::MTLCopyAllDevices;
+#[cfg(all(feature = "MTLDevice", feature = "block2"))]
+pub use self::__MTLDevice::MTLCopyAllDevicesWithObserver;
 #[cfg(feature = "MTLDevice")]
 pub use self::__MTLDevice::MTLCounterSamplingPoint;
 #[cfg(feature = "MTLDevice")]
@@ -483,32 +835,6 @@ pub use self::__MTLDevice::MTLFeatureSet;
 pub use self::__MTLDevice::MTLGPUFamily;
 #[cfg(feature = "MTLDevice")]
 pub use self::__MTLDevice::MTLIOCompressionMethod;
-#[cfg(all(
-    feature = "MTLComputePipeline",
-    feature = "MTLDevice",
-    feature = "block2"
-))]
-pub use self::__MTLDevice::MTLNewComputePipelineStateCompletionHandler;
-#[cfg(all(
-    feature = "MTLComputePipeline",
-    feature = "MTLDevice",
-    feature = "block2"
-))]
-pub use self::__MTLDevice::MTLNewComputePipelineStateWithReflectionCompletionHandler;
-#[cfg(all(feature = "MTLDevice", feature = "MTLLibrary", feature = "block2"))]
-pub use self::__MTLDevice::MTLNewLibraryCompletionHandler;
-#[cfg(all(
-    feature = "MTLDevice",
-    feature = "MTLRenderPipeline",
-    feature = "block2"
-))]
-pub use self::__MTLDevice::MTLNewRenderPipelineStateCompletionHandler;
-#[cfg(all(
-    feature = "MTLDevice",
-    feature = "MTLRenderPipeline",
-    feature = "block2"
-))]
-pub use self::__MTLDevice::MTLNewRenderPipelineStateWithReflectionCompletionHandler;
 #[cfg(feature = "MTLDevice")]
 pub use self::__MTLDevice::MTLPipelineOption;
 #[cfg(feature = "MTLDevice")]
@@ -518,11 +844,23 @@ pub use self::__MTLDevice::MTLRemoveDeviceObserver;
 #[cfg(feature = "MTLDevice")]
 pub use self::__MTLDevice::MTLSizeAndAlign;
 #[cfg(feature = "MTLDevice")]
-pub use self::__MTLDevice::MTLSparsePageSize;
-#[cfg(feature = "MTLDevice")]
 pub use self::__MTLDevice::MTLSparseTextureRegionAlignmentMode;
 #[cfg(feature = "MTLDevice")]
 pub use self::__MTLDevice::MTLTimestamp;
+#[cfg(feature = "MTLDeviceCertification")]
+pub use self::__MTLDeviceCertification::NSDeviceCertification;
+#[cfg(feature = "MTLDeviceCertification")]
+pub use self::__MTLDeviceCertification::NSDeviceCertificationiPhonePerformanceGaming;
+#[cfg(feature = "MTLDeviceCertification")]
+pub use self::__MTLDeviceCertification::NSProcessInfoNSDeviceCertification;
+#[cfg(feature = "MTLDeviceCertification")]
+pub use self::__MTLDeviceCertification::NSProcessInfoPerformanceProfileDidChangeNotification;
+#[cfg(feature = "MTLDeviceCertification")]
+pub use self::__MTLDeviceCertification::NSProcessPerformanceProfile;
+#[cfg(feature = "MTLDeviceCertification")]
+pub use self::__MTLDeviceCertification::NSProcessPerformanceProfileDefault;
+#[cfg(feature = "MTLDeviceCertification")]
+pub use self::__MTLDeviceCertification::NSProcessPerformanceProfileSustained;
 #[cfg(feature = "MTLDrawable")]
 pub use self::__MTLDrawable::MTLDrawable;
 #[cfg(all(feature = "MTLDrawable", feature = "block2"))]
@@ -577,7 +915,11 @@ pub use self::__MTLFunctionStitching::MTLFunctionStitchingInputNode;
 pub use self::__MTLFunctionStitching::MTLFunctionStitchingNode;
 #[cfg(feature = "MTLFunctionStitching")]
 pub use self::__MTLFunctionStitching::MTLStitchedLibraryDescriptor;
-#[cfg(feature = "MTLHeap")]
+#[cfg(feature = "MTLFunctionStitching")]
+pub use self::__MTLFunctionStitching::MTLStitchedLibraryOptions;
+#[cfg(feature = "MTLGPUAddress")]
+pub use self::__MTLGPUAddress::MTLGPUAddress;
+#[cfg(all(feature = "MTLAllocation", feature = "MTLHeap"))]
 pub use self::__MTLHeap::MTLHeap;
 #[cfg(feature = "MTLHeap")]
 pub use self::__MTLHeap::MTLHeapDescriptor;
@@ -619,7 +961,11 @@ pub use self::__MTLIOCompressor::MTLIOCompressionStatus;
 pub use self::__MTLIOCompressor::MTLIOCreateCompressionContext;
 #[cfg(feature = "MTLIOCompressor")]
 pub use self::__MTLIOCompressor::MTLIOFlushAndDestroyCompressionContext;
-#[cfg(all(feature = "MTLIndirectCommandBuffer", feature = "MTLResource"))]
+#[cfg(all(
+    feature = "MTLAllocation",
+    feature = "MTLIndirectCommandBuffer",
+    feature = "MTLResource"
+))]
 pub use self::__MTLIndirectCommandBuffer::MTLIndirectCommandBuffer;
 #[cfg(feature = "MTLIndirectCommandBuffer")]
 pub use self::__MTLIndirectCommandBuffer::MTLIndirectCommandBufferDescriptor;
@@ -632,13 +978,25 @@ pub use self::__MTLIndirectCommandEncoder::MTLIndirectComputeCommand;
 #[cfg(feature = "MTLIndirectCommandEncoder")]
 pub use self::__MTLIndirectCommandEncoder::MTLIndirectRenderCommand;
 #[cfg(feature = "MTLIntersectionFunctionTable")]
+pub use self::__MTLIntersectionFunctionTable::MTLIntersectionFunctionBufferArguments;
+#[cfg(feature = "MTLIntersectionFunctionTable")]
 pub use self::__MTLIntersectionFunctionTable::MTLIntersectionFunctionSignature;
-#[cfg(all(feature = "MTLIntersectionFunctionTable", feature = "MTLResource"))]
+#[cfg(all(
+    feature = "MTLAllocation",
+    feature = "MTLIntersectionFunctionTable",
+    feature = "MTLResource"
+))]
 pub use self::__MTLIntersectionFunctionTable::MTLIntersectionFunctionTable;
 #[cfg(feature = "MTLIntersectionFunctionTable")]
 pub use self::__MTLIntersectionFunctionTable::MTLIntersectionFunctionTableDescriptor;
 #[cfg(feature = "MTLLibrary")]
 pub use self::__MTLLibrary::MTLAttribute;
+#[cfg(all(feature = "MTLArgument", feature = "MTLLibrary"))]
+pub use self::__MTLLibrary::MTLAutoreleasedArgument;
+#[cfg(all(feature = "MTLComputePipeline", feature = "MTLLibrary"))]
+pub use self::__MTLLibrary::MTLAutoreleasedComputePipelineReflection;
+#[cfg(all(feature = "MTLLibrary", feature = "MTLRenderPipeline"))]
+pub use self::__MTLLibrary::MTLAutoreleasedRenderPipelineReflection;
 #[cfg(feature = "MTLLibrary")]
 pub use self::__MTLLibrary::MTLCompileOptions;
 #[cfg(feature = "MTLLibrary")]
@@ -647,6 +1005,8 @@ pub use self::__MTLLibrary::MTLCompileSymbolVisibility;
 pub use self::__MTLLibrary::MTLFunction;
 #[cfg(feature = "MTLLibrary")]
 pub use self::__MTLLibrary::MTLFunctionConstant;
+#[cfg(feature = "MTLLibrary")]
+pub use self::__MTLLibrary::MTLFunctionReflection;
 #[cfg(feature = "MTLLibrary")]
 pub use self::__MTLLibrary::MTLFunctionType;
 #[cfg(feature = "MTLLibrary")]
@@ -662,11 +1022,61 @@ pub use self::__MTLLibrary::MTLLibraryOptimizationLevel;
 #[cfg(feature = "MTLLibrary")]
 pub use self::__MTLLibrary::MTLLibraryType;
 #[cfg(feature = "MTLLibrary")]
+pub use self::__MTLLibrary::MTLMathFloatingPointFunctions;
+#[cfg(feature = "MTLLibrary")]
+pub use self::__MTLLibrary::MTLMathMode;
+#[cfg(all(
+    feature = "MTLAllocation",
+    feature = "MTLComputePipeline",
+    feature = "MTLLibrary",
+    feature = "block2"
+))]
+pub use self::__MTLLibrary::MTLNewComputePipelineStateCompletionHandler;
+#[cfg(all(
+    feature = "MTLAllocation",
+    feature = "MTLComputePipeline",
+    feature = "MTLLibrary",
+    feature = "block2"
+))]
+pub use self::__MTLLibrary::MTLNewComputePipelineStateWithReflectionCompletionHandler;
+#[cfg(all(
+    feature = "MTLDynamicLibrary",
+    feature = "MTLLibrary",
+    feature = "block2"
+))]
+pub use self::__MTLLibrary::MTLNewDynamicLibraryCompletionHandler;
+#[cfg(all(feature = "MTLLibrary", feature = "block2"))]
+pub use self::__MTLLibrary::MTLNewLibraryCompletionHandler;
+#[cfg(all(
+    feature = "MTLAllocation",
+    feature = "MTLLibrary",
+    feature = "MTLRenderPipeline",
+    feature = "block2"
+))]
+pub use self::__MTLLibrary::MTLNewRenderPipelineStateCompletionHandler;
+#[cfg(all(
+    feature = "MTLAllocation",
+    feature = "MTLLibrary",
+    feature = "MTLRenderPipeline",
+    feature = "block2"
+))]
+pub use self::__MTLLibrary::MTLNewRenderPipelineStateWithReflectionCompletionHandler;
+#[cfg(feature = "MTLLibrary")]
 pub use self::__MTLLibrary::MTLPatchType;
 #[cfg(feature = "MTLLibrary")]
 pub use self::__MTLLibrary::MTLVertexAttribute;
 #[cfg(feature = "MTLLinkedFunctions")]
 pub use self::__MTLLinkedFunctions::MTLLinkedFunctions;
+#[cfg(feature = "MTLLogState")]
+pub use self::__MTLLogState::MTLLogLevel;
+#[cfg(feature = "MTLLogState")]
+pub use self::__MTLLogState::MTLLogState;
+#[cfg(feature = "MTLLogState")]
+pub use self::__MTLLogState::MTLLogStateDescriptor;
+#[cfg(feature = "MTLLogState")]
+pub use self::__MTLLogState::MTLLogStateError;
+#[cfg(feature = "MTLLogState")]
+pub use self::__MTLLogState::MTLLogStateErrorDomain;
 #[cfg(all(
     feature = "MTLCommandEncoder",
     feature = "MTLParallelRenderCommandEncoder"
@@ -678,6 +1088,8 @@ pub use self::__MTLPipeline::MTLMutability;
 pub use self::__MTLPipeline::MTLPipelineBufferDescriptor;
 #[cfg(feature = "MTLPipeline")]
 pub use self::__MTLPipeline::MTLPipelineBufferDescriptorArray;
+#[cfg(feature = "MTLPipeline")]
+pub use self::__MTLPipeline::MTLShaderValidation;
 #[cfg(feature = "MTLPixelFormat")]
 pub use self::__MTLPixelFormat::MTLPixelFormat;
 #[cfg(feature = "MTLRasterizationRate")]
@@ -750,12 +1162,16 @@ pub use self::__MTLRenderPass::MTLRenderPassStencilAttachmentDescriptor;
 pub use self::__MTLRenderPass::MTLStoreAction;
 #[cfg(feature = "MTLRenderPass")]
 pub use self::__MTLRenderPass::MTLStoreActionOptions;
+#[cfg(feature = "MTLRenderPass")]
+pub use self::__MTLRenderPass::MTLVisibilityResultType;
 #[cfg(feature = "MTLRenderPipeline")]
 pub use self::__MTLRenderPipeline::MTLBlendFactor;
 #[cfg(feature = "MTLRenderPipeline")]
 pub use self::__MTLRenderPipeline::MTLBlendOperation;
 #[cfg(feature = "MTLRenderPipeline")]
 pub use self::__MTLRenderPipeline::MTLColorWriteMask;
+#[cfg(feature = "MTLRenderPipeline")]
+pub use self::__MTLRenderPipeline::MTLLogicalToPhysicalColorAttachmentMap;
 #[cfg(feature = "MTLRenderPipeline")]
 pub use self::__MTLRenderPipeline::MTLMeshRenderPipelineDescriptor;
 #[cfg(feature = "MTLRenderPipeline")]
@@ -770,7 +1186,7 @@ pub use self::__MTLRenderPipeline::MTLRenderPipelineDescriptor;
 pub use self::__MTLRenderPipeline::MTLRenderPipelineFunctionsDescriptor;
 #[cfg(feature = "MTLRenderPipeline")]
 pub use self::__MTLRenderPipeline::MTLRenderPipelineReflection;
-#[cfg(feature = "MTLRenderPipeline")]
+#[cfg(all(feature = "MTLAllocation", feature = "MTLRenderPipeline"))]
 pub use self::__MTLRenderPipeline::MTLRenderPipelineState;
 #[cfg(feature = "MTLRenderPipeline")]
 pub use self::__MTLRenderPipeline::MTLTessellationControlPointIndexType;
@@ -786,18 +1202,28 @@ pub use self::__MTLRenderPipeline::MTLTileRenderPipelineColorAttachmentDescripto
 pub use self::__MTLRenderPipeline::MTLTileRenderPipelineColorAttachmentDescriptorArray;
 #[cfg(feature = "MTLRenderPipeline")]
 pub use self::__MTLRenderPipeline::MTLTileRenderPipelineDescriptor;
+#[cfg(feature = "MTLResidencySet")]
+pub use self::__MTLResidencySet::MTLResidencySet;
+#[cfg(feature = "MTLResidencySet")]
+pub use self::__MTLResidencySet::MTLResidencySetDescriptor;
+#[cfg(feature = "MTLResource")]
+pub use self::__MTLResource::MTLBufferSparseTier;
 #[cfg(feature = "MTLResource")]
 pub use self::__MTLResource::MTLCPUCacheMode;
 #[cfg(feature = "MTLResource")]
 pub use self::__MTLResource::MTLHazardTrackingMode;
 #[cfg(feature = "MTLResource")]
 pub use self::__MTLResource::MTLPurgeableState;
-#[cfg(feature = "MTLResource")]
+#[cfg(all(feature = "MTLAllocation", feature = "MTLResource"))]
 pub use self::__MTLResource::MTLResource;
 #[cfg(feature = "MTLResource")]
 pub use self::__MTLResource::MTLResourceOptions;
 #[cfg(feature = "MTLResource")]
+pub use self::__MTLResource::MTLSparsePageSize;
+#[cfg(feature = "MTLResource")]
 pub use self::__MTLResource::MTLStorageMode;
+#[cfg(feature = "MTLResource")]
+pub use self::__MTLResource::MTLTextureSparseTier;
 #[cfg(feature = "MTLResourceStateCommandEncoder")]
 pub use self::__MTLResourceStateCommandEncoder::MTLMapIndirectArguments;
 #[cfg(all(
@@ -813,6 +1239,10 @@ pub use self::__MTLResourceStatePass::MTLResourceStatePassDescriptor;
 pub use self::__MTLResourceStatePass::MTLResourceStatePassSampleBufferAttachmentDescriptor;
 #[cfg(feature = "MTLResourceStatePass")]
 pub use self::__MTLResourceStatePass::MTLResourceStatePassSampleBufferAttachmentDescriptorArray;
+#[cfg(feature = "MTLResourceViewPool")]
+pub use self::__MTLResourceViewPool::MTLResourceViewPool;
+#[cfg(feature = "MTLResourceViewPool")]
+pub use self::__MTLResourceViewPool::MTLResourceViewPoolDescriptor;
 #[cfg(feature = "MTLSampler")]
 pub use self::__MTLSampler::MTLSamplerAddressMode;
 #[cfg(feature = "MTLSampler")]
@@ -823,6 +1253,8 @@ pub use self::__MTLSampler::MTLSamplerDescriptor;
 pub use self::__MTLSampler::MTLSamplerMinMagFilter;
 #[cfg(feature = "MTLSampler")]
 pub use self::__MTLSampler::MTLSamplerMipFilter;
+#[cfg(feature = "MTLSampler")]
+pub use self::__MTLSampler::MTLSamplerReductionMode;
 #[cfg(feature = "MTLSampler")]
 pub use self::__MTLSampler::MTLSamplerState;
 #[cfg(feature = "MTLStageInputOutputDescriptor")]
@@ -836,14 +1268,34 @@ pub use self::__MTLStageInputOutputDescriptor::MTLBufferLayoutDescriptor;
 #[cfg(feature = "MTLStageInputOutputDescriptor")]
 pub use self::__MTLStageInputOutputDescriptor::MTLBufferLayoutDescriptorArray;
 #[cfg(feature = "MTLStageInputOutputDescriptor")]
-pub use self::__MTLStageInputOutputDescriptor::MTLIndexType;
-#[cfg(feature = "MTLStageInputOutputDescriptor")]
 pub use self::__MTLStageInputOutputDescriptor::MTLStageInputOutputDescriptor;
 #[cfg(feature = "MTLStageInputOutputDescriptor")]
 pub use self::__MTLStageInputOutputDescriptor::MTLStepFunction;
+#[cfg(all(
+    feature = "MTLAllocation",
+    feature = "MTLResource",
+    feature = "MTLTensor"
+))]
+pub use self::__MTLTensor::MTLTensor;
+#[cfg(feature = "MTLTensor")]
+pub use self::__MTLTensor::MTLTensorDataType;
+#[cfg(feature = "MTLTensor")]
+pub use self::__MTLTensor::MTLTensorDescriptor;
+#[cfg(feature = "MTLTensor")]
+pub use self::__MTLTensor::MTLTensorDomain;
+#[cfg(feature = "MTLTensor")]
+pub use self::__MTLTensor::MTLTensorError;
+#[cfg(feature = "MTLTensor")]
+pub use self::__MTLTensor::MTLTensorExtents;
+#[cfg(feature = "MTLTensor")]
+pub use self::__MTLTensor::MTLTensorUsage;
 #[cfg(feature = "MTLTexture")]
 pub use self::__MTLTexture::MTLSharedTextureHandle;
-#[cfg(all(feature = "MTLResource", feature = "MTLTexture"))]
+#[cfg(all(
+    feature = "MTLAllocation",
+    feature = "MTLResource",
+    feature = "MTLTexture"
+))]
 pub use self::__MTLTexture::MTLTexture;
 #[cfg(feature = "MTLTexture")]
 pub use self::__MTLTexture::MTLTextureCompressionType;
@@ -857,6 +1309,10 @@ pub use self::__MTLTexture::MTLTextureSwizzleChannels;
 pub use self::__MTLTexture::MTLTextureType;
 #[cfg(feature = "MTLTexture")]
 pub use self::__MTLTexture::MTLTextureUsage;
+#[cfg(feature = "MTLTexture")]
+pub use self::__MTLTexture::MTLTextureViewDescriptor;
+#[cfg(all(feature = "MTLResourceViewPool", feature = "MTLTextureViewPool"))]
+pub use self::__MTLTextureViewPool::MTLTextureViewPool;
 #[cfg(feature = "MTLTypes")]
 pub use self::__MTLTypes::MTLCoordinate2D;
 #[cfg(feature = "MTLTypes")]
@@ -885,7 +1341,11 @@ pub use self::__MTLVertexDescriptor::MTLVertexDescriptor;
 pub use self::__MTLVertexDescriptor::MTLVertexFormat;
 #[cfg(feature = "MTLVertexDescriptor")]
 pub use self::__MTLVertexDescriptor::MTLVertexStepFunction;
-#[cfg(all(feature = "MTLResource", feature = "MTLVisibleFunctionTable"))]
+#[cfg(all(
+    feature = "MTLAllocation",
+    feature = "MTLResource",
+    feature = "MTLVisibleFunctionTable"
+))]
 pub use self::__MTLVisibleFunctionTable::MTLVisibleFunctionTable;
 #[cfg(feature = "MTLVisibleFunctionTable")]
 pub use self::__MTLVisibleFunctionTable::MTLVisibleFunctionTableDescriptor;

@@ -1,6 +1,7 @@
 use serde::{de, ser};
-use static_assertions::assert_impl_all;
 use std::{convert::Infallible, error, fmt, io, result, sync::Arc};
+
+use crate::Signature;
 
 /// Enum representing the max depth exceeded error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,17 +53,21 @@ pub enum Error {
     /// Missing framing offset at the end of a GVariant-encoded container,
     MissingFramingOffset,
     /// The type (signature as first argument) being (de)serialized is not supported by the format.
-    IncompatibleFormat(crate::Signature<'static>, crate::serialized::Format),
+    IncompatibleFormat(Signature, crate::serialized::Format),
     /// The provided signature (first argument) was not valid for reading as the requested type.
     /// Details on the expected signatures are in the second argument.
-    SignatureMismatch(crate::Signature<'static>, String),
+    SignatureMismatch(Signature, String),
     /// Out of bounds range specified.
     OutOfBounds,
     /// The maximum allowed depth for containers in encoding was exceeded.
     MaxDepthExceeded(MaxDepthExceeded),
+    /// Error from parsing a signature.
+    SignatureParse(crate::signature::Error),
+    /// Attempted to create an empty structure (which is not allowed by the D-Bus specification).
+    EmptyStructure,
+    /// Invalid object path.
+    InvalidObjectPath,
 }
-
-assert_impl_all!(Error: Send, Sync, Unpin);
 
 impl PartialEq for Error {
     fn eq(&self, other: &Self) -> bool {
@@ -74,6 +79,19 @@ impl PartialEq for Error {
             (Error::PaddingNot0(p), Error::PaddingNot0(other)) => p == other,
             (Error::UnknownFd, Error::UnknownFd) => true,
             (Error::MaxDepthExceeded(max1), Error::MaxDepthExceeded(max2)) => max1 == max2,
+            (Error::MissingFramingOffset, Error::MissingFramingOffset) => true,
+            (
+                Error::IncompatibleFormat(sig1, format1),
+                Error::IncompatibleFormat(sig2, format2),
+            ) => sig1 == sig2 && format1 == format2,
+            (
+                Error::SignatureMismatch(provided1, expected1),
+                Error::SignatureMismatch(provided2, expected2),
+            ) => provided1 == provided2 && expected1 == expected2,
+            (Error::OutOfBounds, Error::OutOfBounds) => true,
+            (Error::SignatureParse(e1), Error::SignatureParse(e2)) => e1 == e2,
+            (Error::EmptyStructure, Error::EmptyStructure) => true,
+            (Error::InvalidObjectPath, Error::InvalidObjectPath) => true,
             (_, _) => false,
         }
     }
@@ -115,6 +133,9 @@ impl fmt::Display for Error {
                 "Out of bounds range specified",
             ),
             Error::MaxDepthExceeded(max) => write!(f, "{max}"),
+            Error::SignatureParse(e) => write!(f, "{e}"),
+            Error::EmptyStructure => write!(f, "Attempted to create an empty structure"),
+            Error::InvalidObjectPath => write!(f, "Invalid object path"),
         }
     }
 }
@@ -137,6 +158,9 @@ impl Clone for Error {
             }
             Error::OutOfBounds => Error::OutOfBounds,
             Error::MaxDepthExceeded(max) => Error::MaxDepthExceeded(*max),
+            Error::SignatureParse(e) => Error::SignatureParse(*e),
+            Error::EmptyStructure => Error::EmptyStructure,
+            Error::InvalidObjectPath => Error::InvalidObjectPath,
         }
     }
 }

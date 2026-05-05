@@ -17,7 +17,6 @@ use crate::hb::unicode::hb_gc::{
     HB_UNICODE_GENERAL_CATEGORY_UPPERCASE_LETTER,
 };
 use crate::hb::unicode::GeneralCategory;
-use crate::BufferClusterLevel;
 use crate::BufferFlags;
 use crate::{Direction, Feature, Language, Script};
 use core::ptr;
@@ -32,7 +31,7 @@ pub struct hb_ot_shape_planner_t<'a> {
     pub aat_map: AatMapBuilder,
     pub apply_morx: bool,
     pub script_zero_marks: bool,
-    pub script_fallback_mark_positioning: bool,
+    pub script_fallback_position: bool,
     pub shaper: &'static hb_ot_shaper_t,
 }
 
@@ -56,7 +55,7 @@ impl<'a> hb_ot_shape_planner_t<'a> {
         };
 
         let script_zero_marks = shaper.zero_width_marks != HB_OT_SHAPE_ZERO_WIDTH_MARKS_NONE;
-        let script_fallback_mark_positioning = shaper.fallback_position;
+        let script_fallback_position = shaper.fallback_position;
 
         // https://github.com/harfbuzz/harfbuzz/issues/2124
         let apply_morx = face.aat_tables.morx.is_some()
@@ -76,7 +75,7 @@ impl<'a> hb_ot_shape_planner_t<'a> {
             aat_map,
             apply_morx,
             script_zero_marks,
-            script_fallback_mark_positioning,
+            script_fallback_position,
             shaper,
         }
     }
@@ -239,7 +238,7 @@ impl<'a> hb_ot_shape_planner_t<'a> {
             if has_kerx {
                 apply_kerx = true;
             } else if hb_ot_layout_has_kerning(self.face) {
-                apply_kern = true;
+                apply_kern = self.script_fallback_position;
             }
         }
 
@@ -255,7 +254,7 @@ impl<'a> hb_ot_shape_planner_t<'a> {
             && (!apply_kern || !hb_ot_layout_has_cross_kerning(self.face));
 
         let fallback_mark_positioning =
-            adjust_mark_positioning_when_zeroing && self.script_fallback_mark_positioning;
+            adjust_mark_positioning_when_zeroing && self.script_fallback_position;
 
         // If we're using morx shaping, we cancel mark position adjustment because
         // Apple Color Emoji assumes this will NOT be done when forming emoji sequences;
@@ -713,13 +712,9 @@ fn insert_dotted_circle(buffer: &mut hb_buffer_t, face: &hb_font_t) {
 
 fn form_clusters(buffer: &mut hb_buffer_t) {
     if buffer.scratch_flags & HB_BUFFER_SCRATCH_FLAG_HAS_CONTINUATIONS != 0 {
-        if BufferClusterLevel::new(buffer.cluster_level).is_graphemes() {
-            foreach_grapheme!(buffer, start, end, { buffer.merge_clusters(start, end) });
-        } else {
-            foreach_grapheme!(buffer, start, end, {
-                buffer.unsafe_to_break(Some(start), Some(end));
-            });
-        }
+        foreach_grapheme!(buffer, start, end, {
+            buffer.merge_grapheme_clusters(start, end);
+        });
     }
 }
 

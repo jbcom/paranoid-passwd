@@ -1,8 +1,7 @@
-use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
-use static_assertions::assert_impl_all;
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 use std::os::fd::{self, AsFd, AsRawFd, BorrowedFd, RawFd};
 
-use crate::{serialized::Format, Basic, Signature, Type};
+use crate::{Basic, Type};
 
 /// A file-descriptor type wrapper.
 ///
@@ -18,7 +17,7 @@ pub enum Fd<'f> {
     Owned(fd::OwnedFd),
 }
 
-impl<'f> Fd<'f> {
+impl Fd<'_> {
     /// Try to create an owned version of `self`.
     pub fn try_to_owned(&self) -> crate::Result<Fd<'static>> {
         self.as_fd()
@@ -97,21 +96,13 @@ impl std::fmt::Display for Fd<'_> {
 
 macro_rules! fd_impl {
     ($i:ty) => {
-        assert_impl_all!($i: Send, Sync, Unpin);
-
         impl Basic for $i {
             const SIGNATURE_CHAR: char = 'h';
             const SIGNATURE_STR: &'static str = "h";
-
-            fn alignment(format: Format) -> usize {
-                u32::alignment(format)
-            }
         }
 
         impl Type for $i {
-            fn signature() -> Signature<'static> {
-                Signature::from_static_str_unchecked(Self::SIGNATURE_STR)
-            }
+            const SIGNATURE: &'static crate::Signature = &crate::Signature::Fd;
         }
     };
 }

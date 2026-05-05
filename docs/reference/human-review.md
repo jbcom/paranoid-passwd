@@ -5,6 +5,8 @@ title: Human Review Surface
 # Human Review Surface
 
 This document is the explicit inventory of every open `TODO: HUMAN_REVIEW` site in the repository.
+It now feeds the claim-led [security assurance protocol](./security-assurance.md) instead of
+standing alone as an open-ended release blocker.
 
 Nothing in this file implies those constructions are approved. It exists to keep the review surface
 small, concrete, and hard to forget while the product continues to evolve.
@@ -14,6 +16,8 @@ small, concrete, and hard to forget while the product continues to evolve.
 - review status: **open**
 - expected open review sites: **5**
 - policy: every `TODO: HUMAN_REVIEW` location in source must be listed here and in the inventory check
+- assurance mapping: each open site is represented in [assurance-claims.md](./assurance-claims.md)
+  as a `tracked-open` claim
 
 ## Open Inventory
 
@@ -27,7 +31,9 @@ small, concrete, and hard to forget while the product continues to evolve.
 
 ## Required Review Output
 
-Each open site should receive a short written disposition that answers:
+Each open site should receive a short written disposition from a qualified reviewer, a maintainer
+decision backed by source changes and tests, or a later external assessment. The disposition must
+answer:
 
 1. Is the current construction acceptable as implemented?
 2. If yes, what assumptions or deployment limits make it acceptable?

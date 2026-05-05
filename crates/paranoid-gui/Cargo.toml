@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+description.workspace = true
 rust-version.workspace = true
 
 [[bin]]
@@ -17,10 +18,19 @@ arboard.workspace = true
 iced.workspace = true
 paranoid-core = { path = "../paranoid-core" }
 paranoid-vault = { path = "../paranoid-vault" }
+slint.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
 
 [dev-dependencies]
 openssl.workspace = true
 tempfile.workspace = true
 
-[lints]
-workspace = true
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"
+
+[lints.rust]
+unsafe_code = "deny"

@@ -6,6 +6,10 @@ pub use channel::Channel;
 mod split;
 pub use split::{BoxedSplit, Split};
 
+#[cfg(unix)]
+pub(crate) mod command;
+#[cfg(unix)]
+pub(crate) use command::Command;
 mod tcp;
 mod unix;
 mod vsock;
@@ -18,18 +22,20 @@ use std::{io, mem};
 use tracing::trace;
 
 use crate::{
+    Message,
+    conn::AuthMechanism,
     fdo::ConnectionCredentials,
     message::{
-        header::{MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE},
         PrimaryHeader,
+        header::{MAX_MESSAGE_SIZE, MIN_MESSAGE_SIZE},
     },
-    padding_for_8_bytes, Message,
+    padding_for_8_bytes,
 };
 #[cfg(unix)]
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use zvariant::{
-    serialized::{self, Context},
     Endian,
+    serialized::{self, Context},
 };
 
 #[cfg(unix)]
@@ -38,7 +44,7 @@ type RecvmsgResult = io::Result<(usize, Vec<OwnedFd>)>;
 #[cfg(not(unix))]
 type RecvmsgResult = io::Result<usize>;
 
-/// Trait representing some transport layer over which the DBus protocol can be used
+/// Trait representing some transport layer over which the DBus protocol can be used.
 ///
 /// In order to allow simultaneous reading and writing, this trait requires you to split the socket
 /// into a read half and a write half. The reader and writer halves can be any types that implement
@@ -88,7 +94,7 @@ pub trait ReadHalf: std::fmt::Debug + Send + Sync + 'static {
         &mut self,
         seq: u64,
         already_received_bytes: &mut Vec<u8>,
-        #[cfg(unix)] already_received_fds: &mut Vec<std::os::fd::OwnedFd>,
+        #[cfg(unix)] already_received_fds: &mut Vec<OwnedFd>,
     ) -> crate::Result<Message> {
         #[cfg(unix)]
         let mut fds = vec![];
@@ -184,14 +190,14 @@ pub trait ReadHalf: std::fmt::Debug + Send + Sync + 'static {
 
         #[cfg(unix)]
         if !already_received_fds.is_empty() {
-            use crate::message::{header::PRIMARY_HEADER_SIZE, Field};
+            use crate::message::header::PRIMARY_HEADER_SIZE;
 
             let ctxt = Context::new_dbus(endian, PRIMARY_HEADER_SIZE);
             let encoded_fields =
                 serialized::Data::new(&bytes[PRIMARY_HEADER_SIZE..header_len], ctxt);
             let fields: crate::message::Fields<'_> = encoded_fields.deserialize()?.0;
-            let num_required_fds = match fields.get_field(crate::message::FieldCode::UnixFDs) {
-                Some(Field::UnixFDs(num_fds)) => *num_fds as usize,
+            let num_required_fds = match fields.unix_fds {
+                Some(num_fds) => num_fds as usize,
                 _ => 0,
             };
             let num_pending = num_required_fds
@@ -226,16 +232,23 @@ pub trait ReadHalf: std::fmt::Debug + Send + Sync + 'static {
         unimplemented!("`ReadHalf` implementers must either override `read_message` or `recvmsg`");
     }
 
-    /// Supports passing file descriptors.
+    /// Return whether passing file descriptors is supported.
     ///
     /// Default implementation returns `false`.
     fn can_pass_unix_fd(&self) -> bool {
         false
     }
 
-    /// Return the peer credentials.
+    /// The peer credentials.
     async fn peer_credentials(&mut self) -> io::Result<ConnectionCredentials> {
         Ok(ConnectionCredentials::default())
+    }
+
+    /// The authentication mechanism to use for this socket on the target OS.
+    ///
+    /// Default is `AuthMechanism::External`.
+    fn auth_mechanism(&self) -> AuthMechanism {
+        AuthMechanism::External
     }
 }
 
@@ -279,7 +292,7 @@ pub trait WriteHalf: std::fmt::Debug + Send + Sync + 'static {
     /// Attempt to send a message on the socket
     ///
     /// On success, return the number of bytes written. There may be a partial write, in
-    /// which case the caller is responsible of sending the remaining data by calling this
+    /// which case the caller is responsible for sending the remaining data by calling this
     /// method again until everything is written or it returns an error of kind `WouldBlock`.
     ///
     /// If at least one byte has been written, then all the provided file descriptors will
@@ -312,14 +325,14 @@ pub trait WriteHalf: std::fmt::Debug + Send + Sync + 'static {
     /// After this call, it is valid for all reading and writing operations to fail.
     async fn close(&mut self) -> io::Result<()>;
 
-    /// Supports passing file descriptors.
+    /// Whether passing file descriptors is supported.
     ///
     /// Default implementation returns `false`.
     fn can_pass_unix_fd(&self) -> bool {
         false
     }
 
-    /// Return the peer credentials.
+    /// The peer credentials.
     async fn peer_credentials(&mut self) -> io::Result<ConnectionCredentials> {
         Ok(ConnectionCredentials::default())
     }
@@ -335,7 +348,7 @@ impl ReadHalf for Box<dyn ReadHalf> {
         &mut self,
         seq: u64,
         already_received_bytes: &mut Vec<u8>,
-        #[cfg(unix)] already_received_fds: &mut Vec<std::os::fd::OwnedFd>,
+        #[cfg(unix)] already_received_fds: &mut Vec<OwnedFd>,
     ) -> crate::Result<Message> {
         (**self)
             .receive_message(
@@ -353,6 +366,10 @@ impl ReadHalf for Box<dyn ReadHalf> {
 
     async fn peer_credentials(&mut self) -> io::Result<ConnectionCredentials> {
         (**self).peer_credentials().await
+    }
+
+    fn auth_mechanism(&self) -> AuthMechanism {
+        (**self).auth_mechanism()
     }
 }
 

@@ -10,11 +10,12 @@ resolver = "2"
 [workspace.package]
 version = "3.5.1"
 edition = "2024"
-license = "MIT"
+license = "GPL-3.0-only"
 authors = ["Jon Bogaty"]
 repository = "https://github.com/jbcom/paranoid-passwd"
 homepage = "https://paranoid-passwd.com"
-rust-version = "1.88"
+description = "Local-first password manager and generator with native apps, encrypted vault storage, and verifiable releases."
+rust-version = "1.95"
 
 [workspace.dependencies]
 anyhow = "1.0.102"
@@ -28,6 +29,8 @@ ratatui = "0.30.0"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+slint = { version = "1.16.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg"] }
+slint-build = "1.16.1"
 statrs = "0.18.0"
 tempfile = "3.20.0"
 thiserror = "2.0.18"

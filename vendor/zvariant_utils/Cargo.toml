@@ -10,14 +10,20 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.75"
+edition = "2024"
+rust-version = "1.87"
 name = "zvariant_utils"
-version = "2.1.0"
+version = "3.3.1"
 authors = [
     "Zeeshan Ali Khan <zeeshanak@gnome.org>",
     "turbocooler <turbocooler@cocaine.ninja>",
 ]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Various utilities used internally by the zvariant crate."
 readme = "README.md"
 keywords = [
@@ -32,7 +38,26 @@ categories = [
     "parsing",
 ]
 license = "MIT"
-repository = "https://github.com/dbus2/zbus/"
+repository = "https://github.com/z-galaxy/zbus/"
+
+[package.metadata.docs.rs]
+all-features = true
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-freebsd",
+    "x86_64-unknown-netbsd",
+    "aarch64-linux-android",
+]
+
+[features]
+default = []
+gvariant = []
+
+[lib]
+name = "zvariant_utils"
+path = "src/lib.rs"
 
 [dependencies.proc-macro2]
 version = "1.0.81"
@@ -40,9 +65,23 @@ version = "1.0.81"
 [dependencies.quote]
 version = "1.0.36"
 
+[dependencies.serde]
+version = "1.0.200"
+features = ["derive"]
+
 [dependencies.syn]
 version = "2.0.64"
 features = [
     "extra-traits",
     "full",
 ]
+
+[dependencies.winnow]
+version = "1.0"
+
+[dev-dependencies]
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+priority = 0
+check-cfg = ["cfg(tokio_unstable)"]

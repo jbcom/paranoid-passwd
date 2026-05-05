@@ -16,15 +16,13 @@ use serde::{
         Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeTupleStruct, Serializer,
     },
 };
-use static_assertions::assert_impl_all;
 
 use crate::{
-    array_display_fmt, dict_display_fmt, signature_parser::SignatureParser, structure_display_fmt,
-    utils::*, Array, Basic, Dict, DynamicType, ObjectPath, OwnedValue, Signature, Str, Structure,
-    StructureBuilder, Type,
+    Array, Basic, Dict, DynamicType, ObjectPath, OwnedValue, Signature, Str, Structure,
+    StructureBuilder, Type, array_display_fmt, dict_display_fmt, structure_display_fmt, utils::*,
 };
 #[cfg(feature = "gvariant")]
-use crate::{maybe_display_fmt, Maybe};
+use crate::{Maybe, maybe_display_fmt};
 
 #[cfg(unix)]
 use crate::Fd;
@@ -90,7 +88,7 @@ pub enum Value<'a> {
     U64(u64),
     F64(f64),
     Str(Str<'a>),
-    Signature(Signature<'a>),
+    Signature(Signature),
     ObjectPath(ObjectPath<'a>),
     Value(Box<Value<'a>>),
 
@@ -144,15 +142,13 @@ impl Ord for Value<'_> {
             .unwrap_or_else(|| match (self, other) {
                 (Self::F64(lhs), Self::F64(rhs)) => lhs.total_cmp(rhs),
                 // `partial_cmp` returns `Some(_)` if either the discriminants are different
-                // or if both the left hand side and right hand side is `Self::F64(_)`,
-                // because `f64` is the only type in this enum, that does not implement `Ord`.
-                // This `match`-arm is therefore unreachable.
-                _ => unreachable!(),
+                // or if both the left hand side and right hand side is `Self::F64(_)`. We can only
+                // reach this arm, if only one of the sides is `Self::F64(_)`. So we can just
+                // pretend the ordering is equal.
+                _ => Ordering::Equal,
             })
     }
 }
-
-assert_impl_all!(Value<'_>: Send, Sync, Unpin);
 
 macro_rules! serialize_value {
     ($self:ident $serializer:ident.$method:ident $($first_arg:expr)*) => {
@@ -208,7 +204,7 @@ impl<'a> Value<'a> {
         T: Into<Self> + DynamicType,
     {
         // With specialization, we wouldn't have this
-        if value.dynamic_signature() == VARIANT_SIGNATURE_STR {
+        if value.signature() == VARIANT_SIGNATURE_STR {
             Self::Value(Box::new(value.into()))
         } else {
             value.into()
@@ -250,32 +246,64 @@ impl<'a> Value<'a> {
         }))
     }
 
+    /// Creates an owned value from `self`.
+    ///
+    /// This method can currently only fail on Unix platforms for [`Value::Fd`] variant containing
+    /// an [`Fd::Owned`] variant. This happens when the current process exceeds the maximum number
+    /// of open file descriptors.
+    ///
+    /// Results in an extra allocation if the value contains borrowed data.
+    pub fn try_into_owned(self) -> crate::Result<OwnedValue> {
+        Ok(OwnedValue(match self {
+            Value::U8(v) => Value::U8(v),
+            Value::Bool(v) => Value::Bool(v),
+            Value::I16(v) => Value::I16(v),
+            Value::U16(v) => Value::U16(v),
+            Value::I32(v) => Value::I32(v),
+            Value::U32(v) => Value::U32(v),
+            Value::I64(v) => Value::I64(v),
+            Value::U64(v) => Value::U64(v),
+            Value::F64(v) => Value::F64(v),
+            Value::Str(v) => Value::Str(v.into_owned()),
+            Value::Signature(v) => Value::Signature(v),
+            Value::ObjectPath(v) => Value::ObjectPath(v.into_owned()),
+            Value::Value(v) => Value::Value(Box::new(v.try_into_owned()?.into())),
+            Value::Array(v) => Value::Array(v.try_into_owned()?),
+            Value::Dict(v) => Value::Dict(v.try_into_owned()?),
+            Value::Structure(v) => Value::Structure(v.try_into_owned()?),
+            #[cfg(feature = "gvariant")]
+            Value::Maybe(v) => Value::Maybe(v.try_into_owned()?),
+            #[cfg(unix)]
+            Value::Fd(v) => Value::Fd(v.try_to_owned()?),
+        }))
+    }
+
     /// Get the signature of the enclosed value.
-    pub fn value_signature(&self) -> Signature<'_> {
+    pub fn value_signature(&self) -> &Signature {
         match self {
-            Value::U8(_) => u8::signature(),
-            Value::Bool(_) => bool::signature(),
-            Value::I16(_) => i16::signature(),
-            Value::U16(_) => u16::signature(),
-            Value::I32(_) => i32::signature(),
-            Value::U32(_) => u32::signature(),
-            Value::I64(_) => i64::signature(),
-            Value::U64(_) => u64::signature(),
-            Value::F64(_) => f64::signature(),
-            Value::Str(_) => <&str>::signature(),
-            Value::Signature(_) => Signature::signature(),
-            Value::ObjectPath(_) => ObjectPath::signature(),
-            Value::Value(_) => Signature::from_static_str_unchecked("v"),
+            Value::U8(_) => u8::SIGNATURE,
+            Value::Bool(_) => bool::SIGNATURE,
+            Value::I16(_) => i16::SIGNATURE,
+            Value::U16(_) => u16::SIGNATURE,
+            Value::I32(_) => i32::SIGNATURE,
+            Value::U32(_) => u32::SIGNATURE,
+            Value::I64(_) => i64::SIGNATURE,
+            Value::U64(_) => u64::SIGNATURE,
+            Value::F64(_) => f64::SIGNATURE,
+            Value::Str(_) => <&str>::SIGNATURE,
+            Value::Signature(_) => Signature::SIGNATURE,
+            Value::ObjectPath(_) => ObjectPath::SIGNATURE,
+            Value::Value(_) => &Signature::Variant,
 
             // Container types
-            Value::Array(value) => value.full_signature().as_ref(),
-            Value::Dict(value) => value.full_signature().as_ref(),
-            Value::Structure(value) => value.full_signature().as_ref(),
+            Value::Array(value) => value.signature(),
+            Value::Dict(value) => value.signature(),
+            Value::Structure(value) => value.signature(),
             #[cfg(feature = "gvariant")]
-            Value::Maybe(value) => value.full_signature().as_ref(),
+            Value::Maybe(value) => value.signature(),
 
             #[cfg(unix)]
-            Value::Fd(_) => Fd::signature(),
+            Value::Fd(_) => Fd::SIGNATURE,
         }
     }
 
@@ -411,7 +439,7 @@ impl<'a> Value<'a> {
     /// [`From<Value>`]: https://doc.rust-lang.org/std/convert/trait.From.html
     pub fn downcast<T>(self) -> Result<T, crate::Error>
     where
-        T: ?Sized + TryFrom<Value<'a>>,
+        T: TryFrom<Value<'a>>,
         <T as TryFrom<Value<'a>>>::Error: Into<crate::Error>,
     {
         if let Value::Value(v) = self {
@@ -461,7 +489,7 @@ impl<'a> Value<'a> {
     /// [`downcast`]: enum.Value.html#method.downcast
     pub fn downcast_ref<T>(&'a self) -> Result<T, crate::Error>
     where
-        T: ?Sized + TryFrom<&'a Value<'a>>,
+        T: TryFrom<&'a Value<'a>>,
         <T as TryFrom<&'a Value<'a>>>::Error: Into<crate::Error>,
     {
         if let Value::Value(v) = self {
@@ -490,51 +518,51 @@ pub(crate) fn value_display_fmt(
             if type_annotate {
                 f.write_str("byte ")?;
             }
-            write!(f, "0x{:02x}", num)
+            write!(f, "0x{num:02x}")
         }
         Value::Bool(boolean) => {
-            write!(f, "{}", boolean)
+            write!(f, "{boolean}")
         }
         Value::I16(num) => {
             if type_annotate {
                 f.write_str("int16 ")?;
             }
-            write!(f, "{}", num)
+            write!(f, "{num}")
         }
         Value::U16(num) => {
             if type_annotate {
                 f.write_str("uint16 ")?;
             }
-            write!(f, "{}", num)
+            write!(f, "{num}")
         }
         Value::I32(num) => {
             // Never annotate this type because it is the default for numbers
-            write!(f, "{}", num)
+            write!(f, "{num}")
         }
         Value::U32(num) => {
             if type_annotate {
                 f.write_str("uint32 ")?;
             }
-            write!(f, "{}", num)
+            write!(f, "{num}")
         }
         Value::I64(num) => {
             if type_annotate {
                 f.write_str("int64 ")?;
             }
-            write!(f, "{}", num)
+            write!(f, "{num}")
         }
         Value::U64(num) => {
             if type_annotate {
                 f.write_str("uint64 ")?;
             }
-            write!(f, "{}", num)
+            write!(f, "{num}")
         }
         Value::F64(num) => {
             if num.fract() == 0. {
                 // Add a dot to make it clear that this is a float
-                write!(f, "{}.", num)
+                write!(f, "{num}.")
             } else {
-                write!(f, "{}", num)
+                write!(f, "{num}")
             }
         }
         Value::Str(string) => {
@@ -544,7 +572,7 @@ pub(crate) fn value_display_fmt(
             if type_annotate {
                 f.write_str("signature ")?;
             }
-            write!(f, "{:?}", val.as_str())
+            write!(f, "{:?}", val.to_string())
         }
         Value::ObjectPath(val) => {
             if type_annotate {
@@ -572,23 +600,23 @@ pub(crate) fn value_display_fmt(
             if type_annotate {
                 f.write_str("handle ")?;
             }
-            write!(f, "{}", handle)
+            write!(f, "{handle}")
         }
     }
 }
 
-impl<'a> Serialize for Value<'a> {
+impl Serialize for Value<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         // Serializer implementation needs to ensure padding isn't added for Value.
-        let mut structure = serializer.serialize_struct("zvariant::Value", 2)?;
+        let mut structure = serializer.serialize_struct("Variant", 2)?;
 
         let signature = self.value_signature();
-        structure.serialize_field("zvariant::Value::Signature", &signature)?;
+        structure.serialize_field("signature", &signature)?;
 
-        self.serialize_value_as_struct_field("zvariant::Value::Value", &mut structure)?;
+        self.serialize_value_as_struct_field("value", &mut structure)?;
 
         structure.end()
     }
@@ -605,10 +633,6 @@ impl<'de: 'a, 'a> Deserialize<'de> for Value<'a> {
     }
 }
 
-// Note that the Visitor implementations don't check for validity of the
-// signature. That's left to the Deserialize implementation of Signature
-// itself.
-
 struct ValueVisitor;
 
 impl<'de> Visitor<'de> for ValueVisitor {
@@ -622,11 +646,11 @@ impl<'de> Visitor<'de> for ValueVisitor {
     where
         V: SeqAccess<'de>,
     {
-        let signature = visitor.next_element::<Signature<'_>>()?.ok_or_else(|| {
+        let signature = visitor.next_element::<Signature>()?.ok_or_else(|| {
             Error::invalid_value(Unexpected::Other("nothing"), &"a Value signature")
         })?;
         let seed = ValueSeed::<Value<'_>> {
-            signature,
+            signature: &signature,
             phantom: PhantomData,
         };
 
@@ -639,35 +663,41 @@ impl<'de> Visitor<'de> for ValueVisitor {
     where
         V: MapAccess<'de>,
     {
-        let (_, signature) = visitor
-            .next_entry::<&str, Signature<'_>>()?
-            .ok_or_else(|| {
-                Error::invalid_value(Unexpected::Other("nothing"), &"a Value signature")
-            })?;
+        let (_, signature) = visitor.next_entry::<&str, Signature>()?.ok_or_else(|| {
+            Error::invalid_value(Unexpected::Other("nothing"), &"a Value signature")
+        })?;
         let _ = visitor.next_key::<&str>()?;
 
         let seed = ValueSeed::<Value<'_>> {
-            signature,
+            signature: &signature,
             phantom: PhantomData,
         };
         visitor.next_value_seed(seed)
     }
 }
 
-pub(crate) struct SignatureSeed<'de> {
-    pub signature: Signature<'de>,
+pub(crate) struct SignatureSeed<'sig> {
+    pub signature: &'sig Signature,
 }
 
-impl<'de> SignatureSeed<'de> {
-    pub(crate) fn visit_array<V>(self, mut visitor: V) -> Result<Array<'de>, V::Error>
+impl SignatureSeed<'_> {
+    pub(crate) fn visit_array<'de, V>(self, mut visitor: V) -> Result<Array<'de>, V::Error>
     where
         V: SeqAccess<'de>,
     {
-        let element_signature = self.signature.slice(1..);
-        let mut array = Array::new_full_signature(self.signature.clone());
+        let element_signature = match self.signature {
+            Signature::Array(child) => child.signature(),
+            _ => {
+                return Err(Error::invalid_type(
+                    Unexpected::Str(&self.signature.to_string()),
+                    &"an array signature",
+                ));
+            }
+        };
+        let mut array = Array::new_full_signature(self.signature);
 
         while let Some(elem) = visitor.next_element_seed(ValueSeed::<Value<'_>> {
-            signature: element_signature.clone(),
+            signature: element_signature,
             phantom: PhantomData,
         })? {
             elem.value_signature();
@@ -677,20 +707,22 @@ impl<'de> SignatureSeed<'de> {
         Ok(array)
     }
 
-    pub(crate) fn visit_struct<V>(self, mut visitor: V) -> Result<Structure<'de>, V::Error>
+    pub(crate) fn visit_struct<'de, V>(self, mut visitor: V) -> Result<Structure<'de>, V::Error>
     where
         V: SeqAccess<'de>,
     {
-        let mut i = 1;
-        let signature_end = self.signature.len() - 1;
-        let mut builder = StructureBuilder::new();
-        while i < signature_end {
-            let fields_signature = self.signature.slice(i..signature_end);
-            let parser = SignatureParser::new(fields_signature.as_ref());
-            let len = parser.next_signature().map_err(Error::custom)?.len();
-            let field_signature = fields_signature.slice(0..len);
-            i += field_signature.len();
+        let fields_signatures = match self.signature {
+            Signature::Structure(fields) => fields.iter(),
+            _ => {
+                return Err(Error::invalid_type(
+                    Unexpected::Str(&self.signature.to_string()),
+                    &"a structure signature",
+                ));
+            }
+        };
 
+        let mut builder = StructureBuilder::new();
+        for field_signature in fields_signatures {
             if let Some(field) = visitor.next_element_seed(ValueSeed::<Value<'_>> {
                 signature: field_signature,
                 phantom: PhantomData,
@@ -702,20 +734,20 @@ impl<'de> SignatureSeed<'de> {
     }
 }
 
-impl<'de, T> From<ValueSeed<'de, T>> for SignatureSeed<'de> {
-    fn from(seed: ValueSeed<'de, T>) -> Self {
+impl<'sig, T> From<ValueSeed<'sig, T>> for SignatureSeed<'sig> {
+    fn from(seed: ValueSeed<'sig, T>) -> Self {
         SignatureSeed {
             signature: seed.signature,
         }
     }
 }
 
-struct ValueSeed<'de, T> {
-    signature: Signature<'de>,
+struct ValueSeed<'sig, T> {
+    signature: &'sig Signature,
     phantom: PhantomData<T>,
 }
 
-impl<'de, T> ValueSeed<'de, T>
+impl<'de, T> ValueSeed<'_, T>
 where
     T: Deserialize<'de>,
 {
@@ -740,7 +772,7 @@ where
     }
 
     #[inline]
-    fn visit_variant<V>(self, visitor: V) -> Result<Value<'de>, V::Error>
+    fn visit_variant_as_seq<V>(self, visitor: V) -> Result<Value<'de>, V::Error>
     where
         V: SeqAccess<'de>,
     {
@@ -748,12 +780,22 @@ where
             .visit_seq(visitor)
             .map(|v| Value::Value(Box::new(v)))
     }
+
+    #[inline]
+    fn visit_variant_as_map<V>(self, visitor: V) -> Result<Value<'de>, V::Error>
+    where
+        V: MapAccess<'de>,
+    {
+        ValueVisitor
+            .visit_map(visitor)
+            .map(|v| Value::Value(Box::new(v)))
+    }
 }
 
 macro_rules! value_seed_basic_method {
     ($name:ident, $type:ty) => {
         #[inline]
-        fn $name<E>(self, value: $type) -> Result<Value<'de>, E>
+        fn $name<E>(self, value: $type) -> Result<Value<'static>, E>
         where
             E: serde::de::Error,
         {
@@ -762,34 +804,7 @@ macro_rules! value_seed_basic_method {
     };
 }
 
-macro_rules! value_seed_str_method {
-    ($name:ident, $type:ty, $constructor:ident) => {
-        fn $name<E>(self, value: $type) -> Result<Value<'de>, E>
-        where
-            E: serde::de::Error,
-        {
-            match self.signature.as_str() {
-                <&str>::SIGNATURE_STR => Ok(Value::Str(Str::from(value))),
-                Signature::SIGNATURE_STR => Ok(Value::Signature(Signature::$constructor(value))),
-                ObjectPath::SIGNATURE_STR => Ok(Value::ObjectPath(ObjectPath::$constructor(value))),
-                _ => {
-                    let expected = format!(
-                        "`{}`, `{}` or `{}`",
-                        <&str>::SIGNATURE_STR,
-                        Signature::SIGNATURE_STR,
-                        ObjectPath::SIGNATURE_STR,
-                    );
-                    Err(Error::invalid_type(
-                        Unexpected::Str(self.signature.as_str()),
-                        &expected.as_str(),
-                    ))
-                }
-            }
-        }
-    };
-}
-
-impl<'de, T> Visitor<'de> for ValueSeed<'de, T>
+impl<'de, T> Visitor<'de> for ValueSeed<'_, T>
 where
     T: Deserialize<'de>,
 {
@@ -812,14 +827,9 @@ where
     where
         E: serde::de::Error,
     {
-        let v = match self.signature.as_bytes().first().ok_or_else(|| {
-            Error::invalid_value(
-                Unexpected::Other("nothing"),
-                &"i32 or fd signature character",
-            )
-        })? {
+        let v = match &self.signature {
             #[cfg(unix)]
-            b'h' => {
+            Signature::Fd => {
                 // SAFETY: The `'de` lifetimes will ensure the borrow won't outlive the raw FD.
                 let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(value) };
                 Fd::Borrowed(fd).into()
@@ -838,24 +848,42 @@ where
         self.visit_string(String::from(value))
     }
 
-    value_seed_str_method!(visit_borrowed_str, &'de str, from_str_unchecked);
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        match &self.signature {
+            Signature::Str => Ok(Value::Str(Str::from(v))),
+            Signature::Signature => Signature::try_from(v)
+                .map(Value::Signature)
+                .map_err(Error::custom),
+            Signature::ObjectPath => Ok(Value::ObjectPath(ObjectPath::from_str_unchecked(v))),
+            _ => {
+                let expected = format!(
+                    "`{}`, `{}` or `{}`",
+                    <&str>::SIGNATURE_STR,
+                    Signature::SIGNATURE_STR,
+                    ObjectPath::SIGNATURE_STR,
+                );
+                Err(Error::invalid_type(
+                    Unexpected::Str(&self.signature.to_string()),
+                    &expected.as_str(),
+                ))
+            }
+        }
+    }
 
     fn visit_seq<V>(self, visitor: V) -> Result<Value<'de>, V::Error>
     where
         V: SeqAccess<'de>,
     {
-        match self.signature.as_bytes().first().ok_or_else(|| {
-            Error::invalid_value(
-                Unexpected::Other("nothing"),
-                &"Array or Struct signature character",
-            )
-        })? {
+        match &self.signature {
             // For some reason rustc doesn't like us using ARRAY_SIGNATURE_CHAR const
-            b'a' => self.visit_array(visitor),
-            b'(' => self.visit_struct(visitor),
-            b'v' => self.visit_variant(visitor),
-            b => Err(Error::invalid_value(
-                Unexpected::Char(*b as char),
+            Signature::Array(_) => self.visit_array(visitor),
+            Signature::Structure(_) => self.visit_struct(visitor),
+            Signature::Variant => self.visit_variant_as_seq(visitor),
+            s => Err(Error::invalid_value(
+                Unexpected::Str(&s.to_string()),
                 &"a Value signature",
             )),
         }
@@ -865,24 +893,26 @@ where
     where
         V: MapAccess<'de>,
     {
-        if self.signature.len() < 5 {
-            return Err(serde::de::Error::invalid_length(
-                self.signature.len(),
-                &">= 5 characters in dict entry signature",
-            ));
-        }
-        let key_signature = self.signature.slice(2..3);
-        let signature_end = self.signature.len() - 1;
-        let value_signature = self.signature.slice(3..signature_end);
-        let mut dict = Dict::new_full_signature(self.signature.clone());
+        let (key_signature, value_signature) = match &self.signature {
+            Signature::Dict { key, value } => (key.signature().clone(), value.signature().clone()),
+            Signature::Variant => return self.visit_variant_as_map(visitor),
+            _ => {
+                return Err(Error::invalid_type(
+                    Unexpected::Str(&self.signature.to_string()),
+                    &"a dict signature",
+                ));
+            }
+        };
+
+        let mut dict = Dict::new_full_signature(self.signature);
 
         while let Some((key, value)) = visitor.next_entry_seed(
             ValueSeed::<Value<'_>> {
-                signature: key_signature.clone(),
+                signature: &key_signature,
                 phantom: PhantomData,
             },
             ValueSeed::<Value<'_>> {
-                signature: value_signature.clone(),
+                signature: &value_signature,
                 phantom: PhantomData,
             },
         )? {
@@ -897,8 +927,17 @@ where
     where
         D: Deserializer<'de>,
     {
+        let child_signature = match &self.signature {
+            Signature::Maybe(child) => child.signature().clone(),
+            _ => {
+                return Err(Error::invalid_type(
+                    Unexpected::Str(&self.signature.to_string()),
+                    &"a maybe signature",
+                ));
+            }
+        };
         let visitor = ValueSeed::<T> {
-            signature: self.signature.slice(1..),
+            signature: &child_signature,
             phantom: PhantomData,
         };
 
@@ -934,7 +973,7 @@ where
     }
 }
 
-impl<'de, T> DeserializeSeed<'de> for ValueSeed<'de, T>
+impl<'de, T> DeserializeSeed<'de> for ValueSeed<'_, T>
 where
     T: Deserialize<'de>,
 {
@@ -948,10 +987,8 @@ where
     }
 }
 
-impl<'a> Type for Value<'a> {
-    fn signature() -> Signature<'static> {
-        Signature::from_static_str_unchecked(VARIANT_SIGNATURE_STR)
-    }
+impl Type for Value<'_> {
+    const SIGNATURE: &'static Signature = &Signature::Variant;
 }
 
 impl<'a> TryFrom<&Value<'a>> for Value<'a> {
@@ -959,6 +996,20 @@ impl<'a> TryFrom<&Value<'a>> for Value<'a> {
 
     fn try_from(value: &Value<'a>) -> crate::Result<Value<'a>> {
         value.try_clone()
+    }
+}
+
+impl Clone for Value<'_> {
+    /// Clone the value.
+    ///
+    /// # Panics
+    ///
+    /// This method can only fail on Unix platforms for [`Value::Fd`] variant containing an
+    /// [`Fd::Owned`] variant. This happens when the current process exceeds the limit on maximum
+    /// number of open file descriptors.
+    fn clone(&self) -> Self {
+        self.try_clone()
+            .expect("Process exceeded limit on maximum number of open file descriptors")
     }
 }
 
@@ -1007,10 +1058,7 @@ mod tests {
 
         assert_eq!(
             Value::new((
-                vec![
-                    Signature::from_static_str("").unwrap(),
-                    Signature::from_static_str("(ysa{sd})").unwrap(),
-                ],
+                vec![crate::signature!(""), crate::signature!("(ysa{sd})"),],
                 vec![
                     ObjectPath::from_static_str("/").unwrap(),
                     ObjectPath::from_static_str("/a/very/looooooooooooooooooooooooo0000o0ng/path")
@@ -1078,14 +1126,17 @@ mod tests {
 
         let items_str = val.split(", ").collect::<Vec<_>>();
         assert_eq!(items_str.len(), 2);
-        assert!(items_str
-            .iter()
-            .any(|str| str.contains("32") && str.contains(": ") && str.contains("64")));
-        assert!(items_str
-            .iter()
-            .any(|str| str.contains("100") && str.contains(": ") && str.contains("200")));
+        assert!(
+            items_str
+                .iter()
+                .any(|str| str.contains("32") && str.contains(": ") && str.contains("64"))
+        );
+        assert!(
+            items_str
+                .iter()
+                .any(|str| str.contains("100") && str.contains(": ") && str.contains("200"))
+        );
 
-        assert_eq!(Value::new(Structure::default()).to_string(), "()");
         assert_eq!(
             Value::new(((true,), (true, false), (true, true, false))).to_string(),
             "((true,), (true, false), (true, true, false))"

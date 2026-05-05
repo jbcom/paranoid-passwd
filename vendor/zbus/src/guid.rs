@@ -1,44 +1,35 @@
 use std::{
     borrow::{Borrow, Cow},
     fmt::{self, Debug, Display, Formatter},
-    iter::repeat_with,
     ops::Deref,
     str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde::{de, Deserialize, Serialize};
-use static_assertions::assert_impl_all;
+use serde::{Deserialize, Serialize, de};
 use zvariant::{Str, Type};
 
 /// A D-Bus server GUID.
 ///
 /// See the D-Bus specification [UUIDs chapter] for details.
 ///
-/// You can create a `Guid` from an existing string with [`Guid::try_from::<&str>`][TryFrom].
+/// You can create a `Guid` from an existing string with [`Guid::try_from::<&str>`].
 ///
 /// [UUIDs chapter]: https://dbus.freedesktop.org/doc/dbus-specification.html#uuids
-/// [TryFrom]: #impl-TryFrom%3C%26%27_%20str%3E
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Type, Serialize)]
 pub struct Guid<'g>(Str<'g>);
-
-assert_impl_all!(Guid<'_>: Send, Sync, Unpin);
 
 impl Guid<'_> {
     /// Generate a D-Bus GUID that can be used with e.g.
     /// [`connection::Builder::server`](crate::connection::Builder::server).
+    ///
+    /// This method is only available when the `p2p` feature is enabled (disabled by default).
+    #[cfg(feature = "p2p")]
     pub fn generate() -> Guid<'static> {
-        let r: Vec<u32> = repeat_with(rand::random::<u32>).take(3).collect();
-        let r3 = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(n) => n.as_secs() as u32,
-            Err(_) => rand::random::<u32>(),
-        };
-
-        let s = format!("{:08x}{:08x}{:08x}{:08x}", r[0], r[1], r[2], r3);
+        let s = uuid::Uuid::new_v4().as_simple().to_string();
         Guid(s.into())
     }
 
-    /// Returns a string slice for the GUID.
+    /// Return a string slice for the GUID.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
@@ -65,7 +56,7 @@ impl fmt::Display for Guid<'_> {
 impl<'g> TryFrom<&'g str> for Guid<'g> {
     type Error = crate::Error;
 
-    /// Creates a GUID from a string with 32 hex digits.
+    /// Create a GUID from a string with 32 hex digits.
     ///
     /// Returns `Err(`[`Error::InvalidGUID`]`)` if the provided string is not a well-formed GUID.
     ///
@@ -80,7 +71,7 @@ impl<'g> TryFrom<&'g str> for Guid<'g> {
 impl<'g> TryFrom<Str<'g>> for Guid<'g> {
     type Error = crate::Error;
 
-    /// Creates a GUID from a string with 32 hex digits.
+    /// Create a GUID from a string with 32 hex digits.
     ///
     /// Returns `Err(`[`Error::InvalidGUID`]`)` if the provided string is not a well-formed GUID.
     ///
@@ -130,12 +121,11 @@ impl<'de> Deserialize<'de> for Guid<'de> {
     }
 }
 
-fn validate_guid(value: &str) -> crate::Result<()> {
-    if value.as_bytes().len() != 32 || value.chars().any(|c| !char::is_ascii_hexdigit(&c)) {
-        return Err(crate::Error::InvalidGUID);
+const fn validate_guid(value: &str) -> crate::Result<()> {
+    match uuid::Uuid::try_parse(value) {
+        Ok(_) => Ok(()),
+        Err(_) => Err(crate::Error::InvalidGUID),
     }
-
-    Ok(())
 }
 
 impl From<Guid<'_>> for String {
@@ -149,6 +139,12 @@ impl Deref for Guid<'_> {
 
     fn deref(&self) -> &Self::Target {
         self.as_str()
+    }
+}
+
+impl<'a> Borrow<Guid<'a>> for OwnedGuid {
+    fn borrow(&self) -> &Guid<'a> {
+        &self.0
     }
 }
 
@@ -167,8 +163,6 @@ impl Borrow<str> for Guid<'_> {
 /// Owned version of [`Guid`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Type, Serialize)]
 pub struct OwnedGuid(#[serde(borrow)] Guid<'static>);
-
-assert_impl_all!(OwnedGuid: Send, Sync, Unpin);
 
 impl OwnedGuid {
     /// Get a reference to the inner [`Guid`].
@@ -211,7 +205,7 @@ impl From<Guid<'_>> for OwnedGuid {
 
 impl From<OwnedGuid> for Str<'_> {
     fn from(value: OwnedGuid) -> Self {
-        value.0 .0
+        value.0.0
     }
 }
 
@@ -250,6 +244,7 @@ mod tests {
     use test_log::test;
 
     #[test]
+    #[cfg(feature = "p2p")]
     fn generate() {
         let u1 = Guid::generate();
         let u2 = Guid::generate();
@@ -257,5 +252,15 @@ mod tests {
         assert_eq!(u2.as_str().len(), 32);
         assert_ne!(u1, u2);
         assert_ne!(u1.as_str(), u2.as_str());
+    }
+
+    #[test]
+    fn parse() {
+        let valid = "0123456789ABCDEF0123456789ABCDEF";
+        // Not 32 chars.
+        let invalid = "0123456789ABCDEF0123456789ABCD";
+
+        assert!(Guid::try_from(valid).is_ok());
+        assert!(Guid::try_from(invalid).is_err());
     }
 }

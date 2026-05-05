@@ -10,11 +10,17 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.75"
+edition = "2024"
+rust-version = "1.87"
 name = "zvariant"
-version = "4.2.0"
+version = "5.11.0"
 authors = ["Zeeshan Ali Khan <zeeshanak@gnome.org>"]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "D-Bus & GVariant encoding & decoding"
 readme = "README.md"
 keywords = [
@@ -29,21 +35,150 @@ categories = [
     "parsing",
 ]
 license = "MIT"
-repository = "https://github.com/dbus2/zbus/"
+repository = "https://github.com/z-galaxy/zbus/"
 
 [package.metadata.docs.rs]
 all-features = true
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-freebsd",
+    "x86_64-unknown-netbsd",
+    "aarch64-linux-android",
+]
+
+[features]
+camino = ["dep:camino"]
+default = []
+gvariant = [
+    "zvariant_derive/gvariant",
+    "zvariant_utils/gvariant",
+]
+option-as-array = []
+ostree-tests = ["gvariant"]
 
 [lib]
+name = "zvariant"
+path = "src/lib.rs"
 bench = false
+
+[[test]]
+name = "array_string_value"
+path = "tests/array_string_value.rs"
+
+[[test]]
+name = "array_value"
+path = "tests/array_value.rs"
+
+[[test]]
+name = "common"
+path = "tests/common.rs"
+
+[[test]]
+name = "derive"
+path = "tests/derive.rs"
+
+[[test]]
+name = "dict_compare"
+path = "tests/dict_compare.rs"
+
+[[test]]
+name = "dict_value"
+path = "tests/dict_value.rs"
+
+[[test]]
+name = "enums"
+path = "tests/enums.rs"
+
+[[test]]
+name = "fd_value"
+path = "tests/fd_value.rs"
+
+[[test]]
+name = "heapless_string_value"
+path = "tests/heapless_string_value.rs"
+
+[[test]]
+name = "issues"
+path = "tests/issues.rs"
+
+[[test]]
+name = "numbers"
+path = "tests/numbers.rs"
+
+[[test]]
+name = "object_path_value"
+path = "tests/object_path_value.rs"
+
+[[test]]
+name = "ostree_de"
+path = "tests/ostree_de.rs"
+
+[[test]]
+name = "recursion_limits"
+path = "tests/recursion_limits.rs"
+
+[[test]]
+name = "serde_bytes"
+path = "tests/serde_bytes.rs"
+
+[[test]]
+name = "serde_bytes_gvariant"
+path = "tests/serde_bytes_gvariant.rs"
+
+[[test]]
+name = "serialized_size"
+path = "tests/serialized_size.rs"
+
+[[test]]
+name = "signature"
+path = "tests/signature.rs"
+
+[[test]]
+name = "str_value"
+path = "tests/str_value.rs"
+
+[[test]]
+name = "struct_byte_array"
+path = "tests/struct_byte_array.rs"
+
+[[test]]
+name = "struct_ref"
+path = "tests/struct_ref.rs"
+
+[[test]]
+name = "struct_value"
+path = "tests/struct_value.rs"
+
+[[test]]
+name = "struct_with_hashmap"
+path = "tests/struct_with_hashmap.rs"
+
+[[test]]
+name = "unit"
+path = "tests/unit.rs"
+
+[[test]]
+name = "unit_fds"
+path = "tests/unit_fds.rs"
+
+[[test]]
+name = "value_value"
+path = "tests/value_value.rs"
 
 [[bench]]
 name = "benchmarks"
+path = "benches/benchmarks.rs"
 harness = false
 
 [dependencies.arrayvec]
 version = "0.7.4"
 features = ["serde"]
+optional = true
+
+[dependencies.camino]
+version = "1.1.9"
 optional = true
 
 [dependencies.chrono]
@@ -61,7 +196,7 @@ features = ["serde"]
 optional = true
 
 [dependencies.heapless]
-version = "0.8.0"
+version = "0.9.0"
 features = ["serde"]
 optional = true
 
@@ -72,9 +207,6 @@ features = ["derive"]
 [dependencies.serde_bytes]
 version = "0.11.14"
 optional = true
-
-[dependencies.static_assertions]
-version = "1.1.0"
 
 [dependencies.time]
 version = "0.3.36"
@@ -91,17 +223,30 @@ version = "1.8.0"
 features = ["serde"]
 optional = true
 
+[dependencies.winnow]
+version = "1.0"
+
 [dependencies.zvariant_derive]
-version = "=4.2.0"
+version = "5.11.0"
+
+[dependencies.zvariant_utils]
+version = "3.3.1"
+
+[dev-dependencies.chrono]
+version = "0.4.38"
+features = [
+    "serde",
+    "serde",
+    "alloc",
+]
+default-features = false
 
 [dev-dependencies.criterion]
-version = "0.5.1"
+version = "4.0.4"
+package = "codspeed-criterion-compat"
 
-[dev-dependencies.glib]
-version = "0.20.0"
-
-[dev-dependencies.rand]
-version = "0.8.5"
+[dev-dependencies.fastrand]
+version = "2.3.0"
 
 [dev-dependencies.serde_json]
 version = "1.0.116"
@@ -109,8 +254,7 @@ version = "1.0.116"
 [dev-dependencies.serde_repr]
 version = "0.1.19"
 
-[features]
-default = []
-gvariant = []
-option-as-array = []
-ostree-tests = ["gvariant"]
+[lints.rust.unexpected_cfgs]
+level = "warn"
+priority = 0
+check-cfg = ["cfg(tokio_unstable)"]

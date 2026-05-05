@@ -25,7 +25,7 @@ warn() {
 }
 
 normalize_inventory() {
-  sed -E 's#^([^:]+):[0-9]+:#\1:#'
+  sed -E 's#^([^:]+):[0-9]+:#\1:#' | LC_ALL=C sort
 }
 
 expected_inventory() {
@@ -52,7 +52,7 @@ current="$(
     | normalize_inventory
 )"
 
-expected="$(expected_inventory)"
+expected="$(expected_inventory | LC_ALL=C sort)"
 
 if [ "$current" != "$expected" ]; then
   printf "%bCurrent inventory does not match the expected open review surface.%b\n" "$RED" "$NC"

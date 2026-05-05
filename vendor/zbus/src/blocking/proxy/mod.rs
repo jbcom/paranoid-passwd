@@ -1,18 +1,17 @@
 //! The client-side proxy API.
 
 use enumflags2::BitFlags;
-use futures_util::StreamExt;
-use static_assertions::assert_impl_all;
+use futures_lite::StreamExt;
 use std::{fmt, ops::Deref};
 use zbus_names::{BusName, InterfaceName, MemberName, UniqueName};
 use zvariant::{ObjectPath, OwnedValue, Value};
 
 use crate::{
+    Error, Result,
     blocking::Connection,
     message::Message,
-    proxy::{MethodFlags, ProxyDefault},
+    proxy::{Defaults, MethodFlags},
     utils::block_on,
-    Error, Result,
 };
 
 use crate::fdo;
@@ -51,15 +50,14 @@ pub use builder::Builder;
 ///
 /// # Note
 ///
-/// It is recommended to use the [`proxy`] macro, which provides a more convenient and
-/// type-safe *façade* `Proxy` derived from a Rust trait.
+/// It is recommended to use the [`macro@crate::proxy`] macro, which provides a more
+/// convenient and type-safe *façade* `Proxy` derived from a Rust trait.
 ///
 /// ## Current limitations:
 ///
 /// At the moment, `Proxy` doesn't prevent [auto-launching][al].
 ///
-/// [`proxy`]: attr.proxy.html
-/// [al]: https://github.com/dbus2/zbus/issues/54
+/// [al]: https://github.com/z-galaxy/zbus/issues/54
 #[derive(Clone)]
 pub struct Proxy<'a> {
     conn: Connection,
@@ -76,8 +74,6 @@ impl fmt::Debug for Proxy<'_> {
             .finish_non_exhaustive()
     }
 }
-
-assert_impl_all!(Proxy<'_>: Send, Sync, Unpin);
 
 impl<'a> Proxy<'a> {
     /// Create a new `Proxy` for the given destination/path/interface.
@@ -143,23 +139,23 @@ impl<'a> Proxy<'a> {
     }
 
     /// Get a reference to the destination service name.
-    pub fn destination(&self) -> &BusName<'_> {
+    pub fn destination(&self) -> &BusName<'a> {
         self.inner().destination()
     }
 
     /// Get a reference to the object path.
-    pub fn path(&self) -> &ObjectPath<'_> {
+    pub fn path(&self) -> &ObjectPath<'a> {
         self.inner().path()
     }
 
     /// Get a reference to the interface.
-    pub fn interface(&self) -> &InterfaceName<'_> {
+    pub fn interface(&self) -> &InterfaceName<'a> {
         self.inner().interface()
     }
 
     /// Introspect the associated object, and return the XML description.
     ///
-    /// See the [xml](xml/index.html) module for parsing the result.
+    /// See the [xml](https://docs.rs/zbus_xml) crate for parsing the result.
     pub fn introspect(&self) -> fdo::Result<String> {
         block_on(self.inner().introspect())
     }
@@ -246,8 +242,8 @@ impl<'a> Proxy<'a> {
     /// method flags to control the way the method call message is sent and handled.
     ///
     /// Use [`call`] instead if you do not need any special handling via additional flags.
-    /// If the `NoReplyExpected` flag is passed , this will return None immediately
-    /// after sending the message, similar to [`call_noreply`]
+    /// If the `NoReplyExpected` flag is passed, this will return None immediately
+    /// after sending the message, similar to [`call_noreply`].
     ///
     /// [`call`]: struct.Proxy.html#method.call
     /// [`call_noreply`]: struct.Proxy.html#method.call_noreply
@@ -266,7 +262,7 @@ impl<'a> Proxy<'a> {
         block_on(self.inner().call_with_flags(method_name, flags, body))
     }
 
-    /// Call a method without expecting a reply
+    /// Call a method without expecting a reply.
     ///
     /// This sets the `NoReplyExpected` flag on the calling message and does not wait for a reply.
     pub fn call_noreply<'m, M, B>(&self, method_name: M, body: &B) -> Result<()>
@@ -300,7 +296,7 @@ impl<'a> Proxy<'a> {
     /// this method where possible. Note that this filtering is limited to arguments of string
     /// types.
     ///
-    /// The arguments are passed as a tuples of argument index and expected value.
+    /// The arguments are passed as tuples of argument index and expected value.
     pub fn receive_signal_with_args<'m, M>(
         &self,
         signal_name: M,
@@ -328,6 +324,17 @@ impl<'a> Proxy<'a> {
             .map(SignalIterator)
     }
 
+    /// Get an iterator to receive property changed events.
+    ///
+    /// Note that zbus doesn't queue the updates. If the listener is slower than the receiver, it
+    /// will only receive the last update.
+    pub fn receive_property_changed<'name: 'a, T>(
+        &self,
+        name: &'name str,
+    ) -> PropertyIterator<'a, T> {
+        PropertyIterator(block_on(self.inner().receive_property_changed(name)))
+    }
+
     /// Get an iterator to receive owner changed events.
     ///
     /// If the proxy destination is a unique name, the stream will be notified of the peer
@@ -339,18 +346,7 @@ impl<'a> Proxy<'a> {
     ///
     /// Note that zbus doesn't queue the updates. If the listener is slower than the receiver, it
     /// will only receive the last update.
-    pub fn receive_property_changed<'name: 'a, T>(
-        &self,
-        name: &'name str,
-    ) -> PropertyIterator<'a, T> {
-        PropertyIterator(block_on(self.inner().receive_property_changed(name)))
-    }
-
-    /// Get an iterator to receive property changed events.
-    ///
-    /// Note that zbus doesn't queue the updates. If the listener is slower than the receiver, it
-    /// will only receive the last update.
-    pub fn receive_owner_changed(&self) -> Result<OwnerChangedIterator<'_>> {
+    pub fn receive_owner_changed(&self) -> Result<OwnerChangedIterator<'a>> {
         block_on(self.inner().receive_owner_changed()).map(OwnerChangedIterator)
     }
 
@@ -365,10 +361,10 @@ impl<'a> Proxy<'a> {
     }
 }
 
-impl ProxyDefault for Proxy<'_> {
-    const INTERFACE: Option<&'static str> = None;
-    const DESTINATION: Option<&'static str> = None;
-    const PATH: Option<&'static str> = None;
+impl Defaults for Proxy<'_> {
+    const INTERFACE: &'static Option<InterfaceName<'static>> = &None;
+    const DESTINATION: &'static Option<BusName<'static>> = &None;
+    const PATH: &'static Option<ObjectPath<'static>> = &None;
 }
 
 impl<'a> std::convert::AsRef<Proxy<'a>> for Proxy<'a> {
@@ -406,8 +402,6 @@ impl<'a> SignalIterator<'a> {
         self.0.as_ref().expect("`SignalStream` is `None`").name()
     }
 }
-
-assert_impl_all!(SignalIterator<'_>: Send, Sync, Unpin);
 
 impl std::iter::Iterator for SignalIterator<'_> {
     type Item = Message;
@@ -449,32 +443,32 @@ where
 pub struct PropertyChanged<'a, T>(crate::proxy::PropertyChanged<'a, T>);
 
 // split this out to avoid the trait bound on `name` method
-impl<'a, T> PropertyChanged<'a, T> {
+impl<T> PropertyChanged<'_, T> {
     /// Get the name of the property that changed.
     pub fn name(&self) -> &str {
         self.0.name()
     }
 
-    // Get the raw value of the property that changed.
-    //
-    // If the notification signal contained the new value, it has been cached already and this call
-    // will return that value. Otherwise (i-e invalidated property), a D-Bus call is made to fetch
-    // and cache the new value.
+    /// Get the raw value of the property that changed.
+    ///
+    /// If the notification signal contained the new value, it has been cached already and this call
+    /// will return that value. Otherwise (i.e. invalidated property), a D-Bus call is made to fetch
+    /// and cache the new value.
     pub fn get_raw(&self) -> Result<impl Deref<Target = Value<'static>> + '_> {
         block_on(self.0.get_raw())
     }
 }
 
-impl<'a, T> PropertyChanged<'a, T>
+impl<T> PropertyChanged<'_, T>
 where
     T: TryFrom<zvariant::OwnedValue>,
     T::Error: Into<crate::Error>,
 {
-    // Get the value of the property that changed.
-    //
-    // If the notification signal contained the new value, it has been cached already and this call
-    // will return that value. Otherwise (i-e invalidated property), a D-Bus call is made to fetch
-    // and cache the new value.
+    /// Get the value of the property that changed.
+    ///
+    /// If the notification signal contained the new value, it has been cached already and this call
+    /// will return that value. Otherwise (i.e. invalidated property), a D-Bus call is made to fetch
+    /// and cache the new value.
     pub fn get(&self) -> Result<T> {
         block_on(self.0.get())
     }
@@ -485,14 +479,14 @@ where
 /// Use [`Proxy::receive_owner_changed`] to create an instance of this type.
 pub struct OwnerChangedIterator<'a>(crate::proxy::OwnerChangedStream<'a>);
 
-impl OwnerChangedIterator<'_> {
+impl<'a> OwnerChangedIterator<'a> {
     /// The bus name being tracked.
-    pub fn name(&self) -> &BusName<'_> {
+    pub fn name(&self) -> &BusName<'a> {
         self.0.name()
     }
 }
 
-impl<'a> std::iter::Iterator for OwnerChangedIterator<'a> {
+impl std::iter::Iterator for OwnerChangedIterator<'_> {
     type Item = Option<UniqueName<'static>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -501,15 +495,15 @@ impl<'a> std::iter::Iterator for OwnerChangedIterator<'a> {
 }
 
 /// This trait is implemented by all blocking proxies, which are generated with the
-/// [`dbus_proxy`](zbus::dbus_proxy) macro.
+/// [`proxy`](macro@zbus::proxy) macro.
 pub trait ProxyImpl<'p>
 where
     Self: Sized,
 {
-    /// Returns a customizable builder for this proxy.
+    /// Return a customizable builder for this proxy.
     fn builder(conn: &Connection) -> Builder<'p, Self>;
 
-    /// Consumes `self`, returning the underlying `zbus::Proxy`.
+    /// Consume `self`, returning the underlying `zbus::Proxy`.
     fn into_inner(self) -> Proxy<'p>;
 
     /// The reference to the underlying `zbus::Proxy`.

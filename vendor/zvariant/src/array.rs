@@ -3,12 +3,11 @@ use serde::{
     de::{DeserializeSeed, Deserializer, SeqAccess, Visitor},
     ser::{Serialize, SerializeSeq, Serializer},
 };
-use static_assertions::assert_impl_all;
 use std::fmt::{Display, Write};
 
 use crate::{
-    value::{value_display_fmt, SignatureSeed},
     DynamicDeserialize, DynamicType, Error, Result, Signature, Type, Value,
+    value::{SignatureSeed, value_display_fmt},
 };
 
 /// A helper type to wrap arrays in a [`Value`].
@@ -19,30 +18,27 @@ use crate::{
 /// [`Vec`]: https://doc.rust-lang.org/std/vec/struct.Vec.html
 #[derive(Debug, Hash, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Array<'a> {
-    element_signature: Signature<'a>,
     elements: Vec<Value<'a>>,
-    signature: Signature<'a>,
+    signature: Signature,
 }
-
-assert_impl_all!(Array<'_>: Send, Sync, Unpin);
 
 impl<'a> Array<'a> {
     /// Create a new empty `Array`, given the signature of the elements.
-    pub fn new(element_signature: Signature<'_>) -> Array<'_> {
-        let signature = create_signature(&element_signature);
+    pub fn new(element_signature: &Signature) -> Array<'a> {
+        let signature = Signature::array(element_signature.clone());
+
         Array {
-            element_signature,
             elements: vec![],
             signature,
         }
     }
 
-    pub(crate) fn new_full_signature(signature: Signature<'_>) -> Array<'_> {
-        let element_signature = signature.slice(1..);
+    pub(crate) fn new_full_signature(signature: &Signature) -> Array<'a> {
+        assert!(matches!(signature, Signature::Array(_)));
+
         Array {
-            element_signature,
             elements: vec![],
-            signature,
+            signature: signature.clone(),
         }
     }
 
@@ -52,7 +48,16 @@ impl<'a> Array<'a> {
     ///
     /// if `element`'s signature doesn't match the element signature `self` was created for.
     pub fn append<'e: 'a>(&mut self, element: Value<'e>) -> Result<()> {
-        check_child_value_signature!(self.element_signature, element.value_signature(), "element");
+        match &self.signature {
+            Signature::Array(child) if element.value_signature() != child.signature() => {
+                return Err(Error::SignatureMismatch(
+                    element.value_signature().clone(),
+                    child.signature().clone().to_string(),
+                ));
+            }
+            Signature::Array(_) => (),
+            _ => unreachable!("Incorrect `Array` signature"),
+        }
 
         self.elements.push(element);
 
@@ -67,14 +72,13 @@ impl<'a> Array<'a> {
     /// Get the value at the given index.
     pub fn get<V>(&'a self, idx: usize) -> Result<Option<V>>
     where
-        V: ?Sized + TryFrom<&'a Value<'a>>,
+        V: TryFrom<&'a Value<'a>>,
         <V as TryFrom<&'a Value<'a>>>::Error: Into<crate::Error>,
     {
         self.elements
             .get(idx)
             .map(|v| v.downcast_ref::<V>())
             .transpose()
-            .map_err(Into::into)
     }
 
     /// Get the number of elements.
@@ -86,35 +90,38 @@ impl<'a> Array<'a> {
         self.elements.len() == 0
     }
 
-    /// Get the signature of this `Array`.
-    ///
-    /// NB: This method potentially allocates and copies. Use [`full_signature`] if you'd like to
-    /// avoid that.
-    ///
-    /// [`full_signature`]: #method.full_signature
-    pub fn signature(&self) -> Signature<'static> {
-        self.signature.to_owned()
-    }
-
-    /// Get the signature of this `Array`.
-    pub fn full_signature(&self) -> &Signature<'_> {
+    /// The signature of the `Array`.
+    pub fn signature(&self) -> &Signature {
         &self.signature
     }
 
     /// Get the signature of the elements in the `Array`.
-    pub fn element_signature(&self) -> &Signature<'_> {
-        &self.element_signature
+    pub fn element_signature(&self) -> &Signature {
+        match &self.signature {
+            Signature::Array(child) => child.signature(),
+            _ => unreachable!("Incorrect `Array` signature"),
+        }
     }
 
     pub(crate) fn try_to_owned(&self) -> Result<Array<'static>> {
         Ok(Array {
-            element_signature: self.element_signature.to_owned(),
             elements: self
                 .elements
                 .iter()
                 .map(|v| v.try_to_owned().map(Into::into))
                 .collect::<Result<_>>()?,
-            signature: self.signature.to_owned(),
+            signature: self.signature.clone(),
+        })
+    }
+
+    pub(crate) fn try_into_owned(self) -> Result<Array<'static>> {
+        Ok(Array {
+            elements: self
+                .elements
+                .into_iter()
+                .map(|v| v.try_into_owned().map(Into::into))
+                .collect::<Result<_>>()?,
+            signature: self.signature.clone(),
         })
     }
 
@@ -127,7 +134,6 @@ impl<'a> Array<'a> {
             .collect::<crate::Result<Vec<_>>>()?;
 
         Ok(Self {
-            element_signature: self.element_signature.clone(),
             elements,
             signature: self.signature.clone(),
         })
@@ -165,7 +171,7 @@ pub(crate) fn array_display_fmt(
 
     if array.is_empty() {
         if type_annotate {
-            write!(f, "@{} ", array.full_signature())?;
+            write!(f, "@{} ", array.signature())?;
         }
         f.write_str("[]")?;
     } else {
@@ -190,53 +196,44 @@ pub(crate) fn array_display_fmt(
 }
 
 /// Use this to deserialize an [Array].
-pub struct ArraySeed<'a> {
-    signature: Signature<'a>,
+pub struct ArraySeed {
+    signature: Signature,
+    phantom: std::marker::PhantomData<()>,
 }
 
-impl<'a> ArraySeed<'a> {
-    /// Create a new empty `Array`, given the signature of the elements.
-    pub fn new(element_signature: Signature<'_>) -> ArraySeed<'_> {
-        let signature = create_signature(&element_signature);
-        ArraySeed { signature }
-    }
-
-    pub(crate) fn new_full_signature(signature: Signature<'_>) -> ArraySeed<'_> {
-        ArraySeed { signature }
+impl ArraySeed {
+    fn new(signature: &Signature) -> ArraySeed {
+        ArraySeed {
+            signature: signature.clone(),
+            phantom: std::marker::PhantomData,
+        }
     }
 }
 
-assert_impl_all!(ArraySeed<'_>: Send, Sync, Unpin);
-
-impl<'a> DynamicType for Array<'a> {
-    fn dynamic_signature(&self) -> Signature<'_> {
+impl DynamicType for Array<'_> {
+    fn signature(&self) -> Signature {
         self.signature.clone()
     }
 }
 
-impl<'a> DynamicType for ArraySeed<'a> {
-    fn dynamic_signature(&self) -> Signature<'_> {
+impl DynamicType for ArraySeed {
+    fn signature(&self) -> Signature {
         self.signature.clone()
     }
 }
 
 impl<'a> DynamicDeserialize<'a> for Array<'a> {
-    type Deserializer = ArraySeed<'a>;
+    type Deserializer = ArraySeed;
 
-    fn deserializer_for_signature<S>(signature: S) -> zvariant::Result<Self::Deserializer>
-    where
-        S: TryInto<Signature<'a>>,
-        S::Error: Into<zvariant::Error>,
-    {
-        let signature = signature.try_into().map_err(Into::into)?;
-        if signature.starts_with(zvariant::ARRAY_SIGNATURE_CHAR) {
-            Ok(ArraySeed::new_full_signature(signature))
-        } else {
-            Err(zvariant::Error::SignatureMismatch(
-                signature.to_owned(),
+    fn deserializer_for_signature(signature: &Signature) -> zvariant::Result<Self::Deserializer> {
+        if !matches!(signature, Signature::Array(_)) {
+            return Err(zvariant::Error::SignatureMismatch(
+                signature.clone(),
                 "an array signature".to_owned(),
-            ))
-        }
+            ));
+        };
+
+        Ok(ArraySeed::new(signature))
     }
 }
 
@@ -253,12 +250,11 @@ where
     T: Type + Into<Value<'a>>,
 {
     fn from(values: Vec<T>) -> Self {
-        let element_signature = T::signature();
+        let element_signature = T::SIGNATURE.clone();
         let elements = values.into_iter().map(Value::new).collect();
-        let signature = create_signature(&element_signature);
+        let signature = Signature::array(element_signature);
 
         Self {
-            element_signature,
             elements,
             signature,
         }
@@ -270,15 +266,14 @@ where
     T: Type + Into<Value<'a>> + Clone,
 {
     fn from(values: &[T]) -> Self {
-        let element_signature = T::signature();
+        let element_signature = T::SIGNATURE.clone();
         let elements = values
             .iter()
             .map(|value| Value::new(value.clone()))
             .collect();
-        let signature = create_signature(&element_signature);
+        let signature = Signature::array(element_signature);
 
         Self {
-            element_signature,
             elements,
             signature,
         }
@@ -321,7 +316,7 @@ where
 // TODO: this could be useful
 // impl<'a, 'b, T> TryFrom<&'a Array<'b>> for Vec<T>
 
-impl<'a> Serialize for Array<'a> {
+impl Serialize for Array<'_> {
     fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -335,7 +330,7 @@ impl<'a> Serialize for Array<'a> {
     }
 }
 
-impl<'de> DeserializeSeed<'de> for ArraySeed<'de> {
+impl<'de> DeserializeSeed<'de> for ArraySeed {
     type Value = Array<'de>;
     fn deserialize<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
     where
@@ -348,11 +343,11 @@ impl<'de> DeserializeSeed<'de> for ArraySeed<'de> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ArrayVisitor<'a> {
-    signature: Signature<'a>,
+struct ArrayVisitor {
+    signature: Signature,
 }
 
-impl<'de> Visitor<'de> for ArrayVisitor<'de> {
+impl<'de> Visitor<'de> for ArrayVisitor {
     type Value = Array<'de>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -364,12 +359,8 @@ impl<'de> Visitor<'de> for ArrayVisitor<'de> {
         V: SeqAccess<'de>,
     {
         SignatureSeed {
-            signature: self.signature,
+            signature: &self.signature,
         }
         .visit_array(visitor)
     }
-}
-
-fn create_signature(element_signature: &Signature<'_>) -> Signature<'static> {
-    Signature::from_string_unchecked(format!("a{element_signature}"))
 }

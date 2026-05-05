@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
-use syn::{spanned::Spanned, Data, DeriveInput, Error, Fields, Ident, Variant};
+use quote::{ToTokens, quote};
+use syn::{Data, DeriveInput, Error, Fields, Ident, Variant, spanned::Spanned};
 use zvariant_utils::def_attrs;
 
 def_attrs! {
@@ -8,7 +8,8 @@ def_attrs! {
 
     pub StructAttributes("struct") {
         prefix str,
-        impl_display bool
+        impl_display bool,
+        crate_path str
     };
 
     pub VariantAttributes("enum variant") {
@@ -23,7 +24,9 @@ pub fn expand_derive(input: DeriveInput) -> Result<TokenStream, Error> {
     let StructAttributes {
         prefix,
         impl_display,
+        crate_path: crate_attr,
     } = StructAttributes::parse(&input.attrs)?;
+    let crate_path = parse_crate_path(crate_attr.as_deref())?;
     let prefix = prefix.unwrap_or_else(|| "org.freedesktop.DBus".to_string());
     let generate_display = impl_display.unwrap_or(true);
 
@@ -32,7 +35,7 @@ pub fn expand_derive(input: DeriveInput) -> Result<TokenStream, Error> {
         _ => return Err(Error::new(input.span(), "only enums supported")),
     };
 
-    let zbus = zbus_path();
+    let zbus = zbus_path(crate_path.as_ref());
     let mut replies = quote! {};
     let mut error_names = quote! {};
     let mut error_descriptions = quote! {};
@@ -85,8 +88,7 @@ pub fn expand_derive(input: DeriveInput) -> Result<TokenStream, Error> {
             Fields::Unnamed(_) => {
                 if error {
                     quote! {
-                        Self::#ident(#zbus::Error::MethodError(_, desc, _)) => desc.as_deref(),
-                        Self::#ident(_) => None,
+                        Self::#ident(e) => e.description(),
                     }
                 } else {
                     quote! {
@@ -115,7 +117,9 @@ pub fn expand_derive(input: DeriveInput) -> Result<TokenStream, Error> {
                     #fqn => Self::#ident,
                 },
                 Fields::Unnamed(_) => quote! {
-                    #fqn => { Self::#ident(::std::clone::Clone::clone(desc).unwrap_or_default()) },
+                    #fqn => Self::#ident(
+                        desc.map(::std::string::String::from).unwrap_or_default(),
+                    ),
                 },
                 Fields::Named(n) => {
                     let f = &n
@@ -124,18 +128,16 @@ pub fn expand_derive(input: DeriveInput) -> Result<TokenStream, Error> {
                         .ok_or_else(|| Error::new(n.span(), "expected at least one field"))?
                         .ident;
                     quote! {
-                        #fqn => {
-                            let desc = ::std::clone::Clone::clone(desc).unwrap_or_default();
-
-                            Self::#ident { #f: desc }
-                        }
+                        #fqn => Self::#ident {
+                            #f: desc.map(::std::string::String::from).unwrap_or_default(),
+                        },
                     }
                 }
             };
             error_converts.extend(e);
         }
 
-        let r = gen_reply_for_variant(&variant, error)?;
+        let r = gen_reply_for_variant(&variant, error, &zbus)?;
         replies.extend(r);
     }
 
@@ -144,13 +146,24 @@ pub fn expand_derive(input: DeriveInput) -> Result<TokenStream, Error> {
             quote! {
                 impl ::std::convert::From<#zbus::Error> for #name {
                     fn from(value: #zbus::Error) -> #name {
-                        if let #zbus::Error::MethodError(name, desc, _) = &value {
-                            match name.as_str() {
-                                #error_converts
-                                _ => Self::#ident(value),
+                        match &value {
+                            #zbus::Error::MethodError(name, desc, _) => {
+                                let desc = desc.as_deref();
+                                match name.as_str() {
+                                    #error_converts
+                                    _ => Self::#ident(value),
+                                }
                             }
-                        } else {
-                            Self::#ident(value)
+                            #zbus::Error::FDO(e) => {
+                                let e = ::std::convert::AsRef::as_ref(e);
+                                let name = #zbus::DBusError::name(e);
+                                let desc = #zbus::DBusError::description(e);
+                                match name.as_str() {
+                                    #error_converts
+                                    _ => Self::#ident(value),
+                                }
+                            }
+                            _ => Self::#ident(value),
                         }
                     }
                 }
@@ -205,12 +218,12 @@ pub fn expand_derive(input: DeriveInput) -> Result<TokenStream, Error> {
 fn gen_reply_for_variant(
     variant: &Variant,
     zbus_error_variant: bool,
+    zbus: &TokenStream,
 ) -> Result<TokenStream, Error> {
-    let zbus = zbus_path();
     let ident = &variant.ident;
     match &variant.fields {
         Fields::Unit => Ok(quote! {
-            Self::#ident => #zbus::message::Builder::error(call, name)?.build(&()),
+            Self::#ident => #zbus::message::Message::error(call, name)?.build(&()),
         }),
         Fields::Unnamed(f) => {
             // Name the unnamed fields as the number of the field with an 'f' in front.
@@ -240,13 +253,13 @@ fn gen_reply_for_variant(
             };
 
             Ok(quote! {
-                Self::#ident(#(#in_fields),*) => #zbus::message::Builder::error(call, name)?.build(&(#(#out_fields),*)),
+                Self::#ident(#(#in_fields),*) => #zbus::message::Message::error(call, name)?.build(&(#(#out_fields),*)),
             })
         }
         Fields::Named(f) => {
             let fields = f.named.iter().map(|v| v.ident.as_ref()).collect::<Vec<_>>();
             Ok(quote! {
-                Self::#ident { #(#fields),* } => #zbus::message::Builder::error(call, name)?.build(&(#(#fields),*)),
+                Self::#ident { #(#fields),* } => #zbus::message::Message::error(call, name)?.build(&(#(#fields),*)),
             })
         }
     }

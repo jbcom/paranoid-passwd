@@ -2,44 +2,20 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::BTreeMap;
 use syn::{
-    parse::{Parse, ParseStream},
-    parse_quote,
-    punctuated::Punctuated,
-    spanned::Spanned,
-    token::Comma,
     AngleBracketedGenericArguments, Attribute, Error, Expr, ExprLit, FnArg, GenericArgument, Ident,
     ImplItem, ImplItemFn, ItemImpl,
     Lit::Str,
     Meta, MetaNameValue, PatType, PathArguments, ReturnType, Signature, Token, Type, TypePath,
     Visibility,
+    parse::{Parse, ParseStream},
+    parse_quote, parse_str,
+    punctuated::Punctuated,
+    spanned::Spanned,
+    token::{Async, Comma},
 };
-use zvariant_utils::{case, def_attrs, macros::AttrParse, old_new};
+use zvariant_utils::{case, def_attrs};
 
 use crate::utils::*;
-
-pub mod old {
-    use super::def_attrs;
-    def_attrs! {
-        crate dbus_interface;
-
-        pub ImplAttributes("impl block") {
-            interface str,
-            name str,
-            spawn bool
-        };
-
-        pub MethodAttributes("method") {
-            name str,
-            signal none,
-            property {
-                pub PropertyAttributes("property") {
-                    emits_changed_signal str
-                }
-            },
-            out_args [str]
-        };
-    }
-}
 
 def_attrs! {
     crate zbus;
@@ -48,6 +24,8 @@ def_attrs! {
         interface str,
         name str,
         spawn bool,
+        introspection_docs bool,
+        crate_path str,
         proxy {
             // Keep this in sync with proxy's method attributes.
             // TODO: Find a way to share code with proxy module.
@@ -58,7 +36,8 @@ def_attrs! {
                 async_name str,
                 blocking_name str,
                 gen_async bool,
-                gen_blocking bool
+                gen_blocking bool,
+                visibility str
             }
         }
     };
@@ -79,6 +58,7 @@ def_attrs! {
                 object str,
                 async_object str,
                 blocking_object str,
+                object_vec none,
                 no_reply none,
                 no_autostart none,
                 allow_interactive_auth none
@@ -90,32 +70,18 @@ def_attrs! {
         object_server none,
         connection none,
         header none,
-        signal_context none
+        signal_context none,
+        signal_emitter none
     };
 }
 
-old_new!(ImplAttrs, old::ImplAttributes, ImplAttributes);
-old_new!(MethodAttrs, old::MethodAttributes, MethodAttributes);
-
-#[derive(Debug)]
-struct Property<'a> {
+#[derive(Debug, Default)]
+struct Property {
     read: bool,
     write: bool,
     emits_changed_signal: PropertyEmitsChangedSignal,
-    ty: Option<&'a Type>,
+    ty: Option<Type>,
     doc_comments: TokenStream,
-}
-
-impl<'a> Property<'a> {
-    fn new() -> Self {
-        Self {
-            read: false,
-            write: false,
-            emits_changed_signal: PropertyEmitsChangedSignal::True,
-            ty: None,
-            doc_comments: quote!(),
-        }
-    }
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -127,8 +93,8 @@ enum MethodType {
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 enum PropertyType {
-    Inputs,
-    NoInputs,
+    Setter,
+    Getter,
 }
 
 #[derive(Debug, Clone)]
@@ -160,7 +126,7 @@ struct MethodInfo {
     /// Code stream to match on the reply of the method call
     reply: TokenStream,
     /// The signal context object argument
-    signal_context_arg: Option<PatType>,
+    signal_emitter_arg: Option<PatType>,
     /// The name of the method (setters are stripped of set_ prefix)
     member_name: String,
     /// The proxy method attributes, if any.
@@ -177,9 +143,10 @@ impl MethodInfo {
     fn new(
         zbus: &TokenStream,
         method: &ImplItemFn,
-        attrs: &MethodAttrs,
+        attrs: &MethodAttributes,
         cfg_attrs: &[&Attribute],
         doc_attrs: &[&Attribute],
+        introspect_docs: bool,
     ) -> syn::Result<MethodInfo> {
         let is_async = method.sig.asyncness.is_some();
         let Signature {
@@ -188,42 +155,50 @@ impl MethodInfo {
             output,
             ..
         } = &method.sig;
-        let docs = get_doc_attrs(&method.attrs)
-            .iter()
-            .filter_map(|attr| {
-                if let Ok(MetaNameValue {
-                    value: Expr::Lit(ExprLit { lit: Str(s), .. }),
-                    ..
-                }) = &attr.meta.require_name_value()
-                {
-                    Some(s.value())
-                } else {
-                    // non #[doc = "..."] attributes are not our concern
-                    // we leave them for rustc to handle
-                    None
-                }
-            })
-            .collect();
-        let doc_comments = to_xml_docs(docs);
-        let (is_property, is_signal, out_args, attrs_name, proxy_attrs) = match attrs {
-            MethodAttrs::Old(old) => (
-                old.property.is_some(),
-                old.signal,
-                old.out_args.clone(),
-                old.name.clone(),
-                None,
-            ),
-            MethodAttrs::New(new) => (
-                new.property.is_some(),
-                new.signal,
-                new.out_args.clone(),
-                new.name.clone(),
-                new.proxy.clone(),
-            ),
+        let doc_comments = if introspect_docs {
+            let docs = get_doc_attrs(&method.attrs)
+                .iter()
+                .filter_map(|attr| {
+                    if let Ok(MetaNameValue {
+                        value: Expr::Lit(ExprLit { lit: Str(s), .. }),
+                        ..
+                    }) = &attr.meta.require_name_value()
+                    {
+                        Some(s.value())
+                    } else {
+                        // non #[doc = "..."] attributes are not our concern
+                        // we leave them for rustc to handle
+                        None
+                    }
+                })
+                .collect();
+            to_xml_docs(docs)
+        } else {
+            quote!()
         };
+        let is_property = attrs.property.is_some();
+        let is_signal = attrs.signal;
         assert!(!is_property || !is_signal);
 
-        let has_inputs = inputs.len() > 1;
+        let mut typed_inputs = inputs
+            .iter()
+            .filter_map(typed_arg)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let has_inputs = count_regular_args(&typed_inputs) > 0;
+
+        let method_type = if is_signal {
+            MethodType::Signal
+        } else if is_property {
+            if has_inputs {
+                MethodType::Property(PropertyType::Setter)
+            } else {
+                MethodType::Property(PropertyType::Getter)
+            }
+        } else {
+            MethodType::Other
+        };
 
         let is_mut = if let FnArg::Receiver(r) = inputs
             .first()
@@ -244,16 +219,11 @@ impl MethodInfo {
             quote! {}
         };
 
-        let mut typed_inputs = inputs
-            .iter()
-            .filter_map(typed_arg)
-            .cloned()
-            .collect::<Vec<_>>();
-        let signal_context_arg: Option<PatType> = if is_signal {
+        let signal_emitter_arg: Option<PatType> = if is_signal {
             if typed_inputs.is_empty() {
                 return Err(Error::new_spanned(
                     inputs,
-                    "Expected a `&zbus::object_server::SignalContext<'_> argument",
+                    "Expected a `&zbus::object_server::SignalEmitter<'_> argument",
                 ));
             }
             Some(typed_inputs.remove(0))
@@ -263,45 +233,36 @@ impl MethodInfo {
 
         let mut intro_args = quote!();
         intro_args.extend(introspect_input_args(&typed_inputs, is_signal, cfg_attrs));
-        let is_result_output =
-            introspect_add_output_args(&mut intro_args, output, out_args.as_deref(), cfg_attrs)?;
+        let is_result_output = introspect_add_output_args(
+            &mut intro_args,
+            output,
+            attrs.out_args.as_deref(),
+            cfg_attrs,
+        )?;
 
-        let (args_from_msg, args_names) = get_args_from_inputs(&typed_inputs, zbus)?;
+        let (args_from_msg, args_names) = get_args_from_inputs(&typed_inputs, method_type, zbus)?;
 
         let reply = if is_result_output {
             let ret = quote!(r);
 
             quote!(match reply {
-                ::std::result::Result::Ok(r) => c.reply(m, &#ret).await,
-                ::std::result::Result::Err(e) => {
-                    let hdr = m.header();
-                    c.reply_dbus_error(&hdr, e).await
-                }
+                ::std::result::Result::Ok(r) => __zbus__connection.reply(&hdr, &#ret).await,
+                ::std::result::Result::Err(e) => __zbus__connection.reply_dbus_error(&hdr, e).await,
             })
         } else {
-            quote!(c.reply(m, &reply).await)
+            quote!(__zbus__connection.reply(&hdr, &reply).await)
         };
 
-        let member_name = attrs_name.clone().unwrap_or_else(|| {
+        let member_name = attrs.name.clone().unwrap_or_else(|| {
             let mut name = ident.to_string();
             if is_property && has_inputs {
                 assert!(name.starts_with("set_"));
                 name = name[4..].to_string();
+            } else if name.starts_with("r#") {
+                name = name[2..].to_string();
             }
             pascal_case(&name)
         });
-
-        let method_type = if is_signal {
-            MethodType::Signal
-        } else if is_property {
-            if has_inputs {
-                MethodType::Property(PropertyType::Inputs)
-            } else {
-                MethodType::Property(PropertyType::NoInputs)
-            }
-        } else {
-            MethodType::Other
-        };
 
         Ok(MethodInfo {
             ident: ident.clone(),
@@ -312,14 +273,14 @@ impl MethodInfo {
             is_mut,
             method_await,
             typed_inputs,
-            signal_context_arg,
+            signal_emitter_arg,
             intro_args,
             is_result_output,
             args_from_msg,
             args_names,
             reply,
             member_name,
-            proxy_attrs,
+            proxy_attrs: attrs.proxy.clone(),
             output: output.clone(),
             cfg_attrs: cfg_attrs.iter().cloned().cloned().collect(),
             doc_attrs: doc_attrs.iter().cloned().cloned().collect(),
@@ -327,11 +288,10 @@ impl MethodInfo {
     }
 }
 
-pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
-    args: Punctuated<Meta, Token![,]>,
-    mut input: ItemImpl,
-) -> syn::Result<TokenStream> {
-    let zbus = zbus_path();
+pub fn expand(args: Punctuated<Meta, Token![,]>, mut input: ItemImpl) -> syn::Result<TokenStream> {
+    let impl_attrs = ImplAttributes::parse_nested_metas(args)?;
+    let crate_path = parse_crate_path(impl_attrs.crate_path.as_deref())?;
+    let zbus = zbus_path(crate_path.as_ref());
 
     let self_ty = &input.self_ty;
     let mut properties = BTreeMap::new();
@@ -343,6 +303,9 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
     let mut call_mut_dispatch = quote!();
     let mut introspect = quote!();
     let mut generated_signals = quote!();
+    let mut signals_trait_methods = quote!();
+    let mut signals_emitter_impl_methods = quote!();
+    let mut signals_interface_ref_impl_methods = quote!();
 
     // the impl Type
     let ty = match input.self_ty.as_ref() {
@@ -355,27 +318,26 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
         }
         _ => return Err(Error::new_spanned(&input.self_ty, "Invalid type")),
     };
-
-    let (iface_name, with_spawn, mut proxy) = {
-        let (name, interface, spawn, proxy) = match T::parse_nested_metas(args)?.into() {
-            ImplAttrs::New(new) => (new.name, new.interface, new.spawn, new.proxy),
-            // New proxy attributes are not supported for old `dbus_interface`.
-            ImplAttrs::Old(old) => (old.name, old.interface, old.spawn, None),
-        };
-
-        let name =
-            match (name, interface) {
-                (Some(name), None) | (None, Some(name)) => name,
-                (None, None) => format!("org.freedesktop.{ty}"),
-                (Some(_), Some(_)) => return Err(syn::Error::new(
+    let iface_name = {
+        match (impl_attrs.name, impl_attrs.interface) {
+            // Ensure the interface name is valid.
+            (Some(name), None) | (None, Some(name)) => zbus_names::InterfaceName::try_from(name)
+                .map_err(|e| Error::new(input.span(), format!("{e}")))
+                .map(|i| i.to_string())?,
+            (None, None) => format!("org.freedesktop.{ty}"),
+            (Some(_), Some(_)) => {
+                return Err(syn::Error::new(
                     input.span(),
                     "`name` and `interface` attributes should not be specified at the same time",
-                )),
-            };
-        let proxy = proxy.map(|p| Proxy::new(ty, &name, p, &zbus));
-
-        (name, !spawn.unwrap_or(false), proxy)
+                ));
+            }
+        }
     };
+    let with_spawn = impl_attrs.spawn.unwrap_or(true);
+    let mut proxy = impl_attrs
+        .proxy
+        .map(|p| Proxy::new(ty, &iface_name, p, &zbus));
+    let introspect_docs = impl_attrs.introspection_docs.unwrap_or(true);
 
     // Store parsed information about each method
     let mut methods = vec![];
@@ -403,16 +365,11 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
             _ => continue,
         };
 
-        let attrs = M::parse(&method.attrs)?.into();
+        let method_attrs = MethodAttributes::parse(&method.attrs)?;
 
-        method.attrs.retain(|attr| {
-            !attr.path().is_ident("zbus") && !attr.path().is_ident("dbus_interface")
-        });
+        method.attrs.retain(|attr| !attr.path().is_ident("zbus"));
 
-        if is_signal
-            && !matches!(&attrs, MethodAttrs::Old(attrs) if attrs.signal)
-            && !matches!(&attrs, MethodAttrs::New(attrs) if attrs.signal)
-        {
+        if is_signal && !method_attrs.signal {
             return Err(syn::Error::new_spanned(
                 item,
                 "methods that are not signals must have a body",
@@ -430,40 +387,41 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
             .filter(|a| a.path().is_ident("doc"))
             .collect();
 
-        let method_info = MethodInfo::new(&zbus, method, &attrs, &cfg_attrs, &doc_attrs)?;
-        let attr_property = match attrs {
-            MethodAttrs::Old(o) => o.property.map(|op| PropertyAttributes {
-                emits_changed_signal: op.emits_changed_signal,
-            }),
-            MethodAttrs::New(n) => n.property,
-        };
+        let method_info = MethodInfo::new(
+            &zbus,
+            method,
+            &method_attrs,
+            &cfg_attrs,
+            &doc_attrs,
+            introspect_docs,
+        )?;
+        let attr_property = method_attrs.property;
         if let Some(prop_attrs) = &attr_property {
-            if method_info.method_type == MethodType::Property(PropertyType::NoInputs) {
+            let property: &mut Property = properties
+                .entry(method_info.member_name.to_string())
+                .or_default();
+            if method_info.method_type == MethodType::Property(PropertyType::Getter) {
                 let emits_changed_signal = if let Some(s) = &prop_attrs.emits_changed_signal {
                     PropertyEmitsChangedSignal::parse(s, method.span())?
                 } else {
                     PropertyEmitsChangedSignal::True
                 };
-                let mut property = Property::new();
+                property.read = true;
                 property.emits_changed_signal = emits_changed_signal;
-                properties.insert(method_info.member_name.to_string(), property);
-            } else if prop_attrs.emits_changed_signal.is_some() {
-                return Err(syn::Error::new(
-                    method.span(),
-                    "`emits_changed_signal` cannot be specified on setters",
-                ));
+            } else {
+                property.write = true;
+                if prop_attrs.emits_changed_signal.is_some() {
+                    return Err(Error::new_spanned(
+                        method,
+                        "`emits_changed_signal` cannot be specified on setters",
+                    ));
+                }
             }
-        };
+        }
         methods.push((method, method_info));
     }
 
     for (method, method_info) in methods {
-        let cfg_attrs: Vec<_> = method
-            .attrs
-            .iter()
-            .filter(|a| a.path().is_ident("cfg"))
-            .collect();
-
         let info = method_info.clone();
         let MethodInfo {
             method_type,
@@ -473,16 +431,18 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
             is_mut,
             method_await,
             typed_inputs,
-            signal_context_arg,
+            signal_emitter_arg,
             intro_args,
             is_result_output,
             args_from_msg,
             args_names,
             reply,
             member_name,
+            cfg_attrs,
             ..
         } = method_info;
 
+        let mut method_clone = method.clone();
         let Signature {
             ident,
             inputs,
@@ -496,24 +456,50 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
             MethodType::Signal => {
                 introspect.extend(doc_comments);
                 introspect.extend(introspect_signal(&member_name, &intro_args));
-                let signal_context = signal_context_arg.unwrap().pat;
+                let signal_emitter = signal_emitter_arg.unwrap().pat;
 
                 method.block = parse_quote!({
-                    #signal_context.connection().emit_signal(
-                        #signal_context.destination(),
-                        #signal_context.path(),
+                    #signal_emitter.emit(
                         <#self_ty as #zbus::object_server::Interface>::name(),
                         #member_name,
                         &(#args_names),
                     )
                     .await
                 });
+
+                method_clone.sig.asyncness = Some(Async(method_clone.span()));
+                *method_clone.sig.inputs.first_mut().unwrap() = parse_quote!(&self);
+                method_clone.vis = Visibility::Inherited;
+                let sig = &method_clone.sig;
+                signals_trait_methods.extend(quote! {
+                    #sig;
+                });
+                method_clone.block = parse_quote!({
+                    self.emit(
+                        #iface_name,
+                        #member_name,
+                        &(#args_names),
+                    )
+                    .await
+                });
+                signals_emitter_impl_methods.extend(quote! {
+                    #method_clone
+                });
+                method_clone.block = parse_quote!({
+                    <#zbus::object_server::InterfaceRef<#self_ty>>::signal_emitter(self)
+                        .emit(
+                            #iface_name,
+                            #member_name,
+                            &(#args_names),
+                        )
+                        .await
+                });
+                signals_interface_ref_impl_methods.extend(quote! {
+                    #method_clone
+                });
             }
             MethodType::Property(_) => {
-                let p = properties.get_mut(&member_name).ok_or(Error::new_spanned(
-                    &member_name,
-                    "Write-only properties aren't supported yet",
-                ))?;
+                let p = properties.get_mut(&member_name).unwrap();
 
                 let sk_member_name = case::snake_or_kebab_case(&member_name, true);
                 let prop_changed_method_name = format_ident!("{sk_member_name}_changed");
@@ -521,20 +507,20 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
 
                 p.doc_comments.extend(doc_comments);
                 if has_inputs {
-                    p.write = true;
-
                     let set_call = if is_result_output {
-                        quote!(self.#ident(val)#method_await)
+                        quote!(self.#ident(#args_names)#method_await)
                     } else if is_async {
                         quote!(
-                                #zbus::export::futures_util::future::FutureExt::map(
-                                    self.#ident(val),
-                                    ::std::result::Result::Ok,
-                                )
-                                .await
+                            ::std::result::Result::<_, #zbus::fdo::Error>::Ok(
+                                self.#ident(#args_names).await,
+                            )
                         )
                     } else {
-                        quote!(::std::result::Result::Ok(self.#ident(val)))
+                        quote!(
+                            ::std::result::Result::<_, #zbus::fdo::Error>::Ok(
+                                self.#ident(#args_names),
+                            )
+                        )
                     };
 
                     // * For reference arg, we convert from `&Value` (so `TryFrom<&Value<'_>>` is
@@ -555,65 +541,88 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
                             }
                         }
                     };
-                    let value_arg = match &*typed_inputs
-                    .first()
-                    .ok_or_else(|| Error::new_spanned(&inputs, "Expected a value argument"))?
-                    .ty
-                {
-                    Type::Reference(_) => quote!(value),
-                    Type::Path(path) => path
-                        .path
-                        .segments
-                        .first()
-                        .map(|segment| match &segment.arguments {
-                            PathArguments::AngleBracketed(angled) => angled
-                                .args
-                                .first()
-                                .filter(|arg| matches!(arg, GenericArgument::Lifetime(_)))
-                                .map(|_| quote!(match ::zbus::zvariant::Value::try_clone(value) {
-                                    ::std::result::Result::Ok(val) => val,
-                                    ::std::result::Result::Err(e) => {
-                                        return ::std::result::Result::Err(
-                                            ::std::convert::Into::into(#zbus::Error::Variant(::std::convert::Into::into(e)))
-                                        );
-                                    }
-                                }))
-                                .unwrap_or_else(|| value_to_owned.clone()),
-                            _ => value_to_owned.clone(),
+
+                    let value_param = typed_inputs
+                        .iter()
+                        .find(|input| {
+                            let a = ArgAttributes::parse(&input.attrs).unwrap();
+                            !a.object_server
+                                && !a.connection
+                                && !a.header
+                                && !a.signal_context
+                                && !a.signal_emitter
                         })
-                        .unwrap_or_else(|| value_to_owned.clone()),
-                    _ => value_to_owned,
-                };
+                        .ok_or_else(|| Error::new_spanned(inputs, "Expected a value argument"))?;
+
+                    // Use setter argument type as the property type if the getter is not
+                    // explicitly defined.
+                    if !p.read {
+                        p.ty = Some((*value_param.ty).clone());
+                        p.emits_changed_signal = PropertyEmitsChangedSignal::False;
+                    }
+
+                    let value_arg = match &*value_param.ty {
+                        Type::Reference(_) => quote!(value),
+                        Type::Path(path) => path
+                            .path
+                            .segments
+                            .first()
+                            .map(|segment| match &segment.arguments {
+                                PathArguments::AngleBracketed(angled) => angled
+                                    .args
+                                    .first()
+                                    .filter(|arg| matches!(arg, GenericArgument::Lifetime(_)))
+                                    .map(|_| quote!(match ::zbus::zvariant::Value::try_clone(value) {
+                                        ::std::result::Result::Ok(val) => val,
+                                        ::std::result::Result::Err(e) => {
+                                            return ::std::result::Result::Err(
+                                                ::std::convert::Into::into(#zbus::Error::Variant(::std::convert::Into::into(e)))
+                                            );
+                                        }
+                                    }))
+                                    .unwrap_or_else(|| value_to_owned.clone()),
+                                _ => value_to_owned.clone(),
+                            })
+                            .unwrap_or_else(|| value_to_owned.clone()),
+                        _ => value_to_owned,
+                    };
+
+                    let value_param_name = &value_param.pat;
                     let prop_changed_method = match p.emits_changed_signal {
                         PropertyEmitsChangedSignal::True => {
                             quote!({
                                 self
-                                    .#prop_changed_method_name(&signal_context)
+                                    .#prop_changed_method_name(&__zbus__signal_emitter)
                                     .await
                                     .map(|_| set_result)
-                                    .map_err(Into::into)
                             })
                         }
                         PropertyEmitsChangedSignal::Invalidates => {
                             quote!({
                                 self
-                                    .#prop_invalidate_method_name(&signal_context)
+                                    .#prop_invalidate_method_name(&__zbus__signal_emitter)
                                     .await
                                     .map(|_| set_result)
-                                    .map_err(Into::into)
                             })
                         }
                         PropertyEmitsChangedSignal::False | PropertyEmitsChangedSignal::Const => {
-                            quote!({ Ok(()) })
+                            quote!({ ::std::result::Result::<_, #zbus::Error>::Ok(()) })
                         }
                     };
                     let do_set = quote!({
+                        #args_from_msg
                         let value = #value_arg;
                         match ::std::convert::TryInto::try_into(value) {
                             ::std::result::Result::Ok(val) => {
+                                let #value_param_name = val;
                                 match #set_call {
-                                    ::std::result::Result::Ok(set_result) => #prop_changed_method
-                                    e => e,
+                                    ::std::result::Result::Ok(set_result) => {
+                                        (#prop_changed_method)
+                                            .map_err(|e| #zbus::fdo::Error::from(e))
+                                    }
+                                    ::std::result::Result::Err(e) => {
+                                        ::std::result::Result::Err(#zbus::fdo::Error::from(e))
+                                    }
                                 }
                             }
                             ::std::result::Result::Err(e) => {
@@ -635,14 +644,14 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
 
                         let q = quote!(
                             #(#cfg_attrs)*
-                            #member_name => #zbus::object_server::DispatchResult::RequiresMut,
+                            #member_name => #zbus::object_server::DispatchResult2::RequiresMut,
                         );
                         set_dispatch.extend(q);
                     } else {
                         let q = quote!(
                             #(#cfg_attrs)*
                             #member_name => {
-                                #zbus::object_server::DispatchResult::Async(::std::boxed::Box::pin(async move {
+                                #zbus::object_server::DispatchResult2::Async(::std::boxed::Box::pin(async move {
                                     #do_set
                                 }))
                             }
@@ -652,8 +661,8 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
                 } else {
                     let is_fallible_property = is_result_output;
 
-                    p.ty = Some(get_return_type(output)?);
-                    p.read = true;
+                    p.ty = Some(get_return_type(output)?.clone());
+
                     let value_convert = quote!(
                         <#zbus::zvariant::OwnedValue as ::std::convert::TryFrom<_>>::try_from(
                             <#zbus::zvariant::Value as ::std::convert::From<_>>::from(
@@ -663,10 +672,10 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
                         .map_err(|e| #zbus::fdo::Error::Failed(e.to_string()))
                     );
                     let inner = if is_fallible_property {
-                        quote!(self.#ident() #method_await .and_then(|value| #value_convert))
+                        quote!(self.#ident(#args_names) #method_await .and_then(|value| #value_convert))
                     } else {
                         quote!({
-                            let value = self.#ident()#method_await;
+                            let value = self.#ident(#args_names)#method_await;
                             #value_convert
                         })
                     };
@@ -674,13 +683,16 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
                     let q = quote!(
                         #(#cfg_attrs)*
                         #member_name => {
+                            #args_from_msg
                             ::std::option::Option::Some(#inner)
                         },
                     );
                     get_dispatch.extend(q);
 
                     let q = if is_fallible_property {
-                        quote!(if let Ok(prop) = self.#ident()#method_await {
+                        quote!({
+                            #args_from_msg
+                            if let Ok(prop) = self.#ident(#args_names)#method_await {
                             props.insert(
                                 ::std::string::ToString::to_string(#member_name),
                                 <#zbus::zvariant::OwnedValue as ::std::convert::TryFrom<_>>::try_from(
@@ -690,61 +702,87 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
                                 )
                                 .map_err(|e| #zbus::fdo::Error::Failed(e.to_string()))?,
                             );
-                        })
+                        }})
                     } else {
-                        quote!(props.insert(
-                        ::std::string::ToString::to_string(#member_name),
-                        <#zbus::zvariant::OwnedValue as ::std::convert::TryFrom<_>>::try_from(
-                            <#zbus::zvariant::Value as ::std::convert::From<_>>::from(
-                                self.#ident()#method_await,
-                            ),
-                        )
-                        .map_err(|e| #zbus::fdo::Error::Failed(e.to_string()))?,
-                    );)
+                        quote!({
+                            #args_from_msg
+                            props.insert(
+                                ::std::string::ToString::to_string(#member_name),
+                                <#zbus::zvariant::OwnedValue as ::std::convert::TryFrom<_>>::try_from(
+                                    <#zbus::zvariant::Value as ::std::convert::From<_>>::from(
+                                        self.#ident(#args_names)#method_await,
+                                    ),
+                                )
+                                .map_err(|e| #zbus::fdo::Error::Failed(e.to_string()))?,
+                            );
+                        })
                     };
 
                     get_all.extend(q);
 
                     let prop_value_handled = if is_fallible_property {
-                        quote!(self.#ident()#method_await?)
+                        quote!(self.#ident(#args_names)#method_await?)
                     } else {
-                        quote!(self.#ident()#method_await)
+                        quote!(self.#ident(#args_names)#method_await)
                     };
 
-                    let prop_changed_method = quote!(
-                        pub async fn #prop_changed_method_name(
-                            &self,
-                            signal_context: &#zbus::object_server::SignalContext<'_>,
-                        ) -> #zbus::Result<()> {
-                            let mut changed = ::std::collections::HashMap::new();
-                            let value = <#zbus::zvariant::Value as ::std::convert::From<_>>::from(#prop_value_handled);
-                            changed.insert(#member_name, &value);
-                            #zbus::fdo::Properties::properties_changed(
-                                signal_context,
-                                #zbus::names::InterfaceName::from_static_str_unchecked(#iface_name),
-                                &changed,
-                                &[],
-                            ).await
-                        }
-                    );
+                    if p.emits_changed_signal == PropertyEmitsChangedSignal::True {
+                        let changed_doc = format!(
+                            "Emit the “PropertiesChanged” signal with the new value for the\n\
+                             `{member_name}` property.\n\n\
+                             This method should be called if a property value changes outside\n\
+                             its setter method."
+                        );
+                        let prop_changed_method = quote!(
+                            #[doc = #changed_doc]
+                            pub async fn #prop_changed_method_name(
+                                &self,
+                                __zbus__signal_emitter: &#zbus::object_server::SignalEmitter<'_>,
+                            ) -> #zbus::Result<()> {
+                                let __zbus__header = ::std::option::Option::None::<&#zbus::message::Header<'_>>;
+                                let __zbus__connection = __zbus__signal_emitter.connection();
+                                let __zbus__object_server = __zbus__connection.object_server();
+                                #args_from_msg
+                                let mut changed = ::std::collections::HashMap::new();
+                                let value = <#zbus::zvariant::Value as ::std::convert::From<_>>::from(#prop_value_handled);
+                                changed.insert(#member_name, value);
+                                #zbus::fdo::Properties::properties_changed(
+                                    __zbus__signal_emitter,
+                                    #zbus::names::InterfaceName::from_static_str_unchecked(#iface_name),
+                                    changed,
+                                    ::std::borrow::Cow::Borrowed(&[]),
+                                ).await
+                            }
+                        );
 
-                    generated_signals.extend(prop_changed_method);
+                        generated_signals.extend(prop_changed_method);
+                    }
 
-                    let prop_invalidate_method = quote!(
-                        pub async fn #prop_invalidate_method_name(
-                            &self,
-                            signal_context: &#zbus::object_server::SignalContext<'_>,
-                        ) -> #zbus::Result<()> {
-                            #zbus::fdo::Properties::properties_changed(
-                                signal_context,
-                                #zbus::names::InterfaceName::from_static_str_unchecked(#iface_name),
-                                &::std::collections::HashMap::new(),
-                                &[#member_name],
-                            ).await
-                        }
-                    );
+                    if p.emits_changed_signal == PropertyEmitsChangedSignal::Invalidates {
+                        let invalidate_doc = format!(
+                            "Emit the “PropertiesChanged” signal for the `{member_name}` property\n\
+                             without including the new value.\n\n\
+                             It is usually better to call `{prop_changed_method_name}` instead so\n\
+                             that interested peers do not need to fetch the new value separately\n\
+                             (causing excess traffic on the bus)."
+                        );
+                        let prop_invalidate_method = quote!(
+                            #[doc = #invalidate_doc]
+                            pub async fn #prop_invalidate_method_name(
+                                &self,
+                                __zbus__signal_emitter: &#zbus::object_server::SignalEmitter<'_>,
+                            ) -> #zbus::Result<()> {
+                                #zbus::fdo::Properties::properties_changed(
+                                    __zbus__signal_emitter,
+                                    #zbus::names::InterfaceName::from_static_str_unchecked(#iface_name),
+                                    ::std::collections::HashMap::new(),
+                                    ::std::borrow::Cow::Borrowed(&[#member_name]),
+                                ).await
+                            }
+                        );
 
-                    generated_signals.extend(prop_invalidate_method);
+                        generated_signals.extend(prop_invalidate_method);
+                    }
                 }
             }
             MethodType::Other => {
@@ -757,10 +795,18 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
                         let future = async move {
                             #args_from_msg
                             let reply = self.#ident(#args_names)#method_await;
-                            #reply
+                            let hdr = __zbus__message.header();
+                            if hdr.primary().flags().contains(zbus::message::Flags::NoReplyExpected) {
+                                Ok(())
+                            } else {
+                                #reply
+                            }
                         };
-                        #zbus::object_server::DispatchResult::Async(::std::boxed::Box::pin(async move {
-                            future.await
+                        #zbus::object_server::DispatchResult2::Async(::std::boxed::Box::pin(async move {
+                            future.await.map_err(|e| match e {
+                                #zbus::Error::FDO(e) => *e,
+                                e => #zbus::fdo::Error::Failed(::std::format!("{e}")),
+                            })
                         }))
                     },
                 };
@@ -768,7 +814,7 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
                 if is_mut {
                     call_dispatch.extend(quote! {
                         #(#cfg_attrs)*
-                        #member_name => #zbus::object_server::DispatchResult::RequiresMut,
+                        #member_name => #zbus::object_server::DispatchResult2::RequiresMut,
                     });
                     call_mut_dispatch.extend(m);
                 } else {
@@ -798,13 +844,43 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
             }
         }
     };
+    let signals_trait_and_impl = if signals_trait_methods.is_empty() {
+        quote!()
+    } else {
+        let signals_trait_name = format_ident!("{}Signals", ty);
+        let signals_trait_doc = format!("Trait providing all signal emission methods for `{ty}`.");
 
-    let proxy = proxy.map(|proxy| proxy.gen());
+        quote! {
+            #[doc = #signals_trait_doc]
+            #[#zbus::export::async_trait::async_trait]
+            pub trait #signals_trait_name {
+                #signals_trait_methods
+            }
+
+            #[#zbus::export::async_trait::async_trait]
+            impl #signals_trait_name for #zbus::object_server::SignalEmitter<'_>
+            {
+                #signals_emitter_impl_methods
+            }
+
+            #[#zbus::export::async_trait::async_trait]
+            impl #generics #signals_trait_name for #zbus::object_server::InterfaceRef<#self_ty>
+            #where_clause
+            {
+                #signals_interface_ref_impl_methods
+            }
+        }
+    };
+
+    let proxy = proxy.map(|proxy| proxy.r#gen()).transpose()?;
+    let introspect_format_str = format!("{}<interface name=\"{iface_name}\">", "{:indent$}");
 
     Ok(quote! {
         #input
 
         #generated_signals_impl
+
+        #signals_trait_and_impl
 
         #[#zbus::export::async_trait::async_trait]
         impl #generics #zbus::object_server::Interface for #self_ty
@@ -820,9 +896,13 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
 
             async fn get(
                 &self,
-                property_name: &str,
+                __zbus__property_name: &str,
+                __zbus__object_server: &#zbus::ObjectServer,
+                __zbus__connection: &#zbus::Connection,
+                __zbus__header: Option<&#zbus::message::Header<'_>>,
+                __zbus__signal_emitter: &#zbus::object_server::SignalEmitter<'_>,
             ) -> ::std::option::Option<#zbus::fdo::Result<#zbus::zvariant::OwnedValue>> {
-                match property_name {
+                match __zbus__property_name {
                     #get_dispatch
                     _ => ::std::option::Option::None,
                 }
@@ -830,6 +910,10 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
 
             async fn get_all(
                 &self,
+                __zbus__object_server: &#zbus::ObjectServer,
+                __zbus__connection: &#zbus::Connection,
+                __zbus__header: Option<&#zbus::message::Header<'_>>,
+                __zbus__signal_emitter: &#zbus::object_server::SignalEmitter<'_>,
             ) -> #zbus::fdo::Result<::std::collections::HashMap<
                 ::std::string::String,
                 #zbus::zvariant::OwnedValue,
@@ -844,23 +928,29 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
 
             fn set<'call>(
                 &'call self,
-                property_name: &'call str,
+                __zbus__property_name: &'call str,
                 value: &'call #zbus::zvariant::Value<'_>,
-                signal_context: &'call #zbus::object_server::SignalContext<'_>,
-            ) -> #zbus::object_server::DispatchResult<'call> {
-                match property_name {
+                __zbus__object_server: &'call #zbus::ObjectServer,
+                __zbus__connection: &'call #zbus::Connection,
+                __zbus__header: Option<&'call #zbus::message::Header<'_>>,
+                __zbus__signal_emitter: &'call #zbus::object_server::SignalEmitter<'_>,
+            ) -> #zbus::object_server::DispatchResult2<'call> {
+                match __zbus__property_name {
                     #set_dispatch
-                    _ => #zbus::object_server::DispatchResult::NotFound,
+                    _ => #zbus::object_server::DispatchResult2::NotFound,
                 }
             }
 
             async fn set_mut(
                 &mut self,
-                property_name: &str,
+                __zbus__property_name: &str,
                 value: &#zbus::zvariant::Value<'_>,
-                signal_context: &#zbus::object_server::SignalContext<'_>,
+                __zbus__object_server: &#zbus::ObjectServer,
+                __zbus__connection: &#zbus::Connection,
+                __zbus__header: Option<&#zbus::message::Header<'_>>,
+                __zbus__signal_emitter: &#zbus::object_server::SignalEmitter<'_>,
             ) -> ::std::option::Option<#zbus::fdo::Result<()>> {
-                match property_name {
+                match __zbus__property_name {
                     #set_mut_dispatch
                     _ => ::std::option::Option::None,
                 }
@@ -868,36 +958,35 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
 
             fn call<'call>(
                 &'call self,
-                s: &'call #zbus::ObjectServer,
-                c: &'call #zbus::Connection,
-                m: &'call #zbus::message::Message,
+                __zbus__object_server: &'call #zbus::ObjectServer,
+                __zbus__connection: &'call #zbus::Connection,
+                __zbus__message: &'call #zbus::message::Message,
                 name: #zbus::names::MemberName<'call>,
-            ) -> #zbus::object_server::DispatchResult<'call> {
+            ) -> #zbus::object_server::DispatchResult2<'call> {
                 match name.as_str() {
                     #call_dispatch
-                    _ => #zbus::object_server::DispatchResult::NotFound,
+                    _ => #zbus::object_server::DispatchResult2::NotFound,
                 }
             }
 
             fn call_mut<'call>(
                 &'call mut self,
-                s: &'call #zbus::ObjectServer,
-                c: &'call #zbus::Connection,
-                m: &'call #zbus::message::Message,
+                __zbus__object_server: &'call #zbus::ObjectServer,
+                __zbus__connection: &'call #zbus::Connection,
+                __zbus__message: &'call #zbus::message::Message,
                 name: #zbus::names::MemberName<'call>,
-            ) -> #zbus::object_server::DispatchResult<'call> {
+            ) -> #zbus::object_server::DispatchResult2<'call> {
                 match name.as_str() {
                     #call_mut_dispatch
-                    _ => #zbus::object_server::DispatchResult::NotFound,
+                    _ => #zbus::object_server::DispatchResult2::NotFound,
                 }
             }
 
             fn introspect_to_writer(&self, writer: &mut dyn ::std::fmt::Write, level: usize) {
                 ::std::writeln!(
                     writer,
-                    r#"{:indent$}<interface name="{}">"#,
+                    #introspect_format_str,
                     "",
-                    <Self as #zbus::object_server::Interface>::name(),
                     indent = level
                 ).unwrap();
                 {
@@ -916,6 +1005,7 @@ pub fn expand<T: AttrParse + Into<ImplAttrs>, M: AttrParse + Into<MethodAttrs>>(
 
 fn get_args_from_inputs(
     inputs: &[PatType],
+    method_type: MethodType,
     zbus: &TokenStream,
 ) -> syn::Result<(TokenStream, TokenStream)> {
     if inputs.is_empty() {
@@ -924,7 +1014,7 @@ fn get_args_from_inputs(
         let mut server_arg_decl = None;
         let mut conn_arg_decl = None;
         let mut header_arg_decl = None;
-        let mut signal_context_arg_decl = None;
+        let mut signal_emitter_arg_decl = None;
         let mut args_names = Vec::new();
         let mut tys = Vec::new();
 
@@ -933,6 +1023,7 @@ fn get_args_from_inputs(
                 object_server,
                 connection,
                 header,
+                signal_emitter,
                 signal_context,
             } = ArgAttributes::parse(&input.attrs)?;
 
@@ -945,7 +1036,7 @@ fn get_args_from_inputs(
                 }
 
                 let server_arg = &input.pat;
-                server_arg_decl = Some(quote! { let #server_arg = &s; });
+                server_arg_decl = Some(quote! { let #server_arg = &__zbus__object_server; });
             } else if connection {
                 if conn_arg_decl.is_some() {
                     return Err(Error::new_spanned(
@@ -955,7 +1046,7 @@ fn get_args_from_inputs(
                 }
 
                 let conn_arg = &input.pat;
-                conn_arg_decl = Some(quote! { let #conn_arg = &c; });
+                conn_arg_decl = Some(quote! { let #conn_arg = &__zbus__connection; });
             } else if header {
                 if header_arg_decl.is_some() {
                     return Err(Error::new_spanned(
@@ -966,39 +1057,74 @@ fn get_args_from_inputs(
 
                 let header_arg = &input.pat;
 
-                header_arg_decl = Some(quote! {
-                    let #header_arg = m.header();
-                });
-            } else if signal_context {
-                if signal_context_arg_decl.is_some() {
+                header_arg_decl = match method_type {
+                    MethodType::Property(_) => Some(quote! {
+                        let #header_arg =
+                            ::std::option::Option::<&#zbus::message::Header<'_>>::cloned(
+                                __zbus__header,
+                            );
+                    }),
+                    _ => Some(quote! { let #header_arg = __zbus__message.header(); }),
+                };
+            } else if signal_context || signal_emitter {
+                if signal_emitter_arg_decl.is_some() {
                     return Err(Error::new_spanned(
                         input,
-                        "There can only be one `signal_context` argument",
+                        "There can only be one `signal_emitter` or `signal_context` argument",
                     ));
                 }
 
                 let signal_context_arg = &input.pat;
 
-                signal_context_arg_decl = Some(quote! {
-                    let #signal_context_arg = match hdr.path() {
-                        ::std::option::Option::Some(p) => {
-                            #zbus::object_server::SignalContext::new(c, p).expect("Infallible conversion failed")
-                        }
-                        ::std::option::Option::None => {
-                            let err = #zbus::fdo::Error::UnknownObject("Path Required".into());
-                            return c.reply_dbus_error(&hdr, err).await;
-                        }
-                    };
-                });
+                signal_emitter_arg_decl = match method_type {
+                    MethodType::Property(_) => Some(
+                        quote! { let #signal_context_arg = ::std::clone::Clone::clone(__zbus__signal_emitter); },
+                    ),
+                    _ => Some(quote! {
+                        let #signal_context_arg = match hdr.path() {
+                            ::std::option::Option::Some(p) => {
+                                #zbus::object_server::SignalEmitter::new(__zbus__connection, p).expect("Infallible conversion failed")
+                            }
+                            ::std::option::Option::None => {
+                                let err = #zbus::fdo::Error::UnknownObject("Path Required".into());
+                                return __zbus__connection.reply_dbus_error(&hdr, err).await;
+                            }
+                        };
+                    }),
+                };
             } else {
                 args_names.push(pat_ident(input).unwrap());
                 tys.push(&input.ty);
             }
         }
 
+        let (hdr_init, msg_init, args_decl) = match method_type {
+            MethodType::Property(PropertyType::Getter) => (quote! {}, quote! {}, quote! {}),
+            MethodType::Property(PropertyType::Setter) => (
+                quote! { let hdr = __zbus__header.as_ref().unwrap(); },
+                quote! {},
+                quote! {},
+            ),
+            _ => (
+                quote! { let hdr = __zbus__message.header(); },
+                quote! { let msg_body = __zbus__message.body(); },
+                quote! {
+                    let (#(#args_names),*): (#(#tys),*) =
+                        match msg_body.deserialize() {
+                            ::std::result::Result::Ok(r) => r,
+                            ::std::result::Result::Err(e) => {
+                                let err = <#zbus::fdo::Error as ::std::convert::From<_>>::from(e);
+                                return __zbus__connection.reply_dbus_error(&hdr, err).await;
+                            }
+                        };
+                },
+            ),
+        };
+
         let args_from_msg = quote! {
-            let hdr = m.header();
-            let msg_body = m.body();
+            #hdr_init
+
+            #msg_init
 
             #server_arg_decl
 
@@ -1006,16 +1132,9 @@ fn get_args_from_inputs(
 
             #header_arg_decl
 
-            #signal_context_arg_decl
+            #signal_emitter_arg_decl
 
-            let (#(#args_names),*): (#(#tys),*) =
-                match msg_body.deserialize() {
-                    ::std::result::Result::Ok(r) => r,
-                    ::std::result::Result::Err(e) => {
-                        let err = <#zbus::fdo::Error as ::std::convert::From<_>>::from(e);
-                        return c.reply_dbus_error(&hdr, err).await;
-                    }
-                };
+            #args_decl
         };
 
         let all_args_names = inputs.iter().filter_map(pat_ident);
@@ -1025,20 +1144,19 @@ fn get_args_from_inputs(
     }
 }
 
-// Removes all `zbus` and `dbus_interface` attributes from the given inputs.
+// Removes all `zbus` attributes from the given inputs.
 fn clear_input_arg_attrs(inputs: &mut Punctuated<FnArg, Token![,]>) {
     for input in inputs {
         if let FnArg::Typed(t) = input {
-            t.attrs.retain(|attr| {
-                !attr.path().is_ident("zbus") && !attr.path().is_ident("dbus_interface")
-            });
+            t.attrs.retain(|attr| !attr.path().is_ident("zbus"));
         }
     }
 }
 
 fn introspect_signal(name: &str, args: &TokenStream) -> TokenStream {
+    let format_str = format!("{}<signal name=\"{name}\">", "{:indent$}");
     quote!(
-        ::std::writeln!(writer, "{:indent$}<signal name=\"{}\">", "", #name, indent = level).unwrap();
+        ::std::writeln!(writer, #format_str, "", indent = level).unwrap();
         {
             let level = level + 2;
             #args
@@ -1048,8 +1166,9 @@ fn introspect_signal(name: &str, args: &TokenStream) -> TokenStream {
 }
 
 fn introspect_method(name: &str, args: &TokenStream) -> TokenStream {
+    let format_str = format!("{}<method name=\"{name}\">", "{:indent$}");
     quote!(
-        ::std::writeln!(writer, "{:indent$}<method name=\"{}\">", "", #name, indent = level).unwrap();
+        ::std::writeln!(writer, #format_str, "", indent = level).unwrap();
         {
             let level = level + 2;
             #args
@@ -1066,41 +1185,58 @@ fn introspect_input_args<'i>(
     inputs
         .iter()
         .filter_map(move |pat_type @ PatType { ty, attrs, .. }| {
-            let is_special_arg = attrs.iter().any(|attr| {
-                if !attr.path().is_ident("zbus") && !attr.path().is_ident("dbus_interface") {
-                    return false;
-                }
-
-                let Ok(list) = &attr.meta.require_list()  else {
-                     return false;
-                };
-                let Ok(nested) = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) else {
-                    return false;
-                };
-
-                let res = nested.iter().any(|nested_meta| {
-                    matches!(
-                        nested_meta,
-                        Meta::Path(path)
-                        if path.is_ident("object_server") || path.is_ident("connection") || path.is_ident("header") || path.is_ident("signal_context")
-                    )
-                });
-
-                res
-            });
-            if is_special_arg {
+            if is_special_arg(attrs) {
                 return None;
             }
 
             let ident = pat_ident(pat_type).unwrap();
             let arg_name = quote!(#ident).to_string();
+            let arg_name = arg_name.strip_prefix("r#").unwrap_or(arg_name.as_str());
             let dir = if is_signal { "" } else { " direction=\"in\"" };
+            let format_str = format!(
+                "{}<arg name=\"{arg_name}\" type=\"{}\"{dir}/>",
+                "{:indent$}", "{}",
+            );
             Some(quote!(
                 #(#cfg_attrs)*
-                ::std::writeln!(writer, "{:indent$}<arg name=\"{}\" type=\"{}\"{}/>", "",
-                         #arg_name, <#ty>::signature(), #dir, indent = level).unwrap();
+                ::std::writeln!(writer, #format_str, "", <#ty>::SIGNATURE, indent = level).unwrap();
             ))
         })
+}
+
+fn count_regular_args(inputs: &[PatType]) -> usize {
+    inputs
+        .iter()
+        .filter(|PatType { attrs, .. }| !is_special_arg(attrs))
+        .count()
+}
+
+fn is_special_arg(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("zbus") {
+            return false;
+        }
+
+        let Ok(list) = &attr.meta.require_list() else {
+            return false;
+        };
+        let Ok(nested) = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
+        else {
+            return false;
+        };
+
+        nested.iter().any(|nested_meta| {
+            matches!(
+                nested_meta,
+                Meta::Path(path)
+                if path.is_ident("object_server") ||
+                    path.is_ident("connection") ||
+                    path.is_ident("header") ||
+                    path.is_ident("signal_context") ||
+                    path.is_ident("signal_emitter")
+            )
+        })
+    })
 }
 
 fn introspect_output_arg(
@@ -1108,15 +1244,18 @@ fn introspect_output_arg(
     arg_name: Option<&String>,
     cfg_attrs: &[&syn::Attribute],
 ) -> TokenStream {
-    let arg_name = match arg_name {
+    let arg_name_attr = match arg_name {
         Some(name) => format!("name=\"{name}\" "),
         None => String::from(""),
     };
 
+    let format_str = format!(
+        "{}<arg {arg_name_attr}type=\"{}\" direction=\"out\"/>",
+        "{:indent$}", "{}",
+    );
     quote!(
         #(#cfg_attrs)*
-        ::std::writeln!(writer, "{:indent$}<arg {}type=\"{}\" direction=\"out\"/>", "",
-                 #arg_name, <#ty>::signature(), indent = level).unwrap();
+        ::std::writeln!(writer, #format_str, "", <#ty>::SIGNATURE, indent = level).unwrap();
     )
 }
 
@@ -1163,8 +1302,14 @@ fn introspect_add_output_args(
         if let Type::Tuple(t) = ty {
             if let Some(arg_names) = arg_names {
                 if t.elems.len() != arg_names.len() {
-                    // Turn into error
-                    panic!("Number of out arg names different from out args specified")
+                    return Err(Error::new_spanned(
+                        ty,
+                        format!(
+                            "out_args specifies {} names but method returns {} values",
+                            arg_names.len(),
+                            t.elems.len()
+                        ),
+                    ));
                 }
             }
             for i in 0..t.elems.len() {
@@ -1172,7 +1317,23 @@ fn introspect_add_output_args(
                 args.extend(introspect_output_arg(&t.elems[i], name, cfg_attrs));
             }
         } else {
-            args.extend(introspect_output_arg(ty, None, cfg_attrs));
+            // Note: The type might still serialize as a DBus struct/tuple if it has a custom
+            // signature (e.g., `#[zvariant(signature = "(...)")]`), but we can't detect this
+            // from the Rust type structure alone.
+            //
+            // If out_args has exactly one name, apply it to this output.
+            // If out_args has multiple names, the user likely has a type with a tuple signature,
+            // but we can't generate separate <arg> elements for each field since we don't have
+            // access to the individual field types. In this case, we generate a single <arg>
+            // with the type's full signature and no name. The signature will be correct at runtime.
+            let name = arg_names.and_then(|names| {
+                if names.len() == 1 {
+                    Some(&names[0])
+                } else {
+                    None
+                }
+            });
+            args.extend(introspect_output_arg(ty, name, cfg_attrs));
         }
     }
 
@@ -1204,7 +1365,7 @@ fn get_return_type(output: &ReturnType) -> syn::Result<&Type> {
 
 fn introspect_properties(
     introspection: &mut TokenStream,
-    properties: BTreeMap<String, Property<'_>>,
+    properties: BTreeMap<String, Property>,
 ) -> syn::Result<()> {
     for (name, prop) in properties {
         let access = if prop.read && prop.write {
@@ -1214,42 +1375,35 @@ fn introspect_properties(
         } else if prop.write {
             "write"
         } else {
-            return Err(Error::new_spanned(
-                name,
-                "property is neither readable nor writable",
-            ));
+            unreachable!("Properties should have at least one access type");
         };
-        let ty = prop.ty.ok_or_else(|| {
-            Error::new_spanned(&name, "Write-only properties aren't supported yet")
-        })?;
+        let ty = prop.ty.unwrap();
 
         let doc_comments = prop.doc_comments;
         if prop.emits_changed_signal == PropertyEmitsChangedSignal::True {
+            let format_str = format!(
+                "{}<property name=\"{name}\" type=\"{}\" access=\"{access}\"/>",
+                "{:indent$}", "{}",
+            );
             introspection.extend(quote!(
                 #doc_comments
-                ::std::writeln!(
-                    writer,
-                    "{:indent$}<property name=\"{}\" type=\"{}\" access=\"{}\"/>",
-                    "", #name, <#ty>::signature(), #access, indent = level,
-                ).unwrap();
+                ::std::writeln!(writer, #format_str, "", <#ty>::SIGNATURE, indent = level).unwrap();
             ));
         } else {
             let emits_changed_signal = prop.emits_changed_signal.to_string();
+            let annot_name = "org.freedesktop.DBus.Property.EmitsChangedSignal";
+            let format_str = format!(
+                "{}<property name=\"{name}\" type=\"{}\" access=\"{access}\">\n\
+                    {}<annotation name=\"{annot_name}\" value=\"{emits_changed_signal}\"/>\n\
+                {}</property>",
+                "{:indent$}", "{}", "{:annot_indent$}", "{:indent$}",
+            );
             introspection.extend(quote!(
                 #doc_comments
                 ::std::writeln!(
                     writer,
-                    "{:indent$}<property name=\"{}\" type=\"{}\" access=\"{}\">",
-                    "", #name, <#ty>::signature(), #access, indent = level,
-                ).unwrap();
-                ::std::writeln!(
-                    writer,
-                    "{:indent$}<annotation name=\"org.freedesktop.DBus.Property.EmitsChangedSignal\" value=\"{}\"/>",
-                    "", #emits_changed_signal, indent = level + 2,
-                ).unwrap();
-                ::std::writeln!(
-                    writer,
-                    "{:indent$}</property>", "", indent = level,
+                    #format_str,
+                    "", <#ty>::SIGNATURE, "", "", indent = level, annot_indent = level + 2,
                 ).unwrap();
             ));
         }
@@ -1338,14 +1492,18 @@ impl Proxy {
     fn add_method(
         &mut self,
         method_info: MethodInfo,
-        properties: &BTreeMap<String, Property<'_>>,
+        properties: &BTreeMap<String, Property>,
     ) -> syn::Result<()> {
         let inputs: Punctuated<PatType, Comma> = method_info
             .typed_inputs
             .iter()
             .filter(|input| {
                 let a = ArgAttributes::parse(&input.attrs).unwrap();
-                !a.object_server && !a.connection && !a.header && !a.signal_context
+                !a.object_server
+                    && !a.connection
+                    && !a.header
+                    && !a.signal_context
+                    && !a.signal_emitter
             })
             .cloned()
             .collect();
@@ -1385,7 +1543,7 @@ impl Proxy {
         let member_name = method_info.member_name;
         let mut proxy_method_attrs = quote! { name = #member_name, };
         proxy_method_attrs.extend(match method_info.method_type {
-            MethodType::Signal => quote!(signal),
+            MethodType::Signal => quote!(signal,),
             MethodType::Property(_) => {
                 let emits_changed_signal = properties
                     .get(&member_name)
@@ -1394,7 +1552,7 @@ impl Proxy {
                     .to_string();
                 let emits_changed_signal = quote! { emits_changed_signal = #emits_changed_signal };
 
-                quote! { property(#emits_changed_signal) }
+                quote! { property(#emits_changed_signal), }
             }
             MethodType::Other => quote!(),
         });
@@ -1407,6 +1565,9 @@ impl Proxy {
             }
             if let Some(blocking_object) = attrs.blocking_object {
                 proxy_method_attrs.extend(quote! { blocking_object = #blocking_object, });
+            }
+            if attrs.object_vec {
+                proxy_method_attrs.extend(quote! { object_vec, });
             }
             if attrs.no_reply {
                 proxy_method_attrs.extend(quote! { no_reply, });
@@ -1430,7 +1591,7 @@ impl Proxy {
         Ok(())
     }
 
-    fn gen(&self) -> TokenStream {
+    fn r#gen(&self) -> syn::Result<TokenStream> {
         let attrs = &self.attrs;
         let (
             assume_defaults,
@@ -1470,9 +1631,13 @@ impl Proxy {
             &self.methods,
         );
         let iface_name = &self.iface_name;
+        let vis = match &self.attrs.visibility {
+            Some(s) => parse_str::<Visibility>(s)?,
+            None => Visibility::Public(Token![pub](ty.span())),
+        };
         let zbus = &self.zbus;
         let proxy_doc = format!("Proxy for the `{iface_name}` interface.");
-        quote! {
+        Ok(quote! {
             #[doc = #proxy_doc]
             #[#zbus::proxy(
                 name = #iface_name,
@@ -1484,9 +1649,9 @@ impl Proxy {
                 #gen_async
                 #gen_blocking
             )]
-            trait #ty {
+            #vis trait #ty {
                 #methods
             }
-        }
+        })
     }
 }

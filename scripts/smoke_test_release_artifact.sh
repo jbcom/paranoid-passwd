@@ -154,6 +154,11 @@ case "${PRODUCT_NAME}" in
   paranoid-passwd-gui)
     help_output="$("${binary_path}" --help 2>&1)"
     printf '%s\n' "${help_output}" | grep -F "Usage: paranoid-passwd-gui" >/dev/null
+    capture_path="${ARCHIVE_PATH}.smoke.png"
+    if [ "${TARGET_OS}" = "linux" ] && command -v xvfb-run >/dev/null 2>&1; then
+      bash scripts/capture_gui_screenshot.sh "${TARGET_OS}" "${binary_path}" "${capture_path}" "paranoid-passwd"
+      [ -f "${capture_path}" ]
+    fi
     ;;
   *)
     echo "unsupported product for smoke testing: ${PRODUCT_NAME}" >&2

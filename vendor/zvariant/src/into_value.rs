@@ -1,8 +1,8 @@
-use std::{collections::HashMap, hash::BuildHasher};
+use std::{borrow::Cow, collections::HashMap, hash::BuildHasher, sync::Arc};
 
 #[cfg(feature = "gvariant")]
 use crate::Maybe;
-use crate::{Array, Dict, NoneValue, ObjectPath, Optional, Signature, Str, Structure, Type, Value};
+use crate::{Array, Dict, NoneValue, ObjectPath, Optional, Str, Structure, Type, Value};
 
 #[cfg(unix)]
 use crate::Fd;
@@ -49,9 +49,12 @@ into_value_from_both!(i64, I64);
 into_value_from_both!(f32, F64);
 into_value_from_both!(f64, F64);
 
+into_value!(Arc<str>, Str);
+into_value!(Cow<'a, str>, Str);
+into_value_from_both!(String, Str);
+
 into_value_from_both!(&'a str, Str);
 into_value_from_both!(Str<'a>, Str);
-into_value_from_both!(Signature<'a>, Signature);
 into_value_from_both!(ObjectPath<'a>, ObjectPath);
 
 macro_rules! try_into_value_from_ref {
@@ -79,12 +82,6 @@ into_value!(Fd<'a>, Fd);
 #[cfg(unix)]
 try_into_value_from_ref!(Fd<'a>, Fd);
 
-impl From<String> for Value<'_> {
-    fn from(v: String) -> Self {
-        Value::Str(crate::Str::from(v))
-    }
-}
-
 impl<'v, 's: 'v, T> From<T> for Value<'v>
 where
     T: Into<Structure<'s>>,
@@ -94,11 +91,11 @@ where
     }
 }
 
-impl<'v, V> From<&'v [V]> for Value<'v>
+impl<'b, 'v, V> From<&'b [V]> for Value<'v>
 where
-    &'v [V]: Into<Array<'v>>,
+    &'b [V]: Into<Array<'v>>,
 {
-    fn from(v: &'v [V]) -> Value<'v> {
+    fn from(v: &'b [V]) -> Value<'v> {
         Value::Array(v.into())
     }
 }
@@ -112,11 +109,11 @@ where
     }
 }
 
-impl<'v, V> From<&'v Vec<V>> for Value<'v>
+impl<'b, 'v, V> From<&'b Vec<V>> for Value<'v>
 where
-    &'v Vec<V>: Into<Array<'v>>,
+    &'b Vec<V>: Into<Array<'v>>,
 {
-    fn from(v: &'v Vec<V>) -> Value<'v> {
+    fn from(v: &'b Vec<V>) -> Value<'v> {
         Value::Array(v.into())
     }
 }
@@ -131,12 +128,6 @@ where
 {
     fn from(value: HashMap<K, V, H>) -> Self {
         Self::Dict(value.into())
-    }
-}
-
-impl<'v> From<&'v String> for Value<'v> {
-    fn from(v: &'v String) -> Value<'v> {
-        Value::Str(v.into())
     }
 }
 
@@ -167,7 +158,7 @@ where
     V: Into<Value<'v>> + Type,
 {
     fn from(v: Option<V>) -> Value<'v> {
-        let mut array = Array::new(V::signature());
+        let mut array = Array::new(V::SIGNATURE);
         if let Some(v) = v {
             // We got the signature from the `Type` impl, so this should never panic.
             array.append(v.into()).expect("signature mismatch");

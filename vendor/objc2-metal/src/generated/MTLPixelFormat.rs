@@ -4,6 +4,7 @@ use objc2::__framework_prelude::*;
 
 use crate::*;
 
+/// [Apple's documentation](https://developer.apple.com/documentation/metal/mtlpixelformat?language=objc)
 // NS_ENUM
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -150,20 +151,28 @@ impl MTLPixelFormat {
     #[doc(alias = "MTLPixelFormatBC7_RGBAUnorm_sRGB")]
     pub const BC7_RGBAUnorm_sRGB: Self = Self(153);
     #[doc(alias = "MTLPixelFormatPVRTC_RGB_2BPP")]
+    #[deprecated = "Usage of ASTC/ETC2/BC formats is recommended instead."]
     pub const PVRTC_RGB_2BPP: Self = Self(160);
     #[doc(alias = "MTLPixelFormatPVRTC_RGB_2BPP_sRGB")]
+    #[deprecated = "Usage of ASTC/ETC2/BC formats is recommended instead."]
     pub const PVRTC_RGB_2BPP_sRGB: Self = Self(161);
     #[doc(alias = "MTLPixelFormatPVRTC_RGB_4BPP")]
+    #[deprecated = "Usage of ASTC/ETC2/BC formats is recommended instead."]
     pub const PVRTC_RGB_4BPP: Self = Self(162);
     #[doc(alias = "MTLPixelFormatPVRTC_RGB_4BPP_sRGB")]
+    #[deprecated = "Usage of ASTC/ETC2/BC formats is recommended instead."]
     pub const PVRTC_RGB_4BPP_sRGB: Self = Self(163);
     #[doc(alias = "MTLPixelFormatPVRTC_RGBA_2BPP")]
+    #[deprecated = "Usage of ASTC/ETC2/BC formats is recommended instead."]
     pub const PVRTC_RGBA_2BPP: Self = Self(164);
     #[doc(alias = "MTLPixelFormatPVRTC_RGBA_2BPP_sRGB")]
+    #[deprecated = "Usage of ASTC/ETC2/BC formats is recommended instead."]
     pub const PVRTC_RGBA_2BPP_sRGB: Self = Self(165);
     #[doc(alias = "MTLPixelFormatPVRTC_RGBA_4BPP")]
+    #[deprecated = "Usage of ASTC/ETC2/BC formats is recommended instead."]
     pub const PVRTC_RGBA_4BPP: Self = Self(166);
     #[doc(alias = "MTLPixelFormatPVRTC_RGBA_4BPP_sRGB")]
+    #[deprecated = "Usage of ASTC/ETC2/BC formats is recommended instead."]
     pub const PVRTC_RGBA_4BPP_sRGB: Self = Self(167);
     #[doc(alias = "MTLPixelFormatEAC_R11Unorm")]
     pub const EAC_R11Unorm: Self = Self(170);
@@ -269,24 +278,56 @@ impl MTLPixelFormat {
     pub const ASTC_12x10_HDR: Self = Self(235);
     #[doc(alias = "MTLPixelFormatASTC_12x12_HDR")]
     pub const ASTC_12x12_HDR: Self = Self(236);
+    /// A pixel format where the red and green channels are subsampled horizontally.  Two pixels are stored in 32 bits, with shared red and blue values, and unique green values.
+    ///
+    /// This format is equivalent to YUY2, YUYV, yuvs, or GL_RGB_422_APPLE/GL_UNSIGNED_SHORT_8_8_REV_APPLE.   The component order, from lowest addressed byte to highest, is Y0, Cb, Y1, Cr.  There is no implicit colorspace conversion from YUV to RGB, the shader will receive (Cr, Y, Cb, 1).  422 textures must have a width that is a multiple of 2, and can only be used for 2D non-mipmap textures.  When sampling, ClampToEdge is the only usable wrap mode.
     #[doc(alias = "MTLPixelFormatGBGR422")]
     pub const GBGR422: Self = Self(240);
+    /// A pixel format where the red and green channels are subsampled horizontally.  Two pixels are stored in 32 bits, with shared red and blue values, and unique green values.
+    ///
+    /// This format is equivalent to UYVY, 2vuy, or GL_RGB_422_APPLE/GL_UNSIGNED_SHORT_8_8_APPLE. The component order, from lowest addressed byte to highest, is Cb, Y0, Cr, Y1.  There is no implicit colorspace conversion from YUV to RGB, the shader will receive (Cr, Y, Cb, 1).  422 textures must have a width that is a multiple of 2, and can only be used for 2D non-mipmap textures.  When sampling, ClampToEdge is the only usable wrap mode.
     #[doc(alias = "MTLPixelFormatBGRG422")]
     pub const BGRG422: Self = Self(241);
+    /// A pixel format where the red and green channels are subsampled horizontally.  Two pixels are stored in 32 bits, with shared red and blue values, and unique green values.
+    ///
+    /// This format is equivalent to UYVY, 2vuy, or GL_RGB_422_APPLE/GL_UNSIGNED_SHORT_8_8_APPLE. The component order, from lowest addressed byte to highest, is Cb, Y0, Cr, Y1.  There is no implicit colorspace conversion from YUV to RGB, the shader will receive (Cr, Y, Cb, 1).  422 textures must have a width that is a multiple of 2, and can only be used for 2D non-mipmap textures.  When sampling, ClampToEdge is the only usable wrap mode.
     #[doc(alias = "MTLPixelFormatDepth16Unorm")]
     pub const Depth16Unorm: Self = Self(250);
+    /// A pixel format where the red and green channels are subsampled horizontally.  Two pixels are stored in 32 bits, with shared red and blue values, and unique green values.
+    ///
+    /// This format is equivalent to UYVY, 2vuy, or GL_RGB_422_APPLE/GL_UNSIGNED_SHORT_8_8_APPLE. The component order, from lowest addressed byte to highest, is Cb, Y0, Cr, Y1.  There is no implicit colorspace conversion from YUV to RGB, the shader will receive (Cr, Y, Cb, 1).  422 textures must have a width that is a multiple of 2, and can only be used for 2D non-mipmap textures.  When sampling, ClampToEdge is the only usable wrap mode.
     #[doc(alias = "MTLPixelFormatDepth32Float")]
     pub const Depth32Float: Self = Self(252);
+    /// A pixel format where the red and green channels are subsampled horizontally.  Two pixels are stored in 32 bits, with shared red and blue values, and unique green values.
+    ///
+    /// This format is equivalent to UYVY, 2vuy, or GL_RGB_422_APPLE/GL_UNSIGNED_SHORT_8_8_APPLE. The component order, from lowest addressed byte to highest, is Cb, Y0, Cr, Y1.  There is no implicit colorspace conversion from YUV to RGB, the shader will receive (Cr, Y, Cb, 1).  422 textures must have a width that is a multiple of 2, and can only be used for 2D non-mipmap textures.  When sampling, ClampToEdge is the only usable wrap mode.
     #[doc(alias = "MTLPixelFormatStencil8")]
     pub const Stencil8: Self = Self(253);
+    /// A pixel format where the red and green channels are subsampled horizontally.  Two pixels are stored in 32 bits, with shared red and blue values, and unique green values.
+    ///
+    /// This format is equivalent to UYVY, 2vuy, or GL_RGB_422_APPLE/GL_UNSIGNED_SHORT_8_8_APPLE. The component order, from lowest addressed byte to highest, is Cb, Y0, Cr, Y1.  There is no implicit colorspace conversion from YUV to RGB, the shader will receive (Cr, Y, Cb, 1).  422 textures must have a width that is a multiple of 2, and can only be used for 2D non-mipmap textures.  When sampling, ClampToEdge is the only usable wrap mode.
     #[doc(alias = "MTLPixelFormatDepth24Unorm_Stencil8")]
     pub const Depth24Unorm_Stencil8: Self = Self(255);
+    /// A pixel format where the red and green channels are subsampled horizontally.  Two pixels are stored in 32 bits, with shared red and blue values, and unique green values.
+    ///
+    /// This format is equivalent to UYVY, 2vuy, or GL_RGB_422_APPLE/GL_UNSIGNED_SHORT_8_8_APPLE. The component order, from lowest addressed byte to highest, is Cb, Y0, Cr, Y1.  There is no implicit colorspace conversion from YUV to RGB, the shader will receive (Cr, Y, Cb, 1).  422 textures must have a width that is a multiple of 2, and can only be used for 2D non-mipmap textures.  When sampling, ClampToEdge is the only usable wrap mode.
     #[doc(alias = "MTLPixelFormatDepth32Float_Stencil8")]
     pub const Depth32Float_Stencil8: Self = Self(260);
+    /// A pixel format where the red and green channels are subsampled horizontally.  Two pixels are stored in 32 bits, with shared red and blue values, and unique green values.
+    ///
+    /// This format is equivalent to UYVY, 2vuy, or GL_RGB_422_APPLE/GL_UNSIGNED_SHORT_8_8_APPLE. The component order, from lowest addressed byte to highest, is Cb, Y0, Cr, Y1.  There is no implicit colorspace conversion from YUV to RGB, the shader will receive (Cr, Y, Cb, 1).  422 textures must have a width that is a multiple of 2, and can only be used for 2D non-mipmap textures.  When sampling, ClampToEdge is the only usable wrap mode.
     #[doc(alias = "MTLPixelFormatX32_Stencil8")]
     pub const X32_Stencil8: Self = Self(261);
+    /// A pixel format where the red and green channels are subsampled horizontally.  Two pixels are stored in 32 bits, with shared red and blue values, and unique green values.
+    ///
+    /// This format is equivalent to UYVY, 2vuy, or GL_RGB_422_APPLE/GL_UNSIGNED_SHORT_8_8_APPLE. The component order, from lowest addressed byte to highest, is Cb, Y0, Cr, Y1.  There is no implicit colorspace conversion from YUV to RGB, the shader will receive (Cr, Y, Cb, 1).  422 textures must have a width that is a multiple of 2, and can only be used for 2D non-mipmap textures.  When sampling, ClampToEdge is the only usable wrap mode.
     #[doc(alias = "MTLPixelFormatX24_Stencil8")]
     pub const X24_Stencil8: Self = Self(262);
+    /// A pixel format where the red and green channels are subsampled horizontally.  Two pixels are stored in 32 bits, with shared red and blue values, and unique green values.
+    ///
+    /// This format is equivalent to UYVY, 2vuy, or GL_RGB_422_APPLE/GL_UNSIGNED_SHORT_8_8_APPLE. The component order, from lowest addressed byte to highest, is Cb, Y0, Cr, Y1.  There is no implicit colorspace conversion from YUV to RGB, the shader will receive (Cr, Y, Cb, 1).  422 textures must have a width that is a multiple of 2, and can only be used for 2D non-mipmap textures.  When sampling, ClampToEdge is the only usable wrap mode.
+    #[doc(alias = "MTLPixelFormatUnspecialized")]
+    pub const Unspecialized: Self = Self(263);
 }
 
 unsafe impl Encode for MTLPixelFormat {

@@ -10,7 +10,7 @@ kind of D-Bus messages (method calls, signals etc) for you.
 
 ## Getting Started
 
-The best way to get started with zbus is the [book](https://dbus2.github.io/zbus/), where we start
+The best way to get started with zbus is the [book](https://z-galaxy.github.io/zbus/), where we start
 with basic D-Bus concepts and explain with code samples, how zbus makes D-Bus easy.
 
 ## Example code
@@ -86,7 +86,7 @@ trait MyGreeter {
 async fn main() -> Result<()> {
     let connection = Connection::session().await?;
 
-    // `proxy` macro creates `MyGreaterProxy` based on `Notifications` trait.
+    // `proxy` macro creates `MyGreaterProxy` based on `MyGreeter` trait.
     let proxy = MyGreeterProxy::new(&connection).await?;
     let reply = proxy.say_hello("Maria").await?;
     println!("{reply}");
@@ -98,7 +98,8 @@ async fn main() -> Result<()> {
 ## Blocking API
 
 While zbus is primarily asynchronous (since 2.0), [blocking wrappers][bw] are provided for
-convenience.
+convenience. Since zbus 5.0, blocking API can be disabled by disabling the `blocking-api` cargo
+feature.
 
 ## Compatibility with async runtimes
 
@@ -121,7 +122,7 @@ integration with it without you having to worry about any of the above: Enabling
 # Sample Cargo.toml snippet.
 [dependencies]
 # Also disable the default `async-io` feature to avoid unused dependencies.
-zbus = { version = "3", default-features = false, features = ["tokio"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
 ```
 
 That's it! No threads launched behind your back by zbus (directly or indirectly) now and no need to
@@ -130,7 +131,7 @@ tick any executors etc. 😼
 **Note**: On Windows, the `async-io` feature is currently required for UNIX domain socket support,
 see [the corresponding tokio issue on GitHub][tctiog].
 
-[zbus]: https://github.com/dbus2/zbus\#readme
+[zbus]: https://github.com/z-galaxy/zbus\#readme
 [bw]: https://docs.rs/zbus/latest/zbus/blocking/index.html
 [iektc]: https://docs.rs/zbus/latest/zbus/connection/struct.Connection.html#examples-1
 [tctiog]: https://github.com/tokio-rs/tokio/issues/2201

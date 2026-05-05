@@ -1,6 +1,6 @@
 use arboard::Clipboard;
 use iced::{
-    Alignment, Element, Length, Task, Theme,
+    Alignment, Color, Element, Length, Task, Theme,
     widget::{button, checkbox, column, container, row, scrollable, text, text_input},
 };
 use paranoid_core::{
@@ -19,11 +19,17 @@ use paranoid_vault::{
     unlock_vault_for_options,
 };
 use std::{
-    fs,
+    env, fs,
+    path::{Path, PathBuf},
     sync::mpsc::{self, Receiver},
     thread,
     time::Duration,
 };
+
+#[allow(clippy::all, clippy::unwrap_used, warnings)]
+mod slint_shell {
+    slint::include_modules!();
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LaunchAction {
@@ -176,6 +182,50 @@ impl DetailTab {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuiAutomationScenario {
+    OperatorWorkflow,
+}
+
+impl GuiAutomationScenario {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "operator" | "operator-workflow" => Some(Self::OperatorWorkflow),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::OperatorWorkflow => "operator-workflow",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuiAutomationStep {
+    Start,
+    WaitForAudit,
+    AddLogin,
+    FilterLogin,
+    RotateGeneratedPassword,
+    OpenKeyslots,
+    EnrollMnemonic,
+    ReturnToVault,
+    ExportBackup,
+    Complete,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+struct GuiAutomation {
+    scenario: GuiAutomationScenario,
+    step: GuiAutomationStep,
+    vault_path: PathBuf,
+    backup_path: PathBuf,
+    output_path: PathBuf,
+}
+
 #[derive(Debug)]
 enum WorkerMessage {
     Stage(AuditStage),
@@ -203,6 +253,7 @@ enum Message {
     RunAudit,
     Poll,
     SessionTick,
+    AutomationTick,
     SelectTab(DetailTab),
     CopyPrimary,
     GoToConfigure,
@@ -562,6 +613,7 @@ struct GuiApp {
     vault: VaultState,
     status: String,
     session: NativeSessionHardening,
+    automation: Option<GuiAutomation>,
 }
 
 fn main() -> iced::Result {
@@ -616,11 +668,32 @@ fn boot() -> (GuiApp, Task<Message>) {
         completed_stages: Vec::new(),
         worker: None,
         vault: VaultState::default(),
-        status: "Configure the generator, then run the 7-layer audit.".to_string(),
+        status: "Configure the local generator, then run the 7-layer audit.".to_string(),
         session: NativeSessionHardening::default(),
+        automation: None,
     };
+    match configured_gui_automation() {
+        Ok(Some(automation)) => {
+            app.vault.options.path = automation.vault_path.clone();
+            app.status = format!(
+                "Running GUI automation scenario {} against {}.",
+                automation.scenario.as_str(),
+                automation.vault_path.display()
+            );
+            app.automation = Some(automation);
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("GUI automation configuration invalid: {error}");
+            app.status = format!("GUI automation configuration invalid: {error}");
+        }
+    }
     let _ = refresh_vault_state(&mut app);
-    (app, schedule_session_tick())
+    let mut tasks = vec![schedule_session_tick()];
+    if app.automation.is_some() {
+        tasks.push(schedule_automation_tick());
+    }
+    (app, Task::batch(tasks))
 }
 
 fn update(app: &mut GuiApp, message: Message) -> Task<Message> {
@@ -785,6 +858,12 @@ fn update(app: &mut GuiApp, message: Message) -> Task<Message> {
         Message::SessionTick => {
             poll_session_hardening(app);
             return schedule_session_tick();
+        }
+        Message::AutomationTick => {
+            drive_gui_automation(app);
+            if gui_automation_is_active(app) {
+                return schedule_automation_tick();
+            }
         }
         Message::SelectTab(tab) => app.detail_tab = tab,
         Message::CopyPrimary => {
@@ -985,16 +1064,16 @@ fn update(app: &mut GuiApp, message: Message) -> Task<Message> {
         }
         Message::OpenVaultGenerateStore => {
             app.vault.generate_form = VaultGenerateForm::default();
-            if let Some(detail) = &app.vault.detail {
-                if let VaultItemPayload::Login(login) = &detail.payload {
-                    app.vault.generate_form.target_login_id = Some(detail.id.clone());
-                    app.vault.generate_form.title = login.title.clone();
-                    app.vault.generate_form.username = login.username.clone();
-                    app.vault.generate_form.url = login.url.clone().unwrap_or_default();
-                    app.vault.generate_form.notes = login.notes.clone().unwrap_or_default();
-                    app.vault.generate_form.folder = login.folder.clone().unwrap_or_default();
-                    app.vault.generate_form.tags = login.tags.join(", ");
-                }
+            if let Some(detail) = &app.vault.detail
+                && let VaultItemPayload::Login(login) = &detail.payload
+            {
+                app.vault.generate_form.target_login_id = Some(detail.id.clone());
+                app.vault.generate_form.title = login.title.clone();
+                app.vault.generate_form.username = login.username.clone();
+                app.vault.generate_form.url = login.url.clone().unwrap_or_default();
+                app.vault.generate_form.notes = login.notes.clone().unwrap_or_default();
+                app.vault.generate_form.folder = login.folder.clone().unwrap_or_default();
+                app.vault.generate_form.tags = login.tags.join(", ");
             }
             app.vault.screen = VaultScreen::GenerateStore;
             app.status = if app.vault.generate_form.target_login_id.is_some() {
@@ -1155,6 +1234,7 @@ fn update(app: &mut GuiApp, message: Message) -> Task<Message> {
                 | VaultScreen::RotateMnemonicSlot
                 | VaultScreen::RotateRecoverySecret
                 | VaultScreen::MnemonicReveal => VaultScreen::Keyslots,
+                VaultScreen::Keyslots => VaultScreen::List,
                 current => current,
             };
             app.vault.editing_item_id = None;
@@ -1430,10 +1510,26 @@ fn update(app: &mut GuiApp, message: Message) -> Task<Message> {
 
 fn view(app: &GuiApp) -> Element<'_, Message> {
     let nav = row![
-        button("Generator").on_press(Message::SwitchSurface(Surface::Generator)),
-        button("Vault").on_press(Message::SwitchSurface(Surface::Vault)),
+        button(
+            text(if matches!(app.surface, Surface::Generator) {
+                "● Generator"
+            } else {
+                "Generator"
+            })
+            .color(primary_text_color())
+        )
+        .on_press(Message::SwitchSurface(Surface::Generator)),
+        button(
+            text(if matches!(app.surface, Surface::Vault) {
+                "● Vault"
+            } else {
+                "Vault"
+            })
+            .color(primary_text_color())
+        )
+        .on_press(Message::SwitchSurface(Surface::Vault)),
     ]
-    .spacing(12);
+    .spacing(10);
 
     let content = match app.surface {
         Surface::Generator => match app.generator_screen {
@@ -1444,23 +1540,51 @@ fn view(app: &GuiApp) -> Element<'_, Message> {
         Surface::Vault => vault_view(app),
     };
 
-    container(column![nav, content].spacing(16))
-        .padding(24)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    let header = row![
+        column![
+            display_text("paranoid-passwd", 34),
+            section_text("Local secrets. Verifiable trust.", 18),
+            body_copy("Native password generation, encrypted vault operations, and verifiable assurance from one local desktop surface."),
+        ]
+        .spacing(4)
+        .width(Length::Fill),
+        row![
+            status_chip("Native-only", ChipTone::Secondary),
+            status_chip(surface_label(app), ChipTone::Primary),
+            status_chip(surface_state_label(app), surface_state_tone(app)),
+        ]
+        .spacing(8),
+    ]
+    .align_y(Alignment::Center);
+
+    container(
+        column![
+            panel(column![header, nav].spacing(14), Length::Fill),
+            content,
+        ]
+        .spacing(18),
+    )
+    .padding(24)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 fn configure_view(app: &GuiApp) -> Element<'_, Message> {
     let options = charset_options(&app.request);
+    let framework_summary = selected_framework_summary(app.request.selected_frameworks.as_slice());
     let frameworks = paranoid_core::frameworks().iter().fold(
-        column![text("Frameworks").size(22)].spacing(8),
+        column![
+            section_text("Policy frameworks", 22),
+            meta_copy(framework_summary)
+        ]
+        .spacing(8),
         |column, framework| {
-            column.push(
-                checkbox(app.request.selected_frameworks.contains(&framework.id))
-                    .label(framework.name)
-                    .on_toggle(move |enabled| Message::FrameworkChanged(framework.id, enabled)),
-            )
+            column.push(labeled_checkbox(
+                app.request.selected_frameworks.contains(&framework.id),
+                framework.name,
+                move |enabled| Message::FrameworkChanged(framework.id, enabled),
+            ))
         },
     );
     let validation = match app.request.resolve() {
@@ -1472,68 +1596,117 @@ fn configure_view(app: &GuiApp) -> Element<'_, Message> {
         ),
         Err(error) => error.to_string(),
     };
-    let body = row![
+    let policy = panel(
         scrollable(
             column![
-                text("paranoid-passwd").size(34),
-                text("Configure the native generator and audit model."),
+                display_text("Generator policy", 28),
+                body_copy("Shape the local password contract before the audit runs."),
                 row![
-                    text_input("Length", &app.length_input).on_input(Message::LengthChanged),
-                    text_input("Count", &app.count_input).on_input(Message::CountChanged),
-                    text_input("Audit batch", &app.batch_input).on_input(Message::BatchChanged),
+                    labeled_field(
+                        "Password length",
+                        text_input("Length", &app.length_input).on_input(Message::LengthChanged)
+                    ),
+                    labeled_field(
+                        "Passwords to emit",
+                        text_input("Count", &app.count_input).on_input(Message::CountChanged)
+                    ),
+                    labeled_field(
+                        "Audit batch size",
+                        text_input("Audit batch", &app.batch_input).on_input(Message::BatchChanged)
+                    ),
                 ]
                 .spacing(12),
                 row![
-                    text_input("Min lower", &app.min_lower_input)
-                        .on_input(Message::MinLowerChanged),
-                    text_input("Min upper", &app.min_upper_input)
-                        .on_input(Message::MinUpperChanged),
-                    text_input("Min digits", &app.min_digits_input)
-                        .on_input(Message::MinDigitsChanged),
-                    text_input("Min symbols", &app.min_symbols_input)
-                        .on_input(Message::MinSymbolsChanged),
+                    labeled_field(
+                        "Minimum lowercase",
+                        text_input("Min lower", &app.min_lower_input)
+                            .on_input(Message::MinLowerChanged)
+                    ),
+                    labeled_field(
+                        "Minimum uppercase",
+                        text_input("Min upper", &app.min_upper_input)
+                            .on_input(Message::MinUpperChanged)
+                    ),
+                    labeled_field(
+                        "Minimum digits",
+                        text_input("Min digits", &app.min_digits_input)
+                            .on_input(Message::MinDigitsChanged)
+                    ),
+                    labeled_field(
+                        "Minimum symbols",
+                        text_input("Min symbols", &app.min_symbols_input)
+                            .on_input(Message::MinSymbolsChanged)
+                    ),
                 ]
                 .spacing(12),
-                checkbox(options.include_lowercase)
-                    .label("Lowercase")
-                    .on_toggle(Message::ToggleLowercase),
-                checkbox(options.include_uppercase)
-                    .label("Uppercase")
-                    .on_toggle(Message::ToggleUppercase),
-                checkbox(options.include_digits)
-                    .label("Digits")
-                    .on_toggle(Message::ToggleDigits),
-                checkbox(options.include_symbols)
-                    .label("Symbols")
-                    .on_toggle(Message::ToggleSymbols),
-                checkbox(options.include_space)
-                    .label("Include space")
-                    .on_toggle(Message::ToggleSpace),
-                checkbox(options.exclude_ambiguous)
-                    .label("Exclude ambiguous")
-                    .on_toggle(Message::ToggleAmbiguous),
-                text_input("Custom charset override", &app.custom_charset_input)
-                    .on_input(Message::CustomCharsetChanged),
-                button("Generate + Run 7-Layer Audit").on_press(Message::RunAudit),
+                row![
+                    labeled_checkbox(
+                        options.include_lowercase,
+                        "Lowercase",
+                        Message::ToggleLowercase
+                    ),
+                    labeled_checkbox(
+                        options.include_uppercase,
+                        "Uppercase",
+                        Message::ToggleUppercase
+                    ),
+                ]
+                .spacing(12),
+                row![
+                    labeled_checkbox(options.include_digits, "Digits", Message::ToggleDigits),
+                    labeled_checkbox(options.include_symbols, "Symbols", Message::ToggleSymbols),
+                ]
+                .spacing(12),
+                row![
+                    labeled_checkbox(options.include_space, "Include space", Message::ToggleSpace),
+                    labeled_checkbox(
+                        options.exclude_ambiguous,
+                        "Exclude ambiguous glyphs",
+                        Message::ToggleAmbiguous
+                    ),
+                ]
+                .spacing(12),
+                labeled_field(
+                    "Custom charset override",
+                    text_input("Custom charset override", &app.custom_charset_input)
+                        .on_input(Message::CustomCharsetChanged)
+                ),
+                row![
+                    button(text("Run 7-Layer Audit").color(primary_text_color()))
+                        .on_press(Message::RunAudit),
+                    status_chip(format!("Length {}", app.request.length), ChipTone::Primary),
+                    status_chip(format!("Count {}", app.request.count), ChipTone::Secondary),
+                ]
+                .spacing(10),
+                meta_copy(app.status.as_str()),
             ]
-            .spacing(12)
-        )
-        .width(Length::FillPortion(3)),
-        scrollable(
-            column![
-                frameworks,
-                text("Validation").size(22),
-                text(validation),
-                text("The GUI uses the same typed request/result model as the CLI and TUI."),
-                text(app.status.as_str()),
-            ]
-            .spacing(12)
-        )
-        .width(Length::FillPortion(2)),
-    ]
-    .spacing(20);
+            .spacing(14),
+        ),
+        Length::FillPortion(3),
+    );
 
-    column![body].into()
+    let assurance = panel(
+        scrollable(
+            column![
+                display_text("Mission control", 28),
+                body_copy("This desktop surface sells the same promise as the CLI: keep secrets local, keep trust verifiable, and keep the audit visible."),
+                row![
+                    status_chip("OpenSSL entropy", ChipTone::Success),
+                    status_chip("Typed audit model", ChipTone::Primary),
+                    status_chip("No webview", ChipTone::Warning),
+                ]
+                .spacing(8),
+                frameworks,
+                section_text("Readiness", 22),
+                body_copy(validation),
+                meta_copy("The GUI shares the same request and report model as the CLI and TUI, so operator choices stay consistent across every native surface."),
+            ]
+            .spacing(14),
+        ),
+        Length::FillPortion(2),
+    );
+
+    row![policy, assurance].spacing(18).into()
 }
 
 fn audit_view(app: &GuiApp) -> Element<'_, Message> {
@@ -1558,7 +1731,7 @@ fn audit_view(app: &GuiApp) -> Element<'_, Message> {
     ]
     .into_iter()
     .fold(
-        column![text("7-Layer Audit").size(30)].spacing(8),
+        column![display_text("7-Layer Audit", 30)].spacing(8),
         |column, stage| {
             let label = if app.completed_stages.contains(&stage) {
                 format!("✓ {}", stage.label())
@@ -1567,16 +1740,26 @@ fn audit_view(app: &GuiApp) -> Element<'_, Message> {
             } else {
                 format!("· {}", stage.label())
             };
-            column.push(text(label))
+            column.push(body_copy(label))
         },
     );
-    column![
-        text("Generate & Audit").size(34),
-        text(format!("Progress: {:.0}%", progress * 100.0)),
-        stages,
-        text(app.status.as_str()),
+    row![
+        hero_panel(
+            column![
+                display_text("Generate & Audit", 32),
+                body_copy("Running the local generator and the assurance ladder."),
+                status_chip(
+                    format!("Progress {:.0}%", progress * 100.0),
+                    ChipTone::Primary
+                ),
+                meta_copy(app.status.as_str()),
+            ]
+            .spacing(14),
+            Length::FillPortion(2),
+        ),
+        panel(stages, Length::FillPortion(3)),
     ]
-    .spacing(14)
+    .spacing(18)
     .into()
 }
 
@@ -1594,31 +1777,36 @@ fn results_view(app: &GuiApp) -> Element<'_, Message> {
     let tabs = DetailTab::ALL
         .into_iter()
         .fold(row![].spacing(8), |row, tab| {
-            row.push(button(tab.label()).on_press(Message::SelectTab(tab)))
+            row.push(
+                button(text(tab.label()).color(primary_text_color()))
+                    .on_press(Message::SelectTab(tab)),
+            )
         });
 
     let detail = match app.detail_tab {
         DetailTab::Summary => column![
-            text(if audit.overall_pass {
-                "CRYPTOGRAPHICALLY SOUND"
+            section_text(
+                if audit.overall_pass {
+                "AUDIT PASSED"
             } else {
                 "REVIEW FLAGGED ITEMS"
-            })
-            .size(26),
-            text(format!("Primary: {}", primary.value)),
-            text(format!("SHA-256: {}", primary.sha256_hex)),
-            text(format!(
+            },
+                26
+            ),
+            body_copy(format!("Primary: {}", primary.value)),
+            body_copy(format!("SHA-256: {}", primary.sha256_hex)),
+            body_copy(format!(
                 "Primary verdict: {}",
                 if primary.all_pass { "PASS" } else { "REVIEW" }
             )),
-            text(format!(
+            body_copy(format!(
                 "Additional passwords: {}",
                 report.passwords.len().saturating_sub(1)
             )),
         ]
         .spacing(8),
         DetailTab::Compliance => report.passwords.iter().enumerate().fold(
-            column![text("Selected Frameworks").size(24)].spacing(8),
+            column![section_text("Selected Frameworks", 24)].spacing(8),
             |column, (index, password)| {
                 let label = if index == 0 {
                     "Primary".to_string()
@@ -1648,69 +1836,265 @@ fn results_view(app: &GuiApp) -> Element<'_, Message> {
             },
         ),
         DetailTab::Entropy => column![
-            text("Entropy").size(24),
-            text(format!("Charset size: {}", audit.charset_size)),
-            text(format!("Password length: {}", audit.password_length)),
-            text(format!("Bits per character: {:.4}", audit.entropy.bits_per_char)),
-            text(format!("Total entropy: {:.2} bits", audit.entropy.total_entropy)),
-            text(format!(
+            section_text("Entropy", 24),
+            body_copy(format!("Charset size: {}", audit.charset_size)),
+            body_copy(format!("Password length: {}", audit.password_length)),
+            body_copy(format!("Bits per character: {:.4}", audit.entropy.bits_per_char)),
+            body_copy(format!("Total entropy: {:.2} bits", audit.entropy.total_entropy)),
+            body_copy(format!(
                 "Brute-force @ 1T/s: {:.2e} years",
                 audit.entropy.brute_force_years
             )),
         ]
         .spacing(8),
         DetailTab::Stats => column![
-            text("Batch Statistics").size(24),
-            text(format!(
+            section_text("Batch Statistics", 24),
+            body_copy(format!(
                 "Chi-squared: {:.2} (df={}, p={:.4})",
                 audit.chi2_statistic, audit.chi2_df, audit.chi2_p_value
             )),
-            text(format!(
+            body_copy(format!(
                 "Serial correlation: {:.6}",
                 audit.serial_correlation
             )),
-            text(format!("Duplicates: {} / {}", audit.duplicates, audit.batch_size)),
-            text(format!(
+            body_copy(format!("Duplicates: {} / {}", audit.duplicates, audit.batch_size)),
+            body_copy(format!(
                 "Rejection boundary: {} ({:.4}% rejected)",
                 audit.rejection_max_valid, audit.rejection_rate_pct
             )),
         ]
         .spacing(8),
         DetailTab::Threats => column![
-            text("Threat Model").size(24),
-            text("T1 Training-data leakage — mitigated by OpenSSL-backed OS entropy."),
-            text("T2 Token-distribution bias — mitigated by rejection sampling."),
-            text("T3 Deterministic regeneration — mitigated by hardware entropy."),
-            text("T4 Prompt injection steering — residual risk in source review."),
-            text("T5 Hallucinated security claims — residual risk, review the math."),
-            text("T6 Screen exposure — operational risk, clear copied passwords."),
+            section_text("Threat Model", 24),
+            body_copy("T1 Training-data leakage — mitigated by OpenSSL-backed OS entropy."),
+            body_copy("T2 Token-distribution bias — mitigated by rejection sampling."),
+            body_copy("T3 Deterministic regeneration — mitigated by hardware entropy."),
+            body_copy("T4 Prompt injection steering — residual risk in source review."),
+            body_copy("T5 Hallucinated security claims — residual risk, review the math."),
+            body_copy("T6 Screen exposure — operational risk, clear copied passwords."),
         ]
         .spacing(8),
         DetailTab::SelfAudit => column![
-            text("Self-Audit").size(24),
-            text("The GUI consumes the same typed report as the CLI and TUI."),
-            text("Batch statistics stay separated from per-password verdicts."),
-            text("Selected frameworks are enforced per emitted password."),
-            text("This desktop surface remains native-only; no webview trust boundary is reintroduced."),
+            section_text("Self-Audit", 24),
+            body_copy("The GUI consumes the same typed report as the CLI and TUI."),
+            body_copy("Batch statistics stay separated from per-password verdicts."),
+            body_copy("Selected frameworks are enforced per emitted password."),
+            body_copy("This desktop surface remains native-only; no webview trust boundary is reintroduced."),
         ]
         .spacing(8),
     };
 
-    column![
-        text("Results").size(34),
-        text(format!("Primary password: {}", primary.value)),
-        row![
-            button("Copy primary password").on_press(Message::CopyPrimary),
-            button("Back to configuration").on_press(Message::GoToConfigure),
+    let summary = hero_panel(
+        column![
+            display_text("Audit results", 30),
+            body_copy(if audit.overall_pass {
+                "This password set cleared the current assurance ladder."
+            } else {
+                "Review the flagged controls before you ship this password."
+            }),
+            body_copy(format!("Primary password: {}", primary.value)),
+            row![
+                button(text("Copy primary password").color(primary_text_color()))
+                    .on_press(Message::CopyPrimary),
+                button(text("Back to configuration").color(primary_text_color()))
+                    .on_press(Message::GoToConfigure),
+                status_chip(
+                    if audit.overall_pass {
+                        "AUDIT PASSED"
+                    } else {
+                        "REVIEW REQUIRED"
+                    },
+                    if audit.overall_pass {
+                        ChipTone::Success
+                    } else {
+                        ChipTone::Warning
+                    },
+                ),
+            ]
+            .spacing(10),
+            meta_copy(app.status.as_str()),
         ]
-        .spacing(12),
-        tabs,
-        scrollable(detail),
-        text(app.status.as_str()),
+        .spacing(14),
+        Length::Fill,
+    );
+
+    let details = panel(column![tabs, scrollable(detail)].spacing(14), Length::Fill);
+
+    column![summary, details]
+        .spacing(18)
+        .align_x(Alignment::Start)
+        .into()
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ChipTone {
+    Primary,
+    Secondary,
+    Success,
+    Warning,
+}
+
+fn panel<'a>(
+    content: impl Into<Element<'a, Message>>,
+    width: impl Into<Length>,
+) -> Element<'a, Message> {
+    container(content)
+        .padding(18)
+        .width(width)
+        .style(iced::widget::container::bordered_box)
+        .into()
+}
+
+fn hero_panel<'a>(
+    content: impl Into<Element<'a, Message>>,
+    width: impl Into<Length>,
+) -> Element<'a, Message> {
+    container(content)
+        .padding(18)
+        .width(width)
+        .style(iced::widget::container::rounded_box)
+        .into()
+}
+
+fn status_chip(label: impl Into<String>, tone: ChipTone) -> Element<'static, Message> {
+    let label = label.into();
+    let style = match tone {
+        ChipTone::Primary => iced::widget::container::primary,
+        ChipTone::Secondary => iced::widget::container::secondary,
+        ChipTone::Success => iced::widget::container::success,
+        ChipTone::Warning => iced::widget::container::warning,
+    };
+    container(text(label).size(13).color(on_chip_text_color()))
+        .padding([6, 10])
+        .style(style)
+        .into()
+}
+
+fn primary_text_color() -> Color {
+    Color::from_rgb8(0xe6, 0xec, 0xff)
+}
+
+fn body_text_color() -> Color {
+    Color::from_rgb8(0xc0, 0xca, 0xf5)
+}
+
+fn muted_text_color() -> Color {
+    Color::from_rgb8(0x86, 0x8e, 0xb4)
+}
+
+fn on_chip_text_color() -> Color {
+    Color::from_rgb8(0x1a, 0x1b, 0x26)
+}
+
+fn display_text<'a>(content: impl Into<String>, size: u32) -> Element<'a, Message> {
+    text(content.into())
+        .size(size)
+        .color(primary_text_color())
+        .into()
+}
+
+fn section_text<'a>(content: impl Into<String>, size: u32) -> Element<'a, Message> {
+    text(content.into())
+        .size(size)
+        .color(body_text_color())
+        .into()
+}
+
+fn body_copy<'a>(content: impl Into<String>) -> Element<'a, Message> {
+    text(content.into()).color(body_text_color()).into()
+}
+
+fn meta_copy<'a>(content: impl Into<String>) -> Element<'a, Message> {
+    text(content.into()).color(muted_text_color()).into()
+}
+
+fn labeled_field<'a>(
+    label: impl Into<String>,
+    input: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    column![meta_copy(label), input.into()].spacing(6).into()
+}
+
+fn labeled_checkbox<'a>(
+    is_checked: bool,
+    label: impl Into<String>,
+    on_toggle: impl Fn(bool) -> Message + 'a,
+) -> Element<'a, Message> {
+    row![
+        checkbox(is_checked).on_toggle(on_toggle),
+        body_copy(label.into())
     ]
-    .spacing(16)
-    .align_x(Alignment::Start)
+    .spacing(8)
+    .align_y(Alignment::Center)
     .into()
+}
+
+fn surface_label(app: &GuiApp) -> &'static str {
+    match app.surface {
+        Surface::Generator => "Generator",
+        Surface::Vault => "Vault",
+    }
+}
+
+fn surface_state_label(app: &GuiApp) -> &'static str {
+    match app.surface {
+        Surface::Generator => match app.generator_screen {
+            GeneratorScreen::Configure => "Audit ready",
+            GeneratorScreen::Audit => "Audit running",
+            GeneratorScreen::Results => "Audit report",
+        },
+        Surface::Vault => match app.vault.screen {
+            VaultScreen::UnlockBlocked => "Unlock required",
+            VaultScreen::Keyslots
+            | VaultScreen::AddMnemonicSlot
+            | VaultScreen::AddDeviceSlot
+            | VaultScreen::AddCertSlot
+            | VaultScreen::RewrapCertSlot
+            | VaultScreen::EditKeyslotLabel
+            | VaultScreen::RotateMnemonicSlot
+            | VaultScreen::RotateRecoverySecret
+            | VaultScreen::MnemonicReveal => "Keyslot operations",
+            _ => "Vault unlocked",
+        },
+    }
+}
+
+fn surface_state_tone(app: &GuiApp) -> ChipTone {
+    match app.surface {
+        Surface::Generator => match app.generator_screen {
+            GeneratorScreen::Configure => ChipTone::Secondary,
+            GeneratorScreen::Audit => ChipTone::Primary,
+            GeneratorScreen::Results => ChipTone::Success,
+        },
+        Surface::Vault => match app.vault.screen {
+            VaultScreen::UnlockBlocked => ChipTone::Warning,
+            VaultScreen::Keyslots
+            | VaultScreen::AddMnemonicSlot
+            | VaultScreen::AddDeviceSlot
+            | VaultScreen::AddCertSlot
+            | VaultScreen::RewrapCertSlot
+            | VaultScreen::EditKeyslotLabel
+            | VaultScreen::RotateMnemonicSlot
+            | VaultScreen::RotateRecoverySecret
+            | VaultScreen::MnemonicReveal => ChipTone::Primary,
+            _ => ChipTone::Success,
+        },
+    }
+}
+
+fn selected_framework_summary(frameworks: &[FrameworkId]) -> String {
+    if frameworks.is_empty() {
+        "Selected frameworks: none".to_string()
+    } else {
+        format!(
+            "Selected frameworks: {}",
+            frameworks
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }
 
 fn vault_view(app: &GuiApp) -> Element<'_, Message> {
@@ -3080,8 +3464,347 @@ fn schedule_session_tick() -> Task<Message> {
     )
 }
 
+fn schedule_automation_tick() -> Task<Message> {
+    Task::perform(
+        async move {
+            thread::sleep(Duration::from_millis(60));
+        },
+        |_| Message::AutomationTick,
+    )
+}
+
 fn message_counts_as_activity(message: &Message) -> bool {
-    !matches!(message, Message::Poll | Message::SessionTick)
+    !matches!(
+        message,
+        Message::Poll | Message::SessionTick | Message::AutomationTick
+    )
+}
+
+fn configured_gui_automation() -> Result<Option<GuiAutomation>, String> {
+    let Some(raw_scenario) = env::var_os("PARANOID_GUI_AUTOMATION_SCENARIO") else {
+        return Ok(None);
+    };
+    let raw_scenario = raw_scenario.to_string_lossy().into_owned();
+    let scenario = GuiAutomationScenario::parse(raw_scenario.as_str())
+        .ok_or_else(|| format!("unknown GUI automation scenario: {raw_scenario}"))?;
+    let vault_path = env::var_os("PARANOID_GUI_AUTOMATION_VAULT_PATH")
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            "PARANOID_GUI_AUTOMATION_VAULT_PATH is required when GUI automation is enabled"
+                .to_string()
+        })?;
+    let backup_path = env::var_os("PARANOID_GUI_AUTOMATION_BACKUP_PATH")
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            "PARANOID_GUI_AUTOMATION_BACKUP_PATH is required when GUI automation is enabled"
+                .to_string()
+        })?;
+    let output_path = env::var_os("PARANOID_GUI_AUTOMATION_OUTPUT_PATH")
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            "PARANOID_GUI_AUTOMATION_OUTPUT_PATH is required when GUI automation is enabled"
+                .to_string()
+        })?;
+    Ok(Some(GuiAutomation {
+        scenario,
+        step: GuiAutomationStep::Start,
+        vault_path,
+        backup_path,
+        output_path,
+    }))
+}
+
+fn gui_automation_is_active(app: &GuiApp) -> bool {
+    app.automation.as_ref().is_some_and(|automation| {
+        !matches!(
+            automation.step,
+            GuiAutomationStep::Complete | GuiAutomationStep::Failed
+        )
+    })
+}
+
+fn set_gui_automation_step(app: &mut GuiApp, step: GuiAutomationStep) {
+    if let Some(automation) = &mut app.automation {
+        automation.step = step;
+    }
+}
+
+fn automation_backup_path(app: &GuiApp) -> Option<PathBuf> {
+    app.automation
+        .as_ref()
+        .map(|automation| automation.backup_path.clone())
+}
+
+fn write_gui_automation_outcome(
+    path: &Path,
+    status: &str,
+    scenario: GuiAutomationScenario,
+    vault_path: &Path,
+    backup_path: &Path,
+    message: &str,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let sanitized_message = message.replace('\n', " ");
+    fs::write(
+        path,
+        format!(
+            "status={status}\nscenario={}\nvault={}\nbackup={}\nmessage={sanitized_message}\n",
+            scenario.as_str(),
+            vault_path.display(),
+            backup_path.display()
+        ),
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn complete_gui_automation(app: &mut GuiApp, message: &str) {
+    let Some(automation) = app.automation.clone() else {
+        return;
+    };
+    if let Err(error) = write_gui_automation_outcome(
+        &automation.output_path,
+        "pass",
+        automation.scenario,
+        &automation.vault_path,
+        &automation.backup_path,
+        message,
+    ) {
+        eprintln!("failed to write GUI automation pass marker: {error}");
+        app.status = format!("GUI automation passed but outcome write failed: {error}");
+        set_gui_automation_step(app, GuiAutomationStep::Failed);
+        return;
+    }
+    app.status = message.to_string();
+    set_gui_automation_step(app, GuiAutomationStep::Complete);
+}
+
+fn fail_gui_automation(app: &mut GuiApp, message: String) {
+    let Some(automation) = app.automation.clone() else {
+        eprintln!("GUI automation failed without configuration: {message}");
+        app.status = format!("GUI automation failed: {message}");
+        return;
+    };
+    if let Err(error) = write_gui_automation_outcome(
+        &automation.output_path,
+        "fail",
+        automation.scenario,
+        &automation.vault_path,
+        &automation.backup_path,
+        message.as_str(),
+    ) {
+        eprintln!("failed to write GUI automation failure marker: {error}");
+    }
+    eprintln!("GUI automation failed: {message}");
+    app.status = format!("GUI automation failed: {message}");
+    set_gui_automation_step(app, GuiAutomationStep::Failed);
+}
+
+fn drive_gui_automation(app: &mut GuiApp) {
+    let Some(step) = app.automation.as_ref().map(|automation| automation.step) else {
+        return;
+    };
+    let result: Result<(), String> = (|| match step {
+        GuiAutomationStep::Start => {
+            let _ = update(app, Message::LengthChanged("24".to_string()));
+            let _ = update(app, Message::CountChanged("2".to_string()));
+            let _ = update(app, Message::FrameworkChanged(FrameworkId::Nist, true));
+            let _ = update(app, Message::RunAudit);
+            set_gui_automation_step(app, GuiAutomationStep::WaitForAudit);
+            Ok(())
+        }
+        GuiAutomationStep::WaitForAudit => {
+            let _ = update(app, Message::Poll);
+            if app.worker.is_some() {
+                return Ok(());
+            }
+            let report = app
+                .report
+                .as_ref()
+                .ok_or_else(|| "audit worker completed without producing a report".to_string())?;
+            if !matches!(app.generator_screen, GeneratorScreen::Results) {
+                return Err("generator automation never reached the results view".to_string());
+            }
+            if report.passwords.len() != 2 {
+                return Err(format!(
+                    "generator automation expected 2 passwords, found {}",
+                    report.passwords.len()
+                ));
+            }
+            let _ = update(app, Message::SelectTab(DetailTab::Entropy));
+            let _ = update(app, Message::SwitchSurface(Surface::Vault));
+            if !matches!(app.surface, Surface::Vault)
+                || !matches!(app.vault.screen, VaultScreen::List)
+            {
+                return Err("vault automation did not reach the unlocked vault list".to_string());
+            }
+            set_gui_automation_step(app, GuiAutomationStep::AddLogin);
+            Ok(())
+        }
+        GuiAutomationStep::AddLogin => {
+            let _ = update(app, Message::OpenVaultAddLogin);
+            let _ = update(app, Message::VaultTitleChanged("GitHub".to_string()));
+            let _ = update(app, Message::VaultUsernameChanged("octocat".to_string()));
+            let _ = update(app, Message::VaultPasswordChanged("hunter2".to_string()));
+            let _ = update(app, Message::VaultFolderChanged("Work".to_string()));
+            let _ = update(app, Message::VaultTagsChanged("work,code".to_string()));
+            let _ = update(app, Message::VaultSaveLogin);
+            if !app.status.contains("Stored login item") {
+                return Err(format!(
+                    "vault automation failed to store a login record: {}",
+                    app.status
+                ));
+            }
+            match app.vault.detail.as_ref().map(|item| &item.payload) {
+                Some(VaultItemPayload::Login(login))
+                    if login.title == "GitHub" && login.username == "octocat" => {}
+                _ => {
+                    return Err(
+                        "vault automation did not select the newly stored GitHub login".to_string(),
+                    );
+                }
+            }
+            set_gui_automation_step(app, GuiAutomationStep::FilterLogin);
+            Ok(())
+        }
+        GuiAutomationStep::FilterLogin => {
+            let _ = update(app, Message::VaultSearchChanged("GitHub".to_string()));
+            if app.vault.items.len() != 1 {
+                return Err(format!(
+                    "vault automation expected one filtered GitHub login, found {}",
+                    app.vault.items.len()
+                ));
+            }
+            if vault_filter_summary(&app.vault) != "query=GitHub" {
+                return Err(format!(
+                    "vault automation expected the GitHub query filter to be active, found {}",
+                    vault_filter_summary(&app.vault)
+                ));
+            }
+            set_gui_automation_step(app, GuiAutomationStep::RotateGeneratedPassword);
+            Ok(())
+        }
+        GuiAutomationStep::RotateGeneratedPassword => {
+            let _ = update(app, Message::OpenVaultGenerateStore);
+            let _ = update(app, Message::VaultLengthChanged("28".to_string()));
+            let _ = update(app, Message::VaultFrameworksChanged("nist".to_string()));
+            let _ = update(app, Message::VaultMinDigitsChanged("2".to_string()));
+            let _ = update(app, Message::VaultSaveGenerated);
+            if !app
+                .status
+                .contains("Generated one password and rotated item")
+            {
+                return Err(format!(
+                    "vault automation failed to rotate the selected login: {}",
+                    app.status
+                ));
+            }
+            match app.vault.detail.as_ref().map(|item| &item.payload) {
+                Some(VaultItemPayload::Login(login)) if login.password != "hunter2" => {}
+                Some(VaultItemPayload::Login(_)) => {
+                    return Err(
+                        "vault automation rotated the login but left the original password intact"
+                            .to_string(),
+                    );
+                }
+                _ => {
+                    return Err(
+                        "vault automation lost the selected login after generate-and-store"
+                            .to_string(),
+                    );
+                }
+            }
+            set_gui_automation_step(app, GuiAutomationStep::OpenKeyslots);
+            Ok(())
+        }
+        GuiAutomationStep::OpenKeyslots => {
+            let _ = update(app, Message::OpenVaultKeyslots);
+            if !matches!(app.vault.screen, VaultScreen::Keyslots) {
+                return Err("vault automation did not reach the keyslot view".to_string());
+            }
+            set_gui_automation_step(app, GuiAutomationStep::EnrollMnemonic);
+            Ok(())
+        }
+        GuiAutomationStep::EnrollMnemonic => {
+            let _ = update(app, Message::OpenVaultAddMnemonicSlot);
+            let _ = update(
+                app,
+                Message::VaultKeyslotLabelChanged("paper-backup".to_string()),
+            );
+            let _ = update(app, Message::VaultEnrollMnemonicSlot);
+            if !matches!(app.vault.screen, VaultScreen::MnemonicReveal) {
+                return Err("vault automation did not reach the mnemonic reveal screen".to_string());
+            }
+            let Some(enrollment) = &app.vault.latest_mnemonic_enrollment else {
+                return Err(
+                    "vault automation did not retain the enrolled mnemonic phrase".to_string(),
+                );
+            };
+            if enrollment.keyslot.label.as_deref() != Some("paper-backup") {
+                return Err(format!(
+                    "vault automation enrolled the mnemonic slot with an unexpected label: {:?}",
+                    enrollment.keyslot.label
+                ));
+            }
+            set_gui_automation_step(app, GuiAutomationStep::ReturnToVault);
+            Ok(())
+        }
+        GuiAutomationStep::ReturnToVault => {
+            let _ = update(app, Message::VaultCancelFlow);
+            if !matches!(app.vault.screen, VaultScreen::Keyslots) {
+                return Err(
+                    "vault automation did not return from mnemonic reveal to keyslots".to_string(),
+                );
+            }
+            let _ = update(app, Message::VaultCancelFlow);
+            if !matches!(app.vault.screen, VaultScreen::List) {
+                return Err(
+                    "vault automation did not return from keyslots to the vault list".to_string(),
+                );
+            }
+            set_gui_automation_step(app, GuiAutomationStep::ExportBackup);
+            Ok(())
+        }
+        GuiAutomationStep::ExportBackup => {
+            let Some(backup_path) = automation_backup_path(app) else {
+                return Err(
+                    "vault automation did not have a configured backup output path".to_string(),
+                );
+            };
+            let _ = update(app, Message::OpenVaultExportBackup);
+            let _ = update(
+                app,
+                Message::VaultBackupPathChanged(backup_path.display().to_string()),
+            );
+            let _ = update(app, Message::VaultExportBackup);
+            if !backup_path.exists() {
+                return Err(format!(
+                    "vault automation did not write the expected backup package: {}",
+                    backup_path.display()
+                ));
+            }
+            if !app.status.contains("Exported encrypted vault backup") {
+                return Err(format!(
+                    "vault automation exported the backup but reported an unexpected status: {}",
+                    app.status
+                ));
+            }
+            let _ = update(app, Message::SwitchSurface(Surface::Generator));
+            let _ = update(app, Message::GoToConfigure);
+            complete_gui_automation(
+                app,
+                "GUI automation passed. Generator audit, vault CRUD, generate-and-rotate, mnemonic enrollment, and backup export all completed under xvfb-run.",
+            );
+            Ok(())
+        }
+        GuiAutomationStep::Complete | GuiAutomationStep::Failed => Ok(()),
+    })();
+    if let Err(error) = result {
+        fail_gui_automation(app, error);
+    }
 }
 
 fn poll_session_hardening(app: &mut GuiApp) {
@@ -4305,8 +5028,30 @@ mod tests {
         x509::{X509, X509NameBuilder},
     };
     use paranoid_vault::{SecretString, VaultAuth, unlock_vault, unlock_vault_with_mnemonic};
-    use std::{fs, path::Path, path::PathBuf, thread, time::Duration};
+    use std::{
+        fs,
+        path::Path,
+        path::PathBuf,
+        thread,
+        time::{Duration, Instant},
+    };
     use tempfile::tempdir;
+
+    #[test]
+    fn slint_shell_bindings_are_generated() {
+        fn assert_component_handle<T: slint::ComponentHandle>() {}
+
+        type Shell = slint_shell::ParanoidPasswdShell;
+
+        assert_component_handle::<Shell>();
+
+        let _set_mode: fn(&Shell, slint::SharedString) = Shell::set_mode;
+        let _get_mode: fn(&Shell) -> slint::SharedString = Shell::get_mode;
+        let _set_posture: fn(&Shell, slint::SharedString) = Shell::set_posture;
+        let _get_posture: fn(&Shell) -> slint::SharedString = Shell::get_posture;
+        let _set_readiness: fn(&Shell, slint::SharedString) = Shell::set_readiness;
+        let _get_readiness: fn(&Shell) -> slint::SharedString = Shell::get_readiness;
+    }
 
     fn with_test_vault() -> (std::path::PathBuf, VaultOpenOptions) {
         let tempdir = tempdir().expect("tempdir");
@@ -4397,6 +5142,19 @@ mod tests {
         (cert_path, key_path)
     }
 
+    fn wait_for_worker(app: &mut GuiApp) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.worker.is_some() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+            let _ = update(app, Message::Poll);
+        }
+        let _ = update(app, Message::Poll);
+        assert!(
+            app.worker.is_none(),
+            "GUI worker did not complete before timeout"
+        );
+    }
+
     #[test]
     fn framework_selection_updates_request_constraints() {
         let (mut app, _) = boot();
@@ -4452,6 +5210,135 @@ mod tests {
         };
         assert_eq!(login.title, "GitHub");
         assert_eq!(login.tags, vec!["work".to_string()]);
+    }
+
+    #[test]
+    fn gui_end_to_end_operator_workflow_exercises_generator_and_vault_flows() {
+        let transfer_dir = tempdir().expect("transfer dir");
+        let backup_path = transfer_dir.path().join("vault.backup.json");
+        let transfer_path = transfer_dir.path().join("vault.transfer.ppvt.json");
+
+        let (_path, options) = with_test_vault();
+        let (mut app, _) = boot();
+        app.vault.options = options;
+        let _ = refresh_vault_state(&mut app);
+
+        let _ = update(&mut app, Message::LengthChanged("24".to_string()));
+        let _ = update(&mut app, Message::CountChanged("2".to_string()));
+        let _ = update(&mut app, Message::FrameworkChanged(FrameworkId::Nist, true));
+        let _ = update(&mut app, Message::RunAudit);
+        wait_for_worker(&mut app);
+
+        assert!(matches!(app.generator_screen, GeneratorScreen::Results));
+        assert_eq!(app.report.as_ref().expect("report").passwords.len(), 2);
+        assert!(app.status.contains("Audit complete"));
+
+        let _ = update(&mut app, Message::SwitchSurface(Surface::Vault));
+        assert!(matches!(app.vault.screen, VaultScreen::List));
+
+        let _ = update(&mut app, Message::OpenVaultAddLogin);
+        let _ = update(&mut app, Message::VaultTitleChanged("GitHub".to_string()));
+        let _ = update(
+            &mut app,
+            Message::VaultUsernameChanged("octocat".to_string()),
+        );
+        let _ = update(
+            &mut app,
+            Message::VaultPasswordChanged("hunter2".to_string()),
+        );
+        let _ = update(&mut app, Message::VaultFolderChanged("Work".to_string()));
+        let _ = update(&mut app, Message::VaultTagsChanged("work,code".to_string()));
+        let _ = update(&mut app, Message::VaultSaveLogin);
+
+        assert!(matches!(app.vault.screen, VaultScreen::List));
+        assert_eq!(app.vault.items.len(), 1);
+        assert!(app.status.contains("Stored login item"));
+
+        let _ = update(&mut app, Message::OpenVaultGenerateStore);
+        let _ = update(&mut app, Message::VaultLengthChanged("20".to_string()));
+        let _ = update(
+            &mut app,
+            Message::VaultFrameworksChanged("nist".to_string()),
+        );
+        let _ = update(&mut app, Message::VaultSaveGenerated);
+
+        let VaultItemPayload::Login(login) = &app.vault.detail.as_ref().expect("detail").payload
+        else {
+            panic!("expected login");
+        };
+        assert_eq!(login.password.len(), 20);
+        assert_eq!(login.password_history.len(), 1);
+        assert!(app.status.contains("rotated item"));
+
+        let _ = update(&mut app, Message::VaultSearchChanged("GitHub".to_string()));
+        assert_eq!(app.vault.items.len(), 1);
+        assert_eq!(app.vault.items[0].title, "GitHub");
+
+        let _ = update(&mut app, Message::OpenVaultKeyslots);
+        assert!(matches!(app.vault.screen, VaultScreen::Keyslots));
+        let _ = update(&mut app, Message::OpenVaultAddMnemonicSlot);
+        let _ = update(
+            &mut app,
+            Message::VaultKeyslotLabelChanged("paper-backup".to_string()),
+        );
+        let _ = update(&mut app, Message::VaultEnrollMnemonicSlot);
+
+        assert!(matches!(app.vault.screen, VaultScreen::MnemonicReveal));
+        assert!(app.vault.latest_mnemonic_enrollment.is_some());
+        assert!(app.status.contains("Mnemonic recovery slot enrolled"));
+
+        let _ = update(&mut app, Message::VaultCancelFlow);
+        assert!(matches!(app.vault.screen, VaultScreen::Keyslots));
+        let _ = update(&mut app, Message::VaultCancelFlow);
+        assert!(matches!(app.vault.screen, VaultScreen::List));
+
+        let _ = update(&mut app, Message::OpenVaultExportBackup);
+        let _ = update(
+            &mut app,
+            Message::VaultBackupPathChanged(backup_path.display().to_string()),
+        );
+        let _ = update(&mut app, Message::VaultExportBackup);
+        assert!(backup_path.exists());
+        assert!(app.status.contains("Exported encrypted vault backup"));
+
+        let _ = update(&mut app, Message::OpenVaultExportTransfer);
+        let _ = update(
+            &mut app,
+            Message::VaultTransferPathChanged(transfer_path.display().to_string()),
+        );
+        let _ = update(
+            &mut app,
+            Message::VaultTransferPasswordChanged("transfer secret".to_string()),
+        );
+        let _ = update(&mut app, Message::VaultExportTransfer);
+        assert!(transfer_path.exists());
+        assert!(app.status.contains("Exported encrypted transfer package"));
+
+        let (_dest_path, dest_options) = with_test_vault();
+        let (mut dest_app, _) = boot();
+        dest_app.vault.options = dest_options;
+        let _ = refresh_vault_state(&mut dest_app);
+        let _ = update(&mut dest_app, Message::SwitchSurface(Surface::Vault));
+        let _ = update(&mut dest_app, Message::OpenVaultImportTransfer);
+        let _ = update(
+            &mut dest_app,
+            Message::VaultTransferPathChanged(transfer_path.display().to_string()),
+        );
+        let _ = update(
+            &mut dest_app,
+            Message::VaultTransferPasswordChanged("transfer secret".to_string()),
+        );
+        let _ = update(&mut dest_app, Message::VaultImportTransfer);
+
+        assert!(matches!(dest_app.vault.screen, VaultScreen::List));
+        assert_eq!(dest_app.vault.items.len(), 1);
+        let VaultItemPayload::Login(imported) =
+            &dest_app.vault.detail.as_ref().expect("detail").payload
+        else {
+            panic!("expected imported login");
+        };
+        assert_eq!(imported.title, "GitHub");
+        assert!(dest_app.status.contains("Imported transfer package"));
     }
 
     #[test]

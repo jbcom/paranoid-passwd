@@ -4,7 +4,7 @@ use event_listener::Event;
 use tracing::{debug, instrument, trace};
 
 use crate::{
-    async_lock::Mutex, connection::MsgBroadcaster, Executor, Message, OwnedMatchRule, Task,
+    Executor, Message, OwnedMatchRule, Task, async_lock::Mutex, connection::MsgBroadcaster,
 };
 
 use super::socket::ReadHalf;
@@ -44,7 +44,7 @@ impl SocketReader {
     }
 
     // Keep receiving messages and put them on the queue.
-    #[instrument(name = "socket reader", skip(self))]
+    #[instrument(name = "socket reader", skip(self), level = "trace")]
     async fn receive_msg(mut self) {
         loop {
             trace!("Waiting for message on the socket..");
@@ -76,12 +76,14 @@ impl SocketReader {
                     // 1. the channel is closed.
                     // 2. No active receivers.
                     //
-                    // In either case, just log it.
-                    trace!(
-                        "Error broadcasting message to stream for `{:?}`: {:?}",
-                        rule,
-                        e
-                    );
+                    // In either case, just log it unless this is the channel for the generic
+                    // unfiltered stream, where the channel is not created on-demand.
+                    if rule.is_some() {
+                        trace!(
+                            "Error broadcasting message to stream for `{:?}`: {:?}",
+                            rule, e
+                        );
+                    }
                 }
             }
             trace!("Broadcasted to all streams: {:?}", msg);
@@ -95,7 +97,7 @@ impl SocketReader {
         }
     }
 
-    #[instrument]
+    #[instrument(skip(self), level = "trace")]
     async fn read_socket(&mut self) -> crate::Result<Message> {
         self.activity_event.notify(usize::MAX);
         let seq = self.prev_seq + 1;

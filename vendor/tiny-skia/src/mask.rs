@@ -44,9 +44,7 @@ pub struct Mask {
 }
 
 impl Mask {
-    /// Creates a new mask by taking ownership over a mask buffer.
-    ///
-    /// The size needs to match the data provided.
+    /// Creates a new mask, allocating a buffer of the given size.
     pub fn new(width: u32, height: u32) -> Option<Self> {
         let size = IntSize::from_wh(width, height)?;
         Some(Mask {
@@ -134,6 +132,11 @@ impl Mask {
         self.data.as_mut_slice()
     }
 
+    /// Consumes the mask and returns its owned internal data.
+    pub fn take(self) -> Vec<u8> {
+        self.data
+    }
+
     pub(crate) fn as_submask(&self) -> SubMaskRef<'_> {
         SubMaskRef {
             size: self.size,
@@ -183,10 +186,13 @@ impl Mask {
             std::io::Error::new(std::io::ErrorKind::Other, msg).into()
         }
 
-        let mut decoder = png::Decoder::new(data);
+        let mut decoder = png::Decoder::new(std::io::BufReader::new(std::io::Cursor::new(data)));
         decoder.set_transformations(png::Transformations::normalize_to_color8());
         let mut reader = decoder.read_info()?;
-        let mut img_data = vec![0; reader.output_buffer_size()];
+        let output_buffer_size = reader
+            .output_buffer_size()
+            .ok_or(png::DecodingError::LimitsExceeded)?;
+        let mut img_data = vec![0; output_buffer_size];
         let info = reader.next_frame(&mut img_data)?;
 
         if info.bit_depth != png::BitDepth::Eight {

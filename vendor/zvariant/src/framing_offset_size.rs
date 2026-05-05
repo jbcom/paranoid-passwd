@@ -1,4 +1,4 @@
-use crate::{Error, Result, WriteBytes, LE};
+use crate::{Error, LE, Result, WriteBytes};
 
 // Used internally for GVariant encoding and decoding.
 //
@@ -64,11 +64,11 @@ impl FramingOffsetSize {
 
     fn max(self) -> usize {
         match self {
-            FramingOffsetSize::U8 => std::u8::MAX as usize,
-            FramingOffsetSize::U16 => std::u16::MAX as usize,
-            FramingOffsetSize::U32 => std::u32::MAX as usize,
+            FramingOffsetSize::U8 => u8::MAX as usize,
+            FramingOffsetSize::U16 => u16::MAX as usize,
+            FramingOffsetSize::U32 => u32::MAX as usize,
             #[cfg(not(target_pointer_width = "32"))]
-            FramingOffsetSize::U64 => std::u64::MAX as usize,
+            FramingOffsetSize::U64 => u64::MAX as usize,
         }
     }
 
@@ -93,28 +93,28 @@ mod tests {
     #[test]
     fn framing_offset_size_bump() {
         assert_eq!(
-            FramingOffsetSize::for_bare_container(std::u8::MAX as usize - 3, 3),
+            FramingOffsetSize::for_bare_container(u8::MAX as usize - 3, 3),
             FramingOffsetSize::U8
         );
         assert_eq!(
-            FramingOffsetSize::for_bare_container(std::u8::MAX as usize - 1, 2),
+            FramingOffsetSize::for_bare_container(u8::MAX as usize - 1, 2),
             FramingOffsetSize::U16
         );
         assert_eq!(
-            FramingOffsetSize::for_bare_container(std::u16::MAX as usize - 4, 2),
+            FramingOffsetSize::for_bare_container(u16::MAX as usize - 4, 2),
             FramingOffsetSize::U16
         );
         assert_eq!(
-            FramingOffsetSize::for_bare_container(std::u16::MAX as usize - 3, 2),
+            FramingOffsetSize::for_bare_container(u16::MAX as usize - 3, 2),
             FramingOffsetSize::U32
         );
         assert_eq!(
-            FramingOffsetSize::for_bare_container(std::u32::MAX as usize - 12, 3),
+            FramingOffsetSize::for_bare_container(u32::MAX as usize - 12, 3),
             FramingOffsetSize::U32
         );
         #[cfg(not(target_pointer_width = "32"))]
         assert_eq!(
-            FramingOffsetSize::for_bare_container(std::u32::MAX as usize - 11, 3),
+            FramingOffsetSize::for_bare_container(u32::MAX as usize - 11, 3),
             FramingOffsetSize::U64
         );
     }

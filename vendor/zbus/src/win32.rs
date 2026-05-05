@@ -1,6 +1,6 @@
 use std::{
     ffi::{CStr, OsStr},
-    io::{Error, ErrorKind},
+    io::Error,
     net::SocketAddr,
     os::windows::{
         io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle},
@@ -11,22 +11,23 @@ use std::{
 
 use windows_sys::Win32::{
     Foundation::{
-        LocalFree, ERROR_INSUFFICIENT_BUFFER, FALSE, HANDLE, NO_ERROR, WAIT_ABANDONED,
+        ERROR_INSUFFICIENT_BUFFER, FALSE, HANDLE, LocalFree, NO_ERROR, WAIT_ABANDONED,
         WAIT_OBJECT_0,
     },
-    NetworkManagement::IpHelper::{GetTcpTable2, MIB_TCPTABLE2, MIB_TCP_STATE_ESTAB},
+    NetworkManagement::IpHelper::{GetTcpTable2, MIB_TCP_STATE_ESTAB, MIB_TCPTABLE2},
     Networking::WinSock::INADDR_LOOPBACK,
     Security::{
-        Authorization::ConvertSidToStringSidA, GetTokenInformation, IsValidSid, TokenUser,
-        TOKEN_QUERY, TOKEN_USER,
+        Authorization::ConvertSidToStringSidA, GetTokenInformation, IsValidSid, TOKEN_QUERY,
+        TOKEN_USER, TokenUser,
     },
     System::{
-        Memory::{MapViewOfFile, OpenFileMappingW, FILE_MAP_READ},
+        Memory::{FILE_MAP_READ, MapViewOfFile, OpenFileMappingW},
         Threading::{
-            CreateMutexW, GetCurrentProcess, OpenProcess, OpenProcessToken, ReleaseMutex,
-            WaitForSingleObject, INFINITE, PROCESS_ACCESS_RIGHTS,
-            PROCESS_QUERY_LIMITED_INFORMATION,
+            CreateMutexW, GetCurrentProcess, INFINITE, OpenProcess, OpenProcessToken,
+            PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, ReleaseMutex,
+            WaitForSingleObject,
         },
+        WindowsProgramming::{GetCurrentHwProfileA, HW_PROFILE_INFOA},
     },
 };
 
@@ -52,9 +53,9 @@ impl Mutex {
     }
 
     pub fn lock(&self) -> MutexGuard<'_> {
-        match unsafe { WaitForSingleObject(self.0.as_raw_handle() as isize, INFINITE) } {
+        match unsafe { WaitForSingleObject(self.0.as_raw_handle(), INFINITE) } {
             WAIT_ABANDONED | WAIT_OBJECT_0 => MutexGuard(self),
-            err => panic!("WaitForSingleObject() failed: return code {}", err),
+            err => panic!("WaitForSingleObject() failed: return code {err}"),
         }
     }
 }
@@ -63,15 +64,15 @@ struct MutexGuard<'a>(&'a Mutex);
 
 impl Drop for MutexGuard<'_> {
     fn drop(&mut self) {
-        unsafe { ReleaseMutex(self.0 .0.as_raw_handle() as isize) };
+        unsafe { ReleaseMutex(self.0.0.as_raw_handle()) };
     }
 }
 
-// A process handle
+/// A process handle.
 pub struct ProcessHandle(OwnedHandle);
 
 impl ProcessHandle {
-    // Open the process associated with the process_id (if None, the current process)
+    /// Open the process associated with the process_id (if None, the current process).
     pub fn open(
         process_id: Option<u32>,
         desired_access: PROCESS_ACCESS_RIGHTS,
@@ -82,7 +83,7 @@ impl ProcessHandle {
             unsafe { GetCurrentProcess() }
         };
 
-        if process == 0 {
+        if process.is_null() {
             Err(Error::last_os_error())
         } else {
             // SAFETY: We have exclusive ownership over the process handle
@@ -93,23 +94,23 @@ impl ProcessHandle {
     }
 }
 
-// A process token
-//
-// See MSDN documentation:
-// https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocesstoken
-//
-// Get the process security identifier with the `sid()` function.
+/// A process token.
+///
+/// See MSDN documentation:
+/// https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocesstoken
+///
+/// Get the process security identifier with the `sid()` function.
 pub struct ProcessToken(OwnedHandle);
 
 impl ProcessToken {
-    // Open the access token associated with the process_id (if None, the current process)
+    /// Open the access token associated with the process_id (if None, the current process).
     pub fn open(process_id: Option<u32>) -> Result<Self, Error> {
-        let mut process_token: HANDLE = HANDLE::default();
+        let mut process_token: HANDLE = ptr::null_mut();
         let process = ProcessHandle::open(process_id, PROCESS_QUERY_LIMITED_INFORMATION)?;
 
         if unsafe {
             OpenProcessToken(
-                process.0.as_raw_handle() as isize,
+                process.0.as_raw_handle(),
                 TOKEN_QUERY,
                 ptr::addr_of_mut!(process_token),
             ) == 0
@@ -123,7 +124,7 @@ impl ProcessToken {
         }
     }
 
-    // Return the process SID (security identifier) as a string
+    /// Return the process SID (security identifier) as a string.
     pub fn sid(&self) -> Result<String, Error> {
         let mut len = 256;
         let mut token_info;
@@ -133,7 +134,7 @@ impl ProcessToken {
 
             let result = unsafe {
                 GetTokenInformation(
-                    self.0.as_raw_handle() as isize,
+                    self.0.as_raw_handle(),
                     TokenUser,
                     token_info.as_mut_ptr().cast(),
                     len,
@@ -156,7 +157,7 @@ impl ProcessToken {
         let sid = unsafe { (*token_info.as_ptr().cast::<TOKEN_USER>()).User.Sid };
 
         if unsafe { IsValidSid(sid.cast()) == FALSE } {
-            return Err(Error::new(ErrorKind::Other, "Invalid SID"));
+            return Err(Error::other("Invalid SID"));
         }
 
         let mut pstr = ptr::null_mut();
@@ -167,7 +168,7 @@ impl ProcessToken {
         let sid = unsafe { CStr::from_ptr(pstr.cast()) };
         let ret = sid
             .to_str()
-            .map_err(|_| Error::new(ErrorKind::Other, "Invalid SID"))?
+            .map_err(|_| Error::other("Invalid SID"))?
             .to_owned();
         unsafe {
             LocalFree(pstr.cast());
@@ -177,7 +178,7 @@ impl ProcessToken {
     }
 }
 
-// Get the process ID of the local socket address
+/// Get the process ID of the local socket address.
 // TODO: add ipv6 support
 pub fn socket_addr_get_pid(addr: &SocketAddr) -> Result<u32, Error> {
     let mut len = 4096;
@@ -219,10 +220,10 @@ pub fn socket_addr_get_pid(addr: &SocketAddr) -> Result<u32, Error> {
         }
     }
 
-    Err(Error::new(ErrorKind::Other, "PID of TCP address not found"))
+    Err(Error::other("PID of TCP address not found"))
 }
 
-// Get the process ID of the connected peer
+/// Get the process ID of the connected peer.
 #[cfg(any(test, not(feature = "tokio")))]
 pub fn tcp_stream_get_peer_pid(stream: &std::net::TcpStream) -> Result<u32, Error> {
     let peer_addr = stream.peer_addr()?;
@@ -238,11 +239,11 @@ fn last_err() -> std::io::Error {
     std::io::Error::from_raw_os_error(err)
 }
 
-// Get the process ID of the connected peer
+/// Get the process ID of the connected peer.
 #[cfg(not(feature = "tokio"))]
 pub fn unix_stream_get_peer_pid(stream: &UnixStream) -> Result<u32, Error> {
     use std::os::windows::io::AsRawSocket;
-    use windows_sys::Win32::Networking::WinSock::{WSAIoctl, IOC_OUT, IOC_VENDOR, SOCKET_ERROR};
+    use windows_sys::Win32::Networking::WinSock::{IOC_OUT, IOC_VENDOR, SOCKET_ERROR, WSAIoctl};
 
     macro_rules! _WSAIOR {
         ($x:expr, $y:expr) => {
@@ -285,7 +286,7 @@ fn read_shm(name: &str) -> Result<Vec<u8>, crate::Error> {
 
         let res = unsafe { OpenFileMappingW(FILE_MAP_READ, FALSE, wide_name.as_ptr()) };
 
-        if res != 0 {
+        if !res.is_null() {
             // SAFETY: We have exclusive ownership over the file mapping handle
             unsafe { OwnedHandle::from_raw_handle(res as RawHandle) }
         } else {
@@ -295,7 +296,7 @@ fn read_shm(name: &str) -> Result<Vec<u8>, crate::Error> {
         }
     };
 
-    let addr = unsafe { MapViewOfFile(handle.as_raw_handle() as isize, FILE_MAP_READ, 0, 0, 0) };
+    let addr = unsafe { MapViewOfFile(handle.as_raw_handle(), FILE_MAP_READ, 0, 0, 0) };
 
     if addr.Value.is_null() {
         return Err(crate::Error::Address("MapViewOfFile() failed".to_owned()));
@@ -311,9 +312,28 @@ pub fn autolaunch_bus_address() -> Result<Address, crate::Error> {
 
     let addr = read_shm("DBusDaemonAddressInfo")?;
     let addr = String::from_utf8(addr)
-        .map_err(|e| crate::Error::Address(format!("Unable to parse address as UTF-8: {}", e)))?;
+        .map_err(|e| crate::Error::Address(format!("Unable to parse address as UTF-8: {e}")))?;
 
     addr.parse()
+}
+
+/// Get the machine ID using the hardware profile GUID.
+///
+/// As per the D-Bus specification, on Windows we use the `GetCurrentHwProfile` API.
+pub fn machine_id() -> Result<String, Error> {
+    let mut hw_profile: HW_PROFILE_INFOA = unsafe { std::mem::zeroed() };
+
+    let ret = unsafe { GetCurrentHwProfileA(&mut hw_profile) };
+    if ret == 0 {
+        return Err(Error::last_os_error());
+    }
+
+    let guid = unsafe { CStr::from_ptr(hw_profile.szHwProfileGuid.as_ptr().cast()) };
+    let guid = guid
+        .to_str()
+        .map_err(|_| Error::other("Invalid hardware profile GUID"))?;
+
+    Ok(guid.replace(['{', '}', '-'], ""))
 }
 
 #[cfg(test)]
@@ -331,5 +351,15 @@ mod tests {
         let process_token = ProcessToken::open(if pid != 0 { Some(pid) } else { None }).unwrap();
         let sid = process_token.sid().unwrap();
         assert!(!sid.is_empty());
+    }
+
+    #[test]
+    fn machine_id() {
+        let id = super::machine_id().expect("machine_id should succeed");
+        assert_eq!(id.len(), 32, "machine ID should be 32 hex characters");
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "machine ID should only contain hex characters"
+        );
     }
 }

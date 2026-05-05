@@ -1,0 +1,142 @@
+export component ParanoidPasswdShell inherits Window {
+    in property <string> mode: "Generator";
+    in property <string> posture: "Audit ready";
+    in property <string> readiness: "Ready: local generator and encrypted vault";
+
+    title: "paranoid-passwd";
+    preferred-width: 1180px;
+    preferred-height: 760px;
+    background: #1a1b26;
+
+    Rectangle {
+        x: 24px;
+        y: 24px;
+        width: parent.width - 48px;
+        height: 260px;
+        background: #202233;
+        border-color: #3b4261;
+        border-width: 1px;
+        border-radius: 6px;
+
+        Text {
+            x: 32px;
+            y: 36px;
+            text: "paranoid-passwd";
+            color: #e6ecff;
+            font-size: 44px;
+            font-weight: 600;
+        }
+
+        Text {
+            x: 34px;
+            y: 104px;
+            text: "Local secrets. Verifiable trust.";
+            color: #c0caf5;
+            font-size: 25px;
+        }
+
+        Text {
+            x: 34px;
+            y: 152px;
+            width: parent.width - 68px;
+            text: "Native password generation, encrypted vault operations, and verifiable assurance from one local product surface.";
+            color: #a9b1d6;
+            font-size: 19px;
+            wrap: word-wrap;
+        }
+
+        Rectangle {
+            x: 34px;
+            y: 204px;
+            width: 148px;
+            height: 42px;
+            background: #2ac3de;
+            border-radius: 4px;
+
+            Text {
+                text: root.mode;
+                color: #11131f;
+                font-size: 18px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle {
+            x: 198px;
+            y: 204px;
+            width: 168px;
+            height: 42px;
+            background: #9ece6a;
+            border-radius: 4px;
+
+            Text {
+                text: root.posture;
+                color: #11131f;
+                font-size: 18px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    Rectangle {
+        x: 24px;
+        y: 308px;
+        width: (parent.width - 72px) / 2;
+        height: parent.height - 332px;
+        background: #202233;
+        border-color: #3b4261;
+        border-width: 1px;
+        border-radius: 6px;
+
+        Text {
+            x: 32px;
+            y: 34px;
+            text: "Generator policy";
+            color: #e6ecff;
+            font-size: 33px;
+            font-weight: 600;
+        }
+
+        Text {
+            x: 32px;
+            y: 94px;
+            width: parent.width - 64px;
+            text: "Shape the password contract before the audit runs. The core still owns randomness, rejection sampling, and compliance math.";
+            color: #c0caf5;
+            font-size: 18px;
+            wrap: word-wrap;
+        }
+    }
+
+    Rectangle {
+        x: (parent.width / 2) + 12px;
+        y: 308px;
+        width: (parent.width - 72px) / 2;
+        height: parent.height - 332px;
+        background: #202233;
+        border-color: #3b4261;
+        border-width: 1px;
+        border-radius: 6px;
+
+        Text {
+            x: 32px;
+            y: 34px;
+            text: "Mission control";
+            color: #e6ecff;
+            font-size: 33px;
+            font-weight: 600;
+        }
+
+        Text {
+            x: 32px;
+            y: 94px;
+            width: parent.width - 64px;
+            text: root.readiness;
+            color: #c0caf5;
+            font-size: 18px;
+            wrap: word-wrap;
+        }
+    }
+}

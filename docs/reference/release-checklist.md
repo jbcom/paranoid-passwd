@@ -17,6 +17,7 @@ Use this checklist before and after cutting a release from `main`.
 2. Run the local merge-equivalent gates.
 
    ```bash
+   make verify-assurance
    make ci
    ```
 
@@ -33,10 +34,12 @@ Use this checklist before and after cutting a release from `main`.
    make docs-check
    ```
 
-5. Confirm the tracked human-review inventory still matches the source tree.
+5. Confirm the security assurance report can be generated for the candidate.
 
    ```bash
-   make verify-human-review
+   python3 scripts/security_assurance_gate.py \
+     --json-out dist/security-assurance-report.json \
+     --markdown-out dist/security-assurance-report.md
    ```
 
 6. If you are validating an already-published tag, verify the public release surface directly.

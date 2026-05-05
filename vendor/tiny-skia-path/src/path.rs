@@ -15,7 +15,7 @@ use crate::NoStdFloat;
 
 /// A path verb.
 #[allow(missing_docs)]
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub enum PathVerb {
     Move,
     Line,
@@ -140,7 +140,7 @@ impl Path {
     }
 
     /// Returns an iterator over path's segments.
-    pub fn segments(&self) -> PathSegmentsIter {
+    pub fn segments(&self) -> PathSegmentsIter<'_> {
         PathSegmentsIter {
             path: self,
             verb_index: 0,
@@ -265,7 +265,7 @@ pub struct PathSegmentsIter<'a> {
     last_point: Point,
 }
 
-impl<'a> PathSegmentsIter<'a> {
+impl PathSegmentsIter<'_> {
     /// Sets the auto closing mode. Off by default.
     ///
     /// When enabled, emits an additional `PathSegment::Line` from the current position
@@ -331,7 +331,7 @@ impl<'a> PathSegmentsIter<'a> {
     }
 }
 
-impl<'a> Iterator for PathSegmentsIter<'a> {
+impl Iterator for PathSegmentsIter<'_> {
     type Item = PathSegment;
 
     fn next(&mut self) -> Option<Self::Item> {

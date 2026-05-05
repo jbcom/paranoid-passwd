@@ -1,13 +1,14 @@
+use async_broadcast::Receiver as ActiveReceiver;
 #[cfg(not(feature = "tokio"))]
 use async_io::Async;
+use enumflags2::BitFlags;
 use event_listener::Event;
-use static_assertions::assert_impl_all;
 #[cfg(not(feature = "tokio"))]
 use std::net::TcpStream;
 #[cfg(all(unix, not(feature = "tokio")))]
 use std::os::unix::net::UnixStream;
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     vec,
 };
 #[cfg(feature = "tokio")]
@@ -21,13 +22,17 @@ use uds_windows::UnixStream;
 #[cfg(all(feature = "vsock", not(feature = "tokio")))]
 use vsock::VsockStream;
 
-use zvariant::{ObjectPath, Str};
+use zvariant::ObjectPath;
 
+#[cfg(feature = "bus-impl")]
+use crate::MessageStream;
 use crate::{
+    Connection, Error, Executor, Guid, OwnedGuid, Result,
     address::{self, Address},
+    fdo::RequestNameFlags,
+    message::Message,
     names::{InterfaceName, WellKnownName},
     object_server::{ArcInterface, Interface},
-    Connection, Error, Executor, Guid, OwnedGuid, Result,
 };
 
 use super::{
@@ -55,6 +60,17 @@ enum Target {
 type Interfaces<'a> = HashMap<ObjectPath<'a>, HashMap<InterfaceName<'static>, ArcInterface>>;
 
 /// A builder for [`zbus::Connection`].
+///
+/// The builder allows setting the flags [`RequestNameFlags::AllowReplacement`] and
+/// [`RequestNameFlags::ReplaceExisting`] when requesting names, but the flag
+/// [`RequestNameFlags::DoNotQueue`] will always be enabled. The reasons are:
+///
+/// 1. There is no indication given to the caller of [`Self::build`] that the name(s) request was
+///    enqueued and that the requested name might not be available right after building.
+///
+/// 2. The name may be acquired in between the time the name is requested and the
+///    [`crate::fdo::NameAcquiredStream`] is constructed. As a result the service can miss the
+///    [`crate::fdo::NameAcquired`] signal.
 #[derive(Debug)]
 #[must_use]
 pub struct Builder<'a> {
@@ -67,14 +83,13 @@ pub struct Builder<'a> {
     internal_executor: bool,
     interfaces: Interfaces<'a>,
     names: HashSet<WellKnownName<'a>>,
-    auth_mechanisms: Option<VecDeque<AuthMechanism>>,
+    auth_mechanism: Option<AuthMechanism>,
     #[cfg(feature = "bus-impl")]
     unique_name: Option<crate::names::UniqueName<'a>>,
-    cookie_context: Option<super::handshake::CookieContext<'a>>,
-    cookie_id: Option<usize>,
+    request_name_flags: BitFlags<RequestNameFlags>,
+    method_timeout: Option<std::time::Duration>,
+    user_id: Option<u32>,
 }
-
-assert_impl_all!(Builder<'_>: Send, Sync, Unpin);
 
 impl<'a> Builder<'a> {
     /// Create a builder for the session/user message bus connection.
@@ -87,7 +102,50 @@ impl<'a> Builder<'a> {
         Ok(Self::new(Target::Address(Address::system()?)))
     }
 
-    /// Create a builder for connection that will use the given [D-Bus bus address].
+    /// Create a builder for an IBus connection.
+    ///
+    /// IBus (Intelligent Input Bus) is an input method framework. This method creates a builder
+    /// that will query the IBus daemon for its D-Bus address using the `ibus address` command.
+    ///
+    /// # Platform Support
+    ///
+    /// This method is available on Unix-like systems where IBus is installed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The `ibus` command is not found or fails to execute
+    /// - The IBus daemon is not running
+    /// - The command output cannot be parsed as a valid D-Bus address
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use std::error::Error;
+    /// # use zbus::connection::Builder;
+    /// # use zbus::block_on;
+    /// #
+    /// # block_on(async {
+    /// let conn = Builder::ibus()?
+    ///     .build()
+    ///     .await?;
+    ///
+    /// // Use the connection to interact with IBus services
+    /// # drop(conn);
+    /// # Ok::<(), zbus::Error>(())
+    /// # }).unwrap();
+    /// #
+    /// # Ok::<_, Box<dyn Error + Send + Sync>>(())
+    /// ```
+    #[cfg(unix)]
+    pub fn ibus() -> Result<Self> {
+        use crate::address::transport::{Ibus, Transport};
+        Ok(Self::new(Target::Address(Address::from(Transport::Ibus(
+            Ibus::new(),
+        )))))
+    }
+
+    /// Create a builder for a connection that will use the given [D-Bus bus address].
     ///
     /// # Example
     ///
@@ -115,7 +173,8 @@ impl<'a> Builder<'a> {
     /// ```
     ///
     /// **Note:** The IBus address is different for each session. You can find the address for your
-    /// current session using `ibus address` command.
+    /// current session using `ibus address` command. For a more convenient way to connect to IBus,
+    /// see [`Builder::ibus`].
     ///
     /// [D-Bus bus address]: https://dbus.freedesktop.org/doc/dbus-specification.html#addresses
     pub fn address<A>(address: A) -> Result<Self>
@@ -128,9 +187,9 @@ impl<'a> Builder<'a> {
         )))
     }
 
-    /// Create a builder for connection that will use the given unix stream.
+    /// Create a builder for a connection that will use the given unix stream.
     ///
-    /// If the default `async-io` feature is disabled, this method will expect
+    /// If the default `async-io` feature is disabled, this method will expect a
     /// [`tokio::net::UnixStream`](https://docs.rs/tokio/latest/tokio/net/struct.UnixStream.html)
     /// argument.
     ///
@@ -143,16 +202,16 @@ impl<'a> Builder<'a> {
         Self::new(Target::UnixStream(stream))
     }
 
-    /// Create a builder for connection that will use the given TCP stream.
+    /// Create a builder for a connection that will use the given TCP stream.
     ///
-    /// If the default `async-io` feature is disabled, this method will expect
+    /// If the default `async-io` feature is disabled, this method will expect a
     /// [`tokio::net::TcpStream`](https://docs.rs/tokio/latest/tokio/net/struct.TcpStream.html)
     /// argument.
     pub fn tcp_stream(stream: TcpStream) -> Self {
         Self::new(Target::TcpStream(stream))
     }
 
-    /// Create a builder for connection that will use the given VSOCK stream.
+    /// Create a builder for a connection that will use the given VSOCK stream.
     ///
     /// This method is only available when either `vsock` or `tokio-vsock` feature is enabled. The
     /// type of `stream` is `vsock::VsockStream` with `vsock` feature and `tokio_vsock::VsockStream`
@@ -165,7 +224,7 @@ impl<'a> Builder<'a> {
         Self::new(Target::VsockStream(stream))
     }
 
-    /// Create a builder for connection that will use the given socket.
+    /// Create a builder for a connection that will use the given socket.
     pub fn socket<S: Into<BoxedSplit>>(socket: S) -> Self {
         Self::new(Target::Socket(socket.into()))
     }
@@ -187,46 +246,20 @@ impl<'a> Builder<'a> {
     }
 
     /// Specify the mechanism to use during authentication.
-    pub fn auth_mechanism(self, auth_mechanism: AuthMechanism) -> Self {
-        #[allow(deprecated)]
-        self.auth_mechanisms(&[auth_mechanism])
-    }
-
-    /// Specify the mechanisms to use during authentication.
-    #[deprecated(since = "4.1.3", note = "Use `auth_mechanism` instead.")]
-    pub fn auth_mechanisms(mut self, auth_mechanisms: &[AuthMechanism]) -> Self {
-        self.auth_mechanisms = Some(VecDeque::from(auth_mechanisms.to_vec()));
+    pub fn auth_mechanism(mut self, auth_mechanism: AuthMechanism) -> Self {
+        self.auth_mechanism = Some(auth_mechanism);
 
         self
     }
 
-    /// The cookie context to use during authentication.
+    /// Specify the user id during authentication.
     ///
-    /// This is only used when the `cookie` authentication mechanism is enabled and only valid for
-    /// server connection.
-    ///
-    /// If not specified, the default cookie context of `org_freedesktop_general` will be used.
-    ///
-    /// # Errors
-    ///
-    /// If the given string is not a valid cookie context.
-    pub fn cookie_context<C>(mut self, context: C) -> Result<Self>
-    where
-        C: Into<Str<'a>>,
-    {
-        self.cookie_context = Some(context.into().try_into()?);
-
-        Ok(self)
-    }
-
-    /// The ID of the cookie to use during authentication.
-    ///
-    /// This is only used when the `cookie` authentication mechanism is enabled and only valid for
-    /// server connection.
-    ///
-    /// If not specified, the first cookie found in the cookie context file will be used.
-    pub fn cookie_id(mut self, id: usize) -> Self {
-        self.cookie_id = Some(id);
+    /// This can be useful when using [`AuthMechanism::External`] with `socat`
+    /// to avoid the host decide what uid to use and instead provide one
+    /// known to have access rights.
+    #[cfg(unix)]
+    pub fn user_id(mut self, id: u32) -> Self {
+        self.user_id = Some(id);
 
         self
     }
@@ -331,6 +364,9 @@ impl<'a> Builder<'a> {
     /// of the connection setup ([`Builder::build`]), immediately after interfaces
     /// registered (through [`Builder::serve_at`]) are advertised. Typically this is
     /// exactly what you want.
+    ///
+    /// The methods [`Builder::allow_name_replacements`] and [`Builder::replace_existing_names`]
+    /// allow to set the [`zbus::fdo::RequestNameFlags`] used to request the name.
     pub fn name<W>(mut self, well_known_name: W) -> Result<Self>
     where
         W: TryInto<WellKnownName<'a>>,
@@ -342,7 +378,23 @@ impl<'a> Builder<'a> {
         Ok(self)
     }
 
-    /// Sets the unique name of the connection.
+    /// Whether the [`zbus::fdo::RequestNameFlags::AllowReplacement`] flag will be set when
+    /// requesting names.
+    pub fn allow_name_replacements(mut self, allow_replacement: bool) -> Self {
+        self.request_name_flags
+            .set(RequestNameFlags::AllowReplacement, allow_replacement);
+        self
+    }
+
+    /// Whether the [`zbus::fdo::RequestNameFlags::ReplaceExisting`] flag will be set when
+    /// requesting names.
+    pub fn replace_existing_names(mut self, replace_existing: bool) -> Self {
+        self.request_name_flags
+            .set(RequestNameFlags::ReplaceExisting, replace_existing);
+        self
+    }
+
+    /// Set the unique name of the connection.
     ///
     /// This is mainly provided for bus implementations. All other users should not need to use this
     /// method. Hence why this method is only available when the `bus-impl` feature is enabled.
@@ -366,18 +418,105 @@ impl<'a> Builder<'a> {
         Ok(self)
     }
 
+    /// Set a timeout for method calls.
+    ///
+    /// Method calls will return
+    /// `zbus::Error::InputOutput(std::io::Error(kind: ErrorKind::TimedOut))` if a client does not
+    /// receive an answer from a service in time.
+    pub fn method_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.method_timeout = Some(timeout);
+
+        self
+    }
+
     /// Build the connection, consuming the builder.
     ///
     /// # Errors
     ///
     /// Until server-side bus connection is supported, attempting to build such a connection will
-    /// result in [`Error::Unsupported`] error.
+    /// result in a [`Error::Unsupported`] error.
     pub async fn build(self) -> Result<Connection> {
+        let (conn, _) = self.build_inner(false).await?;
+        Ok(conn)
+    }
+
+    /// Build the connection and return a [`MessageStream`] to receive messages from it.
+    ///
+    /// This is equivalent to [`Self::build`] followed by `MessageStream::from(&conn)`, except
+    /// that the stream is set up **before** the socket-reader task is started. No messages can
+    /// therefore be lost in the window between `build()` returning and `MessageStream::from`
+    /// being called. Use this when the peer may pipeline traffic right after authentication —
+    /// e.g. a bus implementation reading a `Hello` method call from a just-connected client.
+    ///
+    /// To get the [`Connection`] out of the returned stream, use `Connection::from(&stream)` —
+    /// this is cheap (an `Arc` clone).
+    ///
+    /// This method is only available when the `bus-impl` feature is enabled.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use futures_util::StreamExt;
+    /// # use zbus::{
+    /// #     Connection, Guid, block_on,
+    /// #     connection::{Builder, socket::Channel},
+    /// #     message::Message,
+    /// # };
+    /// #
+    /// # block_on(async {
+    /// let guid = Guid::generate();
+    /// let (c1, c2) = Channel::pair();
+    ///
+    /// // Bus client sends a method call right away (simulates pipelining after auth).
+    /// let client = Builder::authenticated_socket(c1, guid.clone())
+    ///     .unwrap()
+    ///     .build()
+    ///     .await
+    ///     .unwrap();
+    /// let hello = Message::method_call("/org/freedesktop/DBus", "Hello")
+    ///     .unwrap()
+    ///     .destination("org.freedesktop.DBus")
+    ///     .unwrap()
+    ///     .build(&())
+    ///     .unwrap();
+    /// client.send(&hello).await.unwrap();
+    ///
+    /// // Server builds *after* the client has already sent.
+    /// let mut stream = Builder::authenticated_socket(c2, guid)
+    ///     .unwrap()
+    ///     .p2p()
+    ///     .build_message_stream()
+    ///     .await
+    ///     .unwrap();
+    ///
+    /// let msg = stream.next().await.unwrap().unwrap();
+    /// assert_eq!(msg.header().member().unwrap().as_str(), "Hello");
+    ///
+    /// let _conn: Connection = (&stream).into();
+    /// # });
+    /// ```
+    #[cfg(feature = "bus-impl")]
+    pub async fn build_message_stream(self) -> Result<MessageStream> {
+        let (conn, msg_receiver) = self.build_inner(true).await?;
+        let msg_receiver = msg_receiver.expect("build_inner(true) always returns Some");
+
+        Ok(MessageStream::for_subscription_channel(
+            msg_receiver,
+            None,
+            &conn,
+        ))
+    }
+
+    async fn build_inner(
+        self,
+        activate_msg_stream: bool,
+    ) -> Result<(Connection, Option<ActiveReceiver<Result<Message>>>)> {
         let executor = Executor::new();
         #[cfg(not(feature = "tokio"))]
         let internal_executor = self.internal_executor;
         // Box the future as it's large and can cause stack overflow.
-        let conn = Box::pin(executor.run(self.build_(executor.clone()))).await?;
+        let conn =
+            Box::pin(executor.run(self.build_(executor.clone(), activate_msg_stream))).await?;
 
         #[cfg(not(feature = "tokio"))]
         start_internal_executor(&executor, internal_executor)?;
@@ -385,71 +524,17 @@ impl<'a> Builder<'a> {
         Ok(conn)
     }
 
-    async fn build_(mut self, executor: Executor<'static>) -> Result<Connection> {
+    async fn build_(
+        mut self,
+        executor: Executor<'static>,
+        activate_msg_stream: bool,
+    ) -> Result<(Connection, Option<ActiveReceiver<Result<Message>>>)> {
         #[cfg(feature = "p2p")]
         let is_bus_conn = !self.p2p;
         #[cfg(not(feature = "p2p"))]
         let is_bus_conn = true;
 
-        #[cfg(not(feature = "bus-impl"))]
-        let unique_name = None;
-        #[cfg(feature = "bus-impl")]
-        let unique_name = self.unique_name.take().map(Into::into);
-
-        #[allow(unused_mut)]
-        let (mut stream, server_guid, authenticated) = self.target_connect().await?;
-        let mut auth = if authenticated {
-            let (socket_read, socket_write) = stream.take();
-            Authenticated {
-                #[cfg(unix)]
-                cap_unix_fd: socket_read.can_pass_unix_fd(),
-                socket_read: Some(socket_read),
-                socket_write,
-                // SAFETY: `server_guid` is provided as arg of `Builder::authenticated_socket`.
-                server_guid: server_guid.unwrap(),
-                already_received_bytes: vec![],
-                unique_name,
-                #[cfg(unix)]
-                already_received_fds: vec![],
-            }
-        } else {
-            #[cfg(feature = "p2p")]
-            match self.guid {
-                None => {
-                    // SASL Handshake
-                    Authenticated::client(stream, server_guid, self.auth_mechanisms, is_bus_conn)
-                        .await?
-                }
-                Some(guid) => {
-                    if !self.p2p {
-                        return Err(Error::Unsupported);
-                    }
-
-                    let creds = stream.read_mut().peer_credentials().await?;
-                    #[cfg(unix)]
-                    let client_uid = creds.unix_user_id();
-                    #[cfg(windows)]
-                    let client_sid = creds.into_windows_sid();
-
-                    Authenticated::server(
-                        stream,
-                        guid.to_owned().into(),
-                        #[cfg(unix)]
-                        client_uid,
-                        #[cfg(windows)]
-                        client_sid,
-                        self.auth_mechanisms,
-                        self.cookie_id,
-                        self.cookie_context.unwrap_or_default(),
-                        unique_name,
-                    )
-                    .await?
-                }
-            }
-
-            #[cfg(not(feature = "p2p"))]
-            Authenticated::client(stream, server_guid, self.auth_mechanisms, is_bus_conn).await?
-        };
+        let mut auth = self.connect(is_bus_conn).await?;
 
         // SAFETY: `Authenticated` is always built with these fields set to `Some`.
         let socket_read = auth.socket_read.take().unwrap();
@@ -457,15 +542,14 @@ impl<'a> Builder<'a> {
         #[cfg(unix)]
         let already_received_fds = auth.already_received_fds.drain(..).collect();
 
-        let mut conn = Connection::new(auth, is_bus_conn, executor).await?;
+        let mut conn = Connection::new(auth, is_bus_conn, executor, self.method_timeout).await?;
         conn.set_max_queued(self.max_queued.unwrap_or(DEFAULT_MAX_QUEUED));
 
         if !self.interfaces.is_empty() {
-            let object_server = conn.sync_object_server(false, None);
+            let object_server = conn.ensure_object_server(false);
             for (path, interfaces) in self.interfaces {
                 for (name, iface) in interfaces {
                     let added = object_server
-                        .inner()
                         .add_arc_interface(path.clone(), name.clone(), iface.clone())
                         .await?;
                     if !added {
@@ -481,6 +565,10 @@ impl<'a> Builder<'a> {
             listener.await;
         }
 
+        // Set up a message receiver before the socket-reader task is spawned so that the
+        // caller cannot miss early messages due to a race with the reader task.
+        let msg_receiver = activate_msg_stream.then(|| conn.inner.msg_receiver.activate_cloned());
+
         // Start the socket reader task.
         conn.init_socket_reader(
             socket_read,
@@ -490,10 +578,11 @@ impl<'a> Builder<'a> {
         );
 
         for name in self.names {
-            conn.request_name(name).await?;
+            conn.request_name_with_flags(name, self.request_name_flags)
+                .await?;
         }
 
-        Ok(conn)
+        Ok((conn, msg_receiver))
     }
 
     fn new(target: Target) -> Self {
@@ -506,11 +595,85 @@ impl<'a> Builder<'a> {
             internal_executor: true,
             interfaces: HashMap::new(),
             names: HashSet::new(),
-            auth_mechanisms: None,
+            auth_mechanism: None,
             #[cfg(feature = "bus-impl")]
             unique_name: None,
-            cookie_id: None,
-            cookie_context: None,
+            request_name_flags: BitFlags::default(),
+            method_timeout: None,
+            user_id: None,
+        }
+    }
+
+    async fn connect(&mut self, is_bus_conn: bool) -> Result<Authenticated> {
+        #[cfg(not(feature = "bus-impl"))]
+        let unique_name = None;
+        #[cfg(feature = "bus-impl")]
+        let unique_name = self.unique_name.take().map(Into::into);
+
+        #[allow(unused_mut)]
+        let (mut stream, server_guid, authenticated) = self.target_connect().await?;
+        if authenticated {
+            let (socket_read, socket_write) = stream.take();
+            Ok(Authenticated {
+                #[cfg(unix)]
+                cap_unix_fd: socket_read.can_pass_unix_fd(),
+                socket_read: Some(socket_read),
+                socket_write,
+                // SAFETY: `server_guid` is provided as arg of `Builder::authenticated_socket`.
+                server_guid: server_guid.unwrap(),
+                already_received_bytes: vec![],
+                unique_name,
+                #[cfg(unix)]
+                already_received_fds: vec![],
+            })
+        } else {
+            #[cfg(feature = "p2p")]
+            match self.guid.take() {
+                None => {
+                    // SASL Handshake
+                    Authenticated::client(
+                        stream,
+                        server_guid,
+                        self.auth_mechanism,
+                        is_bus_conn,
+                        self.user_id,
+                    )
+                    .await
+                }
+                Some(guid) => {
+                    if !self.p2p {
+                        return Err(Error::Unsupported);
+                    }
+
+                    let creds = stream.read_mut().peer_credentials().await?;
+                    #[cfg(unix)]
+                    let client_uid = self.user_id.or_else(|| creds.unix_user_id());
+                    #[cfg(windows)]
+                    let client_sid = creds.into_windows_sid();
+
+                    Authenticated::server(
+                        stream,
+                        guid.to_owned().into(),
+                        #[cfg(unix)]
+                        client_uid,
+                        #[cfg(windows)]
+                        client_sid,
+                        self.auth_mechanism,
+                        unique_name,
+                    )
+                    .await
+                }
+            }
+
+            #[cfg(not(feature = "p2p"))]
+            Authenticated::client(
+                stream,
+                server_guid,
+                self.auth_mechanism,
+                is_bus_conn,
+                self.user_id,
+            )
+            .await
         }
     }
 
@@ -537,6 +700,8 @@ impl<'a> Builder<'a> {
                 match address.connect().await? {
                     #[cfg(any(unix, not(feature = "tokio")))]
                     address::transport::Stream::Unix(stream) => stream.into(),
+                    #[cfg(unix)]
+                    address::transport::Stream::Unixexec(stream) => stream.into(),
                     address::transport::Stream::Tcp(stream) => stream.into(),
                     #[cfg(any(
                         all(feature = "vsock", not(feature = "tokio")),

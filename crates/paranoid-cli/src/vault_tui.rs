@@ -3653,12 +3653,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> anyhow::Resu
         terminal
             .draw(|frame| render(frame, &app))
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        if event::poll(std::time::Duration::from_millis(80))? {
-            if let Event::Key(key) = event::read()? {
-                app.session.note_activity();
-                if app.handle_key(key) {
-                    break;
-                }
+        if event::poll(std::time::Duration::from_millis(80))?
+            && let Event::Key(key) = event::read()?
+        {
+            app.session.note_activity();
+            if app.handle_key(key) {
+                break;
             }
         }
     }
@@ -5829,8 +5829,89 @@ mod tests {
     use paranoid_vault::{
         SecretString, VaultAuth, init_vault, unlock_vault, unlock_vault_with_mnemonic,
     };
-    use std::{fs, path::Path, path::PathBuf, thread, time::Duration};
+    use std::{
+        collections::HashMap,
+        fs,
+        path::Path,
+        path::PathBuf,
+        sync::{Mutex, Once, OnceLock},
+        thread,
+        time::Duration,
+    };
     use tempfile::tempdir;
+
+    static MOCK_KEYRING: Once = Once::new();
+
+    fn use_mock_keyring() {
+        MOCK_KEYRING.call_once(|| {
+            keyring::set_default_credential_builder(Box::new(PersistentTestCredentialBuilder));
+        });
+    }
+
+    #[derive(Debug)]
+    struct PersistentTestCredential {
+        key: String,
+    }
+
+    struct PersistentTestCredentialBuilder;
+
+    impl keyring::credential::CredentialBuilderApi for PersistentTestCredentialBuilder {
+        fn build(
+            &self,
+            target: Option<&str>,
+            service: &str,
+            user: &str,
+        ) -> keyring::Result<Box<keyring::Credential>> {
+            Ok(Box::new(PersistentTestCredential {
+                key: format!("{}\u{0}{service}\u{0}{user}", target.unwrap_or_default()),
+            }))
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
+        fn persistence(&self) -> keyring::credential::CredentialPersistence {
+            keyring::credential::CredentialPersistence::ProcessOnly
+        }
+    }
+
+    impl keyring::credential::CredentialApi for PersistentTestCredential {
+        fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+            test_keyring_store()
+                .lock()
+                .expect("test keyring lock")
+                .insert(self.key.clone(), secret.to_vec());
+            Ok(())
+        }
+
+        fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+            test_keyring_store()
+                .lock()
+                .expect("test keyring lock")
+                .get(&self.key)
+                .cloned()
+                .ok_or(keyring::Error::NoEntry)
+        }
+
+        fn delete_credential(&self) -> keyring::Result<()> {
+            test_keyring_store()
+                .lock()
+                .expect("test keyring lock")
+                .remove(&self.key)
+                .map(|_| ())
+                .ok_or(keyring::Error::NoEntry)
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn test_keyring_store() -> &'static Mutex<HashMap<String, Vec<u8>>> {
+        static STORE: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
+        STORE.get_or_init(|| Mutex::new(HashMap::new()))
+    }
 
     fn render_to_string(app: &App) -> String {
         let backend = TestBackend::new(120, 42);
@@ -5843,6 +5924,17 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>()
+    }
+
+    fn press_key(app: &mut App, code: KeyCode) {
+        let should_quit = app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+        assert!(!should_quit, "unexpected quit for key {code:?}");
+    }
+
+    fn type_text(app: &mut App, value: &str) {
+        for ch in value.chars() {
+            press_key(app, KeyCode::Char(ch));
+        }
     }
 
     fn app_options(path: &std::path::Path) -> VaultOpenOptions {
@@ -5858,6 +5950,7 @@ mod tests {
     }
 
     fn add_device_fallback(options: &VaultOpenOptions) -> anyhow::Result<()> {
+        use_mock_keyring();
         let mut vault = unlock_vault(&options.path, "correct horse battery staple")?;
         vault.add_device_keyslot(Some("tui-test".to_string()))?;
         Ok(())
@@ -6004,6 +6097,74 @@ mod tests {
         assert_eq!(login.folder.as_deref(), Some("Work"));
         assert_eq!(login.tags, vec!["work".to_string(), "code".to_string()]);
         assert!(app.status.contains("Stored login item"));
+    }
+
+    #[test]
+    fn end_to_end_key_workflow_exercises_primary_vault_actions() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        let backup = path.with_extension("backup.json");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+
+        press_key(&mut app, KeyCode::Char('a'));
+        assert!(matches!(app.screen, Screen::AddLogin));
+        type_text(&mut app, "GitHub");
+        press_key(&mut app, KeyCode::Tab);
+        type_text(&mut app, "octocat");
+        press_key(&mut app, KeyCode::Tab);
+        type_text(&mut app, "hunter2");
+        press_key(&mut app, KeyCode::Tab);
+        press_key(&mut app, KeyCode::Tab);
+        press_key(&mut app, KeyCode::Tab);
+        type_text(&mut app, "Work");
+        press_key(&mut app, KeyCode::Tab);
+        type_text(&mut app, "work,code");
+        press_key(&mut app, KeyCode::Tab);
+        press_key(&mut app, KeyCode::Enter);
+
+        assert!(matches!(app.screen, Screen::Vault));
+        assert_eq!(app.items.len(), 1);
+        assert!(app.status.contains("Stored login item"));
+
+        press_key(&mut app, KeyCode::Char('/'));
+        assert!(app.search_mode);
+        type_text(&mut app, "GitHub");
+        press_key(&mut app, KeyCode::Enter);
+        assert!(!app.search_mode);
+        assert_eq!(app.items.len(), 1);
+        assert_eq!(app.items[0].title, "GitHub");
+        assert!(app.status.contains("Vault filters locked"));
+
+        press_key(&mut app, KeyCode::Char('k'));
+        assert!(matches!(app.screen, Screen::Keyslots));
+        press_key(&mut app, KeyCode::Char('m'));
+        assert!(matches!(app.screen, Screen::AddMnemonicSlot));
+        type_text(&mut app, "paper-backup");
+        press_key(&mut app, KeyCode::Tab);
+        press_key(&mut app, KeyCode::Enter);
+
+        assert!(matches!(app.screen, Screen::MnemonicReveal));
+        assert!(app.latest_mnemonic_enrollment.is_some());
+        assert!(app.status.contains("Mnemonic recovery slot enrolled"));
+
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::Keyslots));
+        press_key(&mut app, KeyCode::Esc);
+        assert!(matches!(app.screen, Screen::Vault));
+
+        press_key(&mut app, KeyCode::Char('x'));
+        assert!(matches!(app.screen, Screen::ExportBackup));
+        press_key(&mut app, KeyCode::Tab);
+        press_key(&mut app, KeyCode::Enter);
+
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(backup.exists());
+        assert!(app.status.contains("Exported encrypted vault backup"));
     }
 
     #[test]
@@ -6710,6 +6871,7 @@ mod tests {
 
     #[test]
     fn rebind_selected_device_keyslot_preserves_active_device_unlock_options() {
+        use_mock_keyring();
         let tempdir = tempdir().expect("tempdir");
         let path = tempdir.path().join("vault.sqlite");
         init_vault(&path, "correct horse battery staple").expect("init");
@@ -7160,6 +7322,7 @@ mod tests {
 
     #[test]
     fn native_device_unlock_updates_state() {
+        use_mock_keyring();
         let tempdir = tempfile::tempdir().expect("tempdir");
         let path = tempdir.path().join("vault.sqlite");
         paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");

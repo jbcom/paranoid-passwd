@@ -31,12 +31,10 @@ jobs:
           run: |
             cargo fmt --check
             cargo clippy --workspace --all-targets --locked --frozen --offline -- -D warnings
-            cargo test --workspace --locked --frozen --offline
+            bash scripts/cargo_test.sh --workspace --locked --frozen --offline
             cargo build -p paranoid-cli --locked --frozen --offline
             bash tests/test_cli.sh target/debug/paranoid-passwd
-            bash scripts/hallucination_check.sh
-            bash scripts/supply_chain_verify.sh
-            bash scripts/verify_human_review_inventory.sh
+            make verify-assurance
 
   docs:
     name: Docs Build
