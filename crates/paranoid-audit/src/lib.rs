@@ -12,6 +12,11 @@ use thiserror::Error;
 pub const AUDIT_SCHEMA_VERSION: u16 = 1;
 pub const AUDIT_HASH_CHAIN_VERSION: u16 = 1;
 pub const DEFAULT_AUDIT_OPERATION_ID: &str = "pp.operation.v1.local";
+const PARANOID_AUDIT_DEVICE_ENDPOINT: &str = "PARANOID_AUDIT_DEVICE_ENDPOINT";
+const PARANOID_AUDIT_DEVICE_ID: &str = "PARANOID_AUDIT_DEVICE_ID";
+const PARANOID_AUDIT_DEVICE_MTLS_CERT: &str = "PARANOID_AUDIT_DEVICE_MTLS_CERT";
+const PARANOID_AUDIT_DEVICE_MTLS_KEY: &str = "PARANOID_AUDIT_DEVICE_MTLS_KEY";
+const PARANOID_AUDIT_DEVICE_CA_CERT: &str = "PARANOID_AUDIT_DEVICE_CA_CERT";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -436,22 +441,32 @@ pub fn assess_optional_jsonl_file_audit_sink(path: Option<&Path>) -> AuditSinkHe
 }
 
 pub fn assess_external_audit_device_from_environment() -> AuditSinkHealth {
-    let Ok(endpoint) = env::var("PARANOID_AUDIT_DEVICE_ENDPOINT") else {
+    assess_external_audit_device_from_lookup(|name| {
+        // Non-Unicode values cannot be used as UTF-8 paths, so they are missing evidence.
+        env::var(name).ok()
+    })
+}
+
+fn assess_external_audit_device_from_lookup(
+    mut value_for: impl FnMut(&str) -> Option<String>,
+) -> AuditSinkHealth {
+    let Some(endpoint) = non_empty_lookup_value(value_for(PARANOID_AUDIT_DEVICE_ENDPOINT)) else {
         return AuditSinkHealth::not_configured_external_device();
     };
-    let provider_id = env::var("PARANOID_AUDIT_DEVICE_ID")
-        .unwrap_or_else(|_| "external_audit_device".to_string());
+    let provider_id = non_empty_lookup_value(value_for(PARANOID_AUDIT_DEVICE_ID))
+        .unwrap_or_else(|| "external_audit_device".to_string());
 
     let required_mtls_vars = [
-        "PARANOID_AUDIT_DEVICE_MTLS_CERT",
-        "PARANOID_AUDIT_DEVICE_MTLS_KEY",
-        "PARANOID_AUDIT_DEVICE_CA_CERT",
+        PARANOID_AUDIT_DEVICE_MTLS_CERT,
+        PARANOID_AUDIT_DEVICE_MTLS_KEY,
+        PARANOID_AUDIT_DEVICE_CA_CERT,
     ];
-    let missing_mtls: Vec<&str> = required_mtls_vars
-        .iter()
-        .copied()
-        .filter(|name| env::var(name).is_err())
-        .collect();
+    let mut missing_mtls = Vec::new();
+    for name in required_mtls_vars {
+        if non_empty_lookup_value(value_for(name)).is_none() {
+            missing_mtls.push(name);
+        }
+    }
     if !missing_mtls.is_empty() {
         return AuditSinkHealth::unavailable_external_device(
             provider_id,
@@ -465,6 +480,10 @@ pub fn assess_external_audit_device_from_environment() -> AuditSinkHealth {
         endpoint,
         "external audit-device health probe is not implemented; configured mTLS material is evidence only",
     )
+}
+
+fn non_empty_lookup_value(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.trim().is_empty())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -781,6 +800,66 @@ mod tests {
         assert_eq!(ready.status, AuditSinkStatus::Ready);
         assert!(ready.is_available());
         assert_eq!(ready.evidence_source.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn external_audit_device_environment_lookup_never_claims_ready() {
+        fn assess_from(values: &[(&str, &str)]) -> AuditSinkHealth {
+            let values: BTreeMap<&str, String> = values
+                .iter()
+                .map(|(name, value)| (*name, (*value).to_string()))
+                .collect();
+            assess_external_audit_device_from_lookup(|name| values.get(name).cloned())
+        }
+
+        let not_configured = assess_from(&[]);
+        assert_eq!(
+            not_configured,
+            AuditSinkHealth::not_configured_external_device()
+        );
+        assert!(!not_configured.is_available());
+
+        let missing_mtls = assess_from(&[(
+            PARANOID_AUDIT_DEVICE_ENDPOINT,
+            "mtls://audit.example.invalid:6514",
+        )]);
+        assert_eq!(missing_mtls.status, AuditSinkStatus::Unavailable);
+        assert!(!missing_mtls.is_available());
+        assert!(
+            missing_mtls
+                .failure
+                .as_deref()
+                .unwrap_or_default()
+                .contains(PARANOID_AUDIT_DEVICE_MTLS_CERT)
+        );
+
+        let empty_mtls_is_missing = assess_from(&[
+            (
+                PARANOID_AUDIT_DEVICE_ENDPOINT,
+                "mtls://audit.example.invalid:6514",
+            ),
+            (PARANOID_AUDIT_DEVICE_MTLS_CERT, ""),
+            (PARANOID_AUDIT_DEVICE_MTLS_KEY, "/tmp/device.key"),
+            (PARANOID_AUDIT_DEVICE_CA_CERT, "/tmp/ca.crt"),
+        ]);
+        assert_eq!(empty_mtls_is_missing.status, AuditSinkStatus::Unavailable);
+        assert!(!empty_mtls_is_missing.is_available());
+
+        let unverified = assess_from(&[
+            (
+                PARANOID_AUDIT_DEVICE_ENDPOINT,
+                "mtls://audit.example.invalid:6514",
+            ),
+            (PARANOID_AUDIT_DEVICE_MTLS_CERT, "/tmp/device.crt"),
+            (PARANOID_AUDIT_DEVICE_MTLS_KEY, "/tmp/device.key"),
+            (PARANOID_AUDIT_DEVICE_CA_CERT, "/tmp/ca.crt"),
+        ]);
+        assert_eq!(unverified.status, AuditSinkStatus::Unverified);
+        assert_eq!(
+            unverified.provider_id.as_deref(),
+            Some("external_audit_device")
+        );
+        assert!(!unverified.is_available());
     }
 
     #[test]

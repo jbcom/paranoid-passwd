@@ -255,14 +255,34 @@ CLAIMS: tuple[Claim, ...] = (
                 "external audit-device configuration requires mTLS evidence before probe status",
             ),
             Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "value.trim().is_empty()",
+                "external audit-device mTLS evidence rejects empty environment values",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "external_audit_device_environment_lookup_never_claims_ready",
+                "audit tests cover external audit-device environment lookup states",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION: u16 = 2",
+                "federal startup evidence schema version marks the external audit-device wire shape",
+            ),
+            Requirement(
                 "crates/paranoid-ops/src/lib.rs",
                 "pub external_audit_device: AuditSinkHealth",
                 "federal startup evidence includes external audit-device posture",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
-                "input.audit_sink.is_available()\n            || input.external_audit_device.is_available()",
-                "policy availability only accepts ready local or external audit health",
+                "input.audit_sink.is_available()",
+                "policy availability checks local audit sink readiness",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "input.external_audit_device.is_available()",
+                "policy availability checks external audit device readiness",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -278,6 +298,11 @@ CLAIMS: tuple[Claim, ...] = (
                 "crates/paranoid-ops/tests/fixtures/federal_startup_denied.json",
                 '"external_audit_device"',
                 "stable federal startup evidence fixture includes external audit posture",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/fixtures/federal_startup_denied.json",
+                '"schema_version": 2',
+                "stable federal startup evidence fixture uses the bumped wire schema",
             ),
             Requirement(
                 "tests/test_cli.sh",

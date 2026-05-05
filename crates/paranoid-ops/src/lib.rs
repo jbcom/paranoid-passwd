@@ -19,6 +19,7 @@ use thiserror::Error;
 static LOCAL_OPERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const OPS_SCHEMA_VERSION: u16 = 1;
+pub const FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -592,7 +593,7 @@ pub fn collect_federal_startup_evidence_from_input(
     );
     let policy_decision = evaluate_policy(&envelope, &context);
     FederalStartupEvidence {
-        schema_version: OPS_SCHEMA_VERSION,
+        schema_version: FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION,
         profile: input.profile,
         product_version: input.product_version,
         build_commit: input.build_commit,
@@ -1172,13 +1173,29 @@ mod tests {
 
     #[test]
     fn federal_startup_evidence_reports_denied_default_runtime() {
-        let evidence = collect_federal_startup_evidence(
-            OpsProfile::FederalReady,
-            false,
-            "test-commit",
-            "test-date",
-        );
+        let evidence = collect_federal_startup_evidence_from_input(FederalStartupEvidenceInput {
+            profile: OpsProfile::FederalReady,
+            product_version: "test-version".to_string(),
+            build_commit: "test-commit".to_string(),
+            build_date: "test-date".to_string(),
+            operating_system: "linux".to_string(),
+            architecture: "amd64".to_string(),
+            audit_sink: AuditSinkHealth::not_configured_jsonl(),
+            external_audit_device: AuditSinkHealth::not_configured_external_device(),
+            crypto_provider: FederalCryptoProviderEvidence {
+                provider_name: "OpenSSL".to_string(),
+                provider_version: "OpenSSL test provider".to_string(),
+                provider_platform: "test-platform".to_string(),
+                approved_mode: FederalApprovedMode::NotConfirmed,
+                certificate_reference: None,
+                evidence_source: "test".to_string(),
+            },
+        });
 
+        assert_eq!(
+            evidence.schema_version,
+            FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION
+        );
         assert_eq!(evidence.profile, OpsProfile::FederalReady);
         assert_eq!(evidence.audit_schema_version, AUDIT_SCHEMA_VERSION);
         assert_eq!(

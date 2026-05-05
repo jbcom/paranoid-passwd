@@ -267,13 +267,21 @@ check "federal-ready profile fails closed without approved provider evidence" t_
 # --- Test 18: federal evidence emits startup profile report
 t_federal_evidence() {
     local out
-    out="$("$BIN" --federal-evidence)"
+    out="$(env \
+        -u PARANOID_AUDIT_DEVICE_ENDPOINT \
+        -u PARANOID_AUDIT_DEVICE_ID \
+        -u PARANOID_AUDIT_DEVICE_MTLS_CERT \
+        -u PARANOID_AUDIT_DEVICE_MTLS_KEY \
+        -u PARANOID_AUDIT_DEVICE_CA_CERT \
+        -u PARANOID_FEDERAL_APPROVED_MODE \
+        -u PARANOID_FEDERAL_CERTIFICATE_REFERENCE \
+        "$BIN" --federal-evidence)"
     printf '%s' "$out" | python3 -c '
 import json
 import sys
 
 data = json.load(sys.stdin)
-assert data["schema_version"] == 1
+assert data["schema_version"] == 2
 assert data["profile"] == "federal_ready"
 assert data["audit_sink"]["status"] == "not_configured"
 assert data["external_audit_device"]["kind"] == "external_device"

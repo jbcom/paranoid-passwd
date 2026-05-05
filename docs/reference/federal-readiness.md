@@ -122,7 +122,8 @@ and hash-chain evidence.
   lifecycle flows
 - reusable vault operation policy evaluation for CLI, TUI, and native GUI adapters
 - a placeholder transport model for future mTLS policy when operations cross process boundaries
-- stable JSON responses for automation and evidence capture
+- stable JSON responses for automation and evidence capture, including federal startup evidence
+  schema `2` for the external audit-device posture field
 
 `paranoid-seal` now provides:
 
