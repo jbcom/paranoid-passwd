@@ -7,6 +7,7 @@
         "profile": "federal_ready",
         "request_id": "pp.fixture.request.gui.export_federal",
         "session_surface": "gui",
+        "session_transport": "in_process",
         "vault_access": "export",
         "vault_operation": "export"
       },
@@ -27,6 +28,7 @@
         "decision": "allow",
         "request_id": "pp.fixture.request.gui.export_federal",
         "session_surface": "gui",
+        "session_transport": "in_process",
         "vault_access": "export",
         "vault_operation": "export"
       },

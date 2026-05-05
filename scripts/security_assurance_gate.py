@@ -297,6 +297,63 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
+        "ops.mtls-process-boundary-fixture",
+        "mTLS process-boundary command evidence",
+        "ops-security",
+        (
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "pub struct OpsTransportEvidence",
+                "ops crate models non-secret process-boundary transport evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "mtls_transport_evidence",
+                "ops policy fails closed when mTLS commands lack authenticated transport evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "transport_certificate_fingerprint_sha256",
+                "ops audit events can record non-secret mTLS certificate fingerprint evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "mtls_process_boundary_requires_authenticated_transport_evidence",
+                "ops unit tests cover missing mTLS transport evidence denial",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "authenticated_mtls_process_boundary_records_non_secret_evidence",
+                "ops unit tests cover non-secret authenticated mTLS audit evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/ops_trace_fixtures.rs",
+                "mtls_process_boundary_export_trace_fixture_is_stable",
+                "ops trace tests pin an mTLS process-boundary fixture",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/fixtures/ops_trace_mtls_process_boundary_allowed.json",
+                '"transport": "mtls"',
+                "stable fixture preserves the mTLS process-boundary transport",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/fixtures/ops_trace_mtls_process_boundary_allowed.json",
+                '"kind": "service_account"',
+                "stable fixture preserves neutral service-account actor context",
+            ),
+            Requirement(
+                "docs/reference/testing.md",
+                "stable mTLS process-boundary vault operation fixture",
+                "testing docs describe the mTLS process-boundary fixture",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`ops.mtls-process-boundary-fixture` | `enforced`",
+                "assurance claims track the mTLS process-boundary fixture",
+            ),
+        ),
+    ),
+    Claim(
         "audit.external-device-health",
         "External audit-device health evidence",
         "ops-security",

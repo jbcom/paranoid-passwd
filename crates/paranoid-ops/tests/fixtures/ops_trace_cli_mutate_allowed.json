@@ -7,6 +7,7 @@
         "profile": "default",
         "request_id": "pp.fixture.request.cli.mutate",
         "session_surface": "cli",
+        "session_transport": "in_process",
         "vault_access": "mutate",
         "vault_operation": "mutate_item"
       },
@@ -27,6 +28,7 @@
         "decision": "allow",
         "request_id": "pp.fixture.request.cli.mutate",
         "session_surface": "cli",
+        "session_transport": "in_process",
         "vault_access": "mutate",
         "vault_operation": "mutate_item"
       },

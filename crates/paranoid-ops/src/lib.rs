@@ -19,6 +19,7 @@ use thiserror::Error;
 static LOCAL_OPERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const OPS_SCHEMA_VERSION: u16 = 1;
+pub const OPS_TRANSPORT_EVIDENCE_SCHEMA_VERSION: u16 = 1;
 pub const FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,11 +70,92 @@ pub enum OpsTransport {
     Mtls,
 }
 
+impl OpsTransport {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InProcess => "in_process",
+            Self::LocalTty => "local_tty",
+            Self::Mtls => "mtls",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpsTransportEvidence {
+    pub schema_version: u16,
+    pub transport: OpsTransport,
+    pub authenticated: bool,
+    pub peer_identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_fingerprint_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_binding_sha256: Option<String>,
+    pub evidence_source: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
+impl OpsTransportEvidence {
+    pub fn authenticated_mtls(
+        peer_identity: impl Into<String>,
+        certificate_fingerprint_sha256: impl Into<String>,
+        evidence_source: impl Into<String>,
+    ) -> Self {
+        Self {
+            schema_version: OPS_TRANSPORT_EVIDENCE_SCHEMA_VERSION,
+            transport: OpsTransport::Mtls,
+            authenticated: true,
+            peer_identity: peer_identity.into(),
+            certificate_fingerprint_sha256: Some(certificate_fingerprint_sha256.into()),
+            channel_binding_sha256: None,
+            evidence_source: evidence_source.into(),
+            warnings: Vec::new(),
+        }
+    }
+
+    pub fn unauthenticated_mtls(
+        peer_identity: impl Into<String>,
+        evidence_source: impl Into<String>,
+        warning: impl Into<String>,
+    ) -> Self {
+        Self {
+            schema_version: OPS_TRANSPORT_EVIDENCE_SCHEMA_VERSION,
+            transport: OpsTransport::Mtls,
+            authenticated: false,
+            peer_identity: peer_identity.into(),
+            certificate_fingerprint_sha256: None,
+            channel_binding_sha256: None,
+            evidence_source: evidence_source.into(),
+            warnings: vec![warning.into()],
+        }
+    }
+
+    pub fn with_channel_binding_sha256(
+        mut self,
+        channel_binding_sha256: impl Into<String>,
+    ) -> Self {
+        self.channel_binding_sha256 = Some(channel_binding_sha256.into());
+        self
+    }
+
+    fn is_authenticated_mtls(&self) -> bool {
+        self.transport == OpsTransport::Mtls
+            && self.authenticated
+            && !self.peer_identity.trim().is_empty()
+            && self
+                .certificate_fingerprint_sha256
+                .as_deref()
+                .is_some_and(|fingerprint| !fingerprint.trim().is_empty())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpsSession {
     pub session_id: String,
     pub surface: AuditSurface,
     pub transport: OpsTransport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_evidence: Option<OpsTransportEvidence>,
 }
 
 impl OpsSession {
@@ -82,6 +164,30 @@ impl OpsSession {
             session_id: new_local_operation_id(),
             surface,
             transport: OpsTransport::InProcess,
+            transport_evidence: None,
+        }
+    }
+
+    pub fn mtls(
+        surface: AuditSurface,
+        session_id: impl Into<String>,
+        transport_evidence: OpsTransportEvidence,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            surface,
+            transport: OpsTransport::Mtls,
+            transport_evidence: Some(transport_evidence),
+        }
+    }
+
+    fn has_authenticated_transport_evidence(&self) -> bool {
+        match self.transport {
+            OpsTransport::InProcess | OpsTransport::LocalTty => true,
+            OpsTransport::Mtls => self
+                .transport_evidence
+                .as_ref()
+                .is_some_and(OpsTransportEvidence::is_authenticated_mtls),
         }
     }
 }
@@ -344,6 +450,11 @@ pub fn evaluate_policy(
     {
         missing_controls.push("required_audit_sink".to_string());
     }
+    if envelope.command.is_security_relevant()
+        && !envelope.session.has_authenticated_transport_evidence()
+    {
+        missing_controls.push("mtls_transport_evidence".to_string());
+    }
 
     if let OpsCommand::VaultUnlock { method } = envelope.command {
         append_seal_policy_missing_controls(method, context, &mut missing_controls);
@@ -444,10 +555,7 @@ pub fn record_ops_request<'a>(
     event
         .attributes
         .insert("request_id".to_string(), envelope.request_id.clone());
-    event.attributes.insert(
-        "session_surface".to_string(),
-        envelope.session.surface.as_str().to_string(),
-    );
+    record_session_attributes(event, envelope);
     event
         .attributes
         .insert("profile".to_string(), envelope.profile.as_str().to_string());
@@ -486,10 +594,7 @@ pub fn record_ops_response<'a>(
     event
         .attributes
         .insert("request_id".to_string(), envelope.request_id.clone());
-    event.attributes.insert(
-        "session_surface".to_string(),
-        envelope.session.surface.as_str().to_string(),
-    );
+    record_session_attributes(event, envelope);
     event
         .attributes
         .insert("decision".to_string(), decision.status().to_string());
@@ -502,6 +607,37 @@ pub fn record_ops_response<'a>(
             .insert("vault_access".to_string(), access.as_str().to_string());
     }
     event
+}
+
+fn record_session_attributes(event: &mut AuditEvent, envelope: &OpsCommandEnvelope) {
+    event.attributes.insert(
+        "session_surface".to_string(),
+        envelope.session.surface.as_str().to_string(),
+    );
+    event.attributes.insert(
+        "session_transport".to_string(),
+        envelope.session.transport.as_str().to_string(),
+    );
+    if let Some(evidence) = &envelope.session.transport_evidence {
+        event.attributes.insert(
+            "transport_authenticated".to_string(),
+            evidence.authenticated.to_string(),
+        );
+        event.attributes.insert(
+            "transport_evidence_source".to_string(),
+            evidence.evidence_source.clone(),
+        );
+        event.attributes.insert(
+            "transport_peer_identity".to_string(),
+            evidence.peer_identity.clone(),
+        );
+        if let Some(fingerprint) = &evidence.certificate_fingerprint_sha256 {
+            event.attributes.insert(
+                "transport_certificate_fingerprint_sha256".to_string(),
+                fingerprint.clone(),
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1244,6 +1380,97 @@ mod tests {
     }
 
     #[test]
+    fn mtls_process_boundary_requires_authenticated_transport_evidence() {
+        let mut envelope = OpsCommandEnvelope::local(
+            AuditSurface::Ops,
+            OpsProfile::Default,
+            OpsCommand::VaultOperation {
+                name: "export".to_string(),
+                access: VaultOperationAccess::Export,
+            },
+        );
+        envelope.session.transport = OpsTransport::Mtls;
+
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: None,
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert_eq!(
+                    missing_controls,
+                    vec!["mtls_transport_evidence".to_string()]
+                );
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn authenticated_mtls_process_boundary_records_non_secret_evidence() {
+        let envelope = OpsCommandEnvelope {
+            schema_version: OPS_SCHEMA_VERSION,
+            request_id: "pp.test.request.mtls".to_string(),
+            operation_id: "pp.test.operation.mtls".to_string(),
+            profile: OpsProfile::Default,
+            actor: OpsActor {
+                actor_id: "external_assessor".to_string(),
+                kind: OpsActorKind::ServiceAccount,
+            },
+            session: OpsSession::mtls(
+                AuditSurface::Ops,
+                "pp.test.session.mtls",
+                mtls_test_evidence(),
+            ),
+            command: OpsCommand::VaultOperation {
+                name: "export".to_string(),
+                access: VaultOperationAccess::Export,
+            },
+        };
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: None,
+        };
+
+        let evaluation = evaluate_ops_command_envelope(envelope, &context);
+
+        assert!(evaluation.is_allowed());
+        assert!(evaluation.audit_events.iter().all(|event| {
+            event
+                .attributes
+                .get("session_transport")
+                .is_some_and(|transport| transport == "mtls")
+        }));
+        assert!(evaluation.audit_events.iter().all(|event| {
+            event
+                .attributes
+                .get("transport_peer_identity")
+                .is_some_and(|identity| identity == "spiffe://example.test/paranoid-assessor")
+        }));
+        assert!(!evaluation.audit_events.iter().any(|event| {
+            event
+                .attributes
+                .keys()
+                .any(|attribute| attribute.contains("private_key") || attribute.contains("secret"))
+        }));
+    }
+
+    #[test]
     fn ops_request_and_response_events_share_request_id() {
         let envelope = OpsCommandEnvelope::local(
             AuditSurface::Cli,
@@ -1347,6 +1574,13 @@ mod tests {
             Some("gui")
         );
         assert_eq!(
+            evaluation.audit_events[0]
+                .attributes
+                .get("session_transport")
+                .map(String::as_str),
+            Some("in_process")
+        );
+        assert_eq!(
             evaluation.audit_events[1]
                 .attributes
                 .get("decision")
@@ -1360,6 +1594,17 @@ mod tests {
                 .map(String::as_str),
             Some("gui")
         );
+    }
+
+    fn mtls_test_evidence() -> OpsTransportEvidence {
+        OpsTransportEvidence::authenticated_mtls(
+            "spiffe://example.test/paranoid-assessor",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "fixture-mtls-handshake",
+        )
+        .with_channel_binding_sha256(
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        )
     }
 
     #[test]
