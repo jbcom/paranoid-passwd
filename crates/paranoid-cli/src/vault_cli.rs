@@ -34,7 +34,10 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
         return vault_tui::run(invocation.open_options.clone()).map(|_| 0);
     }
 
-    let command = invocation.command.clone().unwrap_or(VaultCommand::Help);
+    let command = match &invocation.command {
+        Some(command) => command,
+        None => &VaultCommand::Help,
+    };
     let audit_sink_health =
         assess_optional_jsonl_file_audit_sink(invocation.audit_jsonl.as_deref());
     if let Some(exit_code) =
@@ -42,7 +45,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
     {
         return Ok(exit_code);
     }
-    match &command {
+    match command {
         VaultCommand::Help => {
             print_usage(io::stdout())?;
             Ok(0)
