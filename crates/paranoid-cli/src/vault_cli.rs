@@ -41,7 +41,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
     let audit_sink_health =
         assess_optional_jsonl_file_audit_sink(invocation.audit_jsonl.as_deref());
     if let Some(exit_code) =
-        evaluate_vault_command_policy(&invocation, &command, &audit_sink_health)?
+        evaluate_vault_command_policy(&invocation, command, &audit_sink_health)?
     {
         return Ok(exit_code);
     }
