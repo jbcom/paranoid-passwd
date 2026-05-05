@@ -1,5 +1,13 @@
+use paranoid_audit::{
+    AuditEvent, AuditSinkHealth, AuditSurface, AuditTrail, assess_optional_jsonl_file_audit_sink,
+    write_events_jsonl,
+};
 use paranoid_core::{CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, VERSION};
-use paranoid_ops::{OpsProfile, VaultSealMachine, collect_federal_startup_evidence};
+use paranoid_ops::{
+    OpsCommand, OpsCommandEnvelope, OpsPolicyContext, OpsPolicyDecision, OpsProfile,
+    VaultOperationAccess, VaultSealMachine, collect_federal_startup_evidence_with_audit_sink,
+    evaluate_policy, record_ops_request, record_ops_response,
+};
 use paranoid_vault::{
     GenerateStoreLoginRecord, NewCardRecord, NewIdentityRecord, NewLoginRecord,
     NewSecureNoteRecord, UpdateCardRecord, UpdateIdentityRecord, UpdateLoginRecord,
@@ -17,6 +25,8 @@ use std::{
 
 use crate::vault_tui;
 
+const EX_POLICY_DENY: i32 = 6;
+
 pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
     let invocation = parse_vault_args(args)?;
     let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
@@ -24,7 +34,14 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
         return vault_tui::run(invocation.open_options.clone()).map(|_| 0);
     }
 
-    let command = invocation.command.unwrap_or(VaultCommand::Help);
+    let command = invocation.command.clone().unwrap_or(VaultCommand::Help);
+    let audit_sink_health =
+        assess_optional_jsonl_file_audit_sink(invocation.audit_jsonl.as_deref());
+    if let Some(exit_code) =
+        evaluate_vault_command_policy(&invocation, &command, &audit_sink_health)?
+    {
+        return Ok(exit_code);
+    }
     match &command {
         VaultCommand::Help => {
             print_usage(io::stdout())?;
@@ -87,9 +104,9 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             Ok(0)
         }
         VaultCommand::FederalEvidence => {
-            let evidence = collect_federal_startup_evidence(
-                OpsProfile::FederalReady,
-                false,
+            let evidence = collect_federal_startup_evidence_with_audit_sink(
+                invocation.profile,
+                audit_sink_health,
                 option_env!("PARANOID_CLI_BUILD_COMMIT").unwrap_or("dev"),
                 option_env!("PARANOID_CLI_BUILD_DATE").unwrap_or("dev"),
             );
@@ -582,6 +599,9 @@ enum LaunchMode {
 struct VaultInvocation {
     open_options: VaultOpenOptions,
     mode: LaunchMode,
+    profile: OpsProfile,
+    audit_jsonl: Option<PathBuf>,
+    require_audit_sink: bool,
     command: Option<VaultCommand>,
 }
 
@@ -706,6 +726,65 @@ enum VaultCommand {
     },
 }
 
+impl VaultCommand {
+    fn ops_command(&self) -> Option<OpsCommand> {
+        match self {
+            Self::Help => None,
+            Self::FederalEvidence => Some(OpsCommand::FederalEvidence),
+            Self::SealStatus => Some(OpsCommand::VaultSealStatus),
+            Self::Init => Some(vault_operation("init", VaultOperationAccess::Keyslot)),
+            Self::Keyslots | Self::InspectKeyslot { .. } => {
+                Some(vault_operation("keyslots", VaultOperationAccess::Metadata))
+            }
+            Self::InspectCertificate { .. }
+            | Self::InspectBackup { .. }
+            | Self::InspectTransfer { .. } => {
+                Some(vault_operation("inspect", VaultOperationAccess::Metadata))
+            }
+            Self::List { .. } | Self::Show { .. } => {
+                Some(vault_operation("read_item", VaultOperationAccess::Decrypt))
+            }
+            Self::Add { .. }
+            | Self::AddNote { .. }
+            | Self::AddCard { .. }
+            | Self::AddIdentity { .. }
+            | Self::Update { .. }
+            | Self::UpdateNote { .. }
+            | Self::UpdateCard { .. }
+            | Self::UpdateIdentity { .. }
+            | Self::Delete { .. }
+            | Self::GenerateStore { .. } => {
+                Some(vault_operation("mutate_item", VaultOperationAccess::Mutate))
+            }
+            Self::ExportBackup { .. } | Self::ExportTransfer { .. } => {
+                Some(vault_operation("export", VaultOperationAccess::Export))
+            }
+            Self::ImportBackup { .. } | Self::ImportTransfer { .. } => {
+                Some(vault_operation("import", VaultOperationAccess::Import))
+            }
+            Self::AddCertSlot { .. }
+            | Self::AddMnemonicSlot { .. }
+            | Self::RotateMnemonicSlot { .. }
+            | Self::AddDeviceSlot { .. }
+            | Self::RewrapCertSlot { .. }
+            | Self::RenameKeyslot { .. }
+            | Self::RemoveKeyslot { .. }
+            | Self::RebindDeviceSlot { .. }
+            | Self::RotateRecoverySecret { .. } => Some(vault_operation(
+                "keyslot_lifecycle",
+                VaultOperationAccess::Keyslot,
+            )),
+        }
+    }
+}
+
+fn vault_operation(name: &str, access: VaultOperationAccess) -> OpsCommand {
+    OpsCommand::VaultOperation {
+        name: name.to_string(),
+        access,
+    }
+}
+
 fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
     let mut path = default_vault_path();
     let mut password_env = "PARANOID_MASTER_PASSWORD".to_string();
@@ -716,6 +795,9 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
     let mut mnemonic_slot = None;
     let mut device_slot = None;
     let mut mode = LaunchMode::Auto;
+    let mut profile = OpsProfile::Default;
+    let mut audit_jsonl = None;
+    let mut require_audit_sink = false;
     let mut command: Option<String> = None;
     let mut command_args = Vec::new();
     let mut iter = args
@@ -760,6 +842,26 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
             }
             "--tui" if command.is_none() => mode = LaunchMode::Tui,
             "--cli" if command.is_none() => mode = LaunchMode::Cli,
+            "--profile" if command.is_none() => {
+                profile = parse_vault_ops_profile(
+                    &iter
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("--profile requires a value"))?,
+                )?;
+            }
+            "--federal-ready" if command.is_none() => {
+                profile = OpsProfile::FederalReady;
+                require_audit_sink = true;
+            }
+            "--audit-jsonl" if command.is_none() => {
+                audit_jsonl =
+                    Some(PathBuf::from(iter.next().ok_or_else(|| {
+                        anyhow::anyhow!("--audit-jsonl requires a value")
+                    })?));
+            }
+            "--require-audit-sink" if command.is_none() => {
+                require_audit_sink = true;
+            }
             "--recovery-phrase-env" if command.is_none() => {
                 mnemonic_phrase_env =
                     Some(iter.next().ok_or_else(|| {
@@ -873,8 +975,19 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
             use_device_auto: false,
         },
         mode,
+        profile,
+        audit_jsonl,
+        require_audit_sink,
         command,
     })
+}
+
+fn parse_vault_ops_profile(raw: &str) -> anyhow::Result<OpsProfile> {
+    match raw {
+        "default" => Ok(OpsProfile::Default),
+        "federal-ready" | "federal_ready" => Ok(OpsProfile::FederalReady),
+        other => Err(anyhow::anyhow!("unknown vault profile: {other}")),
+    }
 }
 
 fn should_launch_tui(invocation: &VaultInvocation, interactive: bool) -> bool {
@@ -882,6 +995,81 @@ fn should_launch_tui(invocation: &VaultInvocation, interactive: bool) -> bool {
         || (matches!(invocation.mode, LaunchMode::Auto)
             && interactive
             && invocation.command.is_none())
+}
+
+fn evaluate_vault_command_policy(
+    invocation: &VaultInvocation,
+    command: &VaultCommand,
+    audit_sink_health: &AuditSinkHealth,
+) -> anyhow::Result<Option<i32>> {
+    let Some(ops_command) = command.ops_command() else {
+        return Ok(None);
+    };
+    let envelope = OpsCommandEnvelope::local(AuditSurface::Vault, invocation.profile, ops_command);
+    let context = OpsPolicyContext {
+        profile: invocation.profile,
+        audit_sink_required: invocation.audit_jsonl.is_some()
+            || invocation.require_audit_sink
+            || invocation.profile == OpsProfile::FederalReady,
+        audit_sink_available: audit_sink_health.is_available(),
+        crypto_provider: paranoid_ops::FederalCryptoProviderEvidence::collect_from_environment(),
+    };
+    let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
+    record_ops_request(&mut trail, &envelope);
+    let decision = evaluate_policy(&envelope, &context);
+    record_ops_response(&mut trail, &envelope, &decision);
+    let audit_events = trail.into_events();
+    write_optional_vault_audit_jsonl(
+        &invocation.audit_jsonl,
+        audit_sink_health,
+        audit_events.as_slice(),
+    )?;
+    if decision.is_allowed() {
+        return Ok(None);
+    }
+    print_vault_policy_denial_json(
+        &envelope.operation_id,
+        &decision,
+        audit_sink_health,
+        audit_events.as_slice(),
+    )?;
+    Ok(Some(EX_POLICY_DENY))
+}
+
+fn write_optional_vault_audit_jsonl(
+    path: &Option<PathBuf>,
+    audit_sink: &AuditSinkHealth,
+    audit_events: &[AuditEvent],
+) -> anyhow::Result<()> {
+    if let Some(path) = path
+        && audit_sink.is_available()
+    {
+        write_events_jsonl(path, audit_events)?;
+    }
+    Ok(())
+}
+
+fn print_vault_policy_denial_json(
+    operation_id: &str,
+    decision: &OpsPolicyDecision,
+    audit_sink: &AuditSinkHealth,
+    audit_events: &[AuditEvent],
+) -> io::Result<()> {
+    let report = serde_json::json!({
+        "schema_version": paranoid_audit::AUDIT_SCHEMA_VERSION,
+        "operation": "vault",
+        "operation_id": operation_id,
+        "status": "error",
+        "error_kind": "policy_denied",
+        "policy_decision": decision,
+        "audit_sink": audit_sink,
+        "audit_events": audit_events,
+    });
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer_pretty(&mut handle, &report).map_err(io::Error::other)?;
+    writeln!(handle)?;
+    handle.flush()
 }
 
 fn parse_show(args: &[String]) -> anyhow::Result<VaultCommand> {
@@ -2441,7 +2629,7 @@ fn print_usage(mut out: impl Write) -> io::Result<()> {
 paranoid-passwd {VERSION}
 
 Usage:
-  paranoid-passwd vault [--tui|--cli] [--path FILE] [--password-env VAR] [--recovery-phrase-env VAR [--mnemonic-slot ID]] [--device-slot ID] [--cert CERT.pem --key KEY.pem [--key-passphrase-env VAR]] [subcommand] [OPTIONS]
+  paranoid-passwd vault [--tui|--cli] [--path FILE] [--audit-jsonl FILE] [--require-audit-sink] [--profile default|federal-ready] [--password-env VAR] [--recovery-phrase-env VAR [--mnemonic-slot ID]] [--device-slot ID] [--cert CERT.pem --key KEY.pem [--key-passphrase-env VAR]] [subcommand] [OPTIONS]
 
 Subcommands:
   init
@@ -2494,6 +2682,9 @@ Behavior:
   On an interactive TTY with no explicit subcommand, `paranoid-passwd vault` launches
   the native vault TUI. Pass --cli to force headless behavior or --tui to force the
   interactive view explicitly.
+  Headless vault subcommands submit typed ops requests before execution. Use
+  --audit-jsonl FILE to append request/response audit events, and --require-audit-sink
+  to fail closed unless that sink is writable.
 "
     )
 }
@@ -2672,6 +2863,25 @@ mod tests {
 
         let seal = parse_vault_args(&[OsString::from("seal-status")]).expect("parse");
         assert!(matches!(seal.command, Some(VaultCommand::SealStatus)));
+    }
+
+    #[test]
+    fn parse_vault_ops_audit_policy_flags() {
+        let invocation = parse_vault_args(&[
+            OsString::from("--profile"),
+            OsString::from("federal-ready"),
+            OsString::from("--audit-jsonl"),
+            OsString::from("vault-audit.jsonl"),
+            OsString::from("keyslots"),
+        ])
+        .expect("parse vault ops flags");
+
+        assert_eq!(invocation.profile, OpsProfile::FederalReady);
+        assert_eq!(
+            invocation.audit_jsonl.as_deref(),
+            Some(PathBuf::from("vault-audit.jsonl").as_path())
+        );
+        assert!(matches!(invocation.command, Some(VaultCommand::Keyslots)));
     }
 
     #[test]

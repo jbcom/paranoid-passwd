@@ -104,6 +104,8 @@ The CLI exposes the first automation surface:
 - `--require-audit-sink` fails closed unless the sink is writable
 - `--profile federal-ready` and `--federal-ready` enforce the federal-ready startup policy
 - `--federal-evidence` emits assessor-readable startup evidence as JSON
+- `vault --audit-jsonl PATH <subcommand>` wraps headless vault subcommands in typed ops
+  request/response audit events
 - `vault seal-status` reports the local vault seal posture without decrypting item payloads
 - `vault federal-evidence` emits the same federal startup evidence from the vault namespace
 

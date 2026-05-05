@@ -82,10 +82,13 @@ The current ops/audit work adds typed command envelopes, allow/challenge/deny po
 sinks with writable health evidence, seal-state primitives, and a federal-ready startup evidence
 path. The next architecture boundary should route all security-relevant vault command flows and
 interactive UI adapters through that protocol rather than drifting back into UI-local patches.
+Headless vault CLI commands have started that migration; TUI and GUI adapters still need the same
+coverage.
 
 That PR should be scoped around:
 
-- expanding `crates/paranoid-ops` into vault mutation orchestration
+- expanding `crates/paranoid-ops` from headless vault CLI orchestration into TUI/GUI vault mutation
+  orchestration
 - expanding `crates/paranoid-audit` beyond local JSONL writable-path health into external
   audit-device health
 - CLI JSONL fixtures and additional automation output over the typed ops protocol

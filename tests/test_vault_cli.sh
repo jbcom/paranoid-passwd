@@ -195,6 +195,12 @@ prepare_workspace() {
 
 t_init_and_crud() {
     local out=""
+    local audit_out=""
+    local audit_path=""
+    local audit_missing_path=""
+    local audit_denial=""
+    local audit_err=""
+    local audit_rc=0
     local created_password=""
     local created_list=""
     local created_login_id=""
@@ -211,6 +217,47 @@ t_init_and_crud() {
     contains "$out" $'initialized\t'"$SOURCE_VAULT" || return 1
     contains "$out" "format=1" || return 1
     contains "$out" "keyslots=1" || return 1
+
+    audit_path="$TMPDIR_ROOT/vault-audit.jsonl"
+    audit_out="$(source_vault --audit-jsonl "$audit_path" keyslots)"
+    contains "$audit_out" $'posture\trecovery=true' || return 1
+    [[ -s "$audit_path" ]] || return 1
+    AUDIT_JSONL="$audit_path" python3 -c '
+import json
+import os
+
+with open(os.environ["AUDIT_JSONL"], encoding="utf-8") as handle:
+    events = [json.loads(line) for line in handle]
+
+assert len(events) == 2
+assert events[0]["surface"] == "ops"
+assert events[0]["action"] == "vault_operation.request"
+assert events[1]["action"] == "vault_operation.response"
+assert events[0]["attributes"]["request_id"] == events[1]["attributes"]["request_id"]
+assert events[0]["attributes"]["vault_operation"] == "keyslots"
+assert events[0]["attributes"]["vault_access"] == "metadata"
+assert events[1]["attributes"]["decision"] == "allow"
+'
+
+    audit_missing_path="$TMPDIR_ROOT/missing/vault-audit.jsonl"
+    audit_err="$TMPDIR_ROOT/vault-audit.err"
+    audit_rc=0
+    audit_denial="$(source_vault --audit-jsonl "$audit_missing_path" keyslots 2>"$audit_err")" || audit_rc=$?
+    if [[ "$audit_rc" -ne 6 || -s "$audit_err" ]]; then
+        return 1
+    fi
+    printf '%s' "$audit_denial" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["operation"] == "vault"
+assert data["status"] == "error"
+assert data["error_kind"] == "policy_denied"
+assert data["audit_sink"]["status"] == "unavailable"
+assert data["policy_decision"]["missing_controls"] == ["required_audit_sink"]
+assert data["audit_events"][0]["action"] == "vault_operation.request"
+'
 
     LOGIN1_ID="$(source_vault add --title GitHub --username octo@example.com --password 'ReuseMe#2026' --url https://github.com --notes 'Primary engineering login' --folder Work --tags work,code)"
     LOGIN2_ID="$(source_vault add --title GitLab --username octo@example.com --password 'ReuseMe#2026' --folder Archive --tags archive)"

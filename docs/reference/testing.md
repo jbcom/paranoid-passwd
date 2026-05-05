@@ -97,6 +97,8 @@ proves that:
 - JSON reports include policy request/response audit events
 - `--audit-jsonl` writes a local append-oriented JSONL audit sink
 - configured audit sinks must pass a writable health check before policy treats them as available
+- headless vault CLI subcommands emit typed ops request/response events when an audit sink is
+  configured
 - `--federal-ready` fails closed without confirmed approved-provider evidence
 - federal startup evidence is emitted as JSON
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
@@ -112,7 +114,7 @@ The remaining test expansion is now narrower:
 - audit-device health checks beyond the local JSONL writable-path sink
 - keyed correlation hashes only after the approved primitive and low-entropy secret risk are
   dispositioned
-- e2e coverage for vault mutations routed through typed ops envelopes
+- e2e coverage for TUI and GUI vault mutations routed through typed ops envelopes
 
 ## Core Tests
 

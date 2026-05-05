@@ -100,12 +100,46 @@ impl VaultUnlockMethod {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultOperationAccess {
+    Metadata,
+    Decrypt,
+    Mutate,
+    Export,
+    Import,
+    Keyslot,
+}
+
+impl VaultOperationAccess {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::Decrypt => "decrypt",
+            Self::Mutate => "mutate",
+            Self::Export => "export",
+            Self::Import => "import",
+            Self::Keyslot => "keyslot",
+        }
+    }
+
+    fn requires_fips_evidence(self) -> bool {
+        !matches!(self, Self::Metadata)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum OpsCommand {
     GeneratePassword,
     VaultSealStatus,
-    VaultUnlock { method: VaultUnlockMethod },
+    VaultUnlock {
+        method: VaultUnlockMethod,
+    },
+    VaultOperation {
+        name: String,
+        access: VaultOperationAccess,
+    },
     FederalEvidence,
 }
 
@@ -115,6 +149,7 @@ impl OpsCommand {
             Self::GeneratePassword => "generate_password",
             Self::VaultSealStatus => "vault_seal_status",
             Self::VaultUnlock { .. } => "vault_unlock",
+            Self::VaultOperation { .. } => "vault_operation",
             Self::FederalEvidence => "federal_evidence",
         }
     }
@@ -122,7 +157,9 @@ impl OpsCommand {
     pub fn subject(&self) -> AuditSubject {
         match self {
             Self::GeneratePassword => AuditSubject::PasswordGeneration,
-            Self::VaultSealStatus | Self::VaultUnlock { .. } => AuditSubject::VaultOperation,
+            Self::VaultSealStatus | Self::VaultUnlock { .. } | Self::VaultOperation { .. } => {
+                AuditSubject::VaultOperation
+            }
             Self::FederalEvidence => AuditSubject::ReleaseAssurance,
         }
     }
@@ -132,7 +169,11 @@ impl OpsCommand {
     }
 
     fn requires_fips_evidence(&self) -> bool {
-        matches!(self, Self::GeneratePassword | Self::VaultUnlock { .. })
+        match self {
+            Self::GeneratePassword | Self::VaultUnlock { .. } => true,
+            Self::VaultOperation { access, .. } => access.requires_fips_evidence(),
+            Self::VaultSealStatus | Self::FederalEvidence => false,
+        }
     }
 }
 
@@ -354,6 +395,14 @@ pub fn record_ops_request<'a>(
     event
         .attributes
         .insert("command".to_string(), envelope.command.name().to_string());
+    if let OpsCommand::VaultOperation { name, access } = &envelope.command {
+        event
+            .attributes
+            .insert("vault_operation".to_string(), name.clone());
+        event
+            .attributes
+            .insert("vault_access".to_string(), access.as_str().to_string());
+    }
     event
 }
 
@@ -381,6 +430,14 @@ pub fn record_ops_response<'a>(
     event
         .attributes
         .insert("decision".to_string(), decision.status().to_string());
+    if let OpsCommand::VaultOperation { name, access } = &envelope.command {
+        event
+            .attributes
+            .insert("vault_operation".to_string(), name.clone());
+        event
+            .attributes
+            .insert("vault_access".to_string(), access.as_str().to_string());
+    }
     event
 }
 
@@ -1049,6 +1106,47 @@ mod tests {
                 .get("decision")
                 .map(String::as_str),
             Some("allow")
+        );
+    }
+
+    #[test]
+    fn vault_operation_events_include_operation_and_access_metadata() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Vault,
+            OpsProfile::Default,
+            OpsCommand::VaultOperation {
+                name: "mutate_item".to_string(),
+                access: VaultOperationAccess::Mutate,
+            },
+        );
+        let decision = OpsPolicyDecision::Allow {
+            reason: "test".to_string(),
+        };
+        let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
+
+        record_ops_request(&mut trail, &envelope);
+        record_ops_response(&mut trail, &envelope, &decision);
+
+        assert_eq!(
+            trail.events()[0]
+                .attributes
+                .get("vault_operation")
+                .map(String::as_str),
+            Some("mutate_item")
+        );
+        assert_eq!(
+            trail.events()[0]
+                .attributes
+                .get("vault_access")
+                .map(String::as_str),
+            Some("mutate")
+        );
+        assert_eq!(
+            trail.events()[1]
+                .attributes
+                .get("vault_operation")
+                .map(String::as_str),
+            Some("mutate_item")
         );
     }
 

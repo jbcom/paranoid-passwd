@@ -74,6 +74,7 @@ Automation surfaces:
 ```bash
 paranoid-passwd --federal-evidence
 paranoid-passwd --cli --federal-ready --audit-jsonl audit.jsonl --length 32
+paranoid-passwd vault --audit-jsonl vault-audit.jsonl keyslots
 paranoid-passwd vault federal-evidence
 paranoid-passwd vault seal-status
 ```
@@ -108,6 +109,8 @@ federal startup evidence, redacted structured audit events, and hash-chain evide
 - typed command envelopes with request id, actor, surface, session, profile, and operation
 - policy decisions of `allow`, `challenge`, or `deny`
 - challenge/response handling for sensitive operations and fresh proof requirements
+- vault operation access classes for metadata, decrypt, mutate, export, import, and keyslot
+  lifecycle flows
 - seal and auto-unseal state transitions
 - a placeholder transport model for future mTLS policy when operations cross process boundaries
 - stable JSON responses for automation and evidence capture
