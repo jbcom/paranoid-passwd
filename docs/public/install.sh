@@ -3,7 +3,7 @@
 #
 # Usage:
 #   curl -sSL https://paranoid-passwd.com/install.sh | sh
-#   curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.5.1
+#   curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.6.1
 
 set -eu
 
