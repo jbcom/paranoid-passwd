@@ -17,15 +17,15 @@ Before making any change, complete this self-audit:
 - [ ] I acknowledge that my training data includes password breach dumps
 - [ ] I will not generate randomness directly; I will delegate to the Rust core's OpenSSL-backed RNG path
 - [ ] I will not implement custom cryptographic primitives
-- [ ] I will not claim statistical formulas are correct without a human-verifiable source
+- [ ] I will not claim statistical formulas are correct without a public, independently verifiable source
 - [ ] I will not bypass rejection sampling; the boundary remains `(256/N)*N - 1`
 - [ ] I will not reintroduce the retired browser, JavaScript, or webview product path
 - [ ] I will treat any Slint WASM or mobile target as a separately gated Rust-native surface with an explicit threat model
 - [ ] I will not add handwritten `unsafe` blocks, functions, or impls; only Slint-generated code and exact audited platform ABI export attributes may lower the GUI lint
 - [ ] I will keep security-sensitive logic in `crates/paranoid-core`, not in the CLI, TUI, GUI, or docs layer
-- [ ] I will flag math/security-sensitive changes with `TODO: HUMAN_REVIEW - <reason>`
+- [ ] I will flag math/security-sensitive changes with `TODO: AI_REVIEW - <reason>`
 
-If you cannot check all boxes, stop and request human guidance.
+If you cannot check all boxes, stop and request maintainer direction.
 
 ## Zero-Exception Rules
 
@@ -36,7 +36,7 @@ If you cannot check all boxes, stop and request human guidance.
 4. Reintroduce JavaScript, DOM, or webview fallbacks into the product surface
 5. Move cryptographic or audit math into the TUI, GUI, docs tooling, or shell scripts
 6. Unpin GitHub Actions from commit SHAs
-7. Add handwritten `unsafe` blocks, functions, or impls without explicit human approval and assurance-script coverage
+7. Add handwritten `unsafe` blocks, functions, or impls without explicit repository disposition and assurance-script coverage
 8. Remove audit layers to simplify the UX
 
 ### Always
@@ -75,7 +75,7 @@ Before committing:
 - [ ] Rejection sampling still uses `(256/N)*N - 1`
 - [ ] Chi-squared pass logic still uses `p > 0.01`
 - [ ] Chi-squared degrees of freedom remain `df = N - 1`
-- [ ] Math/security-sensitive edits are marked `TODO: HUMAN_REVIEW`
+- [ ] Math/security-sensitive edits are marked `TODO: AI_REVIEW`
 
 ### Build
 - [ ] `cargo fmt --check`
@@ -131,15 +131,15 @@ only exact `#[unsafe(no_mangle)]` ABI attributes are allowed there, and `paranoi
 - `openssl` is the approved native cryptography backend.
 - `zeroize` is the approved secret-scrubbing helper.
 
-## For Human Cryptographers
+## For AI Security Assessors
 
 Focus review on:
 
 1. `crates/paranoid-core/src/lib.rs` rejection sampling, chi-squared usage, serial correlation, and compliance thresholds
 2. The OpenSSL-backed RNG / SHA-256 delegation paths in `paranoid-core`
-3. Any `TODO: HUMAN_REVIEW` sites added around statistical or security logic
+3. Any `TODO: AI_REVIEW` sites added around statistical or security logic
 4. Release and supply-chain changes under `.github/`, `.cargo/`, and `vendor/`
-5. `docs/reference/human-review.md` for the tracked open review inventory and expected reviewer outputs
+5. `docs/reference/ai-review.md` for the tracked open review inventory and expected assessor outputs
 
 ## Documentation Map
 

@@ -1,4 +1,4 @@
-.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-e2e-emulate _test-gui-e2e-emulate test-vault-e2e verify-security verify-assurance verify-deep verify-human-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality builder-image _builder-image ci-emulate _ci-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
+.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-e2e-emulate _test-gui-e2e-emulate test-vault-e2e verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality builder-image _builder-image ci-emulate _ci-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -122,14 +122,14 @@ verify-security: ## Run repository security and supply-chain verification script
 verify-assurance: ## Run deterministic security assurance protocol gates
 	bash scripts/hallucination_check.sh
 	bash scripts/supply_chain_verify.sh
-	bash scripts/verify_human_review_inventory.sh
+	bash scripts/verify_ai_review_inventory.sh
 	python3 scripts/security_assurance_gate.py
 
 verify-deep: ## Run local-only static/dependency/secret quality checks before pushing
 	cargo run -p xtask --locked --frozen --offline -- verify-deep
 
-verify-human-review: ## Verify the tracked HUMAN_REVIEW inventory matches the source tree
-	bash scripts/verify_human_review_inventory.sh
+verify-ai-review: ## Verify the tracked AI_REVIEW inventory matches the source tree
+	bash scripts/verify_ai_review_inventory.sh
 
 verify-branch-protection: ## Verify main branch protection matches the Rust-native required checks
 	bash scripts/verify_branch_protection.sh

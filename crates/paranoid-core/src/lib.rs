@@ -938,7 +938,7 @@ pub fn chi_squared(
         return Ok((chi2, df, 1.0));
     }
 
-    // TODO: HUMAN_REVIEW - verify chi-squared upper-tail interpretation and thresholding.
+    // TODO: AI_REVIEW - verify chi-squared upper-tail interpretation and thresholding.
     let distribution = ChiSquared::new(df as f64).map_err(|error| {
         ParanoidError::InvalidArguments(format!("invalid chi-squared degrees of freedom: {error}"))
     })?;
@@ -951,7 +951,7 @@ pub fn serial_correlation(data: &[u8]) -> f64 {
         return 0.0;
     }
 
-    // TODO: HUMAN_REVIEW - verify the serial-correlation coefficient matches the intended estimator.
+    // TODO: AI_REVIEW - verify the serial-correlation coefficient matches the intended estimator.
     let mean = data.iter().map(|value| f64::from(*value)).sum::<f64>() / data.len() as f64;
     let numerator = data
         .windows(2)

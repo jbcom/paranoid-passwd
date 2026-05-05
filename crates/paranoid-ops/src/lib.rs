@@ -1,6 +1,6 @@
 use paranoid_audit::{
     AUDIT_SCHEMA_VERSION, AuditEvent, AuditOutcome, AuditSeverity, AuditSinkHealth, AuditSubject,
-    AuditSurface, AuditTrail,
+    AuditSurface, AuditTrail, assess_external_audit_device_from_environment,
 };
 use paranoid_core::{AuditStage, AuditSummary, GenerationReport, ParanoidError, ParanoidRequest};
 pub use paranoid_seal::{
@@ -19,6 +19,7 @@ use thiserror::Error;
 static LOCAL_OPERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const OPS_SCHEMA_VERSION: u16 = 1;
+pub const FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -467,7 +468,7 @@ impl OpsCommandEvaluation {
     }
 }
 
-// TODO: HUMAN_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.
+// TODO: AI_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.
 pub fn evaluate_ops_command(
     surface: AuditSurface,
     command: OpsCommand,
@@ -512,8 +513,43 @@ pub struct FederalStartupEvidence {
     pub architecture: String,
     pub audit_schema_version: u16,
     pub audit_sink: AuditSinkHealth,
+    pub external_audit_device: AuditSinkHealth,
     pub crypto_provider: FederalCryptoProviderEvidence,
     pub policy_decision: OpsPolicyDecision,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FederalStartupEvidenceInput {
+    pub profile: OpsProfile,
+    pub product_version: String,
+    pub build_commit: String,
+    pub build_date: String,
+    pub operating_system: String,
+    pub architecture: String,
+    pub audit_sink: AuditSinkHealth,
+    pub external_audit_device: AuditSinkHealth,
+    pub crypto_provider: FederalCryptoProviderEvidence,
+}
+
+impl FederalStartupEvidenceInput {
+    pub fn runtime(
+        profile: OpsProfile,
+        audit_sink: AuditSinkHealth,
+        build_commit: impl Into<String>,
+        build_date: impl Into<String>,
+    ) -> Self {
+        Self {
+            profile,
+            product_version: paranoid_core::VERSION.to_string(),
+            build_commit: build_commit.into(),
+            build_date: build_date.into(),
+            operating_system: env::consts::OS.to_string(),
+            architecture: env::consts::ARCH.to_string(),
+            audit_sink,
+            external_audit_device: assess_external_audit_device_from_environment(),
+            crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+        }
+    }
 }
 
 pub fn collect_federal_startup_evidence(
@@ -536,27 +572,38 @@ pub fn collect_federal_startup_evidence_with_audit_sink(
     build_commit: impl Into<String>,
     build_date: impl Into<String>,
 ) -> FederalStartupEvidence {
-    let crypto_provider = FederalCryptoProviderEvidence::collect_from_environment();
+    let input = FederalStartupEvidenceInput::runtime(profile, audit_sink, build_commit, build_date);
+    collect_federal_startup_evidence_from_input(input)
+}
+
+pub fn collect_federal_startup_evidence_from_input(
+    input: FederalStartupEvidenceInput,
+) -> FederalStartupEvidence {
     let context = OpsPolicyContext {
-        profile,
-        audit_sink_required: profile == OpsProfile::FederalReady,
-        audit_sink_available: audit_sink.is_available(),
-        crypto_provider: crypto_provider.clone(),
+        profile: input.profile,
+        audit_sink_required: input.profile == OpsProfile::FederalReady,
+        audit_sink_available: input.audit_sink.is_available()
+            || input.external_audit_device.is_available(),
+        crypto_provider: input.crypto_provider.clone(),
     };
-    let envelope =
-        OpsCommandEnvelope::local(AuditSurface::Cli, profile, OpsCommand::GeneratePassword);
+    let envelope = OpsCommandEnvelope::local(
+        AuditSurface::Cli,
+        input.profile,
+        OpsCommand::GeneratePassword,
+    );
     let policy_decision = evaluate_policy(&envelope, &context);
     FederalStartupEvidence {
-        schema_version: OPS_SCHEMA_VERSION,
-        profile,
-        product_version: paranoid_core::VERSION.to_string(),
-        build_commit: build_commit.into(),
-        build_date: build_date.into(),
-        operating_system: env::consts::OS.to_string(),
-        architecture: env::consts::ARCH.to_string(),
+        schema_version: FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION,
+        profile: input.profile,
+        product_version: input.product_version,
+        build_commit: input.build_commit,
+        build_date: input.build_date,
+        operating_system: input.operating_system,
+        architecture: input.architecture,
         audit_schema_version: AUDIT_SCHEMA_VERSION,
-        audit_sink,
-        crypto_provider,
+        audit_sink: input.audit_sink,
+        external_audit_device: input.external_audit_device,
+        crypto_provider: input.crypto_provider,
         policy_decision,
     }
 }
@@ -1126,18 +1173,94 @@ mod tests {
 
     #[test]
     fn federal_startup_evidence_reports_denied_default_runtime() {
-        let evidence = collect_federal_startup_evidence(
-            OpsProfile::FederalReady,
-            false,
-            "test-commit",
-            "test-date",
-        );
+        let evidence = collect_federal_startup_evidence_from_input(FederalStartupEvidenceInput {
+            profile: OpsProfile::FederalReady,
+            product_version: "test-version".to_string(),
+            build_commit: "test-commit".to_string(),
+            build_date: "test-date".to_string(),
+            operating_system: "linux".to_string(),
+            architecture: "amd64".to_string(),
+            audit_sink: AuditSinkHealth::not_configured_jsonl(),
+            external_audit_device: AuditSinkHealth::not_configured_external_device(),
+            crypto_provider: FederalCryptoProviderEvidence {
+                provider_name: "OpenSSL".to_string(),
+                provider_version: "OpenSSL test provider".to_string(),
+                provider_platform: "test-platform".to_string(),
+                approved_mode: FederalApprovedMode::NotConfirmed,
+                certificate_reference: None,
+                evidence_source: "test".to_string(),
+            },
+        });
 
+        assert_eq!(
+            evidence.schema_version,
+            FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION
+        );
         assert_eq!(evidence.profile, OpsProfile::FederalReady);
         assert_eq!(evidence.audit_schema_version, AUDIT_SCHEMA_VERSION);
+        assert_eq!(
+            evidence.external_audit_device,
+            AuditSinkHealth::not_configured_external_device()
+        );
         assert!(matches!(
             evidence.policy_decision,
             OpsPolicyDecision::Deny { .. }
+        ));
+    }
+
+    #[test]
+    fn unverified_external_audit_device_does_not_satisfy_required_audit_control() {
+        let evidence = collect_federal_startup_evidence_from_input(FederalStartupEvidenceInput {
+            profile: OpsProfile::FederalReady,
+            product_version: "test-version".to_string(),
+            build_commit: "test-commit".to_string(),
+            build_date: "test-date".to_string(),
+            operating_system: "linux".to_string(),
+            architecture: "amd64".to_string(),
+            audit_sink: AuditSinkHealth::not_configured_jsonl(),
+            external_audit_device: AuditSinkHealth::unverified_external_device(
+                "siem-primary",
+                "mtls://audit.example.invalid:6514",
+                "probe not implemented",
+            ),
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+        });
+
+        match evidence.policy_decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert_eq!(missing_controls, vec!["required_audit_sink".to_string()]);
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ready_external_audit_device_can_satisfy_required_audit_control() {
+        let evidence = collect_federal_startup_evidence_from_input(FederalStartupEvidenceInput {
+            profile: OpsProfile::FederalReady,
+            product_version: "test-version".to_string(),
+            build_commit: "test-commit".to_string(),
+            build_date: "test-date".to_string(),
+            operating_system: "linux".to_string(),
+            architecture: "amd64".to_string(),
+            audit_sink: AuditSinkHealth::not_configured_jsonl(),
+            external_audit_device: AuditSinkHealth::ready_external_device(
+                "siem-primary",
+                "mtls://audit.example.invalid:6514",
+                "test",
+            ),
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+        });
+
+        assert!(matches!(
+            evidence.policy_decision,
+            OpsPolicyDecision::Allow { .. }
         ));
     }
 }

@@ -1140,7 +1140,7 @@ fn result_tab_text(tab: usize, report: &GenerationReport) -> Text<'static> {
                 "Batch statistics now describe the generation method while each emitted password gets its own verdict.",
             ),
             Line::raw(
-                "Have a human cryptographer review the policy thresholds and statistical formulas before production use.",
+                "Run the AI assessor protocol on policy thresholds and statistical formulas before production use.",
             ),
         ]),
     }

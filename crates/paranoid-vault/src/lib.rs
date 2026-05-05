@@ -1025,7 +1025,7 @@ impl UnlockedVault {
             &device_slot_aad(slot_id.as_str()),
             DEVICE_CHECK_PLAINTEXT,
         )?;
-        // TODO: HUMAN_REVIEW - confirm the device-bound keyslot design of storing the raw master key in OS secure storage plus an AES-GCM verification blob is acceptable across macOS, Windows, and Linux secret stores.
+        // TODO: AI_REVIEW - confirm the device-bound keyslot design of storing the raw master key in OS secure storage plus an AES-GCM verification blob is acceptable across macOS, Windows, and Linux secret stores.
         let slot = VaultKeyslot {
             id: slot_id,
             kind: VaultKeyslotKind::DeviceBound,
@@ -1069,7 +1069,7 @@ impl UnlockedVault {
             &mnemonic_slot_aad(slot_id),
             self.master_key.as_slice(),
         )?;
-        // TODO: HUMAN_REVIEW - confirm using 24-word BIP39 entropy directly as the AES-256-GCM wrapping key for mnemonic recovery slots is the right recovery construction.
+        // TODO: AI_REVIEW - confirm using 24-word BIP39 entropy directly as the AES-256-GCM wrapping key for mnemonic recovery slots is the right recovery construction.
         let keyslot = VaultKeyslot {
             id: slot_id.to_string(),
             kind: VaultKeyslotKind::MnemonicRecovery,
@@ -3462,7 +3462,7 @@ fn cms_encrypt_with_certificate(
     let envelope =
         CmsContentInfo::encrypt(&certs, plaintext, Cipher::aes_256_cbc(), CMSOptions::BINARY)
             .map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
-    // TODO: HUMAN_REVIEW - confirm CMS recipient selection and content-encryption policy for certificate-wrapped keyslots.
+    // TODO: AI_REVIEW - confirm CMS recipient selection and content-encryption policy for certificate-wrapped keyslots.
     envelope
         .to_der()
         .map_err(|error| VaultError::CertificateFailure(error.to_string()))

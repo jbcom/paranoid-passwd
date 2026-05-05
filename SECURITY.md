@@ -50,5 +50,5 @@ That includes:
 - docs build
 - `scripts/hallucination_check.sh`
 - `scripts/supply_chain_verify.sh`
-- `scripts/verify_human_review_inventory.sh`
+- `scripts/verify_ai_review_inventory.sh`
 - `scripts/security_assurance_gate.py`
