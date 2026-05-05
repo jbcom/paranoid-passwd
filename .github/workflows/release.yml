@@ -35,7 +35,7 @@ jobs:
             target_arch: arm64
             ext: ""
             archive: tar.gz
-          - runner: macos-13
+          - runner: macos-15-intel
             target_os: darwin
             target_arch: amd64
             ext: ""
