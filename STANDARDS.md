@@ -13,8 +13,8 @@ domain: technical
 2. Do not reintroduce browser, WASM, JavaScript, or webview runtime surfaces.
 3. All GitHub Actions must remain pinned to 40-character commit SHAs.
 4. Cargo commands in CI and documented workflows must use `--locked --frozen --offline`.
-5. The only allowed security/math TODO marker is `TODO: HUMAN_REVIEW - <reason>`.
-6. Do not add `unsafe` Rust without explicit human approval.
+5. The only allowed security/math TODO marker is `TODO: AI_REVIEW - <reason>`.
+6. Do not add `unsafe` Rust without explicit repository disposition and assurance-script coverage.
 
 ## Workspace Responsibilities
 

@@ -45,8 +45,8 @@ Required behavior:
 - report the configured cryptographic provider path when federal mode is requested
 - verify at startup whether the expected FIPS provider is confirmed in approved mode
 - emit machine-readable evidence for provider name, provider version, module certificate or platform
-  certificate reference, audit-sink health, operating system, architecture, build id, and policy
-  profile
+  certificate reference, local audit-sink health, external audit-device posture, operating system,
+  architecture, build id, and policy profile
 - require structured audit output for security-relevant commands
 - reject operations when a required audit sink is unavailable
 - disable or gate recovery paths that cannot be justified under the selected federal profile
@@ -68,6 +68,14 @@ paranoid-passwd --cli --profile federal-ready --audit-jsonl audit.jsonl --length
 Those environment variables are evidence inputs, not a product certification. A customer still has
 to prove that its exact build, OpenSSL provider, operating environment, and assessment boundary
 support the claim.
+
+External audit-device evidence is similarly conservative. The startup report reads
+`PARANOID_AUDIT_DEVICE_ENDPOINT`, `PARANOID_AUDIT_DEVICE_ID`,
+`PARANOID_AUDIT_DEVICE_MTLS_CERT`, `PARANOID_AUDIT_DEVICE_MTLS_KEY`, and
+`PARANOID_AUDIT_DEVICE_CA_CERT`, but configured mTLS material is not considered a healthy audit sink
+until a probe returns a ready health object. Today, an env-configured external device is reported as
+`unverified` or `unavailable` and federal-ready policy still requires a ready local JSONL sink unless
+a future explicit external-device health check proves availability.
 
 Automation surfaces:
 
@@ -130,6 +138,8 @@ and hash-chain evidence.
 - request and response events for every command that reaches policy evaluation
 - stable JSONL schemas suitable for SIEM ingestion
 - configured JSONL sink health evidence before policy treats a sink as available
+- external audit-device posture over configured mTLS endpoints without treating configured-only
+  evidence as a ready sink
 - strict redaction markers for sensitive fields
 - hash-chained local event streams
 - fail-closed behavior for required local JSONL sinks
@@ -154,6 +164,7 @@ package:
 - dependency-vendor manifest
 - FIPS provider evidence and startup self-test report
 - audit-schema reference and sample JSONL traces
+- external audit-device endpoint, mTLS evidence posture, and health status when configured
 - control mapping for relevant NIST SP 800-53 Rev5 families, especially AC, AU, CM, IA, SC, SI, and
   SR
 - configuration baseline guidance, using DoD STIGs where applicable and CIS Level 2 only where a STIG

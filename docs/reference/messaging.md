@@ -35,7 +35,7 @@ release artifacts.
 |-----|-------|
 | local-first password manager and generator | password generator only |
 | encrypted local vault | vault foundation |
-| security assurance protocol | vague human review process |
+| security assurance protocol | vague review process |
 | tracked-open assurance claim | approved crypto/statistics review |
 | federal-ready operating profile | FedRAMP certified |
 | DoD IL5-compatible evidence package | DoD authorized |

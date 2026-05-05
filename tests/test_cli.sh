@@ -276,6 +276,8 @@ data = json.load(sys.stdin)
 assert data["schema_version"] == 1
 assert data["profile"] == "federal_ready"
 assert data["audit_sink"]["status"] == "not_configured"
+assert data["external_audit_device"]["kind"] == "external_device"
+assert data["external_audit_device"]["status"] == "not_configured"
 assert data["crypto_provider"]["provider_name"] == "OpenSSL"
 assert data["policy_decision"]["decision"] == "deny"
 '

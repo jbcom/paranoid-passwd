@@ -13,7 +13,7 @@ The protocol is claim-led:
 1. security-sensitive behavior is expressed as named assurance claims
 2. each claim points to source locations, tests, scripts, and docs
 3. CI runs deterministic gates before any model-authored review can matter
-4. the reviewer agent is a neutral reporter that cites evidence and blocks uncertainty
+4. the AI assessor agent is a neutral reporter that cites evidence and blocks uncertainty
 5. maintainers merge only when required gates pass and blocking findings are resolved
 
 ## Research Basis
@@ -33,7 +33,7 @@ rather than relying on stronger prompts:
   avoiding privileged workflows for untrusted code, and careful handling of attacker-
   controlled inputs.
 - GitHub artifact attestations and SLSA guidance reinforce that build and release trust
-  comes from verifiable provenance and verification, not reviewer confidence.
+  comes from verifiable provenance and verification, not assessor confidence.
 - NIST AI RMF guidance frames AI governance around mapped risks, measured outcomes, and
   recorded evidence.
 
@@ -64,11 +64,13 @@ Required steps:
 1. Identify changed sensitive surfaces.
 2. Run `make verify-assurance`.
 3. Run `make ci` before merge when the change is not docs-only.
-4. Use the security auditor instructions in
+4. Use the security assessor instructions in
    `.github/agents/paranoid-security-auditor.md` or the path-scoped Copilot instructions
    in `.github/instructions/security-assurance.instructions.md`.
 5. Treat the agent output as findings and questions, not approval.
 6. Resolve every blocking finding with code, tests, docs, or an explicit claim disposition.
+7. For UI-sensitive changes, cite the GUI screenshot artifact produced by `make test-gui-e2e`
+   or `make test-gui-e2e-emulate`.
 
 ## Deterministic Gate
 
@@ -77,7 +79,7 @@ Required steps:
 ```bash
 bash scripts/hallucination_check.sh
 bash scripts/supply_chain_verify.sh
-bash scripts/verify_human_review_inventory.sh
+bash scripts/verify_ai_review_inventory.sh
 python3 scripts/security_assurance_gate.py
 ```
 
@@ -91,17 +93,18 @@ python3 scripts/security_assurance_gate.py \
   --markdown-out dist/security-assurance-report.md
 ```
 
-## Reviewer Agent Contract
+## AI Assessor Agent Contract
 
-The neutral PR security auditor must:
+The neutral PR security assessor must:
 
 - cite file paths and line numbers for findings
 - distinguish deterministic evidence from model judgment
 - fail closed when evidence is missing
+- require GUI screenshot capture for UI-sensitive changes and cite the artifact path
 - refuse to approve custom crypto, ad hoc randomness, modulo-without-rejection, browser
   runtime reintroduction, unpinned workflow actions, or loosened Cargo offline policy
 - require known-answer tests for audit math changes
-- require a claim disposition for any change to tracked open review sites
+- require a claim disposition for any change to tracked open AI review sites
 
 The agent must not:
 
@@ -134,4 +137,4 @@ A stable release can rely on this protocol only when:
    exists and is linked from the repo.
 
 This preserves the security posture while removing the old dependency on vague,
-unstructured human review.
+unstructured review language.

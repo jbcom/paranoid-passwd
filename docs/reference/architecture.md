@@ -122,8 +122,8 @@ The native TUI and GUI now evaluate local vault actions through the same typed o
 calling `paranoid-vault`, and their tests record non-secret request/response policy events for read,
 mutate, keyslot, and export flows. TUI launches inherit `vault --audit-jsonl` / `--require-audit-sink`
 policy, and the GUI exposes the same durable local JSONL sink controls for deterministic automation.
-The remaining implementation work is external audit-device health, seal / auto-unseal provider
-health checks, seal / auto-unseal provider policy, and stable assessor fixtures over those same
+The remaining implementation work is live external audit-device probes, seal / auto-unseal provider
+health checks, seal / auto-unseal provider policy, and broader assessor fixtures over those same
 command envelopes.
 
 The seal model stays local-first but borrows the operational shape of Vault: a sealed vault can read
@@ -145,9 +145,10 @@ This split keeps the trust boundaries narrow:
 
 This same split is the path toward a federal-ready profile. FedRAMP High, GovCloud, and DoD IL5
 customers need evidence and enforceable operating modes, not UI-local logging. The ops/audit crates
-should therefore emit stable JSON/JSONL evidence, support SIEM ingestion, prove required audit sinks
-are healthy, and expose FIPS-provider and policy-profile evidence without claiming authorization for
-an unassessed boundary. See [Federal Readiness](./federal-readiness.md).
+should therefore emit stable JSON/JSONL evidence, support SIEM ingestion, report external
+audit-device posture without overstating health, prove required audit sinks are healthy, and expose
+FIPS-provider and policy-profile evidence without claiming authorization for an unassessed boundary.
+See [Federal Readiness](./federal-readiness.md).
 
 ## GUI
 

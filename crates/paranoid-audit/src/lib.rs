@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
+    env,
     fs::OpenOptions,
     io::{BufWriter, Write},
     path::Path,
@@ -16,6 +17,7 @@ pub const DEFAULT_AUDIT_OPERATION_ID: &str = "pp.operation.v1.local";
 #[serde(rename_all = "snake_case")]
 pub enum AuditSinkKind {
     JsonlFile,
+    ExternalDevice,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,8 +26,10 @@ pub enum AuditSinkStatus {
     NotConfigured,
     Ready,
     Unavailable,
+    Unverified,
 }
 
+// TODO: AI_REVIEW - confirm external audit-device posture and health semantics do not overstate sink availability or federal audit coverage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditSinkHealth {
     pub schema_version: u16,
@@ -37,6 +41,12 @@ pub struct AuditSinkHealth {
     pub redaction_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
 }
@@ -52,6 +62,9 @@ impl AuditSinkHealth {
             append_mode: true,
             redaction_mode: "strict_marker".to_string(),
             path: None,
+            endpoint: None,
+            provider_id: None,
+            evidence_source: None,
             failure: None,
         }
     }
@@ -66,6 +79,9 @@ impl AuditSinkHealth {
             append_mode: true,
             redaction_mode: "strict_marker".to_string(),
             path,
+            endpoint: None,
+            provider_id: None,
+            evidence_source: None,
             failure: None,
         }
     }
@@ -80,7 +96,90 @@ impl AuditSinkHealth {
             append_mode: true,
             redaction_mode: "strict_marker".to_string(),
             path,
+            endpoint: None,
+            provider_id: None,
+            evidence_source: None,
             failure: Some(failure.into()),
+        }
+    }
+
+    pub fn not_configured_external_device() -> Self {
+        Self {
+            schema_version: AUDIT_SCHEMA_VERSION,
+            kind: AuditSinkKind::ExternalDevice,
+            status: AuditSinkStatus::NotConfigured,
+            configured: false,
+            writable: false,
+            append_mode: false,
+            redaction_mode: "strict_marker".to_string(),
+            path: None,
+            endpoint: None,
+            provider_id: None,
+            evidence_source: Some("environment".to_string()),
+            failure: None,
+        }
+    }
+
+    pub fn unavailable_external_device(
+        provider_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        failure: impl Into<String>,
+    ) -> Self {
+        Self {
+            schema_version: AUDIT_SCHEMA_VERSION,
+            kind: AuditSinkKind::ExternalDevice,
+            status: AuditSinkStatus::Unavailable,
+            configured: true,
+            writable: false,
+            append_mode: false,
+            redaction_mode: "strict_marker".to_string(),
+            path: None,
+            endpoint: Some(endpoint.into()),
+            provider_id: Some(provider_id.into()),
+            evidence_source: Some("environment".to_string()),
+            failure: Some(failure.into()),
+        }
+    }
+
+    pub fn unverified_external_device(
+        provider_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        failure: impl Into<String>,
+    ) -> Self {
+        Self {
+            schema_version: AUDIT_SCHEMA_VERSION,
+            kind: AuditSinkKind::ExternalDevice,
+            status: AuditSinkStatus::Unverified,
+            configured: true,
+            writable: false,
+            append_mode: false,
+            redaction_mode: "strict_marker".to_string(),
+            path: None,
+            endpoint: Some(endpoint.into()),
+            provider_id: Some(provider_id.into()),
+            evidence_source: Some("environment".to_string()),
+            failure: Some(failure.into()),
+        }
+    }
+
+    pub fn ready_external_device(
+        provider_id: impl Into<String>,
+        endpoint: impl Into<String>,
+        evidence_source: impl Into<String>,
+    ) -> Self {
+        Self {
+            schema_version: AUDIT_SCHEMA_VERSION,
+            kind: AuditSinkKind::ExternalDevice,
+            status: AuditSinkStatus::Ready,
+            configured: true,
+            writable: true,
+            append_mode: true,
+            redaction_mode: "strict_marker".to_string(),
+            path: None,
+            endpoint: Some(endpoint.into()),
+            provider_id: Some(provider_id.into()),
+            evidence_source: Some(evidence_source.into()),
+            failure: None,
         }
     }
 
@@ -334,6 +433,38 @@ pub fn assess_optional_jsonl_file_audit_sink(path: Option<&Path>) -> AuditSinkHe
         Ok(()) => AuditSinkHealth::ready_jsonl(display_path),
         Err(error) => AuditSinkHealth::unavailable_jsonl(display_path, error.to_string()),
     }
+}
+
+pub fn assess_external_audit_device_from_environment() -> AuditSinkHealth {
+    let Ok(endpoint) = env::var("PARANOID_AUDIT_DEVICE_ENDPOINT") else {
+        return AuditSinkHealth::not_configured_external_device();
+    };
+    let provider_id = env::var("PARANOID_AUDIT_DEVICE_ID")
+        .unwrap_or_else(|_| "external_audit_device".to_string());
+
+    let required_mtls_vars = [
+        "PARANOID_AUDIT_DEVICE_MTLS_CERT",
+        "PARANOID_AUDIT_DEVICE_MTLS_KEY",
+        "PARANOID_AUDIT_DEVICE_CA_CERT",
+    ];
+    let missing_mtls: Vec<&str> = required_mtls_vars
+        .iter()
+        .copied()
+        .filter(|name| env::var(name).is_err())
+        .collect();
+    if !missing_mtls.is_empty() {
+        return AuditSinkHealth::unavailable_external_device(
+            provider_id,
+            endpoint,
+            format!("missing mTLS evidence: {}", missing_mtls.join(", ")),
+        );
+    }
+
+    AuditSinkHealth::unverified_external_device(
+        provider_id,
+        endpoint,
+        "external audit-device health probe is not implemented; configured mTLS material is evidence only",
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -606,6 +737,50 @@ mod tests {
         assert_eq!(unavailable.status, AuditSinkStatus::Unavailable);
         assert!(!unavailable.is_available());
         assert!(unavailable.failure.is_some());
+    }
+
+    #[test]
+    fn external_audit_device_health_never_claims_env_only_readiness() {
+        let not_configured = AuditSinkHealth::not_configured_external_device();
+        assert_eq!(not_configured.kind, AuditSinkKind::ExternalDevice);
+        assert_eq!(not_configured.status, AuditSinkStatus::NotConfigured);
+        assert!(!not_configured.is_available());
+
+        let unavailable = AuditSinkHealth::unavailable_external_device(
+            "siem-primary",
+            "mtls://audit.example.invalid:6514",
+            "missing mTLS evidence: PARANOID_AUDIT_DEVICE_MTLS_CERT",
+        );
+        assert_eq!(unavailable.status, AuditSinkStatus::Unavailable);
+        assert!(unavailable.configured);
+        assert!(!unavailable.is_available());
+        assert_eq!(
+            unavailable.endpoint.as_deref(),
+            Some("mtls://audit.example.invalid:6514")
+        );
+
+        let unverified = AuditSinkHealth::unverified_external_device(
+            "siem-primary",
+            "mtls://audit.example.invalid:6514",
+            "probe not implemented",
+        );
+        assert_eq!(unverified.status, AuditSinkStatus::Unverified);
+        assert!(unverified.configured);
+        assert!(!unverified.is_available());
+    }
+
+    #[test]
+    fn ready_external_device_requires_explicit_health_evidence() {
+        let ready = AuditSinkHealth::ready_external_device(
+            "siem-primary",
+            "mtls://audit.example.invalid:6514",
+            "test",
+        );
+
+        assert_eq!(ready.kind, AuditSinkKind::ExternalDevice);
+        assert_eq!(ready.status, AuditSinkStatus::Ready);
+        assert!(ready.is_available());
+        assert_eq!(ready.evidence_source.as_deref(), Some("test"));
     }
 
     #[test]

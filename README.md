@@ -75,10 +75,11 @@ cargo run -p paranoid-cli -- --federal-evidence
 cargo run -p paranoid-cli -- --cli --federal-ready --audit-jsonl audit.jsonl --length 24
 ```
 
-`--audit-jsonl` and `--federal-ready` fail closed unless the configured JSONL audit sink passes a
-local writable health check. Federal-ready mode also requires runtime evidence confirming an approved
-cryptographic provider mode. The default vendored OpenSSL build reports provider evidence but does
-not claim approved mode.
+`--audit-jsonl` and `--federal-ready` fail closed unless a required audit sink has explicit ready
+health. Federal-ready evidence reports both local JSONL health and configured external audit-device
+posture, but mTLS endpoint configuration alone is not treated as a healthy sink. Federal-ready mode
+also requires runtime evidence confirming an approved cryptographic provider mode. The default
+vendored OpenSSL build reports provider evidence but does not claim approved mode.
 
 Local vault:
 
@@ -217,8 +218,8 @@ surface is Slint-native.
 - Native interactive surfaces now auto-clear copied secrets from the clipboard after 30 seconds if the clipboard contents are unchanged.
 - Native interactive vault surfaces now auto-lock after 5 minutes of inactivity and clear cached decrypted state before returning to the unlock screen.
 - The remaining open crypto/statistics disposition surface is mapped to explicit assurance
-  claims in `docs/reference/assurance-claims.md`, and `scripts/verify_human_review_inventory.sh`
-  keeps source `TODO: HUMAN_REVIEW` markers synchronized with the docs.
+  claims in `docs/reference/assurance-claims.md`, and `scripts/verify_ai_review_inventory.sh`
+  keeps source `TODO: AI_REVIEW` markers synchronized with the docs.
 - Cargo dependencies are vendored and CI runs Cargo in locked, frozen, offline mode.
 - Security verification scripts assert the Rust-native invariants, workflow pinning, and
   security assurance protocol wiring.

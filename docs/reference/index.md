@@ -13,7 +13,7 @@ license
 federal-readiness
 security-assurance
 assurance-claims
-human-review
+ai-review
 remaining-work-prd
 vault-format
 release-checklist

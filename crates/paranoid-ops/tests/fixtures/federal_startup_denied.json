@@ -1,0 +1,47 @@
+{
+  "architecture": "amd64",
+  "audit_schema_version": 1,
+  "audit_sink": {
+    "append_mode": true,
+    "configured": false,
+    "kind": "jsonl_file",
+    "redaction_mode": "strict_marker",
+    "schema_version": 1,
+    "status": "not_configured",
+    "writable": false
+  },
+  "build_commit": "fixture-commit",
+  "build_date": "2026-01-01T00:00:00Z",
+  "crypto_provider": {
+    "approved_mode": "not_confirmed",
+    "evidence_source": "fixture",
+    "provider_name": "OpenSSL",
+    "provider_platform": "fixture-platform",
+    "provider_version": "OpenSSL fixture provider"
+  },
+  "external_audit_device": {
+    "append_mode": false,
+    "configured": true,
+    "endpoint": "mtls://audit.example.invalid:6514",
+    "evidence_source": "environment",
+    "failure": "external audit-device health probe is not implemented; configured mTLS material is evidence only",
+    "kind": "external_device",
+    "provider_id": "siem-primary",
+    "redaction_mode": "strict_marker",
+    "schema_version": 1,
+    "status": "unverified",
+    "writable": false
+  },
+  "operating_system": "linux",
+  "policy_decision": {
+    "decision": "deny",
+    "missing_controls": [
+      "required_audit_sink",
+      "fips_approved_mode"
+    ],
+    "reason": "federal-ready profile is missing required controls"
+  },
+  "product_version": "fixture-version",
+  "profile": "federal_ready",
+  "schema_version": 1
+}

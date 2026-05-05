@@ -39,7 +39,7 @@ python3 -m tox -e docs
 2. Do not reintroduce browser, WASM, or webview runtime surfaces.
 3. Keep rejection sampling at `(256/N)*N - 1`.
 4. Keep chi-squared pass logic at `p > 0.01` and degrees of freedom at `N - 1`.
-5. Do not add `unsafe` Rust without explicit human approval.
+5. Do not add `unsafe` Rust without explicit repository disposition and assurance-script coverage.
 6. Keep Cargo builds locked, frozen, offline, and backed by `vendor/`.
 
 ## Key Files

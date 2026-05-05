@@ -80,19 +80,19 @@ Ship a local-first password manager and generator whose implementation, release 
 ## Next Comprehensive PR Boundary
 
 The current ops/audit work adds typed command envelopes, allow/challenge/deny policy, JSONL audit
-sinks with writable health evidence, seal-state primitives, and a federal-ready startup evidence
-path. Headless vault CLI commands, native TUI actions, and native GUI automation now share that
-protocol for covered vault operations rather than drifting back into UI-local patches. The next
-architecture boundary should extend the same model into external audit-device health, seal /
-auto-unseal provider policy, and stable assessor fixtures.
+sinks with writable health evidence, external audit-device posture, seal-state primitives, and a
+federal-ready startup evidence path. Headless vault CLI commands, native TUI actions, and native GUI
+automation now share that protocol for covered vault operations rather than drifting back into
+UI-local patches. The next architecture boundary should extend the same model into live external
+audit-device probes, seal / auto-unseal provider policy, and broader assessor fixtures.
 
 That PR should be scoped around:
 
-- expanding `crates/paranoid-audit` beyond local JSONL writable-path health into external
-  audit-device health
+- expanding `crates/paranoid-audit` beyond evidence-only external audit-device posture into live
+  external audit-device health probes
 - CLI/TUI/GUI JSONL fixtures and additional automation output over the typed ops protocol
 - seal / auto-unseal provider policy
-- federal-ready profile fixtures and configured-provider evidence
+- additional federal-ready profile fixtures and configured-provider evidence
 - docs and tests that make the trust boundary reviewable
 
 ## Workstream 1: Ops Protocol, Audit Crate, and Seal Lifecycle
@@ -223,14 +223,14 @@ The repo-owned release pipeline is implemented and locally validated, but it has
 
 ### Problem
 
-The repo explicitly tracks open `TODO: HUMAN_REVIEW` sites, but the release process should not
-depend on vague human-review language. Those sites now map to named assurance claims and must
+The repo explicitly tracks open `TODO: AI_REVIEW` sites, and the release process does not
+depend on vague review language. Those sites now map to named assurance claims and must
 stay gate-protected until they are dispositioned.
 
 ### Source of Truth
 
 See [security-assurance.md](./security-assurance.md), [assurance-claims.md](./assurance-claims.md),
-and [human-review.md](./human-review.md).
+and [ai-review.md](./ai-review.md).
 
 ### Review Areas
 
@@ -248,14 +248,14 @@ For each review area:
 2. decide whether the current implementation is acceptable, acceptable with constraints, or requires change
 3. update code comments and tests to reflect the disposition
 4. keep `make verify-assurance` passing
-5. remove or revise the corresponding `TODO: HUMAN_REVIEW` only when the disposition supports it
-6. update [assurance-claims.md](./assurance-claims.md), [human-review.md](./human-review.md), and
-   `scripts/verify_human_review_inventory.sh` together
+5. remove or revise the corresponding `TODO: AI_REVIEW` only when the disposition supports it
+6. update [assurance-claims.md](./assurance-claims.md), [ai-review.md](./ai-review.md), and
+   `scripts/verify_ai_review_inventory.sh` together
 
 ### Acceptance Criteria
 
 - every tracked open site has a concrete assurance claim and disposition state
-- no `TODO: HUMAN_REVIEW` markers remain without an entry in [human-review.md](./human-review.md)
+- no `TODO: AI_REVIEW` markers remain without an entry in [ai-review.md](./ai-review.md)
 - `make verify-assurance` runs in CI and passes on the release candidate
 - any required design changes from review have been implemented and tested
 
@@ -397,8 +397,8 @@ This PRD is complete when all of the following are true:
 1. finish and merge the current ops/audit/federal-readiness PR with local tests, GUI screenshot
    verification, and GitHub checks
 2. route vault mutations, TUI actions, and GUI actions through typed ops envelopes
-3. add configured audit-device health beyond local JSONL sinks
-4. add stable federal-ready JSON/JSONL fixtures and a control-mapping evidence artifact
+3. add live audit-device probes beyond the configured-only external posture
+4. expand stable federal-ready JSON/JSONL fixtures and add a control-mapping evidence artifact
 5. run the first canary release from `main` after those architecture boundaries are stable
 6. choose the Windows installer technology and macOS signing/notarization path
 7. update this PRD as those decisions are made

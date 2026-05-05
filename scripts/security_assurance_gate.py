@@ -98,12 +98,12 @@ CLAIMS: tuple[Claim, ...] = (
         "core-security",
         (
             Requirement(
-                "docs/reference/human-review.md",
+                "docs/reference/ai-review.md",
                 "Serial correlation audit",
-                "open serial-correlation disposition remains tracked",
+                "open serial-correlation AI disposition remains tracked",
             ),
             Requirement(
-                "scripts/verify_human_review_inventory.sh",
+                "scripts/verify_ai_review_inventory.sh",
                 "verify the serial-correlation coefficient matches the intended estimator",
                 "inventory check tracks the serial-correlation TODO",
             ),
@@ -137,12 +137,12 @@ CLAIMS: tuple[Claim, ...] = (
         "vault-security",
         (
             Requirement(
-                "docs/reference/human-review.md",
+                "docs/reference/ai-review.md",
                 "Device-bound keyslot design",
-                "open device-bound keyslot disposition remains tracked",
+                "open device-bound keyslot AI disposition remains tracked",
             ),
             Requirement(
-                "scripts/verify_human_review_inventory.sh",
+                "scripts/verify_ai_review_inventory.sh",
                 "device-bound keyslot design",
                 "inventory check tracks the device-bound keyslot TODO",
             ),
@@ -154,12 +154,12 @@ CLAIMS: tuple[Claim, ...] = (
         "vault-security",
         (
             Requirement(
-                "docs/reference/human-review.md",
+                "docs/reference/ai-review.md",
                 "Mnemonic recovery construction",
-                "open mnemonic recovery disposition remains tracked",
+                "open mnemonic recovery AI disposition remains tracked",
             ),
             Requirement(
-                "scripts/verify_human_review_inventory.sh",
+                "scripts/verify_ai_review_inventory.sh",
                 "24-word BIP39 entropy",
                 "inventory check tracks the mnemonic recovery TODO",
             ),
@@ -171,12 +171,12 @@ CLAIMS: tuple[Claim, ...] = (
         "vault-security",
         (
             Requirement(
-                "docs/reference/human-review.md",
+                "docs/reference/ai-review.md",
                 "Certificate-wrapped keyslots",
-                "open certificate-wrapped keyslot disposition remains tracked",
+                "open certificate-wrapped keyslot AI disposition remains tracked",
             ),
             Requirement(
-                "scripts/verify_human_review_inventory.sh",
+                "scripts/verify_ai_review_inventory.sh",
                 "CMS recipient selection",
                 "inventory check tracks the certificate-wrapped keyslot TODO",
             ),
@@ -189,8 +189,8 @@ CLAIMS: tuple[Claim, ...] = (
         (
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
-                "TODO: HUMAN_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.",
-                "shared ops policy boundary remains tracked for human review",
+                "TODO: AI_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.",
+                "shared ops policy boundary remains tracked for AI review",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -213,14 +213,96 @@ CLAIMS: tuple[Claim, ...] = (
                 "native GUI persists durable ops audit events when JSONL is configured",
             ),
             Requirement(
-                "docs/reference/human-review.md",
+                "docs/reference/ai-review.md",
                 "Ops policy boundary",
-                "open ops policy boundary disposition remains tracked",
+                "open ops policy boundary AI disposition remains tracked",
             ),
             Requirement(
-                "scripts/verify_human_review_inventory.sh",
+                "scripts/verify_ai_review_inventory.sh",
                 "centralized policy boundary for ops/vault authorization and audit evidence across adapters",
                 "inventory check tracks the ops policy boundary TODO",
+            ),
+        ),
+    ),
+    Claim(
+        "audit.external-device-health",
+        "External audit-device health evidence",
+        "ops-security",
+        (
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "ExternalDevice",
+                "audit health model includes external audit-device posture",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "Unverified",
+                "audit health model distinguishes configured-only devices from ready sinks",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "assess_external_audit_device_from_environment",
+                "external audit-device evidence is collected through the audit crate",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "TODO: AI_REVIEW - confirm external audit-device posture and health semantics do not overstate sink availability or federal audit coverage.",
+                "external audit-device posture remains tracked for AI review",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "missing mTLS evidence",
+                "external audit-device configuration requires mTLS evidence before probe status",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "pub external_audit_device: AuditSinkHealth",
+                "federal startup evidence includes external audit-device posture",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "input.audit_sink.is_available()\n            || input.external_audit_device.is_available()",
+                "policy availability only accepts ready local or external audit health",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "unverified_external_audit_device_does_not_satisfy_required_audit_control",
+                "ops tests prove unverified external devices do not satisfy required audit control",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/federal_startup_fixtures.rs",
+                "federal_startup_evidence_denied_fixture_is_stable",
+                "stable federal startup evidence fixture is asserted by tests",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/fixtures/federal_startup_denied.json",
+                '"external_audit_device"',
+                "stable federal startup evidence fixture includes external audit posture",
+            ),
+            Requirement(
+                "tests/test_cli.sh",
+                'data["external_audit_device"]["status"] == "not_configured"',
+                "CLI federal evidence contract covers external audit posture",
+            ),
+            Requirement(
+                "docs/reference/federal-readiness.md",
+                "configured mTLS material is not considered a healthy audit sink",
+                "federal readiness docs explain external audit-device posture limits",
+            ),
+            Requirement(
+                "docs/reference/testing.md",
+                "stable denied federal startup fixture",
+                "testing docs cover stable federal startup fixture",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "External audit-device posture",
+                "AI review surface tracks the external audit-device posture disposition",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`audit.external-device-health` | `tracked-open`",
+                "assurance claim tracks the external audit-device posture disposition",
             ),
         ),
     ),
@@ -249,8 +331,8 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-seal/src/lib.rs",
-                "TODO: HUMAN_REVIEW - confirm the seal/posture model correctly represents unlock and recovery posture without overstating provider availability.",
-                "seal posture model remains tracked for human review",
+                "TODO: AI_REVIEW - confirm the seal/posture model correctly represents unlock and recovery posture without overstating provider availability.",
+                "seal posture model remains tracked for AI review",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -283,19 +365,19 @@ CLAIMS: tuple[Claim, ...] = (
                 "headless vault e2e asserts the seal posture payload",
             ),
             Requirement(
-                "scripts/verify_human_review_inventory.sh",
+                "scripts/verify_ai_review_inventory.sh",
                 "seal/posture model correctly represents unlock and recovery posture",
                 "inventory check tracks the seal posture TODO",
             ),
             Requirement(
-                "docs/reference/human-review.md",
+                "docs/reference/ai-review.md",
                 "Seal lifecycle posture model",
-                "open seal posture disposition remains tracked",
+                "open seal posture AI disposition remains tracked",
             ),
             Requirement(
                 "docs/reference/assurance-claims.md",
                 "`seal.lifecycle-boundary` | `tracked-open`",
-                "assurance claim tracks the open seal posture review",
+                "assurance claim tracks the open seal posture AI disposition",
             ),
             Requirement(
                 "docs/reference/testing.md",
@@ -516,14 +598,14 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
-        "assurance.pr-neutral-auditor",
-        "Neutral PR assurance reviewer",
+        "assurance.pr-neutral-ai-assessor",
+        "Neutral PR AI assurance assessor",
         "assurance-process",
         (
             Requirement(
                 ".github/agents/paranoid-security-auditor.md",
-                "You do not approve cryptography",
-                "custom auditor profile limits model authority",
+                "You are a neutral AI security assurance assessor",
+                "custom AI assessor profile defines the neutral role",
             ),
             Requirement(
                 ".github/instructions/security-assurance.instructions.md",
@@ -534,6 +616,38 @@ CLAIMS: tuple[Claim, ...] = (
                 ".github/workflows/security-assurance.yml",
                 "make verify-assurance",
                 "dedicated workflow runs the assurance gate",
+            ),
+        ),
+    ),
+    Claim(
+        "assurance.gui-screenshot-evidence",
+        "GUI screenshot evidence for UI-sensitive PRs",
+        "assurance-process",
+        (
+            Requirement(
+                "Makefile",
+                "test-gui-e2e: ## Run the real GUI workflow harness under Xvfb and capture a screenshot artifact",
+                "Makefile exposes the Xvfb GUI e2e screenshot harness",
+            ),
+            Requirement(
+                "tests/test_gui_e2e.sh",
+                "GUI automation screenshot was blank or undersized",
+                "GUI e2e harness fails blank or undersized screenshots",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "dist/release/gui-e2e.png",
+                "AI review surface documents the GUI screenshot artifact path",
+            ),
+            Requirement(
+                ".github/agents/paranoid-security-auditor.md",
+                "inspect the screenshot artifact",
+                "AI security assessor requires screenshot inspection for UI-sensitive changes",
+            ),
+            Requirement(
+                ".github/instructions/security-assurance.instructions.md",
+                "plus inspection of the captured screenshot artifact",
+                "path-scoped instructions require screenshot inspection for UI-sensitive changes",
             ),
         ),
     ),
@@ -560,6 +674,11 @@ GLOBAL_REQUIREMENTS: tuple[Requirement, ...] = (
         "docs/reference/index.md",
         "assurance-claims",
         "assurance claims docs are in the reference toctree",
+    ),
+    Requirement(
+        "docs/reference/index.md",
+        "ai-review",
+        "AI review docs are in the reference toctree",
     ),
     Requirement(
         "Makefile",

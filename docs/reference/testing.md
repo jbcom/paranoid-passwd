@@ -9,8 +9,8 @@ keeping the retired browser app out of the product surface. Slint WASM and mobil
 treated as explicit Rust-native target surfaces with their own threat model and local checks.
 
 The remaining open disposition surface is tracked separately in
-[Human Review Surface](./human-review.md) and mapped to [Assurance Claims](./assurance-claims.md).
-The repository enforces that inventory with `scripts/verify_human_review_inventory.sh` and the
+[AI Review Surface](./ai-review.md) and mapped to [Assurance Claims](./assurance-claims.md).
+The repository enforces that inventory with `scripts/verify_ai_review_inventory.sh` and the
 claim-led gate in `scripts/security_assurance_gate.py`.
 
 Run the full assurance gate with:
@@ -19,7 +19,7 @@ Run the full assurance gate with:
 make verify-assurance
 ```
 
-That command verifies the hallucination checks, supply-chain checks, open review inventory, and
+That command verifies the hallucination checks, supply-chain checks, open AI review inventory, and
 security assurance protocol wiring.
 
 ## Local Release-Candidate Quality Gate
@@ -104,6 +104,9 @@ crates. Current coverage proves that:
   metadata
 - `--federal-ready` fails closed without confirmed approved-provider evidence
 - federal startup evidence is emitted as JSON
+- federal startup evidence includes external audit-device posture without treating configured-only
+  mTLS evidence as an available sink
+- a stable denied federal startup fixture is checked against the serialized evidence schema
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
 - the seal state machine covers unlock, idle-lock, timeout, and relock transitions
 - seal posture reports configured recovery, certificate, and auto-unseal providers without claiming
@@ -115,8 +118,8 @@ crates. Current coverage proves that:
 
 The remaining test expansion is now narrower:
 
-- stable JSON/JSONL compatibility fixtures checked into the repository
-- audit-device health checks beyond the local JSONL writable-path sink
+- additional JSON/JSONL compatibility fixtures for vault operation traces
+- live external audit-device probes beyond the current evidence-only mTLS configuration posture
 - keyed correlation hashes only after the approved primitive and low-entropy secret risk are
   dispositioned
 - broader PTY e2e coverage for each TUI vault mutation routed through typed ops envelopes
