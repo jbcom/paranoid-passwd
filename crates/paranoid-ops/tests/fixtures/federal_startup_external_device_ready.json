@@ -13,33 +13,29 @@
   "build_commit": "fixture-commit",
   "build_date": "2026-01-01T00:00:00Z",
   "crypto_provider": {
-    "approved_mode": "not_confirmed",
+    "approved_mode": "confirmed",
+    "certificate_reference": "CMVP fixture certificate",
     "evidence_source": "fixture",
     "provider_name": "OpenSSL",
     "provider_platform": "fixture-platform",
     "provider_version": "OpenSSL fixture provider"
   },
   "external_audit_device": {
-    "append_mode": false,
+    "append_mode": true,
     "configured": true,
     "endpoint": "mtls://audit.example.invalid:6514",
-    "evidence_source": "tcp-connect",
-    "failure": "live tcp-connect probe reached endpoint; audit write acknowledgement is not implemented",
+    "evidence_source": "fixture-write-ack",
     "kind": "external_device",
     "provider_id": "siem-primary",
     "redaction_mode": "strict_marker",
     "schema_version": 1,
-    "status": "unverified",
-    "writable": false
+    "status": "ready",
+    "writable": true
   },
   "operating_system": "linux",
   "policy_decision": {
-    "decision": "deny",
-    "missing_controls": [
-      "required_audit_sink",
-      "fips_approved_mode"
-    ],
-    "reason": "federal-ready profile is missing required controls"
+    "decision": "allow",
+    "reason": "federal-ready controls satisfied"
   },
   "product_version": "fixture-version",
   "profile": "federal_ready",

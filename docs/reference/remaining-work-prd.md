@@ -83,13 +83,13 @@ The current ops/audit work adds typed command envelopes, allow/challenge/deny po
 sinks with writable health evidence, external audit-device posture, seal-state primitives, and a
 federal-ready startup evidence path. Headless vault CLI commands, native TUI actions, and native GUI
 automation now share that protocol for covered vault operations rather than drifting back into
-UI-local patches. The next architecture boundary should extend the same model into live external
-audit-device probes, seal / auto-unseal provider policy, and broader assessor fixtures.
+UI-local patches. The next architecture boundary extends the same model into live external
+audit-device reachability probes, seal / auto-unseal provider policy, and broader assessor fixtures.
 
 That PR should be scoped around:
 
 - expanding `crates/paranoid-audit` beyond evidence-only external audit-device posture into live
-  external audit-device health probes
+  TCP reachability probes while reserving `ready` for write-ack health evidence
 - CLI/TUI/GUI JSONL fixtures and additional automation output over the typed ops protocol
 - seal / auto-unseal provider policy
 - additional federal-ready profile fixtures and configured-provider evidence
@@ -397,8 +397,8 @@ This PRD is complete when all of the following are true:
 1. finish and merge the current ops/audit/federal-readiness PR with local tests, GUI screenshot
    verification, and GitHub checks
 2. route vault mutations, TUI actions, and GUI actions through typed ops envelopes
-3. add live audit-device probes beyond the configured-only external posture
-4. expand stable federal-ready JSON/JSONL fixtures and add a control-mapping evidence artifact
+3. add external audit-device write-ack probes beyond TCP reachability evidence
+4. expand stable vault operation JSON/JSONL fixtures and add a control-mapping evidence artifact
 5. run the first canary release from `main` after those architecture boundaries are stable
 6. choose the Windows installer technology and macOS signing/notarization path
 7. update this PRD as those decisions are made

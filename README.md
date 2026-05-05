@@ -77,9 +77,11 @@ cargo run -p paranoid-cli -- --cli --federal-ready --audit-jsonl audit.jsonl --l
 
 `--audit-jsonl` and `--federal-ready` fail closed unless a required audit sink has explicit ready
 health. Federal-ready evidence reports both local JSONL health and configured external audit-device
-posture, but mTLS endpoint configuration alone is not treated as a healthy sink. Federal-ready mode
-also requires runtime evidence confirming an approved cryptographic provider mode. The default
-vendored OpenSSL build reports provider evidence but does not claim approved mode.
+posture. `PARANOID_AUDIT_DEVICE_PROBE=tcp-connect` can add live endpoint reachability evidence, but
+reachability is still not treated as ready audit ingestion without an explicit write
+acknowledgement. Federal-ready mode also requires runtime evidence confirming an approved
+cryptographic provider mode. The default vendored OpenSSL build reports provider evidence but does
+not claim approved mode.
 
 Local vault:
 

@@ -73,9 +73,12 @@ External audit-device evidence is similarly conservative. The startup report rea
 `PARANOID_AUDIT_DEVICE_ENDPOINT`, `PARANOID_AUDIT_DEVICE_ID`,
 `PARANOID_AUDIT_DEVICE_MTLS_CERT`, `PARANOID_AUDIT_DEVICE_MTLS_KEY`, and
 `PARANOID_AUDIT_DEVICE_CA_CERT`, but configured mTLS material is not considered a healthy audit sink
-until a probe returns a ready health object. Today, an env-configured external device is reported as
-`unverified` or `unavailable` and federal-ready policy still requires a ready local JSONL sink unless
-a future explicit external-device health check proves availability.
+until a probe returns a ready health object. `PARANOID_AUDIT_DEVICE_PROBE=tcp-connect` runs a live
+transport reachability probe against `mtls://`, `tls://`, or `tcp://` endpoints. The important
+boundary is that tcp-connect proves reachability, not durable audit ingestion, so the result remains
+`unverified` and does not satisfy a required audit sink. Only an explicit probe result backed by
+write acknowledgment can report `ready`. Without that acknowledgement, federal-ready policy still
+requires a ready local JSONL sink.
 
 Automation surfaces:
 
@@ -139,8 +142,8 @@ and hash-chain evidence.
 - request and response events for every command that reaches policy evaluation
 - stable JSONL schemas suitable for SIEM ingestion
 - configured JSONL sink health evidence before policy treats a sink as available
-- external audit-device posture over configured mTLS endpoints without treating configured-only
-  evidence as a ready sink
+- external audit-device posture over configured mTLS endpoints, plus live TCP reachability probes
+  that still do not treat configured-only or reachable-only evidence as a ready sink
 - strict redaction markers for sensitive fields
 - hash-chained local event streams
 - fail-closed behavior for required local JSONL sinks
