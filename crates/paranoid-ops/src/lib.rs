@@ -637,6 +637,18 @@ fn record_session_attributes(event: &mut AuditEvent, envelope: &OpsCommandEnvelo
                 fingerprint.clone(),
             );
         }
+        if let Some(channel_binding) = &evidence.channel_binding_sha256 {
+            event.attributes.insert(
+                "transport_channel_binding_sha256".to_string(),
+                channel_binding.clone(),
+            );
+        }
+        if !evidence.warnings.is_empty() {
+            event.attributes.insert(
+                "transport_warnings".to_string(),
+                evidence.warnings.join("; "),
+            );
+        }
     }
 }
 
@@ -1462,11 +1474,67 @@ mod tests {
                 .get("transport_peer_identity")
                 .is_some_and(|identity| identity == "spiffe://example.test/paranoid-assessor")
         }));
+        assert!(evaluation.audit_events.iter().all(|event| {
+            event
+                .attributes
+                .get("transport_channel_binding_sha256")
+                .is_some_and(|channel_binding| {
+                    channel_binding
+                        == "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+                })
+        }));
         assert!(!evaluation.audit_events.iter().any(|event| {
             event
                 .attributes
                 .keys()
                 .any(|attribute| attribute.contains("private_key") || attribute.contains("secret"))
+        }));
+    }
+
+    #[test]
+    fn unauthenticated_mtls_process_boundary_records_transport_warnings() {
+        let envelope = OpsCommandEnvelope {
+            schema_version: OPS_SCHEMA_VERSION,
+            request_id: "pp.test.request.mtls_unverified".to_string(),
+            operation_id: "pp.test.operation.mtls_unverified".to_string(),
+            profile: OpsProfile::Default,
+            actor: OpsActor {
+                actor_id: "external_assessor".to_string(),
+                kind: OpsActorKind::ServiceAccount,
+            },
+            session: OpsSession {
+                session_id: "pp.test.session.mtls_unverified".to_string(),
+                surface: AuditSurface::Ops,
+                transport: OpsTransport::Mtls,
+                transport_evidence: Some(OpsTransportEvidence::unauthenticated_mtls(
+                    "spiffe://example.test/paranoid-assessor",
+                    "fixture-mtls-handshake",
+                    "client certificate was not verified",
+                )),
+            },
+            command: OpsCommand::VaultOperation {
+                name: "export".to_string(),
+                access: VaultOperationAccess::Export,
+            },
+        };
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: None,
+        };
+
+        let evaluation = evaluate_ops_command_envelope(envelope, &context);
+
+        assert!(!evaluation.is_allowed());
+        assert!(evaluation.audit_events.iter().all(|event| {
+            event
+                .attributes
+                .get("transport_warnings")
+                .is_some_and(|warnings| warnings == "client certificate was not verified")
         }));
     }
 

@@ -114,7 +114,8 @@ crates. Current coverage proves that:
 - stable CLI/TUI/GUI vault operation trace fixtures pin typed ops envelopes, request/response audit
   events, and JSONL rendering for automation compatibility
 - a stable mTLS process-boundary vault operation fixture pins authenticated transport evidence,
-  service-account actor context, and non-secret request/response audit attributes
+  service-account actor context, and non-secret request/response audit attributes, including
+  channel-binding evidence
 - audit unit tests cover the mTLS JSONL write-ack probe, including matching acknowledgement and
   mismatched challenge rejection
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods

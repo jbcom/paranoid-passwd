@@ -73,7 +73,7 @@ correlation identifiers, not authentication tokens or cryptographic nonces.
 - command envelopes with request ids, actor context, session surface, transport, profile, and
   command identity
 - authenticated mTLS transport evidence for commands that cross a process boundary, including
-  non-secret peer identity and certificate fingerprint evidence
+  non-secret peer identity, certificate fingerprint, channel-binding, and warning evidence
 - an explicit `allow`, `challenge`, and `deny` policy decision model
 - federal-ready startup evidence over build id, platform, audit schema, configured audit-sink
   health, and OpenSSL provider evidence

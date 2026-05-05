@@ -318,6 +318,16 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
+                "transport_channel_binding_sha256",
+                "ops audit events can record non-secret mTLS channel-binding evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "transport_warnings",
+                "ops audit events can record non-secret transport warning evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
                 "mtls_process_boundary_requires_authenticated_transport_evidence",
                 "ops unit tests cover missing mTLS transport evidence denial",
             ),
@@ -325,6 +335,11 @@ CLAIMS: tuple[Claim, ...] = (
                 "crates/paranoid-ops/src/lib.rs",
                 "authenticated_mtls_process_boundary_records_non_secret_evidence",
                 "ops unit tests cover non-secret authenticated mTLS audit evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "unauthenticated_mtls_process_boundary_records_transport_warnings",
+                "ops unit tests cover non-secret mTLS warning audit evidence",
             ),
             Requirement(
                 "crates/paranoid-ops/tests/ops_trace_fixtures.rs",

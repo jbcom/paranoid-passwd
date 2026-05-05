@@ -127,7 +127,8 @@ and hash-chain evidence.
   lifecycle flows
 - reusable vault operation policy evaluation for CLI, TUI, and native GUI adapters
 - mTLS process-boundary transport evidence that fails closed unless a security-relevant command has
-  authenticated peer identity and certificate fingerprint evidence
+  authenticated peer identity and certificate fingerprint evidence; non-secret channel-binding
+  evidence is carried when present
 - stable JSON responses for automation and evidence capture, including federal startup evidence
   schema `2` for the external audit-device posture field
 
