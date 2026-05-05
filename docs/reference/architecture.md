@@ -71,8 +71,8 @@ correlation identifiers, not authentication tokens or cryptographic nonces.
 - command envelopes with request ids, actor context, session surface, transport, profile, and
   command identity
 - an explicit `allow`, `challenge`, and `deny` policy decision model
-- federal-ready startup evidence over build id, platform, audit schema, and OpenSSL provider
-  evidence
+- federal-ready startup evidence over build id, platform, audit schema, configured audit-sink
+  health, and OpenSSL provider evidence
 - a fail-closed federal policy that requires an audit sink and confirmed approved-provider evidence
   before security-relevant operations can run
 - a vault seal state machine covering `sealed`, `challenge_pending`, `unsealed`,
@@ -88,6 +88,7 @@ challenge when fresh proof is required, or a typed denial when controls are miss
 
 - structured audit events with per-operation sequence ids
 - append-only JSONL file sinks through `--audit-jsonl`
+- JSONL sink health evidence covering configured, writable, unavailable, and not-configured states
 - strict redaction markers for sensitive attributes
 - SHA-256 hash-chain evidence generated through the `paranoid-core` OpenSSL-backed hash path
 - fail-closed integration when a required audit sink is unavailable
@@ -98,7 +99,8 @@ generation report and are not copied into audit messages or attributes.
 
 The CLI exposes the first automation surface:
 
-- `--audit-jsonl PATH` appends policy and operation audit events to a JSONL sink
+- `--audit-jsonl PATH` appends policy and operation audit events to a JSONL sink after the path
+  passes a local writable health check
 - `--require-audit-sink` fails closed unless the sink is writable
 - `--profile federal-ready` and `--federal-ready` enforce the federal-ready startup policy
 - `--federal-evidence` emits assessor-readable startup evidence as JSON

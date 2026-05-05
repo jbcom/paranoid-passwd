@@ -96,6 +96,7 @@ proves that:
 - generator automation runs through the ops boundary
 - JSON reports include policy request/response audit events
 - `--audit-jsonl` writes a local append-oriented JSONL audit sink
+- configured audit sinks must pass a writable health check before policy treats them as available
 - `--federal-ready` fails closed without confirmed approved-provider evidence
 - federal startup evidence is emitted as JSON
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
@@ -108,7 +109,7 @@ The remaining test expansion is now narrower:
 - stable JSON/JSONL compatibility fixtures checked into the repository
 - TUI and GUI adapter tests that prove controls submit typed ops commands instead of reimplementing
   policy
-- audit-device health checks beyond the local JSONL sink
+- audit-device health checks beyond the local JSONL writable-path sink
 - keyed correlation hashes only after the approved primitive and low-entropy secret risk are
   dispositioned
 - e2e coverage for vault mutations routed through typed ops envelopes

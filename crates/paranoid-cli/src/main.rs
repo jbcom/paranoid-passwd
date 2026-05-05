@@ -3,15 +3,18 @@ mod vault_cli;
 mod vault_tui;
 
 use lexopt::prelude::*;
-use paranoid_audit::{AuditEvent, AuditTrail, write_events_jsonl};
+use paranoid_audit::{
+    AuditEvent, AuditSinkHealth, AuditTrail, assess_optional_jsonl_file_audit_sink,
+    write_events_jsonl,
+};
 use paranoid_core::{
     CharsetSpec, FrameworkId, GenerationReport, ParanoidError, ParanoidRequest, VERSION,
 };
 use paranoid_ops::{
     GeneratePasswordError, GeneratePasswordOperation, GeneratePasswordOutcome, OpsCommand,
     OpsCommandEnvelope, OpsPolicyContext, OpsPolicyDecision, OpsProfile,
-    collect_federal_startup_evidence, evaluate_policy, record_ops_request, record_ops_response,
-    run_generate_password_operation,
+    collect_federal_startup_evidence_with_audit_sink, evaluate_policy, record_ops_request,
+    record_ops_response, run_generate_password_operation,
 };
 use std::{
     ffi::OsString,
@@ -99,11 +102,12 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
     };
     let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
     let launch_tui = should_launch_tui(&options, interactive);
+    let audit_sink_health = assess_optional_jsonl_file_audit_sink(options.audit_jsonl.as_deref());
 
     if options.federal_evidence {
-        let evidence = collect_federal_startup_evidence(
+        let evidence = collect_federal_startup_evidence_with_audit_sink(
             options.profile,
-            options.audit_jsonl.is_some(),
+            audit_sink_health,
             option_env!("PARANOID_CLI_BUILD_COMMIT").unwrap_or("dev"),
             option_env!("PARANOID_CLI_BUILD_DATE").unwrap_or("dev"),
         );
@@ -122,9 +126,10 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
     );
     let context = OpsPolicyContext {
         profile: options.profile,
-        audit_sink_required: options.require_audit_sink
+        audit_sink_required: options.audit_jsonl.is_some()
+            || options.require_audit_sink
             || options.profile == OpsProfile::FederalReady,
-        audit_sink_available: options.audit_jsonl.is_some(),
+        audit_sink_available: audit_sink_health.is_available(),
         crypto_provider: paranoid_ops::FederalCryptoProviderEvidence::collect_from_environment(),
     };
     let mut policy_trail = AuditTrail::for_operation(envelope.operation_id.clone());
@@ -134,9 +139,14 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
 
     if !policy_decision.is_allowed() {
         let audit_events = policy_trail.into_events();
-        write_optional_audit_jsonl(&options.audit_jsonl, &audit_events)?;
+        write_optional_audit_jsonl(&options.audit_jsonl, &audit_sink_health, &audit_events)?;
         if options.output == OutputFormat::Json {
-            print_policy_denial_json(&envelope.operation_id, &policy_decision, &audit_events)?;
+            print_policy_denial_json(
+                &envelope.operation_id,
+                &policy_decision,
+                &audit_sink_health,
+                &audit_events,
+            )?;
         } else {
             eprintln!("policy: {}", policy_denial_message(&policy_decision));
         }
@@ -154,7 +164,7 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
         Err(error) => {
             let mut audit_events = policy_trail.into_events();
             audit_events.extend_from_slice(error.audit_events());
-            write_optional_audit_jsonl(&options.audit_jsonl, &audit_events)?;
+            write_optional_audit_jsonl(&options.audit_jsonl, &audit_sink_health, &audit_events)?;
             if options.output == OutputFormat::Json {
                 print_generation_error_json(&error)?;
             } else {
@@ -170,7 +180,11 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
         report: outcome.report,
         audit_events,
     };
-    write_optional_audit_jsonl(&options.audit_jsonl, &outcome.audit_events)?;
+    write_optional_audit_jsonl(
+        &options.audit_jsonl,
+        &audit_sink_health,
+        &outcome.audit_events,
+    )?;
 
     if options.output == OutputFormat::Json {
         print_generation_json(&outcome)?;
@@ -426,6 +440,7 @@ fn print_federal_evidence_json(evidence: &paranoid_ops::FederalStartupEvidence) 
 fn print_policy_denial_json(
     operation_id: &str,
     decision: &OpsPolicyDecision,
+    audit_sink: &AuditSinkHealth,
     audit_events: &[AuditEvent],
 ) -> io::Result<()> {
     let report = serde_json::json!({
@@ -436,6 +451,7 @@ fn print_policy_denial_json(
         "error_kind": "policy_denied",
         "error_message": policy_denial_message(decision),
         "policy_decision": decision,
+        "audit_sink": audit_sink,
         "audit_events": audit_events,
     });
     let stdout = io::stdout();
@@ -447,9 +463,12 @@ fn print_policy_denial_json(
 
 fn write_optional_audit_jsonl(
     path: &Option<PathBuf>,
+    audit_sink: &AuditSinkHealth,
     audit_events: &[AuditEvent],
 ) -> anyhow::Result<()> {
-    if let Some(path) = path {
+    if let Some(path) = path
+        && audit_sink.is_available()
+    {
         write_events_jsonl(path, audit_events)?;
     }
     Ok(())

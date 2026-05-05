@@ -79,14 +79,15 @@ Ship a local-first password manager and generator whose implementation, release 
 ## Next Comprehensive PR Boundary
 
 The current ops/audit work adds typed command envelopes, allow/challenge/deny policy, JSONL audit
-sinks, seal-state primitives, and a federal-ready startup evidence path. The next architecture
-boundary should route all security-relevant vault command flows and interactive UI adapters through
-that protocol rather than drifting back into UI-local patches.
+sinks with writable health evidence, seal-state primitives, and a federal-ready startup evidence
+path. The next architecture boundary should route all security-relevant vault command flows and
+interactive UI adapters through that protocol rather than drifting back into UI-local patches.
 
 That PR should be scoped around:
 
 - expanding `crates/paranoid-ops` into vault mutation orchestration
-- expanding `crates/paranoid-audit` beyond local JSONL sinks into configured audit-device health
+- expanding `crates/paranoid-audit` beyond local JSONL writable-path health into external
+  audit-device health
 - CLI JSONL fixtures and additional automation output over the typed ops protocol
 - TUI and GUI adapters over the same protocol
 - seal / auto-unseal provider policy

@@ -1,6 +1,6 @@
 use paranoid_audit::{
-    AUDIT_SCHEMA_VERSION, AuditEvent, AuditOutcome, AuditSeverity, AuditSubject, AuditSurface,
-    AuditTrail,
+    AUDIT_SCHEMA_VERSION, AuditEvent, AuditOutcome, AuditSeverity, AuditSinkHealth, AuditSubject,
+    AuditSurface, AuditTrail,
 };
 use paranoid_core::{AuditStage, AuditSummary, GenerationReport, ParanoidError, ParanoidRequest};
 use serde::{Deserialize, Serialize};
@@ -394,6 +394,7 @@ pub struct FederalStartupEvidence {
     pub operating_system: String,
     pub architecture: String,
     pub audit_schema_version: u16,
+    pub audit_sink: AuditSinkHealth,
     pub crypto_provider: FederalCryptoProviderEvidence,
     pub policy_decision: OpsPolicyDecision,
 }
@@ -404,11 +405,25 @@ pub fn collect_federal_startup_evidence(
     build_commit: impl Into<String>,
     build_date: impl Into<String>,
 ) -> FederalStartupEvidence {
+    let audit_sink = if audit_sink_available {
+        AuditSinkHealth::ready_jsonl(None)
+    } else {
+        AuditSinkHealth::not_configured_jsonl()
+    };
+    collect_federal_startup_evidence_with_audit_sink(profile, audit_sink, build_commit, build_date)
+}
+
+pub fn collect_federal_startup_evidence_with_audit_sink(
+    profile: OpsProfile,
+    audit_sink: AuditSinkHealth,
+    build_commit: impl Into<String>,
+    build_date: impl Into<String>,
+) -> FederalStartupEvidence {
     let crypto_provider = FederalCryptoProviderEvidence::collect_from_environment();
     let context = OpsPolicyContext {
         profile,
         audit_sink_required: profile == OpsProfile::FederalReady,
-        audit_sink_available,
+        audit_sink_available: audit_sink.is_available(),
         crypto_provider: crypto_provider.clone(),
     };
     let envelope =
@@ -423,6 +438,7 @@ pub fn collect_federal_startup_evidence(
         operating_system: env::consts::OS.to_string(),
         architecture: env::consts::ARCH.to_string(),
         audit_schema_version: AUDIT_SCHEMA_VERSION,
+        audit_sink,
         crypto_provider,
         policy_decision,
     }

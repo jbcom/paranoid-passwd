@@ -37,15 +37,16 @@ Use careful language:
 ## Federal-Ready Profile
 
 The product now has an explicit federal-ready profile entry point. It is intentionally conservative:
-security-relevant operations fail closed unless the required audit sink is available and runtime
-evidence confirms an approved cryptographic provider mode.
+security-relevant operations fail closed unless the required audit sink is configured and writable
+and runtime evidence confirms an approved cryptographic provider mode.
 
 Required behavior:
 
 - report the configured cryptographic provider path when federal mode is requested
 - verify at startup whether the expected FIPS provider is confirmed in approved mode
 - emit machine-readable evidence for provider name, provider version, module certificate or platform
-  certificate reference, operating system, architecture, build id, and policy profile
+  certificate reference, audit-sink health, operating system, architecture, build id, and policy
+  profile
 - require structured audit output for security-relevant commands
 - reject operations when a required audit sink is unavailable
 - disable or gate recovery paths that cannot be justified under the selected federal profile
@@ -115,6 +116,7 @@ federal startup evidence, redacted structured audit events, and hash-chain evide
 
 - request and response events for every command that reaches policy evaluation
 - stable JSONL schemas suitable for SIEM ingestion
+- configured JSONL sink health evidence before policy treats a sink as available
 - strict redaction markers for sensitive fields
 - hash-chained local event streams
 - fail-closed behavior for required local JSONL sinks
