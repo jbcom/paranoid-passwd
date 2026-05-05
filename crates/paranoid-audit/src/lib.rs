@@ -57,6 +57,8 @@ pub struct AuditEvent {
     pub event_id: String,
     pub sequence: u64,
     pub occurred_at_epoch_ms: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp_error: Option<String>,
     pub surface: AuditSurface,
     pub subject: AuditSubject,
     pub action: String,
@@ -115,12 +117,14 @@ impl AuditTrail {
     ) -> &mut AuditEvent {
         self.next_sequence += 1;
         let sequence = self.next_sequence;
+        let timestamp = current_epoch_ms();
         let event = AuditEvent {
             schema_version: AUDIT_SCHEMA_VERSION,
             operation_id: self.operation_id.clone(),
             event_id: format!("{}.event.{}", self.operation_id, sequence),
             sequence,
-            occurred_at_epoch_ms: current_epoch_ms(),
+            occurred_at_epoch_ms: timestamp.epoch_ms,
+            timestamp_error: timestamp.error,
             surface,
             subject,
             action: action.into(),
@@ -163,10 +167,26 @@ pub enum AuditError {
     Json(#[from] serde_json::Error),
 }
 
-fn current_epoch_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis())
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuditTimestamp {
+    epoch_ms: u128,
+    error: Option<String>,
+}
+
+fn current_epoch_ms() -> AuditTimestamp {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => AuditTimestamp {
+            epoch_ms: duration.as_millis(),
+            error: None,
+        },
+        Err(error) => AuditTimestamp {
+            epoch_ms: 0,
+            error: Some(format!(
+                "system_clock_before_unix_epoch_by_{}_ms",
+                error.duration().as_millis()
+            )),
+        },
+    }
 }
 
 #[cfg(test)]
