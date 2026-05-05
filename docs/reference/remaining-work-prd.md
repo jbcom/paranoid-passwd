@@ -83,15 +83,15 @@ The current ops/audit work adds typed command envelopes, allow/challenge/deny po
 sinks with writable health evidence, external audit-device posture, seal-state primitives, and a
 federal-ready startup evidence path. Headless vault CLI commands, native TUI actions, and native GUI
 automation now share that protocol for covered vault operations rather than drifting back into
-UI-local patches. The next architecture boundary extends the same model into live external
-audit-device reachability probes, seal / auto-unseal provider policy, and broader assessor fixtures.
+UI-local patches. The next architecture boundary extends the same model into mTLS external
+process-boundary command fixtures, seal / auto-unseal provider policy, and broader assessor
+fixtures.
 
 That PR should be scoped around:
 
-- expanding `crates/paranoid-audit` beyond evidence-only external audit-device posture into live
-  TCP reachability probes while reserving `ready` for write-ack health evidence
 - CLI/TUI/GUI JSONL fixtures and additional automation output over the typed ops protocol
 - seal / auto-unseal provider policy
+- mTLS external process-boundary command fixtures and policy evidence
 - additional federal-ready profile fixtures and configured-provider evidence
 - docs and tests that make the trust boundary reviewable
 
@@ -394,12 +394,9 @@ This PRD is complete when all of the following are true:
 
 ## Immediate Next Actions
 
-1. finish and merge the current ops/audit/federal-readiness PR with local tests, GUI screenshot
-   verification, and GitHub checks
-2. route vault mutations, TUI actions, and GUI actions through typed ops envelopes
-3. add external audit-device write-ack probes beyond TCP reachability evidence
-4. add external process-boundary command fixtures and extend stable JSON/JSONL traces as new
+1. add external process-boundary command fixtures and extend stable JSON/JSONL traces as new
    command families are covered
-5. run the first canary release from `main` after those architecture boundaries are stable
-6. choose the Windows installer technology and macOS signing/notarization path
-7. update this PRD as those decisions are made
+2. expand seal / auto-unseal provider policy checks and health evidence
+3. run the first canary release from `main` after those architecture boundaries are stable
+4. choose the Windows installer technology and macOS signing/notarization path
+5. update this PRD as those decisions are made

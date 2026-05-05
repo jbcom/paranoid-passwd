@@ -3960,6 +3960,7 @@ dependencies = [
 name = "paranoid-audit"
 version = "3.5.1"
 dependencies = [
+ "openssl",
  "paranoid-core",
  "serde",
  "serde_json",

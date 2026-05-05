@@ -113,6 +113,8 @@ crates. Current coverage proves that:
   startup evidence schema `2`
 - stable CLI/TUI/GUI vault operation trace fixtures pin typed ops envelopes, request/response audit
   events, and JSONL rendering for automation compatibility
+- audit unit tests cover the mTLS JSONL write-ack probe, including matching acknowledgement and
+  mismatched challenge rejection
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
 - ops policy tests require seal posture evidence for federal certificate unlock, require seal
   posture evidence for device-bound unlock, and require confirmed auto-unseal availability before
@@ -128,7 +130,6 @@ crates. Current coverage proves that:
 The remaining test expansion is now narrower:
 
 - external process-boundary command fixtures once mTLS transport is introduced
-- external audit-device write-ack probe implementations beyond the current TCP reachability probe
 - keyed correlation hashes only after the approved primitive and low-entropy secret risk are
   dispositioned
 - broader PTY e2e coverage for each TUI vault mutation routed through typed ops envelopes
