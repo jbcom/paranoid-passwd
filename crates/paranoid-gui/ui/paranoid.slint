@@ -209,7 +209,7 @@ export component ParanoidPasswdShell inherits Window {
 
                         SectionTitle { text: "Vault Access"; }
                         BodyText {
-                            text: "Unlock a local encrypted vault and perform item, rotation, recovery, and backup operations through paranoid-vault.";
+                            text: "Unlock a local encrypted vault and perform item, rotation, recovery, and backup operations through typed ops policy and paranoid-vault.";
                         }
 
                         FieldLabel { text: "Vault path"; }
@@ -246,9 +246,7 @@ export component ParanoidPasswdShell inherits Window {
                         spacing: 10px;
 
                         SectionTitle { text: "Operations"; }
-                        BodyText {
-                            text: "Daily operator flows: create a login, rotate a generated password, enroll paper recovery, and export an encrypted backup.";
-                        }
+                        FieldLabel { text: "TYPED OPS POLICY"; }
 
                         HorizontalBox {
                             login-title := LineEdit { placeholder-text: "Title"; text: "GitHub"; }

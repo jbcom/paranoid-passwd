@@ -442,6 +442,55 @@ pub fn record_ops_response<'a>(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpsCommandEvaluation {
+    pub envelope: OpsCommandEnvelope,
+    pub decision: OpsPolicyDecision,
+    pub audit_events: Vec<AuditEvent>,
+}
+
+impl OpsCommandEvaluation {
+    pub fn is_allowed(&self) -> bool {
+        self.decision.is_allowed()
+    }
+}
+
+pub fn evaluate_ops_command(
+    surface: AuditSurface,
+    profile: OpsProfile,
+    command: OpsCommand,
+    context: &OpsPolicyContext,
+) -> OpsCommandEvaluation {
+    let envelope = OpsCommandEnvelope::local(surface, profile, command);
+    let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
+    record_ops_request(&mut trail, &envelope);
+    let decision = evaluate_policy(&envelope, context);
+    record_ops_response(&mut trail, &envelope, &decision);
+    OpsCommandEvaluation {
+        envelope,
+        decision,
+        audit_events: trail.into_events(),
+    }
+}
+
+pub fn evaluate_vault_operation(
+    surface: AuditSurface,
+    profile: OpsProfile,
+    name: impl Into<String>,
+    access: VaultOperationAccess,
+    context: &OpsPolicyContext,
+) -> OpsCommandEvaluation {
+    evaluate_ops_command(
+        surface,
+        profile,
+        OpsCommand::VaultOperation {
+            name: name.into(),
+            access,
+        },
+        context,
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederalStartupEvidence {
     pub schema_version: u16,
     pub profile: OpsProfile,
@@ -1147,6 +1196,36 @@ mod tests {
                 .get("vault_operation")
                 .map(String::as_str),
             Some("mutate_item")
+        );
+    }
+
+    #[test]
+    fn evaluate_vault_operation_returns_policy_decision_and_audit_events() {
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+        };
+
+        let evaluation = evaluate_vault_operation(
+            AuditSurface::Gui,
+            OpsProfile::Default,
+            "mutate_item",
+            VaultOperationAccess::Mutate,
+            &context,
+        );
+
+        assert!(evaluation.is_allowed());
+        assert_eq!(evaluation.envelope.session.surface, AuditSurface::Gui);
+        assert_eq!(evaluation.audit_events.len(), 2);
+        assert_eq!(evaluation.audit_events[0].action, "vault_operation.request");
+        assert_eq!(
+            evaluation.audit_events[1]
+                .attributes
+                .get("decision")
+                .map(String::as_str),
+            Some("allow")
         );
     }
 

@@ -1,12 +1,11 @@
 use paranoid_audit::{
-    AuditEvent, AuditSinkHealth, AuditSurface, AuditTrail, assess_optional_jsonl_file_audit_sink,
+    AuditEvent, AuditSinkHealth, AuditSurface, assess_optional_jsonl_file_audit_sink,
     write_events_jsonl,
 };
 use paranoid_core::{CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, VERSION};
 use paranoid_ops::{
-    OpsCommand, OpsCommandEnvelope, OpsPolicyContext, OpsPolicyDecision, OpsProfile,
-    VaultOperationAccess, VaultSealMachine, collect_federal_startup_evidence_with_audit_sink,
-    evaluate_policy, record_ops_request, record_ops_response,
+    OpsCommand, OpsPolicyContext, OpsPolicyDecision, OpsProfile, VaultOperationAccess,
+    VaultSealMachine, collect_federal_startup_evidence_with_audit_sink, evaluate_ops_command,
 };
 use paranoid_vault::{
     GenerateStoreLoginRecord, NewCardRecord, NewIdentityRecord, NewLoginRecord,
@@ -1008,7 +1007,6 @@ fn evaluate_vault_command_policy(
     let Some(ops_command) = command.ops_command() else {
         return Ok(None);
     };
-    let envelope = OpsCommandEnvelope::local(AuditSurface::Vault, invocation.profile, ops_command);
     let context = OpsPolicyContext {
         profile: invocation.profile,
         audit_sink_required: invocation.audit_jsonl.is_some()
@@ -1017,24 +1015,25 @@ fn evaluate_vault_command_policy(
         audit_sink_available: audit_sink_health.is_available(),
         crypto_provider: paranoid_ops::FederalCryptoProviderEvidence::collect_from_environment(),
     };
-    let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
-    record_ops_request(&mut trail, &envelope);
-    let decision = evaluate_policy(&envelope, &context);
-    record_ops_response(&mut trail, &envelope, &decision);
-    let audit_events = trail.into_events();
+    let evaluation = evaluate_ops_command(
+        AuditSurface::Vault,
+        invocation.profile,
+        ops_command,
+        &context,
+    );
     write_optional_vault_audit_jsonl(
         &invocation.audit_jsonl,
         audit_sink_health,
-        audit_events.as_slice(),
+        evaluation.audit_events.as_slice(),
     )?;
-    if decision.is_allowed() {
+    if evaluation.is_allowed() {
         return Ok(None);
     }
     print_vault_policy_denial_json(
-        &envelope.operation_id,
-        &decision,
+        &evaluation.envelope.operation_id,
+        &evaluation.decision,
         audit_sink_health,
-        audit_events.as_slice(),
+        evaluation.audit_events.as_slice(),
     )?;
     Ok(Some(EX_POLICY_DENY))
 }

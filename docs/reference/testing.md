@@ -99,6 +99,8 @@ proves that:
 - configured audit sinks must pass a writable health check before policy treats them as available
 - headless vault CLI subcommands emit typed ops request/response events when an audit sink is
   configured
+- native GUI vault operations emit typed ops request/response policy events in the deterministic
+  automation contract without copying plaintext secrets into audit metadata
 - `--federal-ready` fails closed without confirmed approved-provider evidence
 - federal startup evidence is emitted as JSON
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
@@ -109,12 +111,12 @@ proves that:
 The remaining test expansion is now narrower:
 
 - stable JSON/JSONL compatibility fixtures checked into the repository
-- TUI and GUI adapter tests that prove controls submit typed ops commands instead of reimplementing
-  policy
+- TUI adapter tests that prove controls submit typed ops commands instead of reimplementing policy
+- durable GUI audit sink coverage beyond the in-memory automation evidence
 - audit-device health checks beyond the local JSONL writable-path sink
 - keyed correlation hashes only after the approved primitive and low-entropy secret risk are
   dispositioned
-- e2e coverage for TUI and GUI vault mutations routed through typed ops envelopes
+- e2e coverage for TUI vault mutations routed through typed ops envelopes
 
 ## Core Tests
 
