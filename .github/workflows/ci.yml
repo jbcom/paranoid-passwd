@@ -33,7 +33,7 @@ jobs:
             cargo clippy --workspace --all-targets --locked --frozen --offline -- -D warnings
             bash scripts/cargo_test.sh --workspace --locked --frozen --offline
             cargo build -p paranoid-cli --locked --frozen --offline
-            bash tests/test_cli.sh target/debug/paranoid-passwd
+            bash tests/test_cli.sh "${CARGO_TARGET_DIR:-target}/debug/paranoid-passwd"
             make verify-assurance
 
   docs:

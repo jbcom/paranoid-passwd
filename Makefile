@@ -29,6 +29,10 @@ CI_EMULATE_TARGET_VOLUME ?= paranoid-passwd-cargo-target-ci-emulate
 RELEASE_EMULATE_TARGET_VOLUME ?= paranoid-passwd-cargo-target-release-emulate
 CI_GUI_E2E_TARGET := $(if $(filter linux,$(HOST_OS)),test-gui-e2e)
 LOCAL_GUI_E2E_TARGET := $(if $(filter darwin,$(HOST_OS)),test-gui-e2e-emulate,$(if $(filter linux,$(HOST_OS)),test-gui-e2e))
+CARGO_TARGET_DIR ?= target
+CARGO_DEBUG_DIR := $(CARGO_TARGET_DIR)/debug
+CLI_DEBUG_BIN := $(CARGO_DEBUG_DIR)/paranoid-passwd
+GUI_DEBUG_BIN := $(CARGO_DEBUG_DIR)/paranoid-passwd-gui
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -62,11 +66,11 @@ lint: ## Run formatting and clippy gates
 
 test-cli-contract: ## Run the generator CLI contract script against the debug CLI binary
 	cargo build -p paranoid-cli --locked --frozen --offline
-	bash tests/test_cli.sh target/debug/paranoid-passwd
+	bash tests/test_cli.sh "$(CLI_DEBUG_BIN)"
 
 test-tui-e2e: ## Run the real PTY-driven TUI binary workflow harness
 	cargo build -p paranoid-cli --locked --frozen --offline
-	python3 tests/test_tui_e2e.py target/debug/paranoid-passwd
+	python3 tests/test_tui_e2e.py "$(CLI_DEBUG_BIN)"
 
 test-gui-host-check: ## Compile-check the host Slint GUI surface
 	cargo check -p paranoid-gui --locked --frozen --offline
@@ -91,7 +95,7 @@ test-gui-targets: test-gui-host-check test-gui-android-check test-gui-wasm-check
 
 test-gui-e2e: ## Run the real GUI workflow harness under Xvfb and capture a screenshot artifact
 	cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline
-	bash tests/test_gui_e2e.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui "$(GUI_E2E_SCREENSHOT)"
+	bash tests/test_gui_e2e.sh "$(CLI_DEBUG_BIN)" "$(GUI_DEBUG_BIN)" "$(GUI_E2E_SCREENSHOT)"
 
 test-gui-e2e-emulate: ## Run the Linux GUI workflow harness through the custom builder image
 	@bash scripts/configure_local_toolchain.sh --quiet
@@ -110,7 +114,7 @@ _test-gui-e2e-emulate: _builder-image
 
 test-vault-e2e: ## Run the headless vault CLI end-to-end suite against the debug CLI binary
 	cargo build -p paranoid-cli --locked --frozen --offline
-	bash tests/test_vault_cli.sh target/debug/paranoid-passwd
+	bash tests/test_vault_cli.sh "$(CLI_DEBUG_BIN)"
 
 verify-security: ## Run repository security and supply-chain verification scripts
 	$(MAKE) verify-assurance
