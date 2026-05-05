@@ -389,6 +389,10 @@ pub fn record_ops_request<'a>(
     event
         .attributes
         .insert("request_id".to_string(), envelope.request_id.clone());
+    event.attributes.insert(
+        "session_surface".to_string(),
+        envelope.session.surface.as_str().to_string(),
+    );
     event
         .attributes
         .insert("profile".to_string(), envelope.profile.as_str().to_string());
@@ -427,6 +431,10 @@ pub fn record_ops_response<'a>(
     event
         .attributes
         .insert("request_id".to_string(), envelope.request_id.clone());
+    event.attributes.insert(
+        "session_surface".to_string(),
+        envelope.session.surface.as_str().to_string(),
+    );
     event
         .attributes
         .insert("decision".to_string(), decision.status().to_string());
@@ -439,6 +447,53 @@ pub fn record_ops_response<'a>(
             .insert("vault_access".to_string(), access.as_str().to_string());
     }
     event
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpsCommandEvaluation {
+    pub envelope: OpsCommandEnvelope,
+    pub decision: OpsPolicyDecision,
+    pub audit_events: Vec<AuditEvent>,
+}
+
+impl OpsCommandEvaluation {
+    pub fn is_allowed(&self) -> bool {
+        self.decision.is_allowed()
+    }
+}
+
+// TODO: HUMAN_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.
+pub fn evaluate_ops_command(
+    surface: AuditSurface,
+    command: OpsCommand,
+    context: &OpsPolicyContext,
+) -> OpsCommandEvaluation {
+    let envelope = OpsCommandEnvelope::local(surface, context.profile, command);
+    let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
+    record_ops_request(&mut trail, &envelope);
+    let decision = evaluate_policy(&envelope, context);
+    record_ops_response(&mut trail, &envelope, &decision);
+    OpsCommandEvaluation {
+        envelope,
+        decision,
+        audit_events: trail.into_events(),
+    }
+}
+
+pub fn evaluate_vault_operation(
+    surface: AuditSurface,
+    name: impl Into<String>,
+    access: VaultOperationAccess,
+    context: &OpsPolicyContext,
+) -> OpsCommandEvaluation {
+    evaluate_ops_command(
+        surface,
+        OpsCommand::VaultOperation {
+            name: name.into(),
+            access,
+        },
+        context,
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1147,6 +1202,50 @@ mod tests {
                 .get("vault_operation")
                 .map(String::as_str),
             Some("mutate_item")
+        );
+    }
+
+    #[test]
+    fn evaluate_vault_operation_returns_policy_decision_and_audit_events() {
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+        };
+
+        let evaluation = evaluate_vault_operation(
+            AuditSurface::Gui,
+            "mutate_item",
+            VaultOperationAccess::Mutate,
+            &context,
+        );
+
+        assert!(evaluation.is_allowed());
+        assert_eq!(evaluation.envelope.session.surface, AuditSurface::Gui);
+        assert_eq!(evaluation.envelope.profile, OpsProfile::Default);
+        assert_eq!(evaluation.audit_events.len(), 2);
+        assert_eq!(evaluation.audit_events[0].action, "vault_operation.request");
+        assert_eq!(
+            evaluation.audit_events[0]
+                .attributes
+                .get("session_surface")
+                .map(String::as_str),
+            Some("gui")
+        );
+        assert_eq!(
+            evaluation.audit_events[1]
+                .attributes
+                .get("decision")
+                .map(String::as_str),
+            Some("allow")
+        );
+        assert_eq!(
+            evaluation.audit_events[1]
+                .attributes
+                .get("session_surface")
+                .map(String::as_str),
+            Some("gui")
         );
     }
 

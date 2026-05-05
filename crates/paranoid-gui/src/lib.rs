@@ -3,8 +3,15 @@
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 use arboard::Clipboard;
 #[cfg(not(target_arch = "wasm32"))]
+use paranoid_audit::{AuditEvent, AuditSurface};
+#[cfg(not(target_arch = "wasm32"))]
 use paranoid_core::{
     CharsetOptions, CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, execute_request,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use paranoid_ops::{
+    FederalCryptoProviderEvidence, OpsPolicyContext, OpsProfile, VaultOperationAccess,
+    evaluate_vault_operation,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use paranoid_vault::{
@@ -124,6 +131,8 @@ struct GuiState {
     selected_login_id: Option<String>,
     #[cfg(not(target_arch = "wasm32"))]
     last_report: Option<GenerationReport>,
+    #[cfg(not(target_arch = "wasm32"))]
+    ops_audit_events: Vec<AuditEvent>,
     status: String,
     generated_passwords: String,
     audit_details: String,
@@ -142,6 +151,7 @@ impl Default for GuiState {
             vault_secret: String::new(),
             selected_login_id: None,
             last_report: None,
+            ops_audit_events: Vec::new(),
             status: "Ready. Core owns RNG, rejection sampling, audit math, and vault crypto."
                 .to_string(),
             generated_passwords: "No passwords generated yet.".to_string(),
@@ -194,6 +204,63 @@ impl GuiState {
     fn set_error(&mut self, context: &str, error: impl ToString) {
         self.status = format!("{context}: {}", error.to_string());
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn record_vault_operation_policy(
+        &mut self,
+        operation: &str,
+        access: VaultOperationAccess,
+    ) -> Result<(), String> {
+        let context = gui_ops_policy_context();
+        let evaluation = evaluate_vault_operation(AuditSurface::Gui, operation, access, &context);
+        self.ops_audit_events
+            .extend(evaluation.audit_events.iter().cloned());
+        self.audit_details = summarize_gui_ops_audit(self.ops_audit_events.as_slice());
+        if evaluation.is_allowed() {
+            Ok(())
+        } else {
+            Err(format!(
+                "GUI vault operation policy denied: {:?}",
+                evaluation.decision
+            ))
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn gui_ops_policy_context() -> OpsPolicyContext {
+    OpsPolicyContext {
+        profile: OpsProfile::Default,
+        audit_sink_required: false,
+        audit_sink_available: false,
+        crypto_provider: FederalCryptoProviderEvidence::collect_from_environment(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn summarize_gui_ops_audit(events: &[AuditEvent]) -> String {
+    let event_count = events.len();
+    let operation_count = event_count / 2;
+    let last_response = events
+        .iter()
+        .rev()
+        .find(|event| event.attributes.contains_key("decision"));
+    let last_operation = last_response
+        .and_then(|event| event.attributes.get("vault_operation"))
+        .map(String::as_str)
+        .unwrap_or("unknown");
+    let last_access = last_response
+        .and_then(|event| event.attributes.get("vault_access"))
+        .map(String::as_str)
+        .unwrap_or("unknown");
+    let last_decision = last_response
+        .and_then(|event| event.attributes.get("decision"))
+        .map(String::as_str)
+        .unwrap_or("pending");
+
+    format!(
+        "GUI ops audit: {operation_count} vault operation(s), {event_count} policy event(s). Last operation={last_operation} access={last_access} decision={last_decision}."
+    )
 }
 
 pub fn cli_main() -> Result<(), slint::PlatformError> {
@@ -594,7 +661,9 @@ fn run_operator_automation(
         ));
     }
 
+    state.record_vault_operation_policy("read_item", VaultOperationAccess::Decrypt)?;
     load_vault(state, &automation.vault_path, secret.as_str())?;
+    state.record_vault_operation_policy("mutate_item", VaultOperationAccess::Mutate)?;
     let github = add_login(
         state,
         &automation.vault_path,
@@ -611,6 +680,7 @@ fn run_operator_automation(
         return Err("vault automation did not store the GitHub login".to_string());
     }
 
+    state.record_vault_operation_policy("read_item", VaultOperationAccess::Decrypt)?;
     let filtered = unlock_with_password(&automation.vault_path, secret.as_str())?
         .list_items_filtered(&VaultItemFilter {
             query: Some("GitHub".to_string()),
@@ -626,7 +696,9 @@ fn run_operator_automation(
         ));
     }
 
+    state.record_vault_operation_policy("mutate_item", VaultOperationAccess::Mutate)?;
     rotate_selected_login(state, &automation.vault_path, secret.as_str(), 28)?;
+    state.record_vault_operation_policy("read_item", VaultOperationAccess::Decrypt)?;
     let rotated = unlock_with_password(&automation.vault_path, secret.as_str())?
         .get_item(
             state
@@ -643,6 +715,7 @@ fn run_operator_automation(
         _ => return Err("vault automation selected a non-login item after rotation".into()),
     }
 
+    state.record_vault_operation_policy("keyslot_lifecycle", VaultOperationAccess::Keyslot)?;
     let mut vault = unlock_with_password(&automation.vault_path, secret.as_str())?;
     let enrollment = vault
         .add_mnemonic_keyslot(Some("paper-backup".to_string()))
@@ -654,6 +727,7 @@ fn run_operator_automation(
         "Mnemonic recovery slot enrolled; phrase captured by automation memory only.".to_string();
     state.keyslot_summary = summarize_keyslots(vault.header());
 
+    state.record_vault_operation_policy("export", VaultOperationAccess::Export)?;
     let written = vault
         .export_backup(&automation.backup_path)
         .map_err(|error| error.to_string())?;
@@ -664,8 +738,9 @@ fn run_operator_automation(
         ));
     }
 
+    state.record_vault_operation_policy("read_item", VaultOperationAccess::Decrypt)?;
     load_vault(state, &automation.vault_path, secret.as_str())?;
-    state.status = "GUI automation passed. Generator audit, vault CRUD, generate-and-rotate, mnemonic enrollment, and backup export all completed under xvfb-run.".to_string();
+    state.status = "GUI automation passed. Generator audit, typed ops policy events, vault CRUD, generate-and-rotate, mnemonic enrollment, and backup export all completed under xvfb-run.".to_string();
     Ok(state.status.clone())
 }
 
@@ -762,6 +837,7 @@ fn init_vault_from_ui(
     path: &SharedString,
     secret: &SharedString,
 ) -> Result<(), String> {
+    state.record_vault_operation_policy("init", VaultOperationAccess::Keyslot)?;
     let path = PathBuf::from(path.as_str());
     let secret = secret.as_str();
     init_vault(&path, secret).map_err(|error| error.to_string())?;
@@ -775,6 +851,7 @@ fn load_vault_from_ui(
     path: &SharedString,
     secret: &SharedString,
 ) -> Result<(), String> {
+    state.record_vault_operation_policy("read_item", VaultOperationAccess::Decrypt)?;
     load_vault(state, Path::new(path.as_str()), secret.as_str())
 }
 
@@ -794,6 +871,7 @@ fn add_login_from_ui(
     secret: &SharedString,
     input: LoginFormInput<'_>,
 ) -> Result<(), String> {
+    state.record_vault_operation_policy("mutate_item", VaultOperationAccess::Mutate)?;
     add_login(
         state,
         Path::new(path.as_str()),
@@ -816,6 +894,7 @@ fn rotate_selected_login_from_ui(
     secret: &SharedString,
     length: &SharedString,
 ) -> Result<(), String> {
+    state.record_vault_operation_policy("mutate_item", VaultOperationAccess::Mutate)?;
     let length = parse_usize(length.as_str(), "length")?;
     rotate_selected_login(state, Path::new(path.as_str()), secret.as_str(), length)
 }
@@ -827,6 +906,7 @@ fn enroll_mnemonic_from_ui(
     secret: &SharedString,
     label: &SharedString,
 ) -> Result<(), String> {
+    state.record_vault_operation_policy("keyslot_lifecycle", VaultOperationAccess::Keyslot)?;
     let mut vault = unlock_with_password(Path::new(path.as_str()), secret.as_str())?;
     let enrollment = vault
         .add_mnemonic_keyslot(normalize_optional_field(label.as_str()))
@@ -852,6 +932,7 @@ fn export_backup_from_ui(
     secret: &SharedString,
     output: &SharedString,
 ) -> Result<(), String> {
+    state.record_vault_operation_policy("export", VaultOperationAccess::Export)?;
     let output = output.as_str().trim();
     if output.is_empty() {
         return Err("backup output path is required".to_string());
@@ -1228,5 +1309,23 @@ mod tests {
         assert!(backup_path.exists());
         assert!(state.vault_items.contains("GitHub"));
         assert!(state.keyslot_summary.contains("mnemonic"));
+        assert_eq!(state.ops_audit_events.len(), 16);
+        assert!(state.audit_details.contains("8 vault operation(s)"));
+        assert!(state.audit_details.contains("decision=allow"));
+        assert!(!state.audit_details.contains("hunter2"));
+    }
+
+    #[test]
+    fn gui_vault_operation_policy_records_non_secret_audit_metadata() {
+        let mut state = GuiState::default();
+
+        state
+            .record_vault_operation_policy("mutate_item", VaultOperationAccess::Mutate)
+            .expect("default GUI policy allows local mutate operation");
+
+        assert_eq!(state.ops_audit_events.len(), 2);
+        assert!(state.audit_details.contains("mutate_item"));
+        assert!(state.audit_details.contains("access=mutate"));
+        assert!(state.audit_details.contains("decision=allow"));
     }
 }

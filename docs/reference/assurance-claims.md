@@ -31,6 +31,7 @@ Claim states:
 | `vault.device-bound-keyslot` | `tracked-open` | Device-bound unlock stores the raw master key only in platform secure storage and validates it with an AES-GCM verification blob. | `crates/paranoid-vault/src/lib.rs`; CLI vault TUI tests; `docs/reference/human-review.md` |
 | `vault.mnemonic-recovery-keyslot` | `tracked-open` | Mnemonic recovery slots use 24-word BIP39 entropy as the current AES-256-GCM wrapping material until a disposition changes that construction. | `crates/paranoid-vault/src/lib.rs`; vault tests; `docs/reference/human-review.md` |
 | `vault.certificate-wrapped-keyslot` | `tracked-open` | Certificate-wrapped keyslots use the current CMS recipient and content-encryption policy until a disposition changes that construction. | `crates/paranoid-vault/src/lib.rs`; vault tests; `docs/reference/human-review.md` |
+| `ops.shared-policy-boundary` | `tracked-open` | The shared ops evaluator gates adapter-initiated vault operations and emits request/response audit evidence until a human disposition confirms the boundary. | `crates/paranoid-ops/src/lib.rs`; CLI vault tests; native GUI automation tests; `docs/reference/human-review.md` |
 
 ## Supply Chain and Release Claims
 

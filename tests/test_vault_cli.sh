@@ -234,6 +234,8 @@ assert events[0]["surface"] == "ops"
 assert events[0]["action"] == "vault_operation.request"
 assert events[1]["action"] == "vault_operation.response"
 assert events[0]["attributes"]["request_id"] == events[1]["attributes"]["request_id"]
+assert events[0]["attributes"]["session_surface"] == "vault"
+assert events[1]["attributes"]["session_surface"] == "vault"
 assert events[0]["attributes"]["vault_operation"] == "keyslots"
 assert events[0]["attributes"]["vault_access"] == "metadata"
 assert events[1]["attributes"]["decision"] == "allow"
@@ -257,6 +259,7 @@ assert data["error_kind"] == "policy_denied"
 assert data["audit_sink"]["status"] == "unavailable"
 assert data["policy_decision"]["missing_controls"] == ["required_audit_sink"]
 assert data["audit_events"][0]["action"] == "vault_operation.request"
+assert data["audit_events"][0]["attributes"]["session_surface"] == "vault"
 '
 
     LOGIN1_ID="$(source_vault add --title GitHub --username octo@example.com --password 'ReuseMe#2026' --url https://github.com --notes 'Primary engineering login' --folder Work --tags work,code)"

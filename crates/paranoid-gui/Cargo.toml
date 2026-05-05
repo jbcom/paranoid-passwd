@@ -21,7 +21,9 @@ path = "src/lib.rs"
 slint.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+paranoid-audit = { workspace = true }
 paranoid-core = { path = "../paranoid-core" }
+paranoid-ops = { workspace = true }
 paranoid-vault = { path = "../paranoid-vault" }
 
 [target.'cfg(not(any(target_os = "android", target_arch = "wasm32")))'.dependencies]
