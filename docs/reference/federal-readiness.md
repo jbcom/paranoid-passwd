@@ -170,7 +170,7 @@ package:
 - audit-schema reference and sample JSONL traces
 - external audit-device endpoint, mTLS evidence posture, and health status when configured
 - control mapping for relevant NIST SP 800-53 Rev5 families, especially AC, AU, CM, IA, SC, SI, and
-  SR
+  SR; see [Federal Control Mapping](./control-mapping.md)
 - configuration baseline guidance, using DoD STIGs where applicable and CIS Level 2 only where a STIG
   is not available
 - shared-responsibility notes for customers who run the product inside a larger FedRAMP or IL5
