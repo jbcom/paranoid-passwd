@@ -4,6 +4,7 @@ build-*/
 artifact/
 dist/
 target/
+.config/
 *.apk
 *.tar
 packages/

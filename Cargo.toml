@@ -4,30 +4,34 @@ members = [
     "crates/paranoid-cli",
     "crates/paranoid-gui",
     "crates/paranoid-vault",
+    "xtask",
 ]
 resolver = "2"
 
 [workspace.package]
 version = "3.5.1"
 edition = "2024"
-license = "MIT"
+license = "GPL-3.0-only"
 authors = ["Jon Bogaty"]
 repository = "https://github.com/jbcom/paranoid-passwd"
 homepage = "https://paranoid-passwd.com"
-rust-version = "1.88"
+description = "Local-first password manager and generator with native apps, encrypted vault storage, and verifiable releases."
+rust-version = "1.95"
 
 [workspace.dependencies]
 anyhow = "1.0.102"
 argon2 = "0.5.3"
 arboard = "3.6.1"
 crossterm = "0.29.0"
-iced = { version = "0.14.0", default-features = false, features = ["tiny-skia", "thread-pool", "fira-sans", "x11", "wayland"] }
 lexopt = "0.3.2"
-openssl = "0.10.77"
+openssl = { version = "0.10.78", features = ["vendored"] }
 ratatui = "0.30.0"
+regex = "1.12.3"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+slint = { version = "1.16.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software", "backend-android-activity-06"] }
+slint-build = "1.16.1"
 statrs = "0.18.0"
 tempfile = "3.20.0"
 thiserror = "2.0.18"

@@ -8,6 +8,7 @@ mod gradient;
 mod linear_gradient;
 mod pattern;
 mod radial_gradient;
+mod sweep_gradient;
 
 use tiny_skia_path::{NormalizedF32, Scalar};
 
@@ -15,16 +16,18 @@ pub use gradient::GradientStop;
 pub use linear_gradient::LinearGradient;
 pub use pattern::{FilterQuality, Pattern, PixmapPaint};
 pub use radial_gradient::RadialGradient;
+pub use sweep_gradient::SweepGradient;
 
-use crate::{Color, Transform};
+use crate::{Color, ColorSpace, Transform};
 
 use crate::pipeline::RasterPipelineBuilder;
 
 /// A shader spreading mode.
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub enum SpreadMode {
     /// Replicate the edge color if the shader draws outside of its
     /// original bounds.
+    #[default]
     Pad,
 
     /// Repeat the shader's image horizontally and vertically, alternating
@@ -33,12 +36,6 @@ pub enum SpreadMode {
 
     /// Repeat the shader's image horizontally and vertically.
     Repeat,
-}
-
-impl Default for SpreadMode {
-    fn default() -> Self {
-        SpreadMode::Pad
-    }
 }
 
 /// A shader specifies the source color(s) for what is being drawn.
@@ -57,17 +54,22 @@ pub enum Shader<'a> {
     LinearGradient(LinearGradient),
     /// A radial gradient shader.
     RadialGradient(RadialGradient),
+    /// A sweep gradient shader.
+    SweepGradient(SweepGradient),
     /// A pattern shader.
     Pattern(Pattern<'a>),
 }
 
-impl<'a> Shader<'a> {
+impl Shader<'_> {
     /// Checks if the shader is guaranteed to produce only opaque colors.
     pub fn is_opaque(&self) -> bool {
         match self {
-            Shader::SolidColor(ref c) => c.is_opaque(),
-            Shader::LinearGradient(ref g) => g.is_opaque(),
+            Shader::SolidColor(c) => c.is_opaque(),
+            Shader::LinearGradient(g) => g.is_opaque(),
+            // A radial gradient may have points that are "undefined" so we just assume that it is
+            // not opaque.
             Shader::RadialGradient(_) => false,
+            Shader::SweepGradient(g) => g.is_opaque(),
             Shader::Pattern(_) => false,
         }
     }
@@ -76,15 +78,17 @@ impl<'a> Shader<'a> {
 
     /// If this returns false, then we draw nothing (do not fall back to shader context)
     #[must_use]
-    pub(crate) fn push_stages(&self, p: &mut RasterPipelineBuilder) -> bool {
+    pub(crate) fn push_stages(&self, cs: ColorSpace, p: &mut RasterPipelineBuilder) -> bool {
         match self {
             Shader::SolidColor(color) => {
-                p.push_uniform_color(color.premultiply());
+                let color = cs.expand_color(*color).premultiply();
+                p.push_uniform_color(color);
                 true
             }
-            Shader::LinearGradient(ref g) => g.push_stages(p),
-            Shader::RadialGradient(ref g) => g.push_stages(p),
-            Shader::Pattern(ref patt) => patt.push_stages(p),
+            Shader::LinearGradient(g) => g.push_stages(cs, p),
+            Shader::RadialGradient(g) => g.push_stages(cs, p),
+            Shader::SweepGradient(g) => g.push_stages(cs, p),
+            Shader::Pattern(patt) => patt.push_stages(cs, p),
         }
     }
 
@@ -96,6 +100,9 @@ impl<'a> Shader<'a> {
                 g.base.transform = g.base.transform.post_concat(ts);
             }
             Shader::RadialGradient(g) => {
+                g.base.transform = g.base.transform.post_concat(ts);
+            }
+            Shader::SweepGradient(g) => {
                 g.base.transform = g.base.transform.post_concat(ts);
             }
             Shader::Pattern(p) => {
@@ -126,6 +133,9 @@ impl<'a> Shader<'a> {
                 g.base.apply_opacity(opacity);
             }
             Shader::RadialGradient(g) => {
+                g.base.apply_opacity(opacity);
+            }
+            Shader::SweepGradient(g) => {
                 g.base.apply_opacity(opacity);
             }
             Shader::Pattern(ref mut p) => {

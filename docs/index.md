@@ -4,16 +4,24 @@ title: paranoid-passwd
 
 # paranoid-passwd
 
-## The Password Generator That Trusts No One
+## Local Secrets. Verifiable Trust.
 
-`paranoid-passwd` is now a **Rust-native local application** with a scriptable CLI, a full-screen wizard TUI, a desktop GUI crate under active parity work, and the first local vault foundation. The public website is a **docs and downloads surface only**. There is no browser generator, no WASM runtime, and no JavaScript trust boundary in the product anymore.
+`paranoid-passwd` is a **Rust-native password manager and generator** built around one
+promise: secrets stay local, and trust is verified instead of assumed.
 
-The current release line focuses on reproducing the existing generator and audit behavior in a more maintainable stack:
+It ships native tools for daily use, scripting, and recovery operations:
 
 - `paranoid-core` owns password generation, rejection sampling, OpenSSL-backed hashing and RNG, compliance policy, and the 7-layer audit.
-- `paranoid-passwd` is the user-facing binary. It defaults to the TUI on an interactive terminal and keeps the scriptable CLI for automation.
-- `paranoid-passwd-gui` follows the same three-screen flow and shared view models as the CLI/TUI, but it is not shipped as a release artifact yet.
-- `paranoid-vault` provides the encrypted local vault foundation built on SQLite, Argon2id, and OpenSSL-backed AEAD.
+- `paranoid-passwd` is the primary user binary. It defaults to the TUI on an interactive terminal and keeps the scriptable CLI for automation.
+- `paranoid-passwd-gui` is the dedicated Slint-native GUI surface over the same generator and vault model.
+- `paranoid-vault` stores encrypted local `Login`, `SecureNote`, `Card`, and `Identity` records with explicit recovery posture.
+- the public website is docs and downloads only; the retired browser generator and JavaScript
+  trust boundary are gone from the product surface.
+- remaining open crypto/statistics dispositions are tracked as assurance claims instead of scattered source comments.
+- the project is licensed as `GPL-3.0-only`, which keeps the password manager open source
+  under a reciprocal license and enables Slint's GPLv3 native GUI path.
+- future Slint WASM or mobile targets must be explicit Rust/Slint surfaces with their own
+  threat models and release gates.
 
 ```{toctree}
 :maxdepth: 2
@@ -27,16 +35,16 @@ api/index
 
 ## Download Channels
 
-- [GitHub Releases](https://github.com/jbcom/paranoid-passwd/releases) ship the signed native archives and checksums.
+- [GitHub Releases](https://github.com/jbcom/paranoid-passwd/releases) ship the signed native archives, macOS `.dmg` images for the GUI, Linux `.deb` packages, and checksums.
 - `install.sh` is hosted at the docs site root and resolves the latest GitHub Release.
 - Package-manager metadata is still generated from the release workflow for Homebrew, Scoop, and Chocolatey.
-- The release pipeline now validates archive packaging, manifest generation, and the installer surface before attesting assets.
-- The current release line ships the CLI/TUI binary only. GUI packaging is later roadmap work.
+- The release pipeline now validates archive, `.dmg`, and Debian package payloads, manifest generation, and the installer surface before attesting assets.
+- The current release line ships both the CLI/TUI binary and a separate GUI binary through direct archives, with Linux `.deb` packages for both.
+- `install.sh` and package-manager flows remain focused on the CLI/TUI binary; the GUI uses direct-download artifacts until native installer work lands on every supported platform.
 
-## What Changed
+## Why It Exists
 
-- The interactive GitHub Pages app is retired.
-- GitHub Pages now publishes documentation built from the repository `docs/` tree with Sphinx.
-- The builder image still owns the CI/docs build path, but it now installs Rust and Sphinx tooling instead of the old C/WASM toolchain.
-- Release packaging is driven by checked-in scripts: `build_release_artifact.sh`, `smoke_test_release_artifact.sh`, and `release_validate.sh`.
-- The public product surface is native-first: local secrets never need a browser runtime.
+- Local secrets should not depend on a browser runtime.
+- Recovery should be visible before a vault is in trouble.
+- Release trust should come from reproducible checks, payload inspection, checksums, and attestations.
+- AI-assisted changes should be constrained by deterministic gates and explicit assurance claims.

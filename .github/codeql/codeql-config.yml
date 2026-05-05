@@ -1,0 +1,7 @@
+name: paranoid-passwd CodeQL
+
+paths-ignore:
+  - vendor/**
+  - target/**
+  - dist/**
+  - docs/_build/**

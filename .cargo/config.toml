@@ -1,6 +1,9 @@
 [build]
 target-dir = "target"
 
+[env]
+MACOSX_DEPLOYMENT_TARGET = "14.0"
+
 [source.crates-io]
 replace-with = "vendored-sources"
 

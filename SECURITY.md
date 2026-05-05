@@ -40,6 +40,7 @@ The retired browser/WASM surface is no longer part of the supported product.
 Before release, the repository should pass:
 
 ```bash
+make verify-assurance
 make ci
 ```
 
@@ -49,3 +50,5 @@ That includes:
 - docs build
 - `scripts/hallucination_check.sh`
 - `scripts/supply_chain_verify.sh`
+- `scripts/verify_human_review_inventory.sh`
+- `scripts/security_assurance_gate.py`

@@ -1,5 +1,6 @@
 mod tui;
 mod vault_cli;
+mod vault_tui;
 
 use lexopt::prelude::*;
 use paranoid_core::{
@@ -207,7 +208,7 @@ fn print_usage(mut out: impl Write) -> io::Result<()> {
         out,
         "\
 Usage: paranoid-passwd [OPTIONS]
-       paranoid-passwd vault [OPTIONS] <SUBCOMMAND>
+       paranoid-passwd vault [OPTIONS] [SUBCOMMAND]
 
 Generate cryptographically strong passwords with a self-audit.
 
@@ -234,7 +235,7 @@ Output:
   -h, --help               Print this help and exit
 
 Vault:
-  vault                    Manage the local encrypted vault
+  vault                    Manage the local encrypted vault; defaults to the vault TUI on an interactive terminal when no subcommand is passed
 
 Behavior:
   When attached to a TTY with no mode-forcing or operational flags, paranoid-passwd
@@ -346,48 +347,43 @@ fn print_audit(report: &GenerationReport) -> io::Result<()> {
         )?;
     }
 
-    if let Some(primary) = report.passwords.first() {
-        let selected = primary
+    let format_selected_frameworks = |password: &paranoid_core::GeneratedPassword| {
+        let selected = password
             .compliance
             .iter()
             .filter(|status| status.selected)
             .map(|status| format!("{}={}", status.id, if status.passed { "OK" } else { "no" }))
             .collect::<Vec<_>>()
             .join(", ");
+        if selected.is_empty() {
+            "none".to_string()
+        } else {
+            selected
+        }
+    };
+
+    if let Some(primary) = report.passwords.first() {
+        let selected = format_selected_frameworks(primary);
         writeln!(
             handle,
             "primary: {}  sha256={}  patterns={}  selected-frameworks={}  pass={}",
             secure_preview(primary.value.as_str()),
             primary.sha256_hex,
             primary.pattern_issues,
-            if selected.is_empty() {
-                "none"
-            } else {
-                &selected
-            },
+            selected,
             if primary.all_pass { "yes" } else { "no" }
         )?;
     }
     if report.passwords.len() > 1 {
         for (index, password) in report.passwords.iter().enumerate().skip(1) {
-            let selected = password
-                .compliance
-                .iter()
-                .filter(|status| status.selected)
-                .map(|status| format!("{}={}", status.id, if status.passed { "OK" } else { "no" }))
-                .collect::<Vec<_>>()
-                .join(", ");
+            let selected = format_selected_frameworks(password);
             writeln!(
                 handle,
                 "additional[{}]: {}  patterns={}  selected-frameworks={}  pass={}",
                 index + 1,
                 secure_preview(password.value.as_str()),
                 password.pattern_issues,
-                if selected.is_empty() {
-                    "none"
-                } else {
-                    &selected
-                },
+                selected,
                 if password.all_pass { "yes" } else { "no" }
             )?;
         }

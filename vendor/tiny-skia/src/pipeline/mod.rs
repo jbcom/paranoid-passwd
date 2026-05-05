@@ -124,17 +124,34 @@ pub enum Stage {
     RepeatX1,
     Gradient,
     EvenlySpaced2StopGradient,
+    XYToUnitAngle,
     XYToRadius,
     XYTo2PtConicalFocalOnCircle,
     XYTo2PtConicalWellBehaved,
+    XYTo2PtConicalSmaller,
     XYTo2PtConicalGreater,
+    XYTo2PtConicalStrip,
+    Mask2PtConicalNan,
     Mask2PtConicalDegenerates,
     ApplyVectorMask,
+    Alter2PtConicalCompensateFocal,
+    Alter2PtConicalUnswap,
+    NegateX,
+    ApplyConcentricScaleBias,
+    GammaExpand2,
+    GammaExpandDestination2,
+    GammaCompress2,
+    GammaExpand22,
+    GammaExpandDestination22,
+    GammaCompress22,
+    GammaExpandSrgb,
+    GammaExpandDestinationSrgb,
+    GammaCompressSrgb,
 }
 
-pub const STAGES_COUNT: usize = Stage::ApplyVectorMask as usize + 1;
+pub const STAGES_COUNT: usize = Stage::GammaCompressSrgb as usize + 1;
 
-impl<'a> PixmapRef<'a> {
+impl PixmapRef<'_> {
     #[inline(always)]
     pub(crate) fn gather(&self, index: u32x8) -> [PremultipliedColorU8; highp::STAGE_WIDTH] {
         let index: [u32; 8] = bytemuck::cast(index);
@@ -152,7 +169,7 @@ impl<'a> PixmapRef<'a> {
     }
 }
 
-impl<'a> SubPixmapMut<'a> {
+impl SubPixmapMut<'_> {
     #[inline(always)]
     pub(crate) fn offset(&self, dx: usize, dy: usize) -> usize {
         self.real_width * dy + dx
@@ -318,6 +335,7 @@ pub struct TwoPointConicalGradientCtx {
     // This context is used only in highp, where we use Tx4.
     pub mask: u32x8,
     pub p0: f32,
+    pub p1: f32,
 }
 
 #[derive(Copy, Clone, Default, Debug)]

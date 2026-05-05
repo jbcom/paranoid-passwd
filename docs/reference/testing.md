@@ -4,7 +4,112 @@ title: Testing
 
 # Testing
 
-The Rust replatform keeps the audit behavior covered in native tests and removes the old browser/WASM test surface.
+The native product line keeps generator, vault, and release behavior covered in tests while
+keeping the retired browser app out of the product surface. Slint WASM and mobile targets are
+treated as explicit Rust-native target surfaces with their own threat model and local checks.
+
+The remaining open disposition surface is tracked separately in
+[Human Review Surface](./human-review.md) and mapped to [Assurance Claims](./assurance-claims.md).
+The repository enforces that inventory with `scripts/verify_human_review_inventory.sh` and the
+claim-led gate in `scripts/security_assurance_gate.py`.
+
+Run the full assurance gate with:
+
+```bash
+make verify-assurance
+```
+
+That command verifies the hallucination checks, supply-chain checks, open review inventory, and
+security assurance protocol wiring.
+
+## Local Release-Candidate Quality Gate
+
+The Makefile remains the operator interface for local and CI workflows. Repo-owned deep checks that
+need structured parsing live in the Rust-native `xtask` crate instead of ad hoc Python glue:
+
+```bash
+make verify-deep
+make quality
+```
+
+- `make verify-deep` runs `cargo run -p xtask --locked --frozen --offline -- verify-deep`.
+- The `xtask` gate verifies the Rust toolchain policy, locked offline Cargo metadata, workspace
+  license/source policy, ShellCheck warning-or-higher results for repo-owned shell scripts, Python
+  syntax for the existing docs/test harness scripts without writing bytecode, tracked-file secret
+  scanning, and local visibility of security scanners.
+- `make quality` runs `verify-deep`, the full `ci` target, and the supported GUI e2e target for the
+  host. On macOS it drives the Linux GUI harness through the local builder image; on Linux it uses
+  the native `xvfb-run` harness. This target requires the local security scanner stack and runs the
+  enforced local scanner subset.
+- Optional external tools (`codeql`, `semgrep`, `cargo-deny`, `cargo-audit`, `cargo-vet`, `syft`,
+  `trivy`, and `osv-scanner`) are reported when missing under `make verify-deep`; `make quality`
+  sets `PARANOID_STRICT_EXTERNAL_TOOLS=1` and treats missing tools as fatal.
+- The enforced scanner subset is `cargo audit --no-fetch --stale`, `cargo deny check`, Semgrep
+  `--config auto`, and an OSV lockfile report. `cargo-deny` allows unmaintained/unsound advisories
+  as warnings only when there is no safe upgrade path; OSV findings with a fixed version remain
+  blocking. Trivy, Syft, CodeQL, and cargo-vet are installed/visible locally but require pinned
+  policies or evidence-output handling before they become default `make quality` steps.
+
+Python remains in the repo only where it already owns a specific workflow: Sphinx/tox docs and the
+PTY-driven TUI harness. It is not the project automation layer.
+
+## Local Build Chain Configure
+
+The repository owns local toolchain discovery through:
+
+```bash
+./configure
+make configure
+make bootstrap-local
+make show-config
+```
+
+`./configure` and `make configure` generate `.config/paranoid-local.mk` for Make and
+`.config/paranoid-local.env` for manual shell work. The generated config detects the host platform,
+Cargo/Rustup, Docker, Xvfb/ImageMagick GUI capture tools, Android SDK/NDK paths, NDK clang/ar/ranlib,
+adb, emulator, Maestro, `wasm-pack`, and installed Rust Android/WASM targets. `make bootstrap-local`
+installs `aarch64-linux-android` and `wasm32-unknown-unknown` with Rustup before regenerating the
+config.
+
+GUI target checks are separate from the main CI target so platform-readiness does not hide behind
+remote runners:
+
+```bash
+make test-gui-host-check
+make test-gui-android-check
+make test-gui-wasm-check
+make test-gui-targets
+```
+
+`make test-gui-android-check` currently compile-checks the Slint GUI library through the configured
+NDK while keeping the native `paranoid-core` and `paranoid-vault` path linked. `make
+test-gui-wasm-check` is intentionally strict and warning-clean, but it only checks the gated
+non-secret Slint WASM surface. The native vault and generator crates are not linked for
+`wasm32-unknown-unknown`; target-appropriate vault storage, crypto, packaging, and runtime
+validation remain product work before WASM can become a supported secret-handling surface.
+
+## Ops, Audit, and Federal Profile Tests
+
+The next comprehensive PR should move command orchestration and security audit behavior into
+dedicated `paranoid-ops` and `paranoid-audit` crates. That refactor should add focused tests before
+UI work expands:
+
+- typed command-envelope serialization and compatibility fixtures
+- allow / challenge / deny policy decisions for sensitive vault operations
+- seal, unseal, auto-unseal, idle-lock, and recovery-required state transitions
+- request/response audit-event pairing by stable request id
+- audit redaction and keyed-hash behavior for sensitive fields
+- event hash-chain verification and tamper/truncation detection
+- fail-closed behavior when a required audit sink is unavailable
+- CLI JSON and JSONL output fixtures for automation consumers
+- TUI and GUI adapter tests that prove controls submit typed ops commands instead of reimplementing
+  policy
+- federal-ready profile startup checks for FIPS-provider availability, approved mode evidence,
+  required audit sinks, and disabled non-federal recovery paths
+
+The federal-ready profile should have its own evidence fixtures so a release candidate can show what
+would be attached to a FedRAMP High, GovCloud, or DoD IL5 customer assessment package without
+claiming that this standalone project is itself authorized.
 
 ## Core Tests
 
@@ -31,6 +136,26 @@ cargo test -p paranoid-core --locked --frozen --offline
 `paranoid-cli` includes:
 
 - TUI reducer / rendering smoke tests
+- real PTY-driven binary TUI workflow coverage in
+  [`tests/test_tui_e2e.py`](../../../tests/test_tui_e2e.py), proving the
+  generator wizard and vault TUI can be driven end to end with actual terminal
+  keystrokes
+- a Linux GUI-binary workflow harness in
+  [`tests/test_gui_e2e.sh`](../../../tests/test_gui_e2e.sh), proving the native
+  Slint desktop app can run an operator workflow end to end under `xvfb-run`
+  and leave a screenshot artifact for review
+- vault TUI rendering and launch-policy smoke tests
+- headless CLI end-to-end coverage for the documented vault workflows in
+  [`tests/test_vault_cli.sh`](../../../tests/test_vault_cli.sh), including
+  real binary CRUD, structured filtering, `generate-store` create and rotate
+  flows, encrypted backup restore plus `--force` overwrite behavior,
+  transfer-package import/export plus remap and `--replace-existing` conflict
+  handling, mnemonic recovery, device-bound unlock, certificate-backed unlock,
+  recovery-secret rotation, and keyslot removal guards
+- vault TUI add, edit, delete, generate-and-store, generate-and-rotate, `SecureNote`, `Card`, `Identity`, folder, tag, password-history, duplicate-password visibility, native direct unlock for recovery-secret, mnemonic, device-bound, and certificate-backed paths, keyslot-enrollment, mnemonic-slot rotation, certificate-slot rewrap, keyslot-relabel, recovery-secret rotation, keyslot-removal, device-slot rebind, and structured `/` filter workflow tests
+- vault TUI encrypted backup export/import round-trip tests, invalid backup restore fail-closed coverage, transfer-package export/import round-trip tests, invalid transfer import fail-closed coverage, and backup/transfer summary preview coverage
+- headless encrypted transfer-package export/import coverage for recovery-secret unwrap, certificate unwrap, and conflict remapping
+- vault TUI idle auto-lock regression coverage
 - vault CLI coverage through the shared workspace tests
 - CLI contract coverage through the shell script in [`tests/test_cli.sh`](../../../tests/test_cli.sh)
 - repository verification via `scripts/hallucination_check.sh` and `scripts/supply_chain_verify.sh`
@@ -41,16 +166,68 @@ Run them with:
 cargo test -p paranoid-cli --locked --frozen --offline
 cargo build -p paranoid-cli --locked --frozen --offline
 tests/test_cli.sh target/debug/paranoid-passwd
+tests/test_tui_e2e.py target/debug/paranoid-passwd
+tests/test_gui_e2e.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui dist/gui-e2e.png
+tests/test_vault_cli.sh target/debug/paranoid-passwd
 bash scripts/hallucination_check.sh
 bash scripts/supply_chain_verify.sh
 ```
 
+The headless vault e2e suite uses a debug-only file-backed device-store override
+when `PARANOID_TEST_DEVICE_STORE_DIR` is set. Release builds do not include that
+test backend.
+
 `paranoid-vault` includes:
 
 - vault init/unlock round trips
-- CRUD coverage for login items
+- CRUD coverage for `Login`, `SecureNote`, `Card`, and `Identity` items, including folder persistence, tag persistence, typed kind/folder/tag/query filtering, login password-history retention on rotation, and duplicate-password detection for login items
 - wrong-password fail-closed coverage
-- generator-to-vault `generate-store` coverage
+- mnemonic recovery keyslot add/unlock coverage
+- mnemonic recovery keyslot rotation coverage, including fail-closed invalidation of the previous phrase
+- multi-mnemonic-slot explicit-selection coverage
+- device-bound keyslot add/unlock coverage
+- multi-device-slot explicit-selection coverage
+- certificate-wrapped keyslot add/unlock coverage
+- certificate-wrapped keyslot rewrap coverage, including persisted public metadata updates for fingerprint, subject, and validity, plus native session continuity when a live certificate-authenticated surface rewraps its active slot
+- public certificate preview coverage for headless inspection before enrollment or rewrap
+- headless keyslot-inspection parser coverage
+- certificate keyslot health coverage for expired-recipient detection
+- encrypted private-key certificate unlock coverage
+- password recovery-slot rotation coverage
+- keyslot relabel persistence coverage
+- recovery-posture summary coverage
+- keyslot removal-impact analysis coverage
+- non-recovery keyslot removal coverage
+- device-bound keyslot rebind coverage
+- generator-to-vault `generate-store` create and rotate coverage
+- decrypted local summary filter coverage
+- encrypted backup export/import round-trip coverage and backup-summary inspection coverage, including keyslot detail and certificate metadata
+- encrypted transfer-package inspection and import coverage, including selective filters, certificate unwrap, and id remapping on conflict
+- invalid-backup and tampered-ciphertext fail-closed coverage
+- shared session-hardening coverage for clipboard auto-clear timing and idle-lock timing
+
+`paranoid-gui` includes:
+
+- shared generator request/result model coverage
+- a checked-in Slint shell compiled by `build.rs` from `crates/paranoid-gui/ui/paranoid.slint`,
+  with a focused Rust test that verifies the generated component bindings under locked,
+  frozen, offline Cargo
+- a comprehensive operator workflow test that crosses the generator and vault
+  surfaces in one run, covering audit completion, vault CRUD, generate-and-rotate,
+  keyslot navigation, mnemonic enrollment, backup export, and transfer export/import
+- a real GUI-binary operator harness that launches the desktop app under Xvfb,
+  drives the same native update path used by interactive controls, attests the
+  workflow result to disk, and captures a rendered screenshot artifact
+- vault refresh, CRUD, `SecureNote`, `Card`, `Identity`, folder, tag, password-history, duplicate-password visibility, structured filtering, generate-and-rotate, encrypted backup export/import, invalid backup restore fail-closed coverage, encrypted transfer export/import, invalid transfer import fail-closed coverage, and backup/transfer summary preview coverage
+- native GUI keyslot inspection, mnemonic-slot rotation, certificate-slot rewrap, relabel, recovery-secret rotation, enrollment, posture-aware removal, device-slot rebind coverage, and active-session continuity after device rebind
+- native GUI direct unlock coverage for recovery-secret, mnemonic, device-bound, and certificate-backed flows
+- native GUI idle auto-lock coverage
+- GUI launch-policy coverage for `--version` and `--help` without creating a window
+
+The GUI crate permits Slint-generated Rust and exact Rust 2024 platform ABI export attributes to
+lower the unsafe-code lint, but handwritten unsafe blocks, functions, and impls are still scanned by
+`scripts/hallucination_check.sh`; security-sensitive crates remain under the workspace
+`unsafe_code = "forbid"` lint.
 
 ## Docs
 
@@ -72,7 +249,12 @@ make smoke-release
 make release-emulate
 ```
 
-- `make smoke-release` builds and smoke-tests the host-native archive.
-- `make release-emulate` drives the Linux release packaging path through the custom builder image.
-- `scripts/release_validate.sh` is used in CI after the full matrix build to verify all archives, package-manager manifests, and `install.sh`.
+- `make smoke-release` builds and smoke-tests the host-native CLI and GUI artifacts, including Linux `.deb` packages on Linux hosts and the GUI `.dmg` image on macOS hosts.
+- `make release-emulate` drives the Linux release packaging path through the custom builder image, including `.deb` outputs.
+- Linux GUI smoke validation now includes an Xvfb-backed screenshot capture of the packaged
+  GUI window so the release path proves a real frame renders instead of only checking
+  `--help`.
+- `make test-gui-e2e` runs the actionable GUI workflow harness on Linux hosts, while
+  `make test-gui-e2e-emulate` drives the same path through the custom builder image on macOS.
+- `scripts/release_validate.sh` is used in CI after the full matrix build to verify all CLI and GUI artifacts, Linux `.deb` packages, package-manager manifests, and `install.sh`.
 - `make verify-branch-protection` checks that GitHub branch protection still matches the active Rust-native required checks.

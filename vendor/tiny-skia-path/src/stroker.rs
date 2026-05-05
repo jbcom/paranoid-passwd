@@ -23,7 +23,7 @@ struct SwappableBuilders<'a> {
     outer: &'a mut PathBuilder,
 }
 
-impl<'a> SwappableBuilders<'a> {
+impl SwappableBuilders<'_> {
     fn swap(&mut self) {
         // Skia swaps pointers to inner and outer builders during joining,
         // but not builders itself. So a simple `core::mem::swap` will produce invalid results.
@@ -80,20 +80,15 @@ impl Default for Stroke {
 }
 
 /// Draws at the beginning and end of an open path contour.
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub enum LineCap {
     /// No stroke extension.
+    #[default]
     Butt,
     /// Adds circle.
     Round,
     /// Adds square.
     Square,
-}
-
-impl Default for LineCap {
-    fn default() -> Self {
-        LineCap::Butt
-    }
 }
 
 /// Specifies how corners are drawn when a shape is stroked.
@@ -108,9 +103,10 @@ impl Default for LineCap {
 /// The fill path constructed to describe the stroked path respects the join setting but may
 /// not contain the actual join. For instance, a fill path constructed with round joins does
 /// not necessarily include circles at each connected segment.
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub enum LineJoin {
     /// Extends to miter limit, then switches to bevel.
+    #[default]
     Miter,
     /// Extends to miter limit, then clips the corner.
     MiterClip,
@@ -118,12 +114,6 @@ pub enum LineJoin {
     Round,
     /// Connects outside edges.
     Bevel,
-}
-
-impl Default for LineJoin {
-    fn default() -> Self {
-        LineJoin::Miter
-    }
 }
 
 const QUAD_RECURSIVE_LIMIT: usize = 3;
@@ -436,7 +426,7 @@ impl PathStroker {
         self.finish(last_segment_is_line)
     }
 
-    fn builders(&mut self) -> SwappableBuilders {
+    fn builders(&mut self) -> SwappableBuilders<'_> {
         SwappableBuilders {
             inner: &mut self.inner,
             outer: &mut self.outer,
@@ -1230,7 +1220,7 @@ impl PathStroker {
         if valid_divide {
             if intersect_ray_type == IntersectRayType::CtrlPt {
                 // the intersection of the tangents need not be on the tangent segment
-                // so 0 <= numerA <= 1 is not necessarily true
+                // so 0 <= numer_a <= 1 is not necessarily true
                 quad_points.quad[1].x =
                     start.x * (1.0 - numer_a) + quad_points.tangent_start.x * numer_a;
                 quad_points.quad[1].y =

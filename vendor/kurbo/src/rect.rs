@@ -6,7 +6,9 @@
 use core::fmt;
 use core::ops::{Add, Sub};
 
-use crate::{Ellipse, Insets, PathEl, Point, RoundedRect, RoundedRectRadii, Shape, Size, Vec2};
+use crate::{
+    Axis, Ellipse, Insets, PathEl, Point, RoundedRect, RoundedRectRadii, Shape, Size, Vec2,
+};
 
 #[cfg(not(feature = "std"))]
 use crate::common::FloatFuncs;
@@ -31,7 +33,7 @@ impl Rect {
     pub const ZERO: Rect = Rect::new(0., 0., 0., 0.);
 
     /// A new rectangle from minimum and maximum coordinates.
-    #[inline]
+    #[inline(always)]
     pub const fn new(x0: f64, y0: f64, x1: f64, y1: f64) -> Rect {
         Rect { x0, y0, x1, y1 }
     }
@@ -102,7 +104,7 @@ impl Rect {
     ///
     /// Note: nothing forbids negative width.
     #[inline]
-    pub fn width(&self) -> f64 {
+    pub const fn width(&self) -> f64 {
         self.x1 - self.x0
     }
 
@@ -110,7 +112,7 @@ impl Rect {
     ///
     /// Note: nothing forbids negative height.
     #[inline]
-    pub fn height(&self) -> f64 {
+    pub const fn height(&self) -> f64 {
         self.y1 - self.y0
     }
 
@@ -142,40 +144,40 @@ impl Rect {
     ///
     /// This is the top left corner in a y-down space and with
     /// non-negative width and height.
-    #[inline]
-    pub fn origin(&self) -> Point {
+    #[inline(always)]
+    pub const fn origin(&self) -> Point {
         Point::new(self.x0, self.y0)
     }
 
     /// The size of the rectangle.
     #[inline]
-    pub fn size(&self) -> Size {
+    pub const fn size(&self) -> Size {
         Size::new(self.width(), self.height())
     }
 
     /// The area of the rectangle.
     #[inline]
-    pub fn area(&self) -> f64 {
+    pub const fn area(&self) -> f64 {
         self.width() * self.height()
     }
 
     /// Whether this rectangle has zero area.
-    ///
-    /// Note: a rectangle with negative area is not considered empty.
+    #[doc(alias = "is_empty")]
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_zero_area(&self) -> bool {
         self.area() == 0.0
     }
 
     /// The center point of the rectangle.
     #[inline]
-    pub fn center(&self) -> Point {
+    pub const fn center(&self) -> Point {
         Point::new(0.5 * (self.x0 + self.x1), 0.5 * (self.y0 + self.y1))
     }
 
     /// Returns `true` if `point` lies within `self`.
     #[inline]
-    pub fn contains(&self, point: Point) -> bool {
+    pub fn contains(&self, point: impl Into<Point>) -> bool {
+        let point = point.into();
         point.x >= self.x0 && point.x < self.x1 && point.y >= self.y0 && point.y < self.y1
     }
 
@@ -184,7 +186,7 @@ impl Rect {
     /// The resulting rect has the same extents as the original, but is
     /// guaranteed to have non-negative width and height.
     #[inline]
-    pub fn abs(&self) -> Rect {
+    pub const fn abs(&self) -> Rect {
         let Rect { x0, y0, x1, y1 } = *self;
         Rect::new(x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1))
     }
@@ -193,7 +195,7 @@ impl Rect {
     ///
     /// Results are valid only if width and height are non-negative.
     #[inline]
-    pub fn union(&self, other: Rect) -> Rect {
+    pub const fn union(&self, other: Rect) -> Rect {
         Rect::new(
             self.x0.min(other.x0),
             self.y0.min(other.y0),
@@ -209,7 +211,8 @@ impl Rect {
     /// points yields their enclosing rectangle.
     ///
     /// Results are valid only if width and height are non-negative.
-    pub fn union_pt(&self, pt: Point) -> Rect {
+    pub fn union_pt(&self, pt: impl Into<Point>) -> Rect {
+        let pt = pt.into();
         Rect::new(
             self.x0.min(pt.x),
             self.y0.min(pt.y),
@@ -222,8 +225,13 @@ impl Rect {
     ///
     /// The result is zero-area if either input has negative width or
     /// height. The result always has non-negative width and height.
+    ///
+    /// If you want to determine whether two rectangles intersect, use the
+    /// [`overlaps`] method instead.
+    ///
+    /// [`overlaps`]: Rect::overlaps
     #[inline]
-    pub fn intersect(&self, other: Rect) -> Rect {
+    pub const fn intersect(&self, other: Rect) -> Rect {
         let x0 = self.x0.max(other.x0);
         let y0 = self.y0.max(other.y0);
         let x1 = self.x1.min(other.x1);
@@ -231,11 +239,69 @@ impl Rect {
         Rect::new(x0, y0, x1.max(x0), y1.max(y0))
     }
 
+    /// Determines whether this rectangle overlaps with another in any way.
+    ///
+    /// Note that the edge of the rectangle is considered to be part of itself, meaning
+    /// that two rectangles that share an edge are considered to overlap.
+    ///
+    /// Returns `true` if the rectangles overlap, `false` otherwise.
+    ///
+    /// If you want to compute the *intersection* of two rectangles, use the
+    /// [`intersect`] method instead.
+    ///
+    /// [`intersect`]: Rect::intersect
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use kurbo::Rect;
+    ///
+    /// let rect1 = Rect::new(0.0, 0.0, 10.0, 10.0);
+    /// let rect2 = Rect::new(5.0, 5.0, 15.0, 15.0);
+    /// assert!(rect1.overlaps(rect2));
+    ///
+    /// let rect1 = Rect::new(0.0, 0.0, 10.0, 10.0);
+    /// let rect2 = Rect::new(10.0, 0.0, 20.0, 10.0);
+    /// assert!(rect1.overlaps(rect2));
+    /// ```
+    #[inline]
+    pub const fn overlaps(&self, other: Rect) -> bool {
+        self.x0 <= other.x1 && self.x1 >= other.x0 && self.y0 <= other.y1 && self.y1 >= other.y0
+    }
+
+    /// Returns whether this rectangle contains another rectangle.
+    ///
+    /// A rectangle is considered to contain another rectangle if the other
+    /// rectangle is fully enclosed within the bounds of this rectangle.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use kurbo::Rect;
+    ///
+    /// let rect1 = Rect::new(0.0, 0.0, 10.0, 10.0);
+    /// let rect2 = Rect::new(2.0, 2.0, 4.0, 4.0);
+    /// assert!(rect1.contains_rect(rect2));
+    /// ```
+    ///
+    /// Two equal rectangles are considered to contain each other.
+    ///
+    /// ```
+    /// use kurbo::Rect;
+    ///
+    /// let rect = Rect::new(0.0, 0.0, 10.0, 10.0);
+    /// assert!(rect.contains_rect(rect));
+    /// ```
+    #[inline]
+    pub const fn contains_rect(&self, other: Rect) -> bool {
+        self.x0 <= other.x0 && self.y0 <= other.y0 && self.x1 >= other.x1 && self.y1 >= other.y1
+    }
+
     /// Expand a rectangle by a constant amount in both directions.
     ///
     /// The logic simply applies the amount in each direction. If rectangle
     /// area or added dimensions are negative, this could give odd results.
-    pub fn inflate(&self, width: f64, height: f64) -> Rect {
+    pub const fn inflate(&self, width: f64, height: f64) -> Rect {
         Rect::new(
             self.x0 - width,
             self.y0 - height,
@@ -245,7 +311,7 @@ impl Rect {
     }
 
     /// Returns a new `Rect`,
-    /// with each coordinate value rounded to the nearest integer.
+    /// with each coordinate value [rounded] to the nearest integer.
     ///
     /// # Examples
     ///
@@ -257,6 +323,8 @@ impl Rect {
     /// assert_eq!(rect.x1, 3.0);
     /// assert_eq!(rect.y1, -3.0);
     /// ```
+    ///
+    /// [rounded]: f64::round
     #[inline]
     pub fn round(self) -> Rect {
         Rect::new(
@@ -268,7 +336,7 @@ impl Rect {
     }
 
     /// Returns a new `Rect`,
-    /// with each coordinate value rounded up to the nearest integer,
+    /// with each coordinate value [rounded up] to the nearest integer,
     /// unless they are already an integer.
     ///
     /// # Examples
@@ -281,6 +349,8 @@ impl Rect {
     /// assert_eq!(rect.x1, 3.0);
     /// assert_eq!(rect.y1, -3.0);
     /// ```
+    ///
+    /// [rounded up]: f64::ceil
     #[inline]
     pub fn ceil(self) -> Rect {
         Rect::new(
@@ -292,7 +362,7 @@ impl Rect {
     }
 
     /// Returns a new `Rect`,
-    /// with each coordinate value rounded down to the nearest integer,
+    /// with each coordinate value [rounded down] to the nearest integer,
     /// unless they are already an integer.
     ///
     /// # Examples
@@ -305,6 +375,8 @@ impl Rect {
     /// assert_eq!(rect.x1, 3.0);
     /// assert_eq!(rect.y1, -4.0);
     /// ```
+    ///
+    /// [rounded down]: f64::floor
     #[inline]
     pub fn floor(self) -> Rect {
         Rect::new(
@@ -437,7 +509,7 @@ impl Rect {
     /// assert_eq!(rect.x1, 8.);
     /// ```
     #[inline]
-    pub fn scale_from_origin(self, factor: f64) -> Rect {
+    pub const fn scale_from_origin(self, factor: f64) -> Rect {
         Rect {
             x0: self.x0 * factor,
             y0: self.y0 * factor,
@@ -447,7 +519,7 @@ impl Rect {
     }
 
     /// Creates a new [`RoundedRect`] from this `Rect` and the provided
-    /// corner radius.
+    /// corner [radius](RoundedRectRadii).
     #[inline]
     pub fn to_rounded_rect(self, radii: impl Into<RoundedRectRadii>) -> RoundedRect {
         RoundedRect::from_rect(self, radii)
@@ -459,79 +531,146 @@ impl Rect {
         Ellipse::from_rect(self)
     }
 
-    /// The aspect ratio of the `Rect`.
+    /// The aspect ratio of this `Rect`.
     ///
-    /// This is defined as the height divided by the width. It measures the
+    /// This is defined as the width divided by the height. It measures the
     /// "squareness" of the rectangle (a value of `1` is square).
+    ///
+    /// If the height is `0`, the output will be `sign(self.width) * infinity`.
+    /// If the width and height are both `0`, then the output will be `NaN`.
+    #[inline]
+    pub const fn aspect_ratio_width(self) -> f64 {
+        self.size().aspect_ratio_width()
+    }
+
+    /// **The inverse** of the aspect ratio of this `Rect`.
+    ///
+    /// Aspect ratios are usually defined as the ratio of the width to the height, but
+    /// this method incorrectly returns the ratio of height to width.
+    /// You should generally prefer [`aspect_ratio_width`](Self::aspect_ratio_width).
     ///
     /// If the width is `0` the output will be `sign(y1 - y0) * infinity`.
     ///
-    /// If The width and height are `0`, the result will be `NaN`.
+    /// If the width and height are both `0`, the result will be `NaN`.
+    #[deprecated(
+        note = "You should use `aspect_ratio_width` instead, as this method returns a potentially unexpected value.",
+        since = "0.12.0"
+    )]
     #[inline]
     pub fn aspect_ratio(&self) -> f64 {
+        #[expect(deprecated, reason = "This method is deprecated for the same reason.")]
         self.size().aspect_ratio()
     }
 
-    /// Returns the largest possible `Rect` that is fully contained in `self`
-    /// with the given `aspect_ratio`.
+    /// Returns the largest possible `Rect` with the given `aspect_ratio`
+    /// that is fully contained in `self`.
     ///
-    /// The aspect ratio is specified fractionally, as `height / width`.
+    /// The aspect ratio is specified fractionally, as `width / height`.
     ///
-    /// The resulting rectangle will be centered if it is smaller than the
-    /// input rectangle.
-    ///
-    /// For the special case where the aspect ratio is `1.0`, the resulting
-    /// `Rect` will be square.
+    /// The resulting rectangle will be centered if it is smaller than this rectangle.
     ///
     /// # Examples
     ///
     /// ```
     /// # use kurbo::Rect;
     /// let outer = Rect::new(0.0, 0.0, 10.0, 20.0);
-    /// let inner = outer.contained_rect_with_aspect_ratio(1.0);
+    /// let inner = outer.inscribed_rect_with_aspect_ratio(1.0);
     /// // The new `Rect` is a square centered at the center of `outer`.
     /// assert_eq!(inner, Rect::new(0.0, 5.0, 10.0, 15.0));
     /// ```
-    ///
-    pub fn contained_rect_with_aspect_ratio(&self, aspect_ratio: f64) -> Rect {
-        let (width, height) = (self.width(), self.height());
-        let self_aspect = height / width;
+    pub const fn inscribed_rect_with_aspect_ratio(&self, aspect_ratio: f64) -> Rect {
+        let self_size @ Size { width, height } = self.size();
+        let self_aspect = self_size.aspect_ratio_width();
 
         // TODO the parameter `1e-9` was chosen quickly and may not be optimal.
-        if (self_aspect - aspect_ratio).abs() < 1e-9 {
+        // if self_aspect is `NaN`, that means we're the 0x0 rectangle (or have a `NaN`).
+        // We don't want NaNs in the output for the 0x0 rectangle
+        if self_aspect.is_nan() || (self_aspect - aspect_ratio).abs() < 1e-9 {
             // short circuit
             *self
         } else if self_aspect.abs() < aspect_ratio.abs() {
-            // shrink x to fit
-            let new_width = height * aspect_ratio.recip();
-            let gap = (width - new_width) * 0.5;
-            let x0 = self.x0 + gap;
-            let x1 = self.x1 - gap;
-            Rect::new(x0, self.y0, x1, self.y1)
-        } else {
+            // Our width/height is less than the requested width/height
+            // We use a smaller height to increase the ratio.
             // shrink y to fit
-            let new_height = width * aspect_ratio;
+            let new_height = width * aspect_ratio.recip();
             let gap = (height - new_height) * 0.5;
             let y0 = self.y0 + gap;
             let y1 = self.y1 - gap;
             Rect::new(self.x0, y0, self.x1, y1)
+        } else {
+            // shrink x to fit
+            let new_width = height * aspect_ratio;
+            let gap = (width - new_width) * 0.5;
+            let x0 = self.x0 + gap;
+            let x1 = self.x1 - gap;
+            Rect::new(x0, self.y0, x1, self.y1)
         }
     }
 
-    /// Is this rectangle finite?
+    /// Returns the largest possible `Rect` with the given <code>**inverse**_aspect_ratio</code>
+    /// that is fully contained in `self`.
+    ///
+    /// Aspect ratios are usually defined as the ratio of the width to the height, but
+    /// this method accepts an aspect ratio specified fractionally as `height / width`.
+    /// You should generally prefer
+    /// [`inscribed_rect_with_aspect_ratio`](Self::inscribed_rect_with_aspect_ratio), which
+    /// takes a "normal" aspect ratio.
+    ///
+    /// The resulting rectangle will be centered if it is smaller than this rectangle.
+    #[deprecated(
+        note = "You should use `inscribed_rect_with_aspect_ratio` instead, as this method expects an unusually defined parameter.",
+        since = "0.12.0"
+    )]
+    pub fn contained_rect_with_aspect_ratio(&self, inverse_aspect_ratio: f64) -> Rect {
+        self.inscribed_rect_with_aspect_ratio(1. / inverse_aspect_ratio)
+    }
+
+    /// Is this rectangle [finite]?
+    ///
+    /// [finite]: f64::is_finite
     #[inline]
-    pub fn is_finite(&self) -> bool {
+    pub const fn is_finite(&self) -> bool {
         self.x0.is_finite() && self.x1.is_finite() && self.y0.is_finite() && self.y1.is_finite()
     }
 
-    /// Is this rectangle NaN?
+    /// Is this rectangle [NaN]?
+    ///
+    /// [NaN]: f64::is_nan
     #[inline]
-    pub fn is_nan(&self) -> bool {
+    pub const fn is_nan(&self) -> bool {
         self.x0.is_nan() || self.y0.is_nan() || self.x1.is_nan() || self.y1.is_nan()
+    }
+
+    /// Get the members matching the given axis.
+    #[inline]
+    pub const fn get_coords(self, axis: Axis) -> (f64, f64) {
+        match axis {
+            Axis::Horizontal => (self.x0, self.x1),
+            Axis::Vertical => (self.y0, self.y1),
+        }
+    }
+
+    /// Get a mutable reference to the members matching the given axis.
+    #[inline]
+    pub const fn get_coords_mut(&mut self, axis: Axis) -> (&mut f64, &mut f64) {
+        match axis {
+            Axis::Horizontal => (&mut self.x0, &mut self.x1),
+            Axis::Vertical => (&mut self.y0, &mut self.y1),
+        }
+    }
+
+    /// Set the members matching the given axis to the given values.
+    #[inline]
+    pub const fn set_coords(&mut self, axis: Axis, v0: f64, v1: f64) {
+        match axis {
+            Axis::Horizontal => (self.x0, self.x1) = (v0, v1),
+            Axis::Vertical => (self.y0, self.y1) = (v0, v1),
+        }
     }
 }
 
 impl From<(Point, Point)> for Rect {
+    #[inline(always)]
     fn from(points: (Point, Point)) -> Rect {
         Rect::from_points(points.0, points.1)
     }
@@ -624,7 +763,7 @@ impl Shape for Rect {
         self.abs()
     }
 
-    #[inline]
+    #[inline(always)]
     fn as_rect(&self) -> Option<Rect> {
         Some(*self)
     }
@@ -731,13 +870,23 @@ mod tests {
     */
 
     #[test]
+    #[expect(
+        deprecated,
+        reason = "Testing behaviour of deprecated function is still as expected."
+    )]
     fn contained_rect_with_aspect_ratio() {
+        #[track_caller]
         fn case(outer: [f64; 4], aspect_ratio: f64, expected: [f64; 4]) {
             let outer = Rect::new(outer[0], outer[1], outer[2], outer[3]);
             let expected = Rect::new(expected[0], expected[1], expected[2], expected[3]);
             assert_eq!(
                 outer.contained_rect_with_aspect_ratio(aspect_ratio),
                 expected
+            );
+            assert!(
+                expected.size().width.abs() <= outer.size().width.abs()
+                    && expected.size().width.abs() <= outer.size().height.abs(),
+                "Sanity check {expected} should be smaller than {outer}."
             );
         }
         // squares (different point orderings)
@@ -764,8 +913,123 @@ mod tests {
     }
 
     #[test]
+    fn inscribed_rect_with_aspect_ratio() {
+        #[track_caller]
+        fn case(outer: [f64; 4], aspect_ratio: f64, expected: [f64; 4]) {
+            let outer = Rect::new(outer[0], outer[1], outer[2], outer[3]);
+            let expected = Rect::new(expected[0], expected[1], expected[2], expected[3]);
+            assert_eq!(
+                outer.inscribed_rect_with_aspect_ratio(aspect_ratio),
+                expected
+            );
+            assert!(
+                expected.size().width.abs() <= outer.size().width.abs()
+                    && expected.size().width.abs() <= outer.size().height.abs(),
+                "Sanity check {expected} should be smaller than {outer}."
+            );
+        }
+        // squares (different point orderings)
+        case([0.0, 0.0, 10.0, 20.0], 1.0, [0.0, 5.0, 10.0, 15.0]);
+        case([0.0, 20.0, 10.0, 0.0], 1.0, [0.0, 5.0, 10.0, 15.0]);
+        case([10.0, 0.0, 0.0, 20.0], 1.0, [10.0, 15.0, 0.0, 5.0]);
+        case([10.0, 20.0, 0.0, 0.0], 1.0, [10.0, 15.0, 0.0, 5.0]);
+        // same aspect ratio
+        case([0.0, 0.0, 10.0, 20.0], 0.5, [0.0, 0.0, 10.0, 20.0]);
+        // non-square
+        case([0.0, 0.0, 10.0, 20.0], 2.0, [0.0, 7.5, 10.0, 12.5]);
+        // negative aspect ratio
+        case([0.0, 0.0, 10.0, 20.0], -1.0, [0.0, 15.0, 10.0, 5.0]);
+        // infinite aspect ratio, horizontal line through the center
+        case(
+            [0.0, 0.0, 10.0, 20.0],
+            f64::INFINITY,
+            [0.0, 10.0, 10.0, 10.0],
+        );
+        // zero aspect ratio, vertical line through the center
+        case([0.0, 0.0, 10.0, 20.0], 0.0, [5.0, 0.0, 5.0, 20.0]);
+        // zero width rect
+        case([0.0, 0.0, 0.0, 20.0], 1.0, [0.0, 10.0, 0.0, 10.0]);
+        // many zeros, vertical line
+        case([0.0, 0.0, 0.0, 20.0], 0.0, [0.0, 0.0, 0.0, 20.0]);
+        // many zeros
+        case([0.0, 0.0, 20.0, 0.0], 0.0, [10.0, 0.0, 10.0, 0.0]);
+        // everything zero
+        case([0.0, 0.0, 0.0, 0.0], 0.0, [0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    #[expect(deprecated, reason = "Testing deprecated function.")]
     fn aspect_ratio() {
         let test = Rect::new(0.0, 0.0, 1.0, 1.0);
         assert!((test.aspect_ratio() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn aspect_ratio_width() {
+        let test = Rect::new(0.0, 0.0, 1.0, 1.0);
+        assert!((test.aspect_ratio_width() - 1.0).abs() < 1e-6);
+        // 16:10
+        let test = Rect::new(0.0, 0.0, 16.0, 10.0);
+        assert!((test.aspect_ratio_width() - 1.6).abs() < 1e-6);
+        // 16:9 screen resolutions
+        let test = Rect::new(0.0, 0.0, 1920.0, 1080.0);
+        assert!((test.aspect_ratio_width() - (16. / 9.)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn contained_rect_overlaps() {
+        let outer = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let inner = Rect::new(2.0, 2.0, 4.0, 4.0);
+        assert!(outer.overlaps(inner));
+    }
+
+    #[test]
+    fn overlapping_rect_overlaps() {
+        let a = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let b = Rect::new(5.0, 5.0, 15.0, 15.0);
+        assert!(a.overlaps(b));
+    }
+
+    #[test]
+    fn disjoint_rect_overlaps() {
+        let a = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let b = Rect::new(11.0, 11.0, 15.0, 15.0);
+        assert!(!a.overlaps(b));
+    }
+
+    #[test]
+    fn sharing_edge_overlaps() {
+        let a = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let b = Rect::new(10.0, 0.0, 20.0, 10.0);
+        assert!(a.overlaps(b));
+    }
+
+    // Test the two other directions in case there is a bug that only appears in one direction.
+    #[test]
+    fn disjoint_rect_overlaps_negative() {
+        let a = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let b = Rect::new(-10.0, -10.0, -5.0, -5.0);
+        assert!(!a.overlaps(b));
+    }
+
+    #[test]
+    fn contained_rectangle_contains() {
+        let outer = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let inner = Rect::new(2.0, 2.0, 4.0, 4.0);
+        assert!(outer.contains_rect(inner));
+    }
+
+    #[test]
+    fn overlapping_rectangle_contains() {
+        let outer = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let inner = Rect::new(5.0, 5.0, 15.0, 15.0);
+        assert!(!outer.contains_rect(inner));
+    }
+
+    #[test]
+    fn disjoint_rectangle_contains() {
+        let outer = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let inner = Rect::new(11.0, 11.0, 15.0, 15.0);
+        assert!(!outer.contains_rect(inner));
     }
 }

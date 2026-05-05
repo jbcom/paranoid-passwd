@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+description.workspace = true
 rust-version.workspace = true
 
 [[bin]]
@@ -21,6 +22,11 @@ paranoid-core = { path = "../paranoid-core" }
 paranoid-vault = { path = "../paranoid-vault" }
 ratatui.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+keyring = { version = "3.6.3", default-features = false }
+openssl.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

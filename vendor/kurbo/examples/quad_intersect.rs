@@ -6,11 +6,11 @@
 
 use arrayvec::ArrayVec;
 use kurbo::{common::solve_quartic, ParamCurve, Point, QuadBez, Shape};
-use rand::{thread_rng, Rng};
+use rand::Rng;
 
 fn rand_point() -> Point {
-    let mut rng = thread_rng();
-    Point::new(rng.gen_range(0.0..500.0), rng.gen_range(0.0..500.0))
+    let mut rng = rand::rng();
+    Point::new(rng.random_range(0.0..500.0), rng.random_range(0.0..500.0))
 }
 
 fn rand_quad() -> QuadBez {
@@ -34,7 +34,7 @@ impl ImplicitQuad {
         let (u0, u1, u2) = (by - cy, cx - bx, bx * cy - by * cx);
         let (v0, v1, v2) = (cy - ay, ax - cx, cx * ay - cy * ax);
         let (w0, w1, w2) = (ay - by, bx - ax, ax * by - ay * bx);
-        ImplicitQuad {
+        Self {
             x2: 4. * u0 * w0 - v0 * v0,
             xy: 4. * (u0 * w1 + u1 * w0) - 2. * v0 * v1,
             y2: 4. * u1 * w1 - v1 * v1,
@@ -68,7 +68,7 @@ fn intersect_quads(q0: QuadBez, q1: QuadBez) -> ArrayVec<f64, 4> {
     let c3 = iq.x2 * 2. * a.x * b.x + iq.xy * (a.x * b.y + b.x * a.y) + iq.y2 * 2. * a.y * b.y;
     let c4 = iq.x2 * a.x * a.x + iq.xy * a.x * a.y + iq.y2 * a.y * a.y;
     let ts = solve_quartic(c0, c1, c2, c3, c4);
-    println!("ts: {:?}", ts);
+    println!("ts: {ts:?}");
     ts
 }
 

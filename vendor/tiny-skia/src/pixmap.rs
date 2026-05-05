@@ -78,10 +78,13 @@ impl Pixmap {
             std::io::Error::new(std::io::ErrorKind::Other, msg).into()
         }
 
-        let mut decoder = png::Decoder::new(data);
+        let mut decoder = png::Decoder::new(std::io::BufReader::new(std::io::Cursor::new(data)));
         decoder.set_transformations(png::Transformations::normalize_to_color8());
         let mut reader = decoder.read_info()?;
-        let mut img_data = vec![0; reader.output_buffer_size()];
+        let output_buffer_size = reader
+            .output_buffer_size()
+            .ok_or(png::DecodingError::LimitsExceeded)?;
+        let mut img_data = vec![0; output_buffer_size];
         let info = reader.next_frame(&mut img_data)?;
 
         if info.bit_depth != png::BitDepth::Eight {
@@ -180,7 +183,7 @@ impl Pixmap {
     }
 
     /// Returns a container that references Pixmap's data.
-    pub fn as_ref(&self) -> PixmapRef {
+    pub fn as_ref(&self) -> PixmapRef<'_> {
         PixmapRef {
             data: &self.data,
             size: self.size,
@@ -188,7 +191,7 @@ impl Pixmap {
     }
 
     /// Returns a container that references Pixmap's data.
-    pub fn as_mut(&mut self) -> PixmapMut {
+    pub fn as_mut(&mut self) -> PixmapMut<'_> {
         PixmapMut {
             data: &mut self.data,
             size: self.size,
@@ -257,6 +260,22 @@ impl Pixmap {
     ///
     /// Byteorder: RGBA
     pub fn take(self) -> Vec<u8> {
+        self.data
+    }
+
+    /// Consumes the pixmap and returns the internal data as demultiplied RGBA bytes.
+    ///
+    /// Byteorder: RGBA
+    pub fn take_demultiplied(mut self) -> Vec<u8> {
+        // Demultiply alpha.
+        //
+        // RasterPipeline is 15% faster here, but produces slightly different results
+        // due to rounding. So we stick with this method for now.
+        for pixel in self.pixels_mut() {
+            let c = pixel.demultiply();
+            *pixel =
+                PremultipliedColorU8::from_rgba_unchecked(c.red(), c.green(), c.blue(), c.alpha());
+        }
         self.data
     }
 
@@ -394,17 +413,7 @@ impl<'a> PixmapRef<'a> {
         // Sadly, we have to copy the pixmap here, because of demultiplication.
         // Not sure how to avoid this.
         // TODO: remove allocation
-        let mut tmp_pixmap = self.to_owned();
-
-        // Demultiply alpha.
-        //
-        // RasterPipeline is 15% faster here, but produces slightly different results
-        // due to rounding. So we stick with this method for now.
-        for pixel in tmp_pixmap.pixels_mut() {
-            let c = pixel.demultiply();
-            *pixel =
-                PremultipliedColorU8::from_rgba_unchecked(c.red(), c.green(), c.blue(), c.alpha());
-        }
+        let demultiplied_data = self.to_owned().take_demultiplied();
 
         let mut data = Vec::new();
         {
@@ -412,7 +421,7 @@ impl<'a> PixmapRef<'a> {
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header()?;
-            writer.write_image_data(&tmp_pixmap.data)?;
+            writer.write_image_data(&demultiplied_data)?;
         }
 
         Ok(data)
@@ -476,7 +485,7 @@ impl<'a> PixmapMut<'a> {
     }
 
     /// Returns a container that references Pixmap's data.
-    pub fn as_ref(&self) -> PixmapRef {
+    pub fn as_ref(&self) -> PixmapRef<'_> {
         PixmapRef {
             data: self.data,
             size: self.size,
@@ -521,7 +530,7 @@ impl<'a> PixmapMut<'a> {
     }
 
     /// Creates `SubPixmapMut` that contains the whole `PixmapMut`.
-    pub(crate) fn as_subpixmap(&mut self) -> SubPixmapMut {
+    pub(crate) fn as_subpixmap(&mut self) -> SubPixmapMut<'_> {
         SubPixmapMut {
             size: self.size(),
             real_width: self.width() as usize,
@@ -532,7 +541,7 @@ impl<'a> PixmapMut<'a> {
     /// Returns a mutable reference to the pixmap region that intersects the `rect`.
     ///
     /// Returns `None` when `Pixmap`'s rect doesn't contain `rect`.
-    pub(crate) fn subpixmap(&mut self, rect: IntRect) -> Option<SubPixmapMut> {
+    pub(crate) fn subpixmap(&mut self, rect: IntRect) -> Option<SubPixmapMut<'_>> {
         let rect = self.size.to_int_rect(0, 0).intersect(&rect)?;
         let row_bytes = self.width() as usize * BYTES_PER_PIXEL;
         let offset = rect.top() as usize * row_bytes + rect.left() as usize * BYTES_PER_PIXEL;
@@ -571,7 +580,7 @@ pub struct SubPixmapMut<'a> {
     pub real_width: usize,
 }
 
-impl<'a> SubPixmapMut<'a> {
+impl SubPixmapMut<'_> {
     /// Returns a mutable slice of pixels.
     pub fn pixels_mut(&mut self) -> &mut [PremultipliedColorU8] {
         bytemuck::cast_slice_mut(self.data)

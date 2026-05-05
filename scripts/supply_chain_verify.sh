@@ -4,7 +4,6 @@ set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -66,14 +65,21 @@ fi
 
 builder="$REPO_ROOT/.github/actions/builder/Dockerfile"
 if [ -f "$builder" ] \
+  && rg -q '^# syntax=docker/dockerfile:1\.' "$builder" \
   && rg -q '^FROM .+@sha256:' "$builder" \
+  && rg -q -- '--mount=type=cache' "$builder" \
+  && rg -q 'fontconfig-dev' "$builder" \
   && rg -q 'openssl-dev' "$builder" \
+  && rg -q 'openssl' "$builder" \
   && rg -q 'pkgconf' "$builder" \
   && rg -q 'python3' "$builder" \
   && rg -q 'ripgrep' "$builder" \
-  && rg -q 'RUST_APK_PACKAGE=rust-1\.88' "$builder" \
-  && rg -q 'RUST_APK_VERSION=1\.88\.0-r0' "$builder" \
+  && rg -q 'imagemagick' "$builder" \
+  && rg -q 'xvfb-run' "$builder" \
+  && rg -q 'RUST_APK_PACKAGE=rust-1\.95' "$builder" \
+  && rg -q 'RUST_APK_VERSION=1\.95\.0-r0' "$builder" \
   && rg -q 'SPHINX_RUSTDOCGEN_VERSION=1\.1\.0' "$builder" \
+  && rg -q 'cargo install --locked --root /usr/local' "$builder" \
   && rg -q 'sphinx-rustdocgen@' "$builder" \
   && rg -q 'tox==' "$builder"; then
   pass "builder image is digest-pinned and contains the expected Rust/OpenSSL/docs toolchain"

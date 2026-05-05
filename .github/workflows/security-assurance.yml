@@ -1,0 +1,46 @@
+name: Security Assurance
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: security-assurance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  assurance:
+    name: Security Assurance
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Run security assurance gate inside the builder
+        uses: ./.github/actions/builder
+        env:
+          SECURITY_ASSURANCE_BASE_REF: origin/${{ github.base_ref || 'main' }}
+        with:
+          run: |
+            make verify-assurance
+            python3 scripts/security_assurance_gate.py \
+              --base-ref "$SECURITY_ASSURANCE_BASE_REF" \
+              --json-out dist/security-assurance-report.json \
+              --markdown-out dist/security-assurance-report.md
+
+      - name: Upload security assurance report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-assurance-report
+          path: |
+            dist/security-assurance-report.json
+            dist/security-assurance-report.md
+          if-no-files-found: error

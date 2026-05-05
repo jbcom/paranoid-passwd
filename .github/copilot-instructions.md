@@ -4,21 +4,27 @@ This repository's authoritative agent instructions live in [`AGENTS.md`](../AGEN
 
 ## Current Product Surface
 
-`paranoid-passwd` is a Rust-native password generator with:
+`paranoid-passwd` is a Rust-native password manager and generator with:
 
 - `crates/paranoid-core` for generation, audit math, compliance, and OpenSSL-backed RNG/SHA-256
 - `crates/paranoid-cli` for the scriptable CLI and default TUI
-- `crates/paranoid-gui` for the desktop GUI follow-on path
+- `crates/paranoid-gui` for the Slint-native GUI surface and target-gated desktop, mobile, and WASM build checks
 - a Sphinx docs/download site instead of an interactive browser app
+
+Security assurance is claim-led. Use `docs/reference/security-assurance.md`,
+`docs/reference/assurance-claims.md`, and `.github/agents/paranoid-security-auditor.md`
+for security-sensitive PR review.
 
 ## Non-Negotiable Rules
 
 1. Treat `AGENTS.md` as the source of truth before making changes.
 2. Keep security-sensitive logic in `crates/paranoid-core`.
-3. Do not reintroduce browser, WASM, JavaScript, or webview runtime paths.
-4. Keep rejection sampling at `(256/N)*N - 1`.
-5. Keep chi-squared pass logic at `p > 0.01` with degrees of freedom `N - 1`.
-6. Do not add `unsafe` Rust without explicit human approval.
-7. Run `make ci` before considering work complete.
+3. Do not reintroduce the retired browser app, JavaScript secret-handling logic, DOM UI, or webview runtime paths.
+4. Treat any Slint WASM or mobile work as a separately gated Rust-native surface with an explicit threat model.
+5. Keep rejection sampling at `(256/N)*N - 1`.
+6. Keep chi-squared pass logic at `p > 0.01` with degrees of freedom `N - 1`.
+7. Do not add handwritten `unsafe` blocks, functions, or impls without explicit human approval; Slint-generated GUI code and exact audited Rust 2024 ABI export attributes are the only current GUI unsafe-code lint exceptions.
+8. Run `make verify-assurance` for security-sensitive changes.
+9. Run `make ci` before considering work complete.
 
 If anything here conflicts with `AGENTS.md`, follow `AGENTS.md`.

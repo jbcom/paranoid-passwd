@@ -11,7 +11,7 @@ The supply-chain model is still builder-first, but the toolchain has changed.
 The custom GitHub Action builder image is the repository trust root for:
 
 - a digest-pinned Wolfi base image
-- pinned Rust `1.88.x` and pinned `tox`
+- pinned Rust `1.95.x` and pinned `tox`
 - Rust toolchain installation
 - OpenSSL development headers
 - Sphinx and Python docs tooling
@@ -29,7 +29,9 @@ The custom GitHub Action builder image is the repository trust root for:
 
 The release pipeline now focuses on:
 
-- native CLI archives
+- native CLI and GUI archives
+- macOS GUI `.dmg` packages
+- Linux `.deb` packages for both binaries
 - checksums
 - provenance / attestations
 - package-manager metadata
@@ -38,6 +40,8 @@ The release pipeline now focuses on:
 Before attestation, the release workflow now validates:
 
 - per-platform archive smoke tests
+- macOS GUI `.dmg` payload validation and host smoke tests
+- Debian package payload validation and Linux host smoke tests for `.deb` artifacts
 - aggregate checksums
 - Homebrew / Scoop / Chocolatey manifest generation
 - the docs-hosted `install.sh` flow against a local artifact server
@@ -54,6 +58,14 @@ The repository now carries `scripts/verify_branch_protection.sh` plus `make veri
 - `Cargo.lock` is committed and release-aware.
 - Cargo dependencies are vendored under `vendor/`.
 - Workspace Cargo commands run with `--locked --frozen --offline` in `make` and CI.
+- `make verify-deep` runs Rust-native `xtask` checks for offline metadata, dependency source and
+  license policy, repo-owned shell linting, Python syntax checks for the existing docs/test harness
+  scripts, and tracked-file secret scanning.
+- `make quality` is the local release-candidate gate: it runs `verify-deep`, the enforced local
+  scanner subset, `ci`, and the host-supported GUI e2e harness before remote CI is treated as
+  confirmation. It also requires the local security scanner stack to be installed.
+- `deny.toml` records the local dependency license/source policy for `cargo-deny`.
 - `scripts/hallucination_check.sh` verifies math/security invariants in `paranoid-core`.
 - `scripts/supply_chain_verify.sh` verifies vendoring, workflow pinning, and release prerequisites.
+- `scripts/security_assurance_gate.py` verifies the claim-led PR assurance protocol wiring.
 - Release packaging lives in repo-owned scripts instead of workflow-only inline shell.

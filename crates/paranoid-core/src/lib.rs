@@ -100,10 +100,10 @@ impl Default for CharsetOptions {
 
 impl CharsetOptions {
     pub fn build(&self) -> Result<String, ParanoidError> {
-        if let Some(custom) = &self.custom_charset {
-            if !custom.trim().is_empty() {
-                return validate_charset(custom);
-            }
+        if let Some(custom) = &self.custom_charset
+            && !custom.trim().is_empty()
+        {
+            return validate_charset(custom);
         }
 
         let mut charset = String::new();

@@ -5,7 +5,7 @@
 
 use core::convert::TryFrom;
 
-use crate::{FiniteF32, IntSize, LengthU32, PathBuilder, Point, SaturateRound, Size, Transform};
+use crate::{FiniteF32, IntSize, LengthU32, Point, SaturateRound, Size, Transform};
 
 #[cfg(all(not(feature = "std"), feature = "no-std-float"))]
 use crate::NoStdFloat;
@@ -211,7 +211,7 @@ mod int_rect_tests {
 /// - Top edge is <= bottom.
 /// - Width and height are <= f32::MAX.
 #[allow(missing_docs)]
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Hash, Eq)]
 pub struct Rect {
     left: FiniteF32,
     top: FiniteF32,
@@ -301,15 +301,25 @@ impl Rect {
         self.bottom.get() - self.top.get()
     }
 
+    /// Returns true if the rect is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.left == self.right || self.top == self.bottom
+    }
+
     /// Converts into an `IntRect` by adding 0.5 and discarding the fractional portion.
     ///
     /// Width and height are guarantee to be >= 1.
     pub fn round(&self) -> Option<IntRect> {
+        let left = i32::saturate_round(self.left());
+        let top = i32::saturate_round(self.top());
+        let right = i32::saturate_round(self.right());
+        let bottom = i32::saturate_round(self.bottom());
         IntRect::from_xywh(
-            i32::saturate_round(self.x()),
-            i32::saturate_round(self.y()),
-            core::cmp::max(1, i32::saturate_round(self.width()) as u32),
-            core::cmp::max(1, i32::saturate_round(self.height()) as u32),
+            left,
+            top,
+            core::cmp::max(1, right.saturating_sub(left)) as u32,
+            core::cmp::max(1, bottom.saturating_sub(top)) as u32,
         )
     }
 
@@ -317,11 +327,15 @@ impl Rect {
     ///
     /// Width and height are guarantee to be >= 1.
     pub fn round_out(&self) -> Option<IntRect> {
+        let left = i32::saturate_floor(self.left());
+        let top = i32::saturate_floor(self.top());
+        let right = i32::saturate_ceil(self.right());
+        let bottom = i32::saturate_ceil(self.bottom());
         IntRect::from_xywh(
-            i32::saturate_floor(self.x()),
-            i32::saturate_floor(self.y()),
-            core::cmp::max(1, i32::saturate_ceil(self.width()) as u32),
-            core::cmp::max(1, i32::saturate_ceil(self.height()) as u32),
+            left,
+            top,
+            core::cmp::max(1, right.saturating_sub(left)) as u32,
+            core::cmp::max(1, bottom.saturating_sub(top)) as u32,
         )
     }
 
@@ -338,30 +352,65 @@ impl Rect {
         Rect::from_ltrb(left, top, right, bottom)
     }
 
+    /// Returns the union of two rectangles.
+    ///
+    /// Returns `None` if the width or height would overflow.
+    pub fn join(&self, other: &Self) -> Option<Self> {
+        if other.is_empty() {
+            return Some(*self);
+        }
+        if self.is_empty() {
+            return Some(*other);
+        }
+
+        let left = self.x().min(other.x());
+        let top = self.y().min(other.y());
+
+        let right = self.right().max(other.right());
+        let bottom = self.bottom().max(other.bottom());
+
+        Rect::from_ltrb(left, top, right, bottom)
+    }
+
     /// Creates a Rect from Point array.
     ///
     /// Returns None if count is zero or if Point array contains an infinity or NaN.
     pub fn from_points(points: &[Point]) -> Option<Self> {
         use crate::f32x4_t::f32x4;
 
-        if points.is_empty() {
-            return None;
-        }
-
-        let mut offset = 0;
+        let mut offset;
         let mut min;
         let mut max;
-        if points.len() & 1 != 0 {
-            let pt = points[0];
-            min = f32x4([pt.x, pt.y, pt.x, pt.y]);
-            max = min;
-            offset += 1;
-        } else {
-            let pt0 = points[0];
-            let pt1 = points[1];
-            min = f32x4([pt0.x, pt0.y, pt1.x, pt1.y]);
-            max = min;
-            offset += 2;
+
+        // Handle trivial-size lists without creating vectors, since they won't
+        // actually use the vector min/max code
+        match points.len() {
+            0 => return None,
+            1 => {
+                let Point { x, y } = points[0];
+                return Rect::from_xywh(x, y, 0.0, 0.0);
+            }
+            2 => {
+                let Point { x: x0, y: y0 } = points[0];
+                let Point { x: x1, y: y1 } = points[1];
+                // Avoid min/max to preserve a NaN for rejection by from_ltrb
+                let (l, r) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
+                let (t, b) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
+                return Rect::from_ltrb(l, t, r, b);
+            }
+            i if i & 1 != 0 => {
+                let pt = points[0];
+                min = f32x4([pt.x, pt.y, pt.x, pt.y]);
+                max = min;
+                offset = 1;
+            }
+            _ => {
+                let pt0 = points[0];
+                let pt1 = points[1];
+                min = f32x4([pt0.x, pt0.y, pt1.x, pt1.y]);
+                max = min;
+                offset = 2;
+            }
         }
 
         let mut accum = f32x4::default();
@@ -408,15 +457,26 @@ impl Rect {
 
     /// Transforms the rect using the provided `Transform`.
     ///
-    /// This method is expensive.
+    /// If the transform is a skew, the result will be a bounding box around the skewed rectangle.
     pub fn transform(&self, ts: Transform) -> Option<Self> {
-        if !ts.is_identity() {
-            // TODO: remove allocation
-            let mut path = PathBuilder::from_rect(*self);
-            path = path.transform(ts)?;
-            Some(path.bounds())
-        } else {
+        if ts.is_identity() {
             Some(*self)
+        } else if ts.has_skew() {
+            // we need to transform all 4 corners
+            let lt = Point::from_xy(self.left(), self.top());
+            let rt = Point::from_xy(self.right(), self.top());
+            let lb = Point::from_xy(self.left(), self.bottom());
+            let rb = Point::from_xy(self.right(), self.bottom());
+            let mut pts = [lt, rt, lb, rb];
+            ts.map_points(&mut pts);
+            Self::from_points(&pts)
+        } else {
+            // Faster (more common) case
+            let lt = Point::from_xy(self.left(), self.top());
+            let rb = Point::from_xy(self.right(), self.bottom());
+            let mut pts = [lt, rb];
+            ts.map_points(&mut pts);
+            Self::from_points(&pts)
         }
     }
 
@@ -476,16 +536,28 @@ mod rect_tests {
     }
 
     #[test]
-    fn round_overflow() {
-        // minimum value that cause overflow
-        // because i32::MAX has no exact conversion to f32
-        let x = 128.0;
-        // maximum width
-        let width = i32::MAX as f32;
+    fn transform() {
+        // Tests based on 2x2 rectangle
+        let rect = Rect::from_ltrb(1.0, 2.0, 3.0, 4.0).unwrap();
 
-        let rect = Rect::from_xywh(x, 0.0, width, 1.0).unwrap();
-        assert_eq!(rect.round(), None);
-        assert_eq!(rect.round_out(), None);
+        let ts = Transform::identity();
+        assert_eq!(rect.transform(ts).unwrap(), rect);
+
+        // Scale x by 1x, y by 2x
+        let ts = Transform::from_scale(1.0, 2.0);
+        let rect_ts: Rect = Rect::from_ltrb(1.0, 4.0, 3.0, 8.0).unwrap();
+        assert_eq!(rect.transform(ts).unwrap(), rect_ts);
+
+        // Skew box along x-axis - vertical lines at y=c go to y=c+x and
+        // horizontal lines stay put. Result is bounding box
+        let ts = Transform::from_skew(1.0, 0.0);
+        let bounding_rect: Rect = Rect::from_ltrb(3.0, 2.0, 7.0, 4.0).unwrap();
+        assert_eq!(rect.transform(ts).unwrap(), bounding_rect);
+
+        // Skew box along y-axis - horizontal lines at x=c go to x=c+2y
+        let ts = Transform::from_skew(0.0, 2.0);
+        let bounding_rect: Rect = Rect::from_ltrb(1.0, 4.0, 3.0, 10.0).unwrap();
+        assert_eq!(rect.transform(ts).unwrap(), bounding_rect);
     }
 }
 
@@ -601,15 +673,12 @@ impl NonZeroRect {
 
     /// Transforms the rect using the provided `Transform`.
     ///
-    /// This method is expensive.
+    /// If the transform is a skew, the result will be a bounding box around the skewed rectangle.
     pub fn transform(&self, ts: Transform) -> Option<Self> {
-        if !ts.is_identity() {
-            // TODO: remove allocation
-            let mut path = PathBuilder::from_rect(self.to_rect());
-            path = path.transform(ts)?;
-            path.bounds().to_non_zero_rect()
-        } else {
+        if ts.is_identity() {
             Some(*self)
+        } else {
+            self.to_rect().transform(ts)?.to_non_zero_rect()
         }
     }
 

@@ -1,8 +1,13 @@
+# HarfRust
+
+<div align="center">
+<p><img src="HarfRust.png" alt="HarfRust Logo" width="256" align="center"/></p>
+
 [![Build Status](https://github.com/harfbuzz/harfrust/actions/workflows/main.yml/badge.svg)](https://github.com/harfbuzz/harfrust/actions/workflows/main.yml)
 [![Crates.io](https://img.shields.io/crates/v/harfrust.svg)](https://crates.io/crates/harfrust)
 [![Documentation](https://docs.rs/harfrust/badge.svg)](https://docs.rs/harfrust)
 
-# HarfRust
+</div>
 
 HarfRust is a Rust port of [HarfBuzz](https://github.com/harfbuzz/harfbuzz) text shaping engine.
 See [Major changes](#major-changes) below for major differences between HarfRust and HarfBuzz.
@@ -12,7 +17,7 @@ HarfRust started as a fork of [RustyBuzz](https://docs.rs/rustybuzz) to explore 
 multiple implementations of core font parsing for [`skrifa`](https://docs.rs/skrifa) consumers.
 Further context in https://github.com/googlefonts/fontations/issues/956.
 
-Matches HarfBuzz [v12.1.0](https://github.com/harfbuzz/harfbuzz/releases/tag/12.1.0).
+Matches HarfBuzz [v13.0.0](https://github.com/harfbuzz/harfbuzz/releases/tag/13.0.0).
 
 ## Why?
 

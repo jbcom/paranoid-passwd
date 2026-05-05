@@ -126,12 +126,31 @@ pub const STAGES: &[StageFn; super::STAGES_COUNT] = &[
     repeat_x1,
     gradient,
     evenly_spaced_2_stop_gradient,
+    // TODO: Can be implemented for lowp as well. The implementation is very similar to its highp
+    // variant.
+    null_fn, // XYToUnitAngle
     xy_to_radius,
     null_fn, // XYTo2PtConicalFocalOnCircle
     null_fn, // XYTo2PtConicalWellBehaved
+    null_fn, // XYTo2PtConicalSmaller
     null_fn, // XYTo2PtConicalGreater
+    null_fn, // XYTo2PtConicalStrip
+    null_fn, // Mask2PtConicalNan
     null_fn, // Mask2PtConicalDegenerates
     null_fn, // ApplyVectorMask
+    null_fn, // Alter2PtConicalCompensateFocal
+    null_fn, // Alter2PtConicalUnswap
+    null_fn, // NegateX
+    null_fn, // ApplyConcentricScaleBias
+    null_fn, // GammaExpand2
+    null_fn, // GammaExpandDestination2
+    null_fn, // GammaCompress2
+    null_fn, // GammaExpand22
+    null_fn, // GammaExpandDestination22
+    null_fn, // GammaCompress22
+    null_fn, // GammaExpandSrgb
+    null_fn, // GammaExpandDestinationSrgb
+    null_fn, // GammaCompressSrgb
 ];
 
 pub fn fn_ptr(f: StageFn) -> *const () {
@@ -830,7 +849,7 @@ fn load_8(data: &[u8; STAGE_WIDTH], a: &mut u16x16) {
 fn div255(v: u16x16) -> u16x16 {
     // Skia uses `vrshrq_n_u16(vrsraq_n_u16(v, v, 8), 8)` here when NEON is available,
     // but it doesn't affect performance much and breaks reproducible result. Ignore it.
-    // NOTE: the compiler does not replace the devision with a shift.
+    // NOTE: the compiler does not replace the division with a shift.
     (v + u16x16::splat(255)) >> u16x16::splat(8) // / u16x16::splat(256)
 }
 
