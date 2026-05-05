@@ -14,6 +14,83 @@ pub const DEFAULT_AUDIT_OPERATION_ID: &str = "pp.operation.v1.local";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum AuditSinkKind {
+    JsonlFile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditSinkStatus {
+    NotConfigured,
+    Ready,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditSinkHealth {
+    pub schema_version: u16,
+    pub kind: AuditSinkKind,
+    pub status: AuditSinkStatus,
+    pub configured: bool,
+    pub writable: bool,
+    pub append_mode: bool,
+    pub redaction_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+}
+
+impl AuditSinkHealth {
+    pub fn not_configured_jsonl() -> Self {
+        Self {
+            schema_version: AUDIT_SCHEMA_VERSION,
+            kind: AuditSinkKind::JsonlFile,
+            status: AuditSinkStatus::NotConfigured,
+            configured: false,
+            writable: false,
+            append_mode: true,
+            redaction_mode: "strict_marker".to_string(),
+            path: None,
+            failure: None,
+        }
+    }
+
+    pub fn ready_jsonl(path: Option<String>) -> Self {
+        Self {
+            schema_version: AUDIT_SCHEMA_VERSION,
+            kind: AuditSinkKind::JsonlFile,
+            status: AuditSinkStatus::Ready,
+            configured: true,
+            writable: true,
+            append_mode: true,
+            redaction_mode: "strict_marker".to_string(),
+            path,
+            failure: None,
+        }
+    }
+
+    pub fn unavailable_jsonl(path: Option<String>, failure: impl Into<String>) -> Self {
+        Self {
+            schema_version: AUDIT_SCHEMA_VERSION,
+            kind: AuditSinkKind::JsonlFile,
+            status: AuditSinkStatus::Unavailable,
+            configured: true,
+            writable: false,
+            append_mode: true,
+            redaction_mode: "strict_marker".to_string(),
+            path,
+            failure: Some(failure.into()),
+        }
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.status == AuditSinkStatus::Ready && self.configured && self.writable
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AuditSurface {
     Core,
     Vault,
@@ -232,6 +309,17 @@ pub fn write_events_jsonl(path: impl AsRef<Path>, events: &[AuditEvent]) -> Resu
     let mut sink = JsonlFileAuditSink::open(path)?;
     sink.record_events(events)?;
     sink.flush()
+}
+
+pub fn assess_optional_jsonl_file_audit_sink(path: Option<&Path>) -> AuditSinkHealth {
+    let Some(path) = path else {
+        return AuditSinkHealth::not_configured_jsonl();
+    };
+    let display_path = Some(path.display().to_string());
+    match JsonlFileAuditSink::open(path).and_then(|mut sink| sink.flush()) {
+        Ok(()) => AuditSinkHealth::ready_jsonl(display_path),
+        Err(error) => AuditSinkHealth::unavailable_jsonl(display_path, error.to_string()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -485,6 +573,25 @@ mod tests {
 
         assert!(written.contains("\"operation_id\":\"pp.operation.v1.sink-test\""));
         assert_eq!(written.lines().count(), 1);
+    }
+
+    #[test]
+    fn jsonl_sink_health_reports_ready_and_unavailable_paths() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let ready_path = tempdir.path().join("audit.jsonl");
+        let missing_parent_path = tempdir.path().join("missing").join("audit.jsonl");
+
+        let not_configured = assess_optional_jsonl_file_audit_sink(None);
+        let ready = assess_optional_jsonl_file_audit_sink(Some(&ready_path));
+        let unavailable = assess_optional_jsonl_file_audit_sink(Some(&missing_parent_path));
+
+        assert_eq!(not_configured.status, AuditSinkStatus::NotConfigured);
+        assert!(!not_configured.is_available());
+        assert_eq!(ready.status, AuditSinkStatus::Ready);
+        assert!(ready.is_available());
+        assert_eq!(unavailable.status, AuditSinkStatus::Unavailable);
+        assert!(!unavailable.is_available());
+        assert!(unavailable.failure.is_some());
     }
 
     #[test]

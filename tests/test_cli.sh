@@ -256,6 +256,7 @@ with open(os.environ["AUDIT_JSONL"], encoding="utf-8") as handle:
 
 assert report["status"] == "error"
 assert report["error_kind"] == "policy_denied"
+assert report["audit_sink"]["status"] == "ready"
 assert "fips_approved_mode" in report["policy_decision"]["missing_controls"]
 assert events[-1]["outcome"] == "blocked"
 '
@@ -274,6 +275,7 @@ import sys
 data = json.load(sys.stdin)
 assert data["schema_version"] == 1
 assert data["profile"] == "federal_ready"
+assert data["audit_sink"]["status"] == "not_configured"
 assert data["crypto_provider"]["provider_name"] == "OpenSSL"
 assert data["policy_decision"]["decision"] == "deny"
 '
@@ -297,11 +299,41 @@ import sys
 data = json.load(sys.stdin)
 assert data["status"] == "error"
 assert data["error_kind"] == "policy_denied"
+assert data["audit_sink"]["status"] == "not_configured"
 assert data["policy_decision"]["missing_controls"] == ["required_audit_sink"]
 '
     rm -f "$err"
 }
 check "--require-audit-sink fails closed without --audit-jsonl" t_required_audit_sink_denial
+
+# --- Test 20: configured but unwritable audit sink fails at policy
+t_unavailable_audit_sink_denial() {
+    local out err dir audit rc
+    dir="$(mktemp -d)" || return 1
+    err="$dir/stderr"
+    audit="$dir/missing/audit.jsonl"
+    rc=0
+    out="$("$BIN" --cli --json --audit-jsonl "$audit" --length 12 2>"$err")" || rc=$?
+    if [[ "$rc" -ne 6 || -s "$err" ]]; then
+        rm -rf "$dir"
+        return 1
+    fi
+    printf '%s' "$out" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["status"] == "error"
+assert data["error_kind"] == "policy_denied"
+assert data["audit_sink"]["status"] == "unavailable"
+assert data["audit_sink"]["configured"] is True
+assert data["audit_sink"]["writable"] is False
+assert data["audit_sink"]["failure"]
+assert data["policy_decision"]["missing_controls"] == ["required_audit_sink"]
+'
+    rm -rf "$dir"
+}
+check "--audit-jsonl fails closed when configured sink is unavailable" t_unavailable_audit_sink_denial
 
 # --- Summary
 printf '\n'

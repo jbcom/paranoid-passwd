@@ -74,9 +74,10 @@ cargo run -p paranoid-cli -- --federal-evidence
 cargo run -p paranoid-cli -- --cli --federal-ready --audit-jsonl audit.jsonl --length 24
 ```
 
-`--federal-ready` fails closed unless a required audit sink is available and the runtime evidence
-confirms an approved cryptographic provider mode. The default vendored OpenSSL build reports
-provider evidence but does not claim approved mode.
+`--audit-jsonl` and `--federal-ready` fail closed unless the configured JSONL audit sink passes a
+local writable health check. Federal-ready mode also requires runtime evidence confirming an approved
+cryptographic provider mode. The default vendored OpenSSL build reports provider evidence but does
+not claim approved mode.
 
 Local vault:
 
