@@ -203,6 +203,16 @@ CLAIMS: tuple[Claim, ...] = (
                 "ops request/response events preserve adapter session surface metadata",
             ),
             Requirement(
+                "crates/paranoid-cli/src/vault_tui.rs",
+                "evaluate_vault_operation(AuditSurface::Tui",
+                "TUI vault adapter routes covered operations through the shared ops evaluator",
+            ),
+            Requirement(
+                "crates/paranoid-gui/src/lib.rs",
+                "write_events_jsonl(path, evaluation.audit_events.as_slice())",
+                "native GUI persists durable ops audit events when JSONL is configured",
+            ),
+            Requirement(
                 "docs/reference/human-review.md",
                 "Ops policy boundary",
                 "open ops policy boundary disposition remains tracked",

@@ -59,7 +59,8 @@ The current branch should be treated as the functional baseline:
 - backup/restore and transfer packages exist
 - offline Cargo + vendored dependency policy exists
 - docs, release verification, and supply-chain checks exist
-- the first ops/audit/seal and federal-readiness primitives exist, but vault/TUI/GUI adoption is not complete
+- the first ops/audit/seal and federal-readiness primitives exist, and CLI/TUI/GUI vault adapters now
+  share the local ops policy path for covered flows
 
 The remaining work therefore falls into protocolization, federal readiness, qualification, review,
 packaging, and closure.
@@ -80,19 +81,16 @@ Ship a local-first password manager and generator whose implementation, release 
 
 The current ops/audit work adds typed command envelopes, allow/challenge/deny policy, JSONL audit
 sinks with writable health evidence, seal-state primitives, and a federal-ready startup evidence
-path. The next architecture boundary should route all security-relevant vault command flows and
-interactive UI adapters through that protocol rather than drifting back into UI-local patches.
-Headless vault CLI commands and the native GUI automation path have started that migration; TUI
-adapters and durable GUI audit sinks still need the same coverage.
+path. Headless vault CLI commands, native TUI actions, and native GUI automation now share that
+protocol for covered vault operations rather than drifting back into UI-local patches. The next
+architecture boundary should extend the same model into external audit-device health, seal /
+auto-unseal provider policy, and stable assessor fixtures.
 
 That PR should be scoped around:
 
-- expanding `crates/paranoid-ops` from headless vault CLI and native GUI orchestration into TUI
-  vault mutation orchestration
 - expanding `crates/paranoid-audit` beyond local JSONL writable-path health into external
   audit-device health
-- CLI JSONL fixtures and additional automation output over the typed ops protocol
-- TUI adapters and durable GUI audit sinks over the same protocol
+- CLI/TUI/GUI JSONL fixtures and additional automation output over the typed ops protocol
 - seal / auto-unseal provider policy
 - federal-ready profile fixtures and configured-provider evidence
 - docs and tests that make the trust boundary reviewable

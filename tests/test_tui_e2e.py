@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import errno
 import os
 import pty
 import re
@@ -81,12 +82,20 @@ class PtySession:
     def send_enter(self):
         self.send(b"\r")
 
+    def read_chunk(self):
+        try:
+            return os.read(self.fd, 65536)
+        except OSError as error:
+            if error.errno == errno.EIO:
+                return b""
+            raise
+
     def read_available(self):
         while True:
             ready, _, _ = select.select([self.fd], [], [], 0)
             if not ready:
                 break
-            chunk = os.read(self.fd, 65536)
+            chunk = self.read_chunk()
             if not chunk:
                 break
             self.buffer.extend(chunk)
@@ -105,7 +114,7 @@ class PtySession:
                 return haystack
             ready, _, _ = select.select([self.fd], [], [], 0.1)
             if ready:
-                chunk = os.read(self.fd, 65536)
+                chunk = self.read_chunk()
                 if not chunk:
                     break
                 self.buffer.extend(chunk)

@@ -111,7 +111,7 @@ federal startup evidence, redacted structured audit events, and hash-chain evide
 - challenge/response handling for sensitive operations and fresh proof requirements
 - vault operation access classes for metadata, decrypt, mutate, export, import, and keyslot
   lifecycle flows
-- reusable vault operation policy evaluation for CLI and native GUI adapters
+- reusable vault operation policy evaluation for CLI, TUI, and native GUI adapters
 - seal and auto-unseal state transitions
 - a placeholder transport model for future mTLS policy when operations cross process boundaries
 - stable JSON responses for automation and evidence capture

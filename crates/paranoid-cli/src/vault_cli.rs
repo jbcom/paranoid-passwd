@@ -30,7 +30,13 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
     let invocation = parse_vault_args(args)?;
     let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
     if should_launch_tui(&invocation, interactive) {
-        return vault_tui::run(invocation.open_options.clone()).map(|_| 0);
+        return vault_tui::run(vault_tui::VaultTuiConfig {
+            open_options: invocation.open_options.clone(),
+            profile: invocation.profile,
+            audit_jsonl: invocation.audit_jsonl.clone(),
+            require_audit_sink: invocation.require_audit_sink,
+        })
+        .map(|_| 0);
     }
 
     let command = match &invocation.command {
