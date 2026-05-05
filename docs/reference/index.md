@@ -11,6 +11,7 @@ architecture
 messaging
 license
 federal-readiness
+control-mapping
 security-assurance
 assurance-claims
 ai-review

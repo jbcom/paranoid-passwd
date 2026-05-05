@@ -1,0 +1,70 @@
+{
+  "audit_events": [
+    {
+      "action": "vault_operation.request",
+      "attributes": {
+        "command": "vault_operation",
+        "profile": "default",
+        "request_id": "pp.fixture.request.cli.mutate",
+        "session_surface": "cli",
+        "vault_access": "mutate",
+        "vault_operation": "mutate_item"
+      },
+      "event_id": "pp.fixture.operation.cli.mutate.event.1",
+      "message": "typed ops command request accepted for policy evaluation",
+      "occurred_at_epoch_ms": 0,
+      "operation_id": "pp.fixture.operation.cli.mutate",
+      "outcome": "started",
+      "schema_version": 1,
+      "sequence": 1,
+      "severity": "info",
+      "subject": "vault_operation",
+      "surface": "ops"
+    },
+    {
+      "action": "vault_operation.response",
+      "attributes": {
+        "decision": "allow",
+        "request_id": "pp.fixture.request.cli.mutate",
+        "session_surface": "cli",
+        "vault_access": "mutate",
+        "vault_operation": "mutate_item"
+      },
+      "event_id": "pp.fixture.operation.cli.mutate.event.2",
+      "message": "typed ops command policy response emitted",
+      "occurred_at_epoch_ms": 0,
+      "operation_id": "pp.fixture.operation.cli.mutate",
+      "outcome": "success",
+      "schema_version": 1,
+      "sequence": 2,
+      "severity": "notice",
+      "subject": "vault_operation",
+      "surface": "ops"
+    }
+  ],
+  "decision": {
+    "decision": "allow",
+    "reason": "default profile permits local in-process operation"
+  },
+  "envelope": {
+    "actor": {
+      "actor_id": "local_operator",
+      "kind": "local_operator"
+    },
+    "command": {
+      "access": "mutate",
+      "kind": "vault_operation",
+      "name": "mutate_item"
+    },
+    "operation_id": "pp.fixture.operation.cli.mutate",
+    "profile": "default",
+    "request_id": "pp.fixture.request.cli.mutate",
+    "schema_version": 1,
+    "session": {
+      "session_id": "pp.fixture.session.cli.mutate",
+      "surface": "cli",
+      "transport": "in_process"
+    }
+  },
+  "schema_version": 1
+}

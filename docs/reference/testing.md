@@ -111,6 +111,8 @@ crates. Current coverage proves that:
 - a stable denied federal startup fixture and an external-device-ready fixture are checked against
   the serialized evidence schema; the external audit-device wire shape is versioned as federal
   startup evidence schema `2`
+- stable CLI/TUI/GUI vault operation trace fixtures pin typed ops envelopes, request/response audit
+  events, and JSONL rendering for automation compatibility
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
 - ops policy tests require seal posture evidence for federal certificate unlock, require seal
   posture evidence for device-bound unlock, and require confirmed auto-unseal availability before
@@ -125,7 +127,7 @@ crates. Current coverage proves that:
 
 The remaining test expansion is now narrower:
 
-- additional JSON/JSONL compatibility fixtures for vault operation traces
+- external process-boundary command fixtures once mTLS transport is introduced
 - external audit-device write-ack probe implementations beyond the current TCP reachability probe
 - keyed correlation hashes only after the approved primitive and low-entropy secret risk are
   dispositioned

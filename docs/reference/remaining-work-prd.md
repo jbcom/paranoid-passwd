@@ -398,7 +398,8 @@ This PRD is complete when all of the following are true:
    verification, and GitHub checks
 2. route vault mutations, TUI actions, and GUI actions through typed ops envelopes
 3. add external audit-device write-ack probes beyond TCP reachability evidence
-4. expand stable vault operation JSON/JSONL fixtures and add a control-mapping evidence artifact
+4. add external process-boundary command fixtures and extend stable JSON/JSONL traces as new
+   command families are covered
 5. run the first canary release from `main` after those architecture boundaries are stable
 6. choose the Windows installer technology and macOS signing/notarization path
 7. update this PRD as those decisions are made

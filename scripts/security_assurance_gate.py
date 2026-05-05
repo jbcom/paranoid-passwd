@@ -225,6 +225,63 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
+        "ops.vault-trace-fixtures",
+        "Stable vault operation trace fixtures",
+        "ops-security",
+        (
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "pub struct OpsCommandTrace",
+                "ops crate exposes a stable trace wrapper for command evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "pub fn evaluate_ops_command_envelope",
+                "ops crate can evaluate caller-provided envelopes for deterministic fixtures",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/ops_trace_fixtures.rs",
+                "cli_mutate_vault_operation_trace_fixture_is_stable",
+                "ops tests pin a CLI vault mutation trace fixture",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/ops_trace_fixtures.rs",
+                "tui_keyslot_required_audit_denial_jsonl_fixture_is_stable",
+                "ops tests pin a TUI fail-closed JSONL fixture",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/ops_trace_fixtures.rs",
+                "gui_export_federal_ready_trace_fixture_is_stable",
+                "ops tests pin a GUI federal-ready export fixture",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/fixtures/ops_trace_cli_mutate_allowed.json",
+                '"session_surface": "cli"',
+                "stable CLI fixture preserves the adapter surface",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/fixtures/ops_trace_tui_keyslot_required_audit_denied.audit.jsonl",
+                '"decision":"deny"',
+                "stable TUI JSONL fixture preserves fail-closed policy evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/fixtures/ops_trace_gui_export_federal_ready_allowed.json",
+                '"profile": "federal_ready"',
+                "stable GUI fixture covers a federal-ready automation trace",
+            ),
+            Requirement(
+                "docs/reference/testing.md",
+                "stable CLI/TUI/GUI vault operation trace fixtures",
+                "testing docs describe stable ops trace fixtures",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`ops.vault-trace-fixtures` | `enforced`",
+                "assurance claims track stable ops trace fixtures",
+            ),
+        ),
+    ),
+    Claim(
         "audit.external-device-health",
         "External audit-device health evidence",
         "ops-security",
@@ -633,6 +690,83 @@ CLAIMS: tuple[Claim, ...] = (
                 "docs/reference/architecture.md",
                 "`paranoid-seal` owns:",
                 "architecture docs name the seal lifecycle boundary",
+            ),
+        ),
+    ),
+    Claim(
+        "federal.control-mapping-evidence",
+        "Federal control mapping evidence",
+        "security-docs",
+        (
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "NIST SP 800-53 Rev5",
+                "federal control mapping names the control catalog",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "FedRAMP High, GovCloud, or DoD IL5-oriented environments",
+                "federal control mapping states the target customer context precisely",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "The project is not FedRAMP authorized.",
+                "federal control mapping preserves non-claim language",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "TCP reachability to an external audit endpoint is not evidence of durable audit ingestion.",
+                "federal control mapping preserves audit-device boundary language",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "AC - Access Control",
+                "federal control mapping covers AC",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "AU - Audit and Accountability",
+                "federal control mapping covers AU",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "CM - Configuration Management",
+                "federal control mapping covers CM",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "IA - Identification and Authentication",
+                "federal control mapping covers IA",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "SC - System and Communications Protection",
+                "federal control mapping covers SC",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "SI - System and Information Integrity",
+                "federal control mapping covers SI",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "SR - Supply Chain Risk Management",
+                "federal control mapping covers SR",
+            ),
+            Requirement(
+                "docs/reference/federal-readiness.md",
+                "Federal Control Mapping",
+                "federal readiness docs link to the control mapping artifact",
+            ),
+            Requirement(
+                "docs/reference/index.md",
+                "control-mapping",
+                "reference toctree includes the control mapping artifact",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`federal.control-mapping-evidence` | `process`",
+                "assurance claims track federal control mapping evidence",
             ),
         ),
     ),

@@ -515,6 +515,32 @@ impl OpsCommandEvaluation {
     pub fn is_allowed(&self) -> bool {
         self.decision.is_allowed()
     }
+
+    pub fn trace(&self) -> OpsCommandTrace {
+        OpsCommandTrace {
+            schema_version: OPS_SCHEMA_VERSION,
+            envelope: self.envelope.clone(),
+            decision: self.decision.clone(),
+            audit_events: self.audit_events.clone(),
+        }
+    }
+
+    pub fn into_trace(self) -> OpsCommandTrace {
+        OpsCommandTrace {
+            schema_version: OPS_SCHEMA_VERSION,
+            envelope: self.envelope,
+            decision: self.decision,
+            audit_events: self.audit_events,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpsCommandTrace {
+    pub schema_version: u16,
+    pub envelope: OpsCommandEnvelope,
+    pub decision: OpsPolicyDecision,
+    pub audit_events: Vec<AuditEvent>,
 }
 
 // TODO: AI_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.
@@ -524,6 +550,13 @@ pub fn evaluate_ops_command(
     context: &OpsPolicyContext,
 ) -> OpsCommandEvaluation {
     let envelope = OpsCommandEnvelope::local(surface, context.profile, command);
+    evaluate_ops_command_envelope(envelope, context)
+}
+
+pub fn evaluate_ops_command_envelope(
+    envelope: OpsCommandEnvelope,
+    context: &OpsPolicyContext,
+) -> OpsCommandEvaluation {
     let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
     record_ops_request(&mut trail, &envelope);
     let decision = evaluate_policy(&envelope, context);

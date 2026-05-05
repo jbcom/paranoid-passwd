@@ -1,0 +1,70 @@
+{
+  "audit_events": [
+    {
+      "action": "vault_operation.request",
+      "attributes": {
+        "command": "vault_operation",
+        "profile": "federal_ready",
+        "request_id": "pp.fixture.request.gui.export_federal",
+        "session_surface": "gui",
+        "vault_access": "export",
+        "vault_operation": "export"
+      },
+      "event_id": "pp.fixture.operation.gui.export_federal.event.1",
+      "message": "typed ops command request accepted for policy evaluation",
+      "occurred_at_epoch_ms": 0,
+      "operation_id": "pp.fixture.operation.gui.export_federal",
+      "outcome": "started",
+      "schema_version": 1,
+      "sequence": 1,
+      "severity": "info",
+      "subject": "vault_operation",
+      "surface": "ops"
+    },
+    {
+      "action": "vault_operation.response",
+      "attributes": {
+        "decision": "allow",
+        "request_id": "pp.fixture.request.gui.export_federal",
+        "session_surface": "gui",
+        "vault_access": "export",
+        "vault_operation": "export"
+      },
+      "event_id": "pp.fixture.operation.gui.export_federal.event.2",
+      "message": "typed ops command policy response emitted",
+      "occurred_at_epoch_ms": 0,
+      "operation_id": "pp.fixture.operation.gui.export_federal",
+      "outcome": "success",
+      "schema_version": 1,
+      "sequence": 2,
+      "severity": "notice",
+      "subject": "vault_operation",
+      "surface": "ops"
+    }
+  ],
+  "decision": {
+    "decision": "allow",
+    "reason": "federal-ready controls satisfied"
+  },
+  "envelope": {
+    "actor": {
+      "actor_id": "local_operator",
+      "kind": "local_operator"
+    },
+    "command": {
+      "access": "export",
+      "kind": "vault_operation",
+      "name": "export"
+    },
+    "operation_id": "pp.fixture.operation.gui.export_federal",
+    "profile": "federal_ready",
+    "request_id": "pp.fixture.request.gui.export_federal",
+    "schema_version": 1,
+    "session": {
+      "session_id": "pp.fixture.session.gui.export_federal",
+      "surface": "gui",
+      "transport": "in_process"
+    }
+  },
+  "schema_version": 1
+}
