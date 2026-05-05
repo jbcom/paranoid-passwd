@@ -19,8 +19,10 @@ arboard.workspace = true
 crossterm.workspace = true
 lexopt.workspace = true
 paranoid-core = { path = "../paranoid-core" }
+paranoid-ops.workspace = true
 paranoid-vault = { path = "../paranoid-vault" }
 ratatui.workspace = true
+serde_json.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]

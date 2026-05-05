@@ -146,6 +146,63 @@ t_audit_rollup() {
 }
 check "audit output includes per-password and generator roll-ups" t_audit_rollup
 
+# --- Test 14: --json emits a structured automation report
+t_json_output() {
+    local out err
+    err="$(mktemp)"
+    out="$("$BIN" --cli --json --length 12 --charset hex --no-audit 2>"$err")"
+    if [[ -s "$err" ]]; then
+        rm -f "$err"
+        return 1
+    fi
+    printf '%s' "$out" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["schema_version"] == 1
+assert data["operation"] == "generate_password"
+assert data["operation_id"].startswith("pp.operation.v1.")
+assert data["status"] == "success"
+assert len(data["report"]["passwords"]) == 1
+assert len(data["report"]["passwords"][0]["value"]) == 12
+assert data["audit_events"][0]["operation_id"] == data["operation_id"]
+assert data["audit_events"][0]["event_id"] == data["operation_id"] + ".event.1"
+'
+    rm -f "$err"
+}
+check "--json emits structured automation report" t_json_output
+
+# --- Test 15: --json errors stay structured
+t_json_error_output() {
+    local out err rc
+    err="$(mktemp)"
+    rc=0
+    out="$("$BIN" --cli --json --length 0 2>"$err")" || rc=$?
+    if [[ "$rc" -ne 1 ]]; then
+        rm -f "$err"
+        return 1
+    fi
+    if [[ -s "$err" ]]; then
+        rm -f "$err"
+        return 1
+    fi
+    printf '%s' "$out" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["schema_version"] == 1
+assert data["operation"] == "generate_password"
+assert data["operation_id"].startswith("pp.operation.v1.")
+assert data["status"] == "error"
+assert data["error_kind"] == "invalid_arguments"
+assert data["audit_events"][0]["operation_id"] == data["operation_id"]
+'
+    rm -f "$err"
+}
+check "--json emits structured error report" t_json_error_output
+
 # --- Summary
 printf '\n'
 printf '%d passed, %d failed\n' "$PASSES" "$FAILS"

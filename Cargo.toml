@@ -1,8 +1,10 @@
 [workspace]
 members = [
+    "crates/paranoid-audit",
     "crates/paranoid-core",
     "crates/paranoid-cli",
     "crates/paranoid-gui",
+    "crates/paranoid-ops",
     "crates/paranoid-vault",
     "xtask",
 ]
@@ -25,6 +27,10 @@ arboard = "3.6.1"
 crossterm = "0.29.0"
 lexopt = "0.3.2"
 openssl = { version = "0.10.78", features = ["vendored"] }
+paranoid-audit = { path = "crates/paranoid-audit" }
+paranoid-core = { path = "crates/paranoid-core" }
+paranoid-ops = { path = "crates/paranoid-ops" }
+paranoid-vault = { path = "crates/paranoid-vault" }
 ratatui = "0.30.0"
 regex = "1.12.3"
 rusqlite = { version = "0.37.0", features = ["bundled"] }

@@ -5,7 +5,10 @@ mod vault_tui;
 use lexopt::prelude::*;
 use paranoid_core::{
     CharsetSpec, FrameworkId, GenerationReport, ParanoidError, ParanoidRequest, VERSION,
-    execute_request,
+};
+use paranoid_ops::{
+    GeneratePasswordError, GeneratePasswordOperation, GeneratePasswordOutcome,
+    run_generate_password_operation,
 };
 use std::{
     ffi::OsString,
@@ -26,12 +29,19 @@ enum LaunchMode {
     Tui,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputFormat {
+    Text,
+    Json,
+}
+
 #[derive(Debug, Clone)]
 struct CliOptions {
     request: ParanoidRequest,
     audit: bool,
     quiet: bool,
     mode: LaunchMode,
+    output: OutputFormat,
     explicit_operational_flag: bool,
 }
 
@@ -47,6 +57,7 @@ impl Default for CliOptions {
             audit: true,
             quiet: false,
             mode: LaunchMode::Auto,
+            output: OutputFormat::Text,
             explicit_operational_flag: false,
         }
     }
@@ -80,27 +91,39 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
         return tui::run().map(|_| EX_OK);
     }
 
-    let report = match execute_request(&options.request, options.audit, |_| {}) {
-        Ok(report) => report,
+    let outcome = match run_generate_password_operation(GeneratePasswordOperation::new(
+        options.request.clone(),
+        options.audit,
+    )) {
+        Ok(outcome) => outcome,
         Err(error) => {
-            eprintln!("error: {error}");
-            return Ok(map_error_to_exit_code(&error));
+            if options.output == OutputFormat::Json {
+                print_generation_error_json(&error)?;
+            } else {
+                eprintln!("error: {error}");
+            }
+            return Ok(map_error_to_exit_code(error.source()));
         }
     };
 
-    print_passwords(&report)?;
+    if options.output == OutputFormat::Json {
+        print_generation_json(&outcome)?;
+    } else {
+        print_passwords(&outcome.report)?;
+    }
     if options.audit {
-        if !options.quiet {
-            print_audit(&report)?;
+        if !options.quiet && options.output == OutputFormat::Text {
+            print_audit(&outcome.report)?;
         }
-        if report
+        if outcome
+            .report
             .audit
             .as_ref()
             .is_some_and(|audit| !audit.overall_pass)
         {
             return Ok(EX_AUDIT_FAIL);
         }
-    } else if !options.quiet {
+    } else if !options.quiet && options.output == OutputFormat::Text {
         eprintln!("audit: skipped");
     }
 
@@ -176,6 +199,10 @@ fn parse_args(args: Vec<OsString>) -> anyhow::Result<ParseOutcome> {
                 options.quiet = true;
                 options.explicit_operational_flag = true;
             }
+            Long("json") => {
+                options.output = OutputFormat::Json;
+                options.explicit_operational_flag = true;
+            }
             Long("tui") => options.mode = LaunchMode::Tui,
             Long("cli") => options.mode = LaunchMode::Cli,
             Short('V') | Long("version") => {
@@ -229,6 +256,7 @@ Generation:
                            nist, pci_dss, hipaa, soc2, gdpr, iso27001
 
 Output:
+      --json               Emit a structured JSON operation report on stdout
       --no-audit           Skip the statistical audit
       --quiet              Suppress audit stage output on stderr
   -V, --version            Print version info and exit
@@ -264,6 +292,23 @@ fn print_passwords(report: &GenerationReport) -> io::Result<()> {
     for password in &report.passwords {
         writeln!(handle, "{}", password.value)?;
     }
+    handle.flush()
+}
+
+fn print_generation_json(outcome: &GeneratePasswordOutcome) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer_pretty(&mut handle, &outcome.automation_report())
+        .map_err(io::Error::other)?;
+    writeln!(handle)?;
+    handle.flush()
+}
+
+fn print_generation_error_json(error: &GeneratePasswordError) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer_pretty(&mut handle, &error.failure_report()).map_err(io::Error::other)?;
+    writeln!(handle)?;
     handle.flush()
 }
 
@@ -471,5 +516,20 @@ mod tests {
 
         assert!(should_launch_tui(&tui, false));
         assert!(!should_launch_tui(&cli, true));
+    }
+
+    #[test]
+    fn json_flag_forces_headless_structured_output() {
+        let ParseOutcome::Run(options) = parse_args(vec![
+            OsString::from("paranoid-passwd"),
+            OsString::from("--json"),
+        ])
+        .expect("parse") else {
+            panic!("expected run options");
+        };
+
+        assert_eq!(options.output, OutputFormat::Json);
+        assert!(options.explicit_operational_flag);
+        assert!(!should_launch_tui(&options, true));
     }
 }

@@ -7,16 +7,15 @@ title: Architecture
 `paranoid-passwd` now uses a Cargo workspace:
 
 - `crates/paranoid-core`
+- `crates/paranoid-audit`
+- `crates/paranoid-ops`
 - `crates/paranoid-cli`
 - `crates/paranoid-gui`
 - `crates/paranoid-vault`
 
-The next production refactor should add two shared crates rather than growing the UI crates:
-
-- `crates/paranoid-ops` for typed command envelopes, policy evaluation, challenge orchestration,
-  seal/unseal state, and automation responses
-- `crates/paranoid-audit` for structured audit events, redaction, hash chaining, JSON/JSONL
-  rendering, and audit-device sinks
+The shared crate split is deliberate: security-sensitive generation and vault mechanics stay in the
+core and vault crates, operation orchestration starts in `paranoid-ops`, and structured evidence
+starts in `paranoid-audit` instead of UI-local logging.
 
 ## Core
 
@@ -62,12 +61,18 @@ The shared report model is split between:
 
 ## Ops, Audit, and Seal Lifecycle
 
-The UI surfaces should converge on a shared typed operations protocol instead of calling each
-other. The CLI can emit JSON/JSONL for automation, the TUI can render the same operation results in
-a terminal, and the GUI can render them in Slint, but all three should submit the same
-`paranoid-ops` command envelopes and receive the same typed responses.
+The first ops/audit foundation is implemented for generator automation: CLI `--json` runs through
+`paranoid-ops`, returns a stable operation report, and carries `paranoid-audit` events with an
+operation id shared by every event in the report. Audit events are evidence metadata only; generated
+passwords remain in the typed report and are not copied into audit messages or attributes.
 
-`paranoid-ops` should own:
+The UI surfaces should continue converging on this shared typed operations protocol instead of
+calling each other. The CLI can emit JSON/JSONL for automation, the TUI can render the same
+operation results in a terminal, and the GUI can render them in Slint, but all three should submit
+the same `paranoid-ops` command envelopes and receive the same typed responses.
+
+`paranoid-ops` currently owns generator operation execution and automation response shaping. It
+should grow into:
 
 - command envelopes with request ids, actor context, surface identity, policy version, and optional
   challenge metadata
@@ -85,8 +90,9 @@ side effects, then require a typed challenge when policy says the operation need
 fresh proof, or stronger unlock material. The challenge result should be verified by the ops layer
 and recorded by the audit layer before the vault mutation runs.
 
-`paranoid-audit` should replace primitive logging for security-relevant behavior. Its event model
-should be append-oriented and safe by default:
+`paranoid-audit` currently owns structured events, per-operation sequence ids, JSONL rendering, and
+the redaction boundary for evidence fields. It should grow into an append-oriented audit stream that
+is safe by default:
 
 - one request event and one response event for every ops command that reaches policy evaluation
 - stable request ids so request/response pairs can be correlated
