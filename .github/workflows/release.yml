@@ -195,7 +195,18 @@ jobs:
         shell: bash
         run: |
           cd cli-dist
-          cat ./*.sha256 > checksums.txt
+          cat ./*.sha256 > checksums.txt.raw
+          awk '
+            NF >= 2 {
+              artifact = $2
+              sub(/^\*/, "", artifact)
+              sub(/^.*\//, "", artifact)
+              print $1 "  " artifact
+              next
+            }
+            { exit 1 }
+          ' checksums.txt.raw > checksums.txt
+          rm -f checksums.txt.raw
           rm -f ./*.sha256
 
       - name: Attest release artifacts
@@ -496,10 +507,11 @@ jobs:
           fi
           gh release download "${RAW_TAG}" -p "${artifact}" -p checksums.txt --repo "${GH_REPO}"
           gh attestation verify "${artifact}" --owner "${OWNER}"
+          checksum_line="$(awk -v artifact="${artifact}" '$2 == artifact { print; found = 1 } END { if (!found) exit 1 }' checksums.txt)"
           if command -v sha256sum >/dev/null 2>&1; then
-            grep " ${artifact}$" checksums.txt | sha256sum -c -
+            printf '%s\n' "${checksum_line}" | sha256sum -c -
           else
-            grep " ${artifact}$" checksums.txt | shasum -a 256 -c -
+            printf '%s\n' "${checksum_line}" | shasum -a 256 -c -
           fi
           if [ "${RUNNABLE}" = "true" ]; then
             bash scripts/smoke_test_release_artifact.sh "${ver}" '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "${artifact}" '${{ matrix.product_name }}'

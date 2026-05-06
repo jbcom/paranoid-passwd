@@ -39,6 +39,7 @@ elif [ "${ARCHIVE}" = "dmg" ]; then
 else
   artifact="${OUT_DIR}/${stage_name}.${ARCHIVE}"
 fi
+artifact_name="$(basename "${artifact}")"
 target_root="${CARGO_TARGET_DIR:-target}"
 target_root="${target_root%/}"
 binary_path="${target_root}/release/${PRODUCT_NAME}${EXT}"
@@ -294,9 +295,9 @@ else
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "${artifact}" > "${artifact}.sha256"
+  (cd "${OUT_DIR}" && sha256sum "${artifact_name}") > "${artifact}.sha256"
 else
-  shasum -a 256 "${artifact}" > "${artifact}.sha256"
+  (cd "${OUT_DIR}" && shasum -a 256 "${artifact_name}") > "${artifact}.sha256"
 fi
 
 printf '%s\n' "${artifact}"

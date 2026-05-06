@@ -3,7 +3,7 @@
 #
 # Usage:
 #   curl -sSL https://paranoid-passwd.com/install.sh | sh
-#   curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.6.3
+#   curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.6.4
 
 set -eu
 
@@ -126,7 +126,11 @@ curl -sSL -o "$TMP/checksums.txt" "$CHECKSUMS_URL" || {
   echo "install.sh: checksum download failed: $CHECKSUMS_URL" >&2; exit 1
 }
 
-( cd "$TMP" && grep "  $ARCHIVE\$" checksums.txt | checksum_check ) || {
+CHECKSUM_LINE=$(awk -v archive="$ARCHIVE" '$2 == archive { print; found = 1 } END { if (!found) exit 1 }' "$TMP/checksums.txt") || {
+  echo "install.sh: checksum entry not found for $ARCHIVE" >&2; exit 1
+}
+
+( cd "$TMP" && printf '%s\n' "$CHECKSUM_LINE" | checksum_check ) || {
   echo "install.sh: checksum verification failed" >&2; exit 1
 }
 
