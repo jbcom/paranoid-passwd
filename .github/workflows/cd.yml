@@ -23,9 +23,17 @@ jobs:
       pull-requests: write
     steps:
       - name: Run release-please
+        id: release-please
+        continue-on-error: true
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.CI_GITHUB_TOKEN }}
+
+      - name: Report release-please branch protection block
+        if: steps.release-please.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::release-please could not update its generated branch under the current repository rules. The verified release workflow remains the release authority."
 
   deploy-pages:
     name: Deploy Docs to GitHub Pages
