@@ -10,7 +10,7 @@ use openssl::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufRead, BufReader, Write},
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     time::Duration,
@@ -57,6 +57,7 @@ pub struct OpsMtlsServerConfig {
     pub server_certificate_path: PathBuf,
     pub server_private_key_path: PathBuf,
     pub client_ca_certificate_path: PathBuf,
+    pub timeout: Duration,
 }
 
 impl OpsMtlsServerConfig {
@@ -69,7 +70,13 @@ impl OpsMtlsServerConfig {
             server_certificate_path: server_certificate_path.into(),
             server_private_key_path: server_private_key_path.into(),
             client_ca_certificate_path: client_ca_certificate_path.into(),
+            timeout: Duration::from_secs(3),
         }
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 }
 
@@ -189,33 +196,23 @@ impl OpsMtlsClient {
                 continue;
             }
 
-            let command_result = (|| {
-                tls_stream.write_all(&request_line)?;
-                tls_stream.flush()?;
+            tls_stream.write_all(&request_line)?;
+            tls_stream.flush()?;
 
-                let mut reader = BufReader::new(tls_stream);
-                let response_line = read_bounded_jsonl_line(
-                    &mut reader,
-                    "server closed mTLS command stream without a response",
-                    "mTLS command response exceeded maximum JSONL frame length",
-                )?;
-                let response: OpsMtlsCommandResponse = serde_json::from_str(response_line.trim())?;
-                if response.schema_version != OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION {
-                    return Err(OpsMtlsTransportError::Protocol(format!(
-                        "response schema mismatch: {}",
-                        response.schema_version
-                    )));
-                }
-                Ok(response.trace)
-            })();
-            match command_result {
-                Ok(trace) => return Ok(trace),
-                Err(OpsMtlsTransportError::Io(error)) => {
-                    failures.push(format!("{address}: mTLS command io failed: {error}"));
-                    continue;
-                }
-                Err(error) => return Err(error),
+            let mut reader = BufReader::new(tls_stream);
+            let response_line = read_bounded_jsonl_line(
+                &mut reader,
+                "server closed mTLS command stream without a response",
+                "mTLS command response exceeded maximum JSONL frame length",
+            )?;
+            let response: OpsMtlsCommandResponse = serde_json::from_str(response_line.trim())?;
+            if response.schema_version != OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION {
+                return Err(OpsMtlsTransportError::Protocol(format!(
+                    "response schema mismatch: {}",
+                    response.schema_version
+                )));
             }
+            return Ok(response.trace);
         }
 
         Err(OpsMtlsTransportError::TlsHandshake(format!(
@@ -227,12 +224,14 @@ impl OpsMtlsClient {
 
 pub struct OpsMtlsServer {
     acceptor: SslAcceptor,
+    timeout: Duration,
 }
 
 impl OpsMtlsServer {
     pub fn from_config(config: &OpsMtlsServerConfig) -> Result<Self, OpsMtlsTransportError> {
         Ok(Self {
             acceptor: build_mtls_acceptor(config)?,
+            timeout: config.timeout,
         })
     }
 
@@ -241,6 +240,8 @@ impl OpsMtlsServer {
         tcp_stream: TcpStream,
         context: &OpsPolicyContext,
     ) -> Result<OpsCommandTrace, OpsMtlsTransportError> {
+        tcp_stream.set_read_timeout(Some(self.timeout))?;
+        tcp_stream.set_write_timeout(Some(self.timeout))?;
         let tls_stream = self
             .acceptor
             .accept(tcp_stream)
@@ -286,9 +287,9 @@ impl OpsMtlsServer {
             schema_version: OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION,
             trace: trace.clone(),
         };
-        let mut tls_stream = reader.into_inner();
         let mut response_line = serde_json::to_vec(&response)?;
         response_line.push(b'\n');
+        let tls_stream = reader.get_mut();
         tls_stream.write_all(&response_line)?;
         tls_stream.flush()?;
         Ok(trace)
@@ -346,21 +347,40 @@ fn read_bounded_jsonl_line(
     overrun_message: &'static str,
 ) -> Result<String, OpsMtlsTransportError> {
     let mut line = Vec::new();
-    let bytes_read = reader
-        .take((OPS_MTLS_JSONL_MAX_LINE_BYTES + 1) as u64)
-        .read_until(b'\n', &mut line)?;
-    if bytes_read == 0 {
-        return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
-    }
-    if bytes_read > OPS_MTLS_JSONL_MAX_LINE_BYTES {
-        return Err(OpsMtlsTransportError::Protocol(overrun_message.to_string()));
-    }
-    if !line.ends_with(b"\n") {
-        if bytes_read == OPS_MTLS_JSONL_MAX_LINE_BYTES {
+
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            if line.is_empty() {
+                return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
+            }
+            return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
+        }
+
+        if let Some(newline_index) = available.iter().position(|byte| *byte == b'\n') {
+            let bytes_to_take = newline_index + 1;
+            if line.len() + bytes_to_take > OPS_MTLS_JSONL_MAX_LINE_BYTES {
+                return Err(OpsMtlsTransportError::Protocol(overrun_message.to_string()));
+            }
+            line.extend_from_slice(&available[..bytes_to_take]);
+            reader.consume(bytes_to_take);
+            break;
+        }
+
+        let remaining = OPS_MTLS_JSONL_MAX_LINE_BYTES.saturating_sub(line.len());
+        if available.len() >= remaining {
+            if remaining > 0 {
+                line.extend_from_slice(&available[..remaining]);
+                reader.consume(remaining);
+            }
             return Err(OpsMtlsTransportError::Protocol(overrun_message.to_string()));
         }
-        return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
+
+        let bytes_to_take = available.len();
+        line.extend_from_slice(available);
+        reader.consume(bytes_to_take);
     }
+
     String::from_utf8(line).map_err(|error| {
         OpsMtlsTransportError::Protocol(format!("mTLS JSONL frame was not UTF-8: {error}"))
     })
