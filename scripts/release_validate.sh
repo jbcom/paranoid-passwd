@@ -114,6 +114,7 @@ for archive in "${EXPECTED_ASSETS[@]}"; do
   validate_archive_payload "${archive}"
 done
 
+checksum_input="${DIST_DIR}/checksums.txt.raw"
 cat \
   "${DIST_DIR}/${LINUX_AMD64}.sha256" \
   "${DIST_DIR}/${LINUX_ARM64}.sha256" \
@@ -131,14 +132,35 @@ cat \
   "${DIST_DIR}/${GUI_WIN_AMD64}.sha256" \
   "${DIST_DIR}/${GUI_DEB_AMD64}.sha256" \
   "${DIST_DIR}/${GUI_DEB_ARM64}.sha256" \
-  > "${DIST_DIR}/checksums.txt"
+  > "${checksum_input}"
+
+awk '
+  NF >= 2 {
+    artifact = $2
+    sub(/^\*/, "", artifact)
+    sub(/^.*\//, "", artifact)
+    print $1 "  " artifact
+    next
+  }
+  { exit 1 }
+' "${checksum_input}" > "${DIST_DIR}/checksums.txt"
+rm -f "${checksum_input}"
+
+for archive in "${EXPECTED_ASSETS[@]}"; do
+  if ! awk -v archive="${archive}" '$2 == archive { found = 1; exit } END { exit !found }' "${DIST_DIR}/checksums.txt"; then
+    echo "missing basename checksum entry: ${archive}" >&2
+    exit 1
+  fi
+done
 
 verify_checksum() {
   local archive="$1"
+  local checksum_line
+  checksum_line="$(awk -v archive="${archive}" '$2 == archive { print; found = 1; exit } END { if (!found) exit 1 }' "${DIST_DIR}/checksums.txt")"
   if command -v sha256sum >/dev/null 2>&1; then
-    (cd "${DIST_DIR}" && grep " ${archive}\$" checksums.txt | sha256sum -c -)
+    (cd "${DIST_DIR}" && printf '%s\n' "${checksum_line}" | sha256sum -c -)
   else
-    (cd "${DIST_DIR}" && grep " ${archive}\$" checksums.txt | shasum -a 256 -c -)
+    (cd "${DIST_DIR}" && printf '%s\n' "${checksum_line}" | shasum -a 256 -c -)
   fi
 }
 
