@@ -165,8 +165,14 @@ impl OpsMtlsClient {
                     continue;
                 }
             };
-            tcp_stream.set_read_timeout(Some(self.timeout))?;
-            tcp_stream.set_write_timeout(Some(self.timeout))?;
+            if let Err(error) = tcp_stream.set_read_timeout(Some(self.timeout)) {
+                failures.push(format!("{address}: failed to set read timeout: {error}"));
+                continue;
+            }
+            if let Err(error) = tcp_stream.set_write_timeout(Some(self.timeout)) {
+                failures.push(format!("{address}: failed to set write timeout: {error}"));
+                continue;
+            }
 
             let mut tls_stream = match self.connector.connect(self.host.as_str(), tcp_stream) {
                 Ok(stream) => stream,
@@ -182,23 +188,34 @@ impl OpsMtlsClient {
                 ));
                 continue;
             }
-            tls_stream.write_all(&request_line)?;
-            tls_stream.flush()?;
 
-            let mut reader = BufReader::new(tls_stream);
-            let response_line = read_bounded_jsonl_line(
-                &mut reader,
-                "server closed mTLS command stream without a response",
-                "mTLS command response exceeded maximum JSONL frame length",
-            )?;
-            let response: OpsMtlsCommandResponse = serde_json::from_str(response_line.trim())?;
-            if response.schema_version != OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION {
-                return Err(OpsMtlsTransportError::Protocol(format!(
-                    "response schema mismatch: {}",
-                    response.schema_version
-                )));
+            let command_result = (|| {
+                tls_stream.write_all(&request_line)?;
+                tls_stream.flush()?;
+
+                let mut reader = BufReader::new(tls_stream);
+                let response_line = read_bounded_jsonl_line(
+                    &mut reader,
+                    "server closed mTLS command stream without a response",
+                    "mTLS command response exceeded maximum JSONL frame length",
+                )?;
+                let response: OpsMtlsCommandResponse = serde_json::from_str(response_line.trim())?;
+                if response.schema_version != OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION {
+                    return Err(OpsMtlsTransportError::Protocol(format!(
+                        "response schema mismatch: {}",
+                        response.schema_version
+                    )));
+                }
+                Ok(response.trace)
+            })();
+            match command_result {
+                Ok(trace) => return Ok(trace),
+                Err(OpsMtlsTransportError::Io(error)) => {
+                    failures.push(format!("{address}: mTLS command io failed: {error}"));
+                    continue;
+                }
+                Err(error) => return Err(error),
             }
-            return Ok(response.trace);
         }
 
         Err(OpsMtlsTransportError::TlsHandshake(format!(
@@ -270,8 +287,9 @@ impl OpsMtlsServer {
             trace: trace.clone(),
         };
         let mut tls_stream = reader.into_inner();
-        serde_json::to_writer(&mut tls_stream, &response)?;
-        tls_stream.write_all(b"\n")?;
+        let mut response_line = serde_json::to_vec(&response)?;
+        response_line.push(b'\n');
+        tls_stream.write_all(&response_line)?;
         tls_stream.flush()?;
         Ok(trace)
     }
@@ -329,15 +347,18 @@ fn read_bounded_jsonl_line(
 ) -> Result<String, OpsMtlsTransportError> {
     let mut line = Vec::new();
     let bytes_read = reader
-        .take(OPS_MTLS_JSONL_MAX_LINE_BYTES as u64)
+        .take((OPS_MTLS_JSONL_MAX_LINE_BYTES + 1) as u64)
         .read_until(b'\n', &mut line)?;
     if bytes_read == 0 {
         return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
     }
-    if bytes_read == OPS_MTLS_JSONL_MAX_LINE_BYTES && !line.ends_with(b"\n") {
+    if bytes_read > OPS_MTLS_JSONL_MAX_LINE_BYTES {
         return Err(OpsMtlsTransportError::Protocol(overrun_message.to_string()));
     }
     if !line.ends_with(b"\n") {
+        if bytes_read == OPS_MTLS_JSONL_MAX_LINE_BYTES {
+            return Err(OpsMtlsTransportError::Protocol(overrun_message.to_string()));
+        }
         return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
     }
     String::from_utf8(line).map_err(|error| {
@@ -449,4 +470,61 @@ fn hex_encode(bytes: &[u8]) -> String {
         out.push(HEX[(byte & 0x0f) as usize] as char);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    const EOF_MESSAGE: &str = "eof";
+    const OVERRUN_MESSAGE: &str = "overrun";
+
+    #[test]
+    fn bounded_jsonl_line_accepts_exact_maximum_frame_with_newline() {
+        let mut frame = vec![b' '; OPS_MTLS_JSONL_MAX_LINE_BYTES - 1];
+        frame.push(b'\n');
+        let line = read_test_frame(frame).expect("maximum frame with newline is valid");
+
+        assert_eq!(line.len(), OPS_MTLS_JSONL_MAX_LINE_BYTES);
+        assert!(line.ends_with('\n'));
+    }
+
+    #[test]
+    fn bounded_jsonl_line_rejects_exact_maximum_frame_without_newline_as_overrun() {
+        let error = read_test_frame(vec![b' '; OPS_MTLS_JSONL_MAX_LINE_BYTES])
+            .expect_err("full frame without newline exceeds valid JSONL length");
+
+        assert!(matches!(
+            error,
+            OpsMtlsTransportError::Protocol(message) if message == OVERRUN_MESSAGE
+        ));
+    }
+
+    #[test]
+    fn bounded_jsonl_line_rejects_more_than_maximum_frame_as_overrun() {
+        let error = read_test_frame(vec![b' '; OPS_MTLS_JSONL_MAX_LINE_BYTES + 1])
+            .expect_err("oversized frame fails closed");
+
+        assert!(matches!(
+            error,
+            OpsMtlsTransportError::Protocol(message) if message == OVERRUN_MESSAGE
+        ));
+    }
+
+    #[test]
+    fn bounded_jsonl_line_reports_short_truncated_frame_as_eof() {
+        let error = read_test_frame(b"{\"schema_version\":1".to_vec())
+            .expect_err("short truncated frame is EOF, not overrun");
+
+        assert!(matches!(
+            error,
+            OpsMtlsTransportError::Protocol(message) if message == EOF_MESSAGE
+        ));
+    }
+
+    fn read_test_frame(frame: Vec<u8>) -> Result<String, OpsMtlsTransportError> {
+        let mut reader = BufReader::new(Cursor::new(frame));
+        read_bounded_jsonl_line(&mut reader, EOF_MESSAGE, OVERRUN_MESSAGE)
+    }
 }
