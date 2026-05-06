@@ -10,14 +10,17 @@ description.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+openssl.workspace = true
 paranoid-audit.workspace = true
 paranoid-core.workspace = true
 paranoid-seal.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

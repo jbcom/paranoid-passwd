@@ -116,6 +116,10 @@ crates. Current coverage proves that:
 - a stable mTLS process-boundary vault operation fixture pins authenticated transport evidence,
   service-account actor context, and non-secret request/response audit attributes, including
   channel-binding evidence
+- live mTLS JSONL ops transport tests prove a loopback OpenSSL mTLS command exchange returns the
+  same typed trace to client and server, replaces client-claimed transport evidence with
+  server-observed peer-certificate evidence, and rejects an untrusted client certificate before
+  policy can allow the command
 - audit unit tests cover the mTLS JSONL write-ack probe, including matching acknowledgement and
   mismatched challenge rejection
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
