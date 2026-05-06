@@ -126,7 +126,7 @@ curl -sSL -o "$TMP/checksums.txt" "$CHECKSUMS_URL" || {
   echo "install.sh: checksum download failed: $CHECKSUMS_URL" >&2; exit 1
 }
 
-CHECKSUM_LINE=$(awk -v archive="$ARCHIVE" '$2 == archive { print; found = 1 } END { if (!found) exit 1 }' "$TMP/checksums.txt") || {
+CHECKSUM_LINE=$(awk -v archive="$ARCHIVE" '$2 == archive { print; found = 1; exit } END { if (!found) exit 1 }' "$TMP/checksums.txt") || {
   echo "install.sh: checksum entry not found for $ARCHIVE" >&2; exit 1
 }
 

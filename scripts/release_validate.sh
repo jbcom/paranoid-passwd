@@ -147,7 +147,7 @@ awk '
 rm -f "${checksum_input}"
 
 for archive in "${EXPECTED_ASSETS[@]}"; do
-  if ! awk -v archive="${archive}" '$2 == archive { found = 1 } END { exit !found }' "${DIST_DIR}/checksums.txt"; then
+  if ! awk -v archive="${archive}" '$2 == archive { found = 1; exit } END { exit !found }' "${DIST_DIR}/checksums.txt"; then
     echo "missing basename checksum entry: ${archive}" >&2
     exit 1
   fi
@@ -156,7 +156,7 @@ done
 verify_checksum() {
   local archive="$1"
   local checksum_line
-  checksum_line="$(awk -v archive="${archive}" '$2 == archive { print; found = 1 } END { if (!found) exit 1 }' "${DIST_DIR}/checksums.txt")"
+  checksum_line="$(awk -v archive="${archive}" '$2 == archive { print; found = 1; exit } END { if (!found) exit 1 }' "${DIST_DIR}/checksums.txt")"
   if command -v sha256sum >/dev/null 2>&1; then
     (cd "${DIST_DIR}" && printf '%s\n' "${checksum_line}" | sha256sum -c -)
   else
