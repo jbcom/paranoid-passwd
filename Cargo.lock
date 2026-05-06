@@ -3872,15 +3872,14 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.78"
+version = "0.10.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f38c4372413cdaaf3cc79dd92d29d7d9f5ab09b51b10dded508fb90bb70b9222"
+checksum = "bf0b434746ee2832f4f0baf10137e1cabb18cbe6912c69e2e33263c45250f542"
 dependencies = [
  "bitflags 2.11.1",
  "cfg-if",
  "foreign-types 0.3.2",
  "libc",
- "once_cell",
  "openssl-macros",
  "openssl-sys",
 ]
@@ -3958,7 +3957,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-audit"
-version = "3.6.4"
+version = "3.6.5"
 dependencies = [
  "openssl",
  "paranoid-core",
@@ -3970,7 +3969,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-cli"
-version = "3.6.4"
+version = "3.6.5"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3990,7 +3989,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-core"
-version = "3.6.4"
+version = "3.6.5"
 dependencies = [
  "openssl",
  "serde",
@@ -4001,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-gui"
-version = "3.6.4"
+version = "3.6.5"
 dependencies = [
  "arboard",
  "getrandom 0.2.17",
@@ -4017,7 +4016,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-ops"
-version = "3.6.4"
+version = "3.6.5"
 dependencies = [
  "paranoid-audit",
  "paranoid-core",
@@ -4029,7 +4028,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-seal"
-version = "3.6.4"
+version = "3.6.5"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -4037,7 +4036,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-vault"
-version = "3.6.4"
+version = "3.6.5"
 dependencies = [
  "argon2",
  "bip39",
@@ -7400,7 +7399,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "3.6.4"
+version = "3.6.5"
 dependencies = [
  "anyhow",
  "regex",

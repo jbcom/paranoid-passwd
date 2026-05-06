@@ -1,8 +1,6 @@
 # syntax=docker/dockerfile:1.7
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:1af610c4a70668dad46159ee178b20378c79a49b554f76405670fc442d30183a
+FROM rust:1.95.0-slim-bookworm@sha256:caaf9ca7acd474892186860307d6f28e51fdbc1a4eada459fcff81517cf46a36
 
-ARG RUST_APK_PACKAGE=rust-1.95
-ARG RUST_APK_VERSION=1.95.0-r0
 ARG SPHINX_RUSTDOCGEN_VERSION=1.1.0
 ARG TOX_VERSION=4.53.0
 
@@ -11,31 +9,60 @@ ENV PATH="/usr/local/bin:${PATH}" \
     CARGO_TARGET_DIR=/tmp/cargo-target \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-RUN --mount=type=cache,target=/var/cache/apk \
-    apk add --no-cache \
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         bash \
-        build-base \
+        build-essential \
+        ca-certificates \
         coreutils \
         curl \
         dbus \
-        dbus-dev \
+        dbus-x11 \
         fontconfig \
-        fontconfig-dev \
-        font-liberation \
+        fonts-liberation \
         git \
         imagemagick \
+        libdbus-1-3 \
+        libdbus-1-dev \
+        libfontconfig1-dev \
+        libssl-dev \
+        libwayland-client0 \
+        libwayland-dev \
+        libx11-6 \
+        libx11-dev \
+        libxcursor1 \
+        libxcb-render0 \
+        libxcb-render0-dev \
+        libxcb-shape0 \
+        libxcb-shape0-dev \
+        libxcb-xfixes0 \
+        libxcb-xfixes0-dev \
+        libxcb1 \
+        libxcb1-dev \
+        libxi6 \
+        libxinerama1 \
+        libxkbcommon-dev \
+        libxkbcommon-x11-0 \
+        libxkbcommon-x11-dev \
+        libxkbcommon0 \
+        libxss1 \
         make \
         openssl \
-        openssl-dev \
         perl \
+        pkg-config \
         pkgconf \
-        py3-pip \
+        python3-pip \
         python3 \
         ripgrep \
-        xkbcomp \
-        xkeyboard-config \
-        xvfb-run \
-        ${RUST_APK_PACKAGE}=${RUST_APK_VERSION}
+        x11-xkb-utils \
+        xauth \
+        xkb-data \
+        xvfb \
+ && rm -rf /var/lib/apt/lists/*
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --break-system-packages "tox==${TOX_VERSION}"
@@ -47,8 +74,19 @@ RUN --mount=type=cache,target=/tmp/cargo/registry \
     cargo install --locked --root /usr/local "sphinx-rustdocgen@${SPHINX_RUSTDOCGEN_VERSION}" \
  && rm -rf /tmp/cargo-target /tmp/cargo/bin /tmp/cargo/.crates.toml /tmp/cargo/.crates2.json
 
+RUN rustup component add rustfmt clippy
+
+RUN toolchain_bin="$(rustc --print sysroot)/bin" \
+ && for tool in cargo rustc rustdoc rustfmt cargo-fmt cargo-clippy clippy-driver; do \
+      if [ -x "${toolchain_bin}/${tool}" ]; then \
+        ln -sf "${toolchain_bin}/${tool}" "/usr/local/bin/${tool}"; \
+      fi; \
+    done
+
 RUN bash --version >/dev/null \
  && cargo --version >/dev/null \
+ && cargo clippy --version >/dev/null \
+ && cargo fmt --version >/dev/null \
  && fc-cache -f >/dev/null \
  && fc-match sans >/dev/null \
  && command -v sphinx-rustdocgen >/dev/null \
@@ -58,8 +96,8 @@ RUN bash --version >/dev/null \
  && command -v openssl >/dev/null \
  && command -v xvfb-run >/dev/null \
  && rustc --version >/dev/null \
- && pkgconf --modversion fontconfig >/dev/null \
- && pkgconf --modversion openssl >/dev/null \
+ && pkg-config --modversion fontconfig >/dev/null \
+ && pkg-config --modversion openssl >/dev/null \
  && python3 --version >/dev/null \
  && rg --version >/dev/null \
  && tox --version >/dev/null \
@@ -67,8 +105,8 @@ RUN bash --version >/dev/null \
  && tox --version | grep -F "${TOX_VERSION}" >/dev/null \
  && echo "builder image OK"
 
-RUN addgroup -g 1001 builder \
- && adduser -D -u 1001 -G builder builder \
+RUN groupadd --gid 1001 builder \
+ && useradd --uid 1001 --gid builder --create-home --shell /bin/bash builder \
  && mkdir -p /github/workspace /tmp/cargo /tmp/cargo-target \
  && chown -R builder:builder /github /tmp/cargo /tmp/cargo-target
 

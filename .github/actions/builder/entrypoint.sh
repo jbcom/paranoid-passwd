@@ -5,7 +5,7 @@
 # (GitHub Actions automatically prefixes any `with: <name>:` with INPUT_).
 # Writes it to a temp script and execs it with strict bash flags.
 #
-# All execution happens inside the Wolfi container with $GITHUB_WORKSPACE
+# All execution happens inside the repository builder container with $GITHUB_WORKSPACE
 # bind-mounted at /github/workspace (cwd).
 
 set -o errexit

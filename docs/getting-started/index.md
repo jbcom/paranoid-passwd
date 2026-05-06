@@ -45,7 +45,7 @@ curl -sSL https://paranoid-passwd.com/install.sh | sh
 You can pin a version or install into a custom directory:
 
 ```bash
-curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.6.4
+curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.6.5
 curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --install-dir "$HOME/.local/bin"
 ```
 

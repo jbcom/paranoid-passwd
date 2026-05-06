@@ -1,6 +1,6 @@
 ---
 title: Changelog
-updated: 2026-05-05
+updated: 2026-05-06
 status: current
 domain: technical
 ---
@@ -11,6 +11,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [3.6.5](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.6.4...paranoid-passwd-v3.6.5) (2026-05-06)
+
+
+### Bug Fixes
+
+* **deps:** update vendored `openssl` bindings to 0.10.79
+* **release:** build Linux artifacts on a conservative glibc floor and smoke-test GUI screenshots under Xvfb
 
 ## [3.6.4](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.6.3...paranoid-passwd-v3.6.4) (2026-05-05)
 

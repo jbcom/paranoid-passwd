@@ -142,7 +142,25 @@ fi
 
 chmod +x "${binary_path}" 2>/dev/null || true
 
-version_output="$("${binary_path}" --version 2>&1)"
+run_binary_output() {
+  local label="$1"
+  local output
+  local status
+  shift
+
+  set +e
+  output="$("$@" 2>&1)"
+  status=$?
+  set -e
+  if [ "${status}" -ne 0 ]; then
+    printf '%s failed for %s with exit code %s\n' "${label}" "${archive_name}" "${status}" >&2
+    printf '%s\n' "${output}" >&2
+    exit "${status}"
+  fi
+  printf '%s\n' "${output}"
+}
+
+version_output="$(run_binary_output "version smoke" "${binary_path}" --version)"
 printf '%s\n' "${version_output}" | grep -F "${VERSION}" >/dev/null
 
 case "${PRODUCT_NAME}" in
@@ -152,12 +170,17 @@ case "${PRODUCT_NAME}" in
     "${binary_path}" vault help >/dev/null
     ;;
   paranoid-passwd-gui)
-    help_output="$("${binary_path}" --help 2>&1)"
+    help_output="$(run_binary_output "GUI help smoke" "${binary_path}" --help)"
     printf '%s\n' "${help_output}" | grep -F "Usage: paranoid-passwd-gui" >/dev/null
     capture_path="${ARCHIVE_PATH}.smoke.png"
-    if [ "${TARGET_OS}" = "linux" ] && command -v xvfb-run >/dev/null 2>&1; then
-      bash scripts/capture_gui_screenshot.sh "${TARGET_OS}" "${binary_path}" "${capture_path}" "paranoid-passwd"
-      [ -f "${capture_path}" ]
+    if [ "${TARGET_OS}" = "linux" ]; then
+      if command -v xvfb-run >/dev/null 2>&1; then
+        bash scripts/capture_gui_screenshot.sh "${TARGET_OS}" "${binary_path}" "${capture_path}" "paranoid-passwd"
+        [ -f "${capture_path}" ]
+      elif [ "${SMOKE_ALLOW_NO_XVFB:-0}" != "1" ]; then
+        printf 'xvfb-run not found; refusing to skip Linux GUI screenshot smoke for %s; expected %s\n' "${archive_name}" "${capture_path}" >&2
+        exit 1
+      fi
     fi
     ;;
   *)

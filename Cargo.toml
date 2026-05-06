@@ -12,7 +12,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "3.6.4"
+version = "3.6.5"
 edition = "2024"
 license = "GPL-3.0-only"
 authors = ["Jon Bogaty"]
@@ -27,7 +27,7 @@ argon2 = "0.5.3"
 arboard = "3.6.1"
 crossterm = "0.29.0"
 lexopt = "0.3.2"
-openssl = { version = "0.10.78", features = ["vendored"] }
+openssl = { version = "0.10.79", features = ["vendored"] }
 paranoid-audit = { path = "crates/paranoid-audit" }
 paranoid-core = { path = "crates/paranoid-core" }
 paranoid-ops = { path = "crates/paranoid-ops" }
