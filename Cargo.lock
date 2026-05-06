@@ -4018,11 +4018,13 @@ dependencies = [
 name = "paranoid-ops"
 version = "3.6.5"
 dependencies = [
+ "openssl",
  "paranoid-audit",
  "paranoid-core",
  "paranoid-seal",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

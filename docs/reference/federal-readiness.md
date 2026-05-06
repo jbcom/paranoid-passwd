@@ -126,9 +126,10 @@ and hash-chain evidence.
 - vault operation access classes for metadata, decrypt, mutate, export, import, and keyslot
   lifecycle flows
 - reusable vault operation policy evaluation for CLI, TUI, and native GUI adapters
-- mTLS process-boundary transport evidence that fails closed unless a security-relevant command has
-  authenticated peer identity and certificate fingerprint evidence; non-secret channel-binding
-  evidence is carried when present
+- an OpenSSL-backed TLS-1.3-minimum mTLS JSONL process-boundary command transport that fails closed
+  unless a security-relevant command has authenticated peer identity and certificate fingerprint
+  evidence; server-side handling replaces client-asserted transport claims with observed
+  peer-certificate evidence before policy evaluation
 - stable JSON responses for automation and evidence capture, including federal startup evidence
   schema `2` for the external audit-device posture field
 

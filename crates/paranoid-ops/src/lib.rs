@@ -16,6 +16,9 @@ use std::{
 };
 use thiserror::Error;
 
+mod mtls_transport;
+pub use mtls_transport::*;
+
 static LOCAL_OPERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const OPS_SCHEMA_VERSION: u16 = 1;

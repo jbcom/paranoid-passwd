@@ -74,6 +74,9 @@ correlation identifiers, not authentication tokens or cryptographic nonces.
   command identity
 - authenticated mTLS transport evidence for commands that cross a process boundary, including
   non-secret peer identity, certificate fingerprint, channel-binding, and warning evidence
+- an OpenSSL-backed mTLS JSONL command transport that accepts typed command envelopes across a
+  process boundary, replaces client-supplied transport claims with server-observed peer-certificate
+  evidence, and returns the same typed command trace used by local adapters
 - an explicit `allow`, `challenge`, and `deny` policy decision model
 - federal-ready startup evidence over build id, platform, audit schema, configured audit-sink
   health, and OpenSSL provider evidence
@@ -128,9 +131,11 @@ The native TUI and GUI now evaluate local vault actions through the same typed o
 calling `paranoid-vault`, and their tests record non-secret request/response policy events for read,
 mutate, keyslot, and export flows. TUI launches inherit `vault --audit-jsonl` / `--require-audit-sink`
 policy, and the GUI exposes the same durable local JSONL sink controls for deterministic automation.
-The remaining implementation work is additional seal-provider health checks, a live external
-process-boundary transport implementation behind the pinned mTLS command fixture contract, broader
-PTY coverage over those same command envelopes, and release-grade packaging evidence.
+The mTLS process-boundary path now has a live JSONL command transport in `paranoid-ops`; the server
+side evaluates the received envelope only after binding the session to the observed mTLS peer
+certificate, not to client-asserted evidence. The remaining implementation work is additional
+seal-provider health checks, broader PTY coverage over those same command envelopes, and
+release-grade packaging evidence.
 
 The seal model stays local-first but borrows the operational shape of Vault: a sealed vault can read
 metadata needed to decide how to unlock, but it cannot decrypt stored item payloads. Auto-unseal
