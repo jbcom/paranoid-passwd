@@ -5,6 +5,7 @@ use openssl::{
     nid::Nid,
     pkey::{PKey, Private},
     rsa::Rsa,
+    ssl::{SslAcceptor, SslConnector, SslFiletype, SslMethod, SslVerifyMode, SslVersion},
     x509::{
         X509, X509Name,
         extension::{BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAlternativeName},
@@ -12,12 +13,19 @@ use openssl::{
 };
 use paranoid_audit::AuditSurface;
 use paranoid_ops::{
-    FederalApprovedMode, FederalCryptoProviderEvidence, OPS_SCHEMA_VERSION, OpsActor, OpsActorKind,
-    OpsCommand, OpsCommandEnvelope, OpsMtlsClientConfig, OpsMtlsServerConfig, OpsPolicyContext,
+    FederalApprovedMode, FederalCryptoProviderEvidence, OPS_MTLS_JSONL_MAX_LINE_BYTES,
+    OPS_SCHEMA_VERSION, OpsActor, OpsActorKind, OpsCommand, OpsCommandEnvelope,
+    OpsMtlsClientConfig, OpsMtlsServerConfig, OpsMtlsTransportError, OpsPolicyContext,
     OpsPolicyDecision, OpsProfile, OpsSession, OpsTransport, OpsTransportEvidence,
     VaultOperationAccess, handle_mtls_ops_command_stream, send_ops_command_over_mtls,
 };
-use std::{net::TcpListener, path::PathBuf, thread, time::Duration};
+use std::{
+    io::{BufRead, BufReader, Write},
+    net::TcpListener,
+    path::PathBuf,
+    thread,
+    time::Duration,
+};
 
 #[test]
 fn mtls_jsonl_transport_evaluates_command_with_observed_peer_evidence() {
@@ -154,12 +162,106 @@ fn mtls_jsonl_transport_rejects_untrusted_client_certificate() {
         .expect("server joins")
         .expect_err("server rejects untrusted client certificate");
 
-    assert!(
-        client_error
-            .to_string()
-            .contains("mTLS command transport failed")
-    );
+    assert!(matches!(
+        client_error,
+        OpsMtlsTransportError::TlsHandshake(_) | OpsMtlsTransportError::Io(_)
+    ));
     assert!(server_error.to_string().contains("handshake"));
+}
+
+#[test]
+fn mtls_jsonl_transport_rejects_oversized_response_line() {
+    let material = TestMtlsMaterial::new();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mTLS ops listener");
+    let endpoint = format!("mtls://{}", listener.local_addr().expect("listener addr"));
+    let server_config = material.server_config();
+    let server = thread::spawn(move || {
+        let mut builder =
+            SslAcceptor::mozilla_modern_v5(SslMethod::tls_server()).expect("acceptor builder");
+        builder
+            .set_min_proto_version(Some(SslVersion::TLS1_3))
+            .expect("tls version");
+        builder
+            .set_certificate_file(&server_config.server_certificate_path, SslFiletype::PEM)
+            .expect("server cert");
+        builder
+            .set_private_key_file(&server_config.server_private_key_path, SslFiletype::PEM)
+            .expect("server key");
+        builder
+            .set_ca_file(&server_config.client_ca_certificate_path)
+            .expect("server ca");
+        builder.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+        let acceptor = builder.build();
+        let (stream, _addr) = listener.accept().expect("accept mTLS ops command");
+        let tls_stream = acceptor.accept(stream).expect("accept tls");
+        let mut reader = BufReader::new(tls_stream);
+        let mut request_line = String::new();
+        reader
+            .read_line(&mut request_line)
+            .expect("read command request");
+        let mut tls_stream = reader.into_inner();
+        let oversized_response = vec![b' '; OPS_MTLS_JSONL_MAX_LINE_BYTES + 1];
+        tls_stream
+            .write_all(&oversized_response)
+            .expect("write oversized response");
+        tls_stream.flush().expect("flush oversized response");
+    });
+
+    let envelope = OpsCommandEnvelope {
+        schema_version: OPS_SCHEMA_VERSION,
+        request_id: "pp.test.request.mtls.transport.oversized".to_string(),
+        operation_id: "pp.test.operation.mtls.transport.oversized".to_string(),
+        profile: OpsProfile::FederalReady,
+        actor: OpsActor::default(),
+        session: OpsSession {
+            session_id: "pp.test.session.mtls.transport.oversized".to_string(),
+            surface: AuditSurface::Ops,
+            transport: OpsTransport::Mtls,
+            transport_evidence: None,
+        },
+        command: OpsCommand::VaultOperation {
+            name: "export".to_string(),
+            access: VaultOperationAccess::Export,
+        },
+    };
+    let client_config = material
+        .client_config(endpoint)
+        .with_timeout(Duration::from_secs(5));
+
+    let client_error = send_ops_command_over_mtls(&client_config, envelope)
+        .expect_err("oversized response fails closed");
+    server.join().expect("server joins");
+
+    assert!(client_error.to_string().contains("maximum JSONL frame"));
+}
+
+#[test]
+fn mtls_jsonl_transport_rejects_oversized_request_line() {
+    let material = TestMtlsMaterial::new();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mTLS ops listener");
+    let address = listener.local_addr().expect("listener addr");
+    let server_config = material.server_config();
+    let server_context = federal_context(true, true);
+    let server = thread::spawn(move || {
+        let (stream, _addr) = listener.accept().expect("accept mTLS ops command");
+        handle_mtls_ops_command_stream(stream, &server_config, &server_context)
+            .expect_err("oversized request fails closed")
+    });
+
+    let connector = test_connector(&material);
+    let tcp_stream = std::net::TcpStream::connect(address).expect("connect mTLS ops server");
+    let mut tls_stream = connector
+        .connect("127.0.0.1", tcp_stream)
+        .expect("connect tls");
+    let oversized_request = vec![b' '; OPS_MTLS_JSONL_MAX_LINE_BYTES + 1];
+    tls_stream
+        .write_all(&oversized_request)
+        .expect("write oversized request");
+    tls_stream.flush().expect("flush oversized request");
+
+    let server_error = server.join().expect("server joins");
+
+    assert!(server_error.to_string().contains("maximum JSONL frame"));
 }
 
 fn federal_context(audit_sink_required: bool, audit_sink_available: bool) -> OpsPolicyContext {
@@ -303,5 +405,22 @@ fn test_certificate(key: &PKey<Private>) -> X509 {
     builder
         .sign(key, MessageDigest::sha256())
         .expect("sign cert");
+    builder.build()
+}
+
+fn test_connector(material: &TestMtlsMaterial) -> SslConnector {
+    let mut builder = SslConnector::builder(SslMethod::tls_client()).expect("connector builder");
+    builder
+        .set_min_proto_version(Some(SslVersion::TLS1_3))
+        .expect("tls version");
+    builder.set_verify(SslVerifyMode::PEER);
+    builder
+        .set_certificate_file(&material.cert_path, SslFiletype::PEM)
+        .expect("client cert");
+    builder
+        .set_private_key_file(&material.key_path, SslFiletype::PEM)
+        .expect("client key");
+    builder.set_ca_file(&material.ca_path).expect("client ca");
+    builder.check_private_key().expect("client key check");
     builder.build()
 }

@@ -3,13 +3,14 @@ use crate::{
     OpsTransportEvidence, evaluate_ops_command_envelope,
 };
 use openssl::{
+    error::ErrorStack,
     hash::MessageDigest,
     ssl::{SslAcceptor, SslConnector, SslFiletype, SslMethod, SslVerifyMode, SslVersion},
     x509::{X509, X509VerifyResult},
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     time::Duration,
@@ -17,6 +18,7 @@ use std::{
 use thiserror::Error;
 
 pub const OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION: u16 = 1;
+pub const OPS_MTLS_JSONL_MAX_LINE_BYTES: usize = 1024 * 1024;
 const OPS_MTLS_EVIDENCE_SOURCE: &str = "openssl-mtls-jsonl-v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,13 +149,12 @@ pub fn send_ops_command_over_mtls(
         tls_stream.write_all(&request_line)?;
         tls_stream.flush()?;
 
-        let mut response_line = String::new();
         let mut reader = BufReader::new(tls_stream);
-        if reader.read_line(&mut response_line)? == 0 {
-            return Err(OpsMtlsTransportError::Protocol(
-                "server closed mTLS command stream without a response".to_string(),
-            ));
-        }
+        let response_line = read_bounded_jsonl_line(
+            &mut reader,
+            "server closed mTLS command stream without a response",
+            "mTLS command response exceeded maximum JSONL frame length",
+        )?;
         let response: OpsMtlsCommandResponse = serde_json::from_str(response_line.trim())?;
         if response.schema_version != OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION {
             return Err(OpsMtlsTransportError::Protocol(format!(
@@ -191,13 +192,12 @@ pub fn handle_mtls_ops_command_stream(
     })?;
     let transport_evidence = transport_evidence_from_peer_certificate(&peer_certificate)?;
 
-    let mut request_line = String::new();
     let mut reader = BufReader::new(tls_stream);
-    if reader.read_line(&mut request_line)? == 0 {
-        return Err(OpsMtlsTransportError::Protocol(
-            "client closed mTLS command stream without a request".to_string(),
-        ));
-    }
+    let request_line = read_bounded_jsonl_line(
+        &mut reader,
+        "client closed mTLS command stream without a request",
+        "mTLS command request exceeded maximum JSONL frame length",
+    )?;
     let request: OpsMtlsCommandRequest = serde_json::from_str(request_line.trim())?;
     if request.schema_version != OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION {
         return Err(OpsMtlsTransportError::Protocol(format!(
@@ -246,47 +246,51 @@ fn build_mtls_connector(
     private_key_path: &Path,
     ca_certificate_path: &Path,
 ) -> Result<SslConnector, OpsMtlsTransportError> {
-    let mut builder = SslConnector::builder(SslMethod::tls_client())
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    builder
-        .set_min_proto_version(Some(SslVersion::TLS1_2))
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    builder.set_verify(SslVerifyMode::PEER);
-    builder
-        .set_certificate_file(certificate_path, SslFiletype::PEM)
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    builder
-        .set_private_key_file(private_key_path, SslFiletype::PEM)
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    builder
-        .set_ca_file(ca_certificate_path)
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    builder
-        .check_private_key()
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    Ok(builder.build())
+    let connector: Result<SslConnector, ErrorStack> = (|| {
+        let mut builder = SslConnector::builder(SslMethod::tls_client())?;
+        builder.set_min_proto_version(Some(SslVersion::TLS1_3))?;
+        builder.set_verify(SslVerifyMode::PEER);
+        builder.set_certificate_file(certificate_path, SslFiletype::PEM)?;
+        builder.set_private_key_file(private_key_path, SslFiletype::PEM)?;
+        builder.set_ca_file(ca_certificate_path)?;
+        builder.check_private_key()?;
+        Ok(builder.build())
+    })();
+    connector.map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))
 }
 
 fn build_mtls_acceptor(config: &OpsMtlsServerConfig) -> Result<SslAcceptor, OpsMtlsTransportError> {
-    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls_server())
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    builder
-        .set_min_proto_version(Some(SslVersion::TLS1_2))
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    builder
-        .set_certificate_file(&config.server_certificate_path, SslFiletype::PEM)
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    builder
-        .set_private_key_file(&config.server_private_key_path, SslFiletype::PEM)
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    builder
-        .set_ca_file(&config.client_ca_certificate_path)
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    builder.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
-    builder
-        .check_private_key()
-        .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))?;
-    Ok(builder.build())
+    let acceptor: Result<SslAcceptor, ErrorStack> = (|| {
+        let mut builder = SslAcceptor::mozilla_modern_v5(SslMethod::tls_server())?;
+        builder.set_min_proto_version(Some(SslVersion::TLS1_3))?;
+        builder.set_certificate_file(&config.server_certificate_path, SslFiletype::PEM)?;
+        builder.set_private_key_file(&config.server_private_key_path, SslFiletype::PEM)?;
+        builder.set_ca_file(&config.client_ca_certificate_path)?;
+        builder.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+        builder.check_private_key()?;
+        Ok(builder.build())
+    })();
+    acceptor.map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))
+}
+
+fn read_bounded_jsonl_line(
+    reader: &mut impl BufRead,
+    eof_message: &'static str,
+    overrun_message: &'static str,
+) -> Result<String, OpsMtlsTransportError> {
+    let mut line = Vec::new();
+    let bytes_read = reader
+        .take((OPS_MTLS_JSONL_MAX_LINE_BYTES + 1) as u64)
+        .read_until(b'\n', &mut line)?;
+    if bytes_read == 0 {
+        return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
+    }
+    if bytes_read > OPS_MTLS_JSONL_MAX_LINE_BYTES || !line.ends_with(b"\n") {
+        return Err(OpsMtlsTransportError::Protocol(overrun_message.to_string()));
+    }
+    String::from_utf8(line).map_err(|error| {
+        OpsMtlsTransportError::Protocol(format!("mTLS JSONL frame was not UTF-8: {error}"))
+    })
 }
 
 fn socket_addresses_from_endpoint(

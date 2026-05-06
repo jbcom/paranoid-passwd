@@ -119,7 +119,8 @@ crates. Current coverage proves that:
 - live mTLS JSONL ops transport tests prove a loopback OpenSSL mTLS command exchange returns the
   same typed trace to client and server, replaces client-claimed transport evidence with
   server-observed peer-certificate evidence, and rejects an untrusted client certificate before
-  policy can allow the command
+  policy can allow the command; the transport also rejects oversized peer-controlled JSONL frames
+  instead of reading unbounded input
 - audit unit tests cover the mTLS JSONL write-ack probe, including matching acknowledgement and
   mismatched challenge rejection
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
