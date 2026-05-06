@@ -351,9 +351,6 @@ fn read_bounded_jsonl_line(
     loop {
         let available = reader.fill_buf()?;
         if available.is_empty() {
-            if line.is_empty() {
-                return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
-            }
             return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
         }
 
