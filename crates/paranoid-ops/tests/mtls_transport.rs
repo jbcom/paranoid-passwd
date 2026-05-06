@@ -14,10 +14,11 @@ use openssl::{
 use paranoid_audit::AuditSurface;
 use paranoid_ops::{
     FederalApprovedMode, FederalCryptoProviderEvidence, OPS_MTLS_JSONL_MAX_LINE_BYTES,
-    OPS_SCHEMA_VERSION, OpsActor, OpsActorKind, OpsCommand, OpsCommandEnvelope,
-    OpsMtlsClientConfig, OpsMtlsServerConfig, OpsMtlsTransportError, OpsPolicyContext,
-    OpsPolicyDecision, OpsProfile, OpsSession, OpsTransport, OpsTransportEvidence,
-    VaultOperationAccess, handle_mtls_ops_command_stream, send_ops_command_over_mtls,
+    OPS_SCHEMA_VERSION, OpsActor, OpsActorKind, OpsCommand, OpsCommandEnvelope, OpsMtlsClient,
+    OpsMtlsClientConfig, OpsMtlsServer, OpsMtlsServerConfig, OpsMtlsTransportError,
+    OpsPolicyContext, OpsPolicyDecision, OpsProfile, OpsSession, OpsTransport,
+    OpsTransportEvidence, VaultOperationAccess, handle_mtls_ops_command_stream,
+    send_ops_command_over_mtls,
 };
 use std::{
     io::{BufRead, BufReader, Write},
@@ -33,10 +34,12 @@ fn mtls_jsonl_transport_evaluates_command_with_observed_peer_evidence() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mTLS ops listener");
     let endpoint = format!("mtls://{}", listener.local_addr().expect("listener addr"));
     let server_config = material.server_config();
+    let server_transport = OpsMtlsServer::from_config(&server_config).expect("mTLS ops server");
     let server_context = federal_context(true, true);
     let server = thread::spawn(move || {
         let (stream, _addr) = listener.accept().expect("accept mTLS ops command");
-        handle_mtls_ops_command_stream(stream, &server_config, &server_context)
+        server_transport
+            .handle_stream(stream, &server_context)
             .expect("handle mTLS ops command")
     });
 
@@ -67,9 +70,11 @@ fn mtls_jsonl_transport_evaluates_command_with_observed_peer_evidence() {
     let client_config = material
         .client_config(endpoint)
         .with_timeout(Duration::from_secs(5));
+    let client_transport = OpsMtlsClient::from_config(&client_config).expect("mTLS ops client");
 
-    let client_trace =
-        send_ops_command_over_mtls(&client_config, envelope).expect("client receives trace");
+    let client_trace = client_transport
+        .send(envelope)
+        .expect("client receives trace");
     let server_trace = server.join().expect("server joins");
 
     assert_eq!(client_trace, server_trace);
@@ -176,22 +181,7 @@ fn mtls_jsonl_transport_rejects_oversized_response_line() {
     let endpoint = format!("mtls://{}", listener.local_addr().expect("listener addr"));
     let server_config = material.server_config();
     let server = thread::spawn(move || {
-        let mut builder =
-            SslAcceptor::mozilla_modern_v5(SslMethod::tls_server()).expect("acceptor builder");
-        builder
-            .set_min_proto_version(Some(SslVersion::TLS1_3))
-            .expect("tls version");
-        builder
-            .set_certificate_file(&server_config.server_certificate_path, SslFiletype::PEM)
-            .expect("server cert");
-        builder
-            .set_private_key_file(&server_config.server_private_key_path, SslFiletype::PEM)
-            .expect("server key");
-        builder
-            .set_ca_file(&server_config.client_ca_certificate_path)
-            .expect("server ca");
-        builder.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
-        let acceptor = builder.build();
+        let acceptor = test_acceptor(&server_config);
         let (stream, _addr) = listener.accept().expect("accept mTLS ops command");
         let tls_stream = acceptor.accept(stream).expect("accept tls");
         let mut reader = BufReader::new(tls_stream);
@@ -233,6 +223,56 @@ fn mtls_jsonl_transport_rejects_oversized_response_line() {
     server.join().expect("server joins");
 
     assert!(client_error.to_string().contains("maximum JSONL frame"));
+}
+
+#[test]
+fn mtls_jsonl_transport_rejects_truncated_response_line() {
+    let material = TestMtlsMaterial::new();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mTLS ops listener");
+    let endpoint = format!("mtls://{}", listener.local_addr().expect("listener addr"));
+    let server_config = material.server_config();
+    let server = thread::spawn(move || {
+        let acceptor = test_acceptor(&server_config);
+        let (stream, _addr) = listener.accept().expect("accept mTLS ops command");
+        let tls_stream = acceptor.accept(stream).expect("accept tls");
+        let mut reader = BufReader::new(tls_stream);
+        let mut request_line = String::new();
+        reader
+            .read_line(&mut request_line)
+            .expect("read command request");
+        let mut tls_stream = reader.into_inner();
+        tls_stream
+            .write_all(br#"{"schema_version":1"#)
+            .expect("write truncated response");
+        tls_stream.flush().expect("flush truncated response");
+    });
+
+    let envelope = OpsCommandEnvelope {
+        schema_version: OPS_SCHEMA_VERSION,
+        request_id: "pp.test.request.mtls.transport.truncated".to_string(),
+        operation_id: "pp.test.operation.mtls.transport.truncated".to_string(),
+        profile: OpsProfile::FederalReady,
+        actor: OpsActor::default(),
+        session: OpsSession {
+            session_id: "pp.test.session.mtls.transport.truncated".to_string(),
+            surface: AuditSurface::Ops,
+            transport: OpsTransport::Mtls,
+            transport_evidence: None,
+        },
+        command: OpsCommand::VaultOperation {
+            name: "export".to_string(),
+            access: VaultOperationAccess::Export,
+        },
+    };
+    let client_config = material
+        .client_config(endpoint)
+        .with_timeout(Duration::from_secs(5));
+
+    let client_error = send_ops_command_over_mtls(&client_config, envelope)
+        .expect_err("truncated response fails closed");
+    server.join().expect("server joins");
+
+    assert!(client_error.to_string().contains("without a response"));
 }
 
 #[test]
@@ -422,5 +462,25 @@ fn test_connector(material: &TestMtlsMaterial) -> SslConnector {
         .expect("client key");
     builder.set_ca_file(&material.ca_path).expect("client ca");
     builder.check_private_key().expect("client key check");
+    builder.build()
+}
+
+fn test_acceptor(config: &OpsMtlsServerConfig) -> SslAcceptor {
+    let mut builder =
+        SslAcceptor::mozilla_modern_v5(SslMethod::tls_server()).expect("acceptor builder");
+    builder
+        .set_min_proto_version(Some(SslVersion::TLS1_3))
+        .expect("tls version");
+    builder
+        .set_certificate_file(&config.server_certificate_path, SslFiletype::PEM)
+        .expect("server cert");
+    builder
+        .set_private_key_file(&config.server_private_key_path, SslFiletype::PEM)
+        .expect("server key");
+    builder
+        .set_ca_file(&config.client_ca_certificate_path)
+        .expect("server ca");
+    builder.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+    builder.check_private_key().expect("server key check");
     builder.build()
 }

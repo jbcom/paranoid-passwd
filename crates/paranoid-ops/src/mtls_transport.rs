@@ -11,7 +11,7 @@ use openssl::{
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufRead, BufReader, Read, Write},
-    net::{TcpStream, ToSocketAddrs},
+    net::{SocketAddr, TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -116,59 +116,7 @@ pub fn send_ops_command_over_mtls(
     config: &OpsMtlsClientConfig,
     envelope: OpsCommandEnvelope,
 ) -> Result<OpsCommandTrace, OpsMtlsTransportError> {
-    let host = endpoint_host(config.endpoint.as_str())?;
-    let addresses = socket_addresses_from_endpoint(config.endpoint.as_str())?;
-    let connector = build_mtls_connector(
-        &config.client_certificate_path,
-        &config.client_private_key_path,
-        &config.ca_certificate_path,
-    )?;
-    let request = OpsMtlsCommandRequest::new(envelope);
-    let mut request_line = serde_json::to_vec(&request)?;
-    request_line.push(b'\n');
-
-    let mut failures = Vec::new();
-    for address in addresses {
-        let tcp_stream = match TcpStream::connect_timeout(&address, config.timeout) {
-            Ok(stream) => stream,
-            Err(error) => {
-                failures.push(format!("{address}: tcp connect failed: {error}"));
-                continue;
-            }
-        };
-        tcp_stream.set_read_timeout(Some(config.timeout))?;
-        tcp_stream.set_write_timeout(Some(config.timeout))?;
-
-        let mut tls_stream = match connector.connect(host.as_str(), tcp_stream) {
-            Ok(stream) => stream,
-            Err(error) => {
-                failures.push(format!("{address}: mTLS handshake failed: {error}"));
-                continue;
-            }
-        };
-        tls_stream.write_all(&request_line)?;
-        tls_stream.flush()?;
-
-        let mut reader = BufReader::new(tls_stream);
-        let response_line = read_bounded_jsonl_line(
-            &mut reader,
-            "server closed mTLS command stream without a response",
-            "mTLS command response exceeded maximum JSONL frame length",
-        )?;
-        let response: OpsMtlsCommandResponse = serde_json::from_str(response_line.trim())?;
-        if response.schema_version != OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION {
-            return Err(OpsMtlsTransportError::Protocol(format!(
-                "response schema mismatch: {}",
-                response.schema_version
-            )));
-        }
-        return Ok(response.trace);
-    }
-
-    Err(OpsMtlsTransportError::TlsHandshake(format!(
-        "mTLS command transport failed: {}",
-        failures.join("; ")
-    )))
+    OpsMtlsClient::from_config(config)?.send(envelope)
 }
 
 pub fn handle_mtls_ops_command_stream(
@@ -176,56 +124,157 @@ pub fn handle_mtls_ops_command_stream(
     config: &OpsMtlsServerConfig,
     context: &OpsPolicyContext,
 ) -> Result<OpsCommandTrace, OpsMtlsTransportError> {
-    let acceptor = build_mtls_acceptor(config)?;
-    let tls_stream = acceptor
-        .accept(tcp_stream)
-        .map_err(|error| OpsMtlsTransportError::TlsHandshake(error.to_string()))?;
-    if tls_stream.ssl().verify_result() != X509VerifyResult::OK {
-        return Err(OpsMtlsTransportError::PeerVerification(
-            tls_stream.ssl().verify_result().to_string(),
-        ));
-    }
-    let peer_certificate = tls_stream.ssl().peer_certificate().ok_or_else(|| {
-        OpsMtlsTransportError::PeerVerification(
-            "mTLS client certificate was not presented".to_string(),
-        )
-    })?;
-    let transport_evidence = transport_evidence_from_peer_certificate(&peer_certificate)?;
+    OpsMtlsServer::from_config(config)?.handle_stream(tcp_stream, context)
+}
 
-    let mut reader = BufReader::new(tls_stream);
-    let request_line = read_bounded_jsonl_line(
-        &mut reader,
-        "client closed mTLS command stream without a request",
-        "mTLS command request exceeded maximum JSONL frame length",
-    )?;
-    let request: OpsMtlsCommandRequest = serde_json::from_str(request_line.trim())?;
-    if request.schema_version != OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION {
-        return Err(OpsMtlsTransportError::Protocol(format!(
-            "request schema mismatch: {}",
-            request.schema_version
-        )));
-    }
-    if request.envelope.schema_version != OPS_SCHEMA_VERSION {
-        return Err(OpsMtlsTransportError::Protocol(format!(
-            "ops envelope schema mismatch: {}",
-            request.envelope.schema_version
-        )));
+pub struct OpsMtlsClient {
+    host: String,
+    addresses: Vec<SocketAddr>,
+    timeout: Duration,
+    connector: SslConnector,
+}
+
+impl OpsMtlsClient {
+    pub fn from_config(config: &OpsMtlsClientConfig) -> Result<Self, OpsMtlsTransportError> {
+        Ok(Self {
+            host: endpoint_host(config.endpoint.as_str())?,
+            addresses: socket_addresses_from_endpoint(config.endpoint.as_str())?,
+            timeout: config.timeout,
+            connector: build_mtls_connector(
+                &config.client_certificate_path,
+                &config.client_private_key_path,
+                &config.ca_certificate_path,
+            )?,
+        })
     }
 
-    let mut envelope = request.envelope;
-    let session_id = envelope.session.session_id.clone();
-    let surface = envelope.session.surface;
-    envelope.session = OpsSession::mtls(surface, session_id, transport_evidence);
-    let trace = evaluate_ops_command_envelope(envelope, context).into_trace();
-    let response = OpsMtlsCommandResponse {
-        schema_version: OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION,
-        trace: trace.clone(),
-    };
-    let mut tls_stream = reader.into_inner();
-    serde_json::to_writer(&mut tls_stream, &response)?;
-    tls_stream.write_all(b"\n")?;
-    tls_stream.flush()?;
-    Ok(trace)
+    pub fn send(
+        &self,
+        envelope: OpsCommandEnvelope,
+    ) -> Result<OpsCommandTrace, OpsMtlsTransportError> {
+        let request = OpsMtlsCommandRequest::new(envelope);
+        let mut request_line = serde_json::to_vec(&request)?;
+        request_line.push(b'\n');
+
+        let mut failures = Vec::new();
+        for address in &self.addresses {
+            let tcp_stream = match TcpStream::connect_timeout(address, self.timeout) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    failures.push(format!("{address}: tcp connect failed: {error}"));
+                    continue;
+                }
+            };
+            tcp_stream.set_read_timeout(Some(self.timeout))?;
+            tcp_stream.set_write_timeout(Some(self.timeout))?;
+
+            let mut tls_stream = match self.connector.connect(self.host.as_str(), tcp_stream) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    failures.push(format!("{address}: mTLS handshake failed: {error}"));
+                    continue;
+                }
+            };
+            if tls_stream.ssl().verify_result() != X509VerifyResult::OK {
+                failures.push(format!(
+                    "{address}: mTLS peer verification failed: {}",
+                    tls_stream.ssl().verify_result()
+                ));
+                continue;
+            }
+            tls_stream.write_all(&request_line)?;
+            tls_stream.flush()?;
+
+            let mut reader = BufReader::new(tls_stream);
+            let response_line = read_bounded_jsonl_line(
+                &mut reader,
+                "server closed mTLS command stream without a response",
+                "mTLS command response exceeded maximum JSONL frame length",
+            )?;
+            let response: OpsMtlsCommandResponse = serde_json::from_str(response_line.trim())?;
+            if response.schema_version != OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION {
+                return Err(OpsMtlsTransportError::Protocol(format!(
+                    "response schema mismatch: {}",
+                    response.schema_version
+                )));
+            }
+            return Ok(response.trace);
+        }
+
+        Err(OpsMtlsTransportError::TlsHandshake(format!(
+            "mTLS command transport failed: {}",
+            failures.join("; ")
+        )))
+    }
+}
+
+pub struct OpsMtlsServer {
+    acceptor: SslAcceptor,
+}
+
+impl OpsMtlsServer {
+    pub fn from_config(config: &OpsMtlsServerConfig) -> Result<Self, OpsMtlsTransportError> {
+        Ok(Self {
+            acceptor: build_mtls_acceptor(config)?,
+        })
+    }
+
+    pub fn handle_stream(
+        &self,
+        tcp_stream: TcpStream,
+        context: &OpsPolicyContext,
+    ) -> Result<OpsCommandTrace, OpsMtlsTransportError> {
+        let tls_stream = self
+            .acceptor
+            .accept(tcp_stream)
+            .map_err(|error| OpsMtlsTransportError::TlsHandshake(error.to_string()))?;
+        if tls_stream.ssl().verify_result() != X509VerifyResult::OK {
+            return Err(OpsMtlsTransportError::PeerVerification(
+                tls_stream.ssl().verify_result().to_string(),
+            ));
+        }
+        let peer_certificate = tls_stream.ssl().peer_certificate().ok_or_else(|| {
+            OpsMtlsTransportError::PeerVerification(
+                "mTLS client certificate was not presented".to_string(),
+            )
+        })?;
+        let transport_evidence = transport_evidence_from_peer_certificate(&peer_certificate)?;
+
+        let mut reader = BufReader::new(tls_stream);
+        let request_line = read_bounded_jsonl_line(
+            &mut reader,
+            "client closed mTLS command stream without a request",
+            "mTLS command request exceeded maximum JSONL frame length",
+        )?;
+        let request: OpsMtlsCommandRequest = serde_json::from_str(request_line.trim())?;
+        if request.schema_version != OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION {
+            return Err(OpsMtlsTransportError::Protocol(format!(
+                "request schema mismatch: {}",
+                request.schema_version
+            )));
+        }
+        if request.envelope.schema_version != OPS_SCHEMA_VERSION {
+            return Err(OpsMtlsTransportError::Protocol(format!(
+                "ops envelope schema mismatch: {}",
+                request.envelope.schema_version
+            )));
+        }
+
+        let mut envelope = request.envelope;
+        let session_id = envelope.session.session_id.clone();
+        let surface = envelope.session.surface;
+        envelope.session = OpsSession::mtls(surface, session_id, transport_evidence);
+        let trace = evaluate_ops_command_envelope(envelope, context).into_trace();
+        let response = OpsMtlsCommandResponse {
+            schema_version: OPS_MTLS_JSONL_TRANSPORT_SCHEMA_VERSION,
+            trace: trace.clone(),
+        };
+        let mut tls_stream = reader.into_inner();
+        serde_json::to_writer(&mut tls_stream, &response)?;
+        tls_stream.write_all(b"\n")?;
+        tls_stream.flush()?;
+        Ok(trace)
+    }
 }
 
 fn transport_evidence_from_peer_certificate(
@@ -280,13 +329,16 @@ fn read_bounded_jsonl_line(
 ) -> Result<String, OpsMtlsTransportError> {
     let mut line = Vec::new();
     let bytes_read = reader
-        .take((OPS_MTLS_JSONL_MAX_LINE_BYTES + 1) as u64)
+        .take(OPS_MTLS_JSONL_MAX_LINE_BYTES as u64)
         .read_until(b'\n', &mut line)?;
     if bytes_read == 0 {
         return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
     }
-    if bytes_read > OPS_MTLS_JSONL_MAX_LINE_BYTES || !line.ends_with(b"\n") {
+    if bytes_read == OPS_MTLS_JSONL_MAX_LINE_BYTES && !line.ends_with(b"\n") {
         return Err(OpsMtlsTransportError::Protocol(overrun_message.to_string()));
+    }
+    if !line.ends_with(b"\n") {
+        return Err(OpsMtlsTransportError::Protocol(eof_message.to_string()));
     }
     String::from_utf8(line).map_err(|error| {
         OpsMtlsTransportError::Protocol(format!("mTLS JSONL frame was not UTF-8: {error}"))
