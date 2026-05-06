@@ -20,7 +20,7 @@
 # =================================================================
 
 name: 'paranoid-passwd builder'
-description: 'Run a step inside the repository-owned Wolfi-based toolchain container.'
+description: 'Run a step inside the repository-owned Debian Bookworm Rust toolchain container.'
 
 inputs:
   run:

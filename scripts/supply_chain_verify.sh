@@ -74,17 +74,25 @@ builder="$REPO_ROOT/.github/actions/builder/Dockerfile"
 if [ -f "$builder" ] \
   && rg -q '^# syntax=docker/dockerfile:1\.' "$builder" \
   && rg -q '^FROM .+@sha256:' "$builder" \
+  && rg -q 'rust:1\.95\.0-slim-bookworm@sha256:' "$builder" \
   && rg -q -- '--mount=type=cache' "$builder" \
-  && rg -q 'fontconfig-dev' "$builder" \
-  && rg -q 'openssl-dev' "$builder" \
+  && rg -q 'build-essential' "$builder" \
+  && rg -q 'libfontconfig1-dev' "$builder" \
+  && rg -q 'libssl-dev' "$builder" \
+  && rg -q 'libdbus-1-dev' "$builder" \
+  && rg -q 'libxcursor1' "$builder" \
+  && rg -q 'libxi6' "$builder" \
   && rg -q 'openssl' "$builder" \
-  && rg -q 'pkgconf' "$builder" \
+  && rg -q 'pkg-config' "$builder" \
   && rg -q 'python3' "$builder" \
   && rg -q 'ripgrep' "$builder" \
   && rg -q 'imagemagick' "$builder" \
-  && rg -q 'xvfb-run' "$builder" \
-  && rg -q 'RUST_APK_PACKAGE=rust-1\.95' "$builder" \
-  && rg -q 'RUST_APK_VERSION=1\.95\.0-r0' "$builder" \
+  && rg -q 'xvfb' "$builder" \
+  && rg -q 'rustup component add rustfmt clippy' "$builder" \
+  && rg -q 'rustc --version | grep -F "1\.95\.0"' "$builder" \
+  && rg -q 'cargo-fmt' "$builder" \
+  && rg -q 'cargo fmt --version' "$builder" \
+  && rg -q 'cargo clippy --version' "$builder" \
   && rg -q 'SPHINX_RUSTDOCGEN_VERSION=1\.1\.0' "$builder" \
   && rg -q 'cargo install --locked --root /usr/local' "$builder" \
   && rg -q 'sphinx-rustdocgen@' "$builder" \

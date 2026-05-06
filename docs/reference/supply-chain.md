@@ -10,10 +10,12 @@ The supply-chain model is still builder-first, but the toolchain has changed.
 
 The custom GitHub Action builder image is the repository trust root for:
 
-- a digest-pinned Wolfi base image
-- pinned Rust `1.95.x` and pinned `tox`
-- Rust toolchain installation
+- a digest-pinned Debian Bookworm slim Rust base image
+- pinned Rust `1.95.0` and pinned `tox`
+- Rust toolchain installation, including `rustfmt` and Clippy
 - OpenSSL development headers
+- a conservative Linux glibc floor for release artifacts
+- Xvfb and the Xlib runtime libraries required for GUI screenshot smoke tests
 - Sphinx and Python docs tooling
 - `cargo` build / test / clippy / fmt runs
 - docs-site builds from the repository root
@@ -35,13 +37,13 @@ The release pipeline now focuses on:
 - checksums
 - provenance / attestations
 - package-manager metadata
-- optional Wolfi packaging
+- repo-owned package metadata
 
 Before attestation, the release workflow now validates:
 
 - per-platform archive smoke tests
 - macOS GUI `.dmg` payload validation and host smoke tests
-- Debian package payload validation and Linux host smoke tests for `.deb` artifacts
+- Debian package payload validation and Linux host smoke tests for `.deb` artifacts on Ubuntu 24.04
 - aggregate checksums
 - Homebrew / Scoop / Chocolatey manifest generation
 - the docs-hosted `install.sh` flow against a local artifact server

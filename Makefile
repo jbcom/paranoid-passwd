@@ -12,9 +12,13 @@ DOCKER_BIN_DIR ?=
 RELEASE_VERSION ?= $(shell sed -n 's/^version = "\(.*\)"$$/\1/p' Cargo.toml | head -n 1)
 DIST_DIR ?= dist/release
 BUILDER_CONTEXT_HASH := $(shell if command -v shasum >/dev/null 2>&1; then cat .github/actions/builder/Dockerfile .github/actions/builder/entrypoint.sh | shasum -a 256 | awk '{print substr($$1,1,12)}'; else cat .github/actions/builder/Dockerfile .github/actions/builder/entrypoint.sh | sha256sum | awk '{print substr($$1,1,12)}'; fi)
-BUILDER_IMAGE ?= paranoid-passwd-builder:$(BUILDER_CONTEXT_HASH)
 HOST_OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 HOST_ARCH := $(shell uname -m | sed -e 's/^x86_64$$/amd64/' -e 's/^aarch64$$/arm64/')
+BUILDER_PLATFORM ?= linux/$(HOST_ARCH)
+BUILDER_PLATFORM_TAG := $(subst /,-,$(BUILDER_PLATFORM))
+BUILDER_TARGET_ARCH := $(lastword $(subst /, ,$(BUILDER_PLATFORM)))
+BUILDER_IMAGE ?= paranoid-passwd-builder:$(BUILDER_CONTEXT_HASH)-$(BUILDER_PLATFORM_TAG)
+RELEASE_EMULATE_ARCH ?= $(BUILDER_TARGET_ARCH)
 HOST_EXT := $(if $(filter windows,$(HOST_OS)),.exe,)
 HOST_ARCHIVE := $(if $(filter windows,$(HOST_OS)),zip,tar.gz)
 HOST_ARTIFACT := $(DIST_DIR)/paranoid-passwd-$(RELEASE_VERSION)-$(HOST_OS)-$(HOST_ARCH).$(HOST_ARCHIVE)
@@ -104,7 +108,7 @@ test-gui-e2e-emulate: ## Run the Linux GUI workflow harness through the custom b
 _test-gui-e2e-emulate: _builder-image
 	mkdir -p "$(DIST_DIR)"
 	@if [ "$(GUI_E2E_CLEAN)" = "1" ]; then PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(GUI_E2E_TARGET_VOLUME)" >/dev/null 2>&1 || true; fi
-	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" run --rm --user root --entrypoint bash \
+	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" run --rm --platform "$(BUILDER_PLATFORM)" --user root --entrypoint bash \
 		-v "$$(pwd)":/github/workspace \
 		--mount type=volume,source="$(GUI_E2E_TARGET_VOLUME)",target=/cargo-target \
 		-w /github/workspace \
@@ -171,7 +175,7 @@ builder-image: ## Build or reuse the local builder image keyed to the builder co
 
 _builder-image:
 	@if [ -z "$(DOCKER)" ] || [ "$(DOCKER_READY)" != "1" ]; then cat "$(LOCAL_CONFIG_DIR)/paranoid-local.summary"; echo "Docker is not ready; start Docker Desktop or install a Docker-compatible runtime, then run make configure."; exit 2; fi
-	@PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" image inspect "$(BUILDER_IMAGE)" >/dev/null 2>&1 || PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" build -t "$(BUILDER_IMAGE)" .github/actions/builder
+	@PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" image inspect "$(BUILDER_IMAGE)" >/dev/null 2>&1 || PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" build --platform "$(BUILDER_PLATFORM)" -t "$(BUILDER_IMAGE)" .github/actions/builder
 
 ci-emulate: ## Run the CI target through the custom builder image
 	@bash scripts/configure_local_toolchain.sh --quiet
@@ -179,7 +183,7 @@ ci-emulate: ## Run the CI target through the custom builder image
 
 _ci-emulate: _builder-image
 	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(CI_EMULATE_TARGET_VOLUME)" >/dev/null 2>&1 || true
-	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" run --rm --user root --entrypoint bash \
+	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" run --rm --platform "$(BUILDER_PLATFORM)" --user root --entrypoint bash \
 		-v "$$(pwd)":/github/workspace \
 		--mount type=volume,source="$(CI_EMULATE_TARGET_VOLUME)",target=/cargo-target \
 		-w /github/workspace \
@@ -218,14 +222,14 @@ endif
 release-validate: ## Validate a populated release dist dir, generate package manifests, and smoke-test install.sh
 	bash scripts/release_validate.sh "$(RELEASE_VERSION)" "$(DIST_DIR)"
 
-release-emulate: ## Build and smoke-test the linux-amd64 CLI and GUI release paths through the custom builder image
+release-emulate: ## Build and smoke-test the Linux CLI and GUI release paths through the custom builder image
 	@bash scripts/configure_local_toolchain.sh --quiet
 	@$(MAKE) _release-emulate
 
 _release-emulate: _builder-image
 	mkdir -p "$(DIST_DIR)"
 	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(RELEASE_EMULATE_TARGET_VOLUME)" >/dev/null 2>&1 || true
-	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" run --rm --user root --entrypoint bash \
+	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" run --rm --platform "$(BUILDER_PLATFORM)" --user root --entrypoint bash \
 		-v "$$(pwd)":/github/workspace \
 		--mount type=volume,source="$(RELEASE_EMULATE_TARGET_VOLUME)",target=/cargo-target \
 		-w /github/workspace \
@@ -234,7 +238,7 @@ _release-emulate: _builder-image
 		-e PARANOID_GUI_BUILD_COMMIT="$(COMMIT)" \
 		-e PARANOID_GUI_BUILD_DATE="$(DATE)" \
 		"$(BUILDER_IMAGE)" \
-		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0; bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" tar.gz \"$(DIST_DIR)\" && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd-$(RELEASE_VERSION)-linux-amd64.tar.gz\" && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" deb \"$(DIST_DIR)\" && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd_$(RELEASE_VERSION)_amd64.deb\" && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" tar.gz \"$(DIST_DIR)\" paranoid-passwd-gui paranoid-gui && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-linux-amd64.tar.gz\" paranoid-passwd-gui && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"\" deb \"$(DIST_DIR)\" paranoid-passwd-gui paranoid-gui && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux amd64 \"$(DIST_DIR)/paranoid-passwd-gui_$(RELEASE_VERSION)_amd64.deb\" paranoid-passwd-gui'"
+		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0; bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"\" tar.gz \"$(DIST_DIR)\" && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"$(DIST_DIR)/paranoid-passwd-$(RELEASE_VERSION)-linux-$(RELEASE_EMULATE_ARCH).tar.gz\" && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"\" deb \"$(DIST_DIR)\" && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"$(DIST_DIR)/paranoid-passwd_$(RELEASE_VERSION)_$(RELEASE_EMULATE_ARCH).deb\" && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"\" tar.gz \"$(DIST_DIR)\" paranoid-passwd-gui paranoid-gui && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"$(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-linux-$(RELEASE_EMULATE_ARCH).tar.gz\" paranoid-passwd-gui && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"\" deb \"$(DIST_DIR)\" paranoid-passwd-gui paranoid-gui && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"$(DIST_DIR)/paranoid-passwd-gui_$(RELEASE_VERSION)_$(RELEASE_EMULATE_ARCH).deb\" paranoid-passwd-gui'"
 	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(RELEASE_EMULATE_TARGET_VOLUME)" >/dev/null 2>&1 || true
 
 clean: ## Remove Rust and docs build artifacts

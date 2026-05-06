@@ -99,4 +99,5 @@ linkcheck_timeout = 10
 linkcheck_retries = 2
 linkcheck_ignore = [
     r"https://paranoid-passwd\.com/.*",
+    r"https://genai\.owasp\.org/2025/12/09/owasp-genai-security-project-releases-top-10-risks-and-mitigations-for-agentic-ai-security/",
 ]
