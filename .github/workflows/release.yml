@@ -540,7 +540,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Linux GUI smoke dependencies
-        if: runner.os == 'Linux' && matrix.runnable == true
+        if: runner.os == 'Linux' && matrix.runnable == true && matrix.product_name == 'paranoid-passwd-gui'
         shell: bash
         run: |
           sudo apt-get update

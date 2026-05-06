@@ -37,10 +37,15 @@ EXPECTED_ASSETS=(
   "paranoid-passwd-gui_${VERSION}_arm64.deb"
 )
 
-mapfile -t ACTUAL_ASSETS < <(
-  gh release view "${TAG}" --repo "${REPO}" --json assets --jq '.assets[].name' | LC_ALL=C sort
-)
-mapfile -t EXPECTED_SORTED < <(printf '%s\n' "${EXPECTED_ASSETS[@]}" | LC_ALL=C sort)
+ACTUAL_ASSETS=()
+while IFS= read -r asset; do
+  ACTUAL_ASSETS+=("${asset}")
+done < <(gh release view "${TAG}" --repo "${REPO}" --json assets --jq '.assets[].name' | LC_ALL=C sort)
+
+EXPECTED_SORTED=()
+while IFS= read -r asset; do
+  EXPECTED_SORTED+=("${asset}")
+done < <(printf '%s\n' "${EXPECTED_ASSETS[@]}" | LC_ALL=C sort)
 
 if [ "${#ACTUAL_ASSETS[@]}" -ne "${#EXPECTED_SORTED[@]}" ]; then
   printf 'unexpected asset count for %s: expected %d, got %d\n' \
@@ -104,11 +109,14 @@ verify_checksum() {
   local checksum_line
 
   checksum_line="$(awk -v artifact="${artifact}" '$2 == artifact { print; found = 1 } END { if (!found) exit 1 }' "${tmpdir}/checksums.txt")"
-  if command -v sha256sum >/dev/null 2>&1; then
-    printf '%s\n' "${checksum_line}" | sha256sum -c -
-  else
-    printf '%s\n' "${checksum_line}" | shasum -a 256 -c -
-  fi
+  (
+    cd "${tmpdir}"
+    if command -v sha256sum >/dev/null 2>&1; then
+      printf '%s\n' "${checksum_line}" | sha256sum -c -
+    else
+      printf '%s\n' "${checksum_line}" | shasum -a 256 -c -
+    fi
+  )
 }
 
 for artifact in "${EXPECTED_ARCHIVES[@]}"; do
