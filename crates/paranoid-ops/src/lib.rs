@@ -573,6 +573,11 @@ pub fn record_ops_request<'a>(
             .attributes
             .insert("vault_access".to_string(), access.as_str().to_string());
     }
+    if let OpsCommand::VaultUnlock { method } = &envelope.command {
+        event
+            .attributes
+            .insert("unlock_method".to_string(), method.as_str().to_string());
+    }
     event
 }
 
@@ -608,6 +613,11 @@ pub fn record_ops_response<'a>(
         event
             .attributes
             .insert("vault_access".to_string(), access.as_str().to_string());
+    }
+    if let OpsCommand::VaultUnlock { method } = &envelope.command {
+        event
+            .attributes
+            .insert("unlock_method".to_string(), method.as_str().to_string());
     }
     event
 }
@@ -1612,6 +1622,39 @@ mod tests {
                 .get("vault_operation")
                 .map(String::as_str),
             Some("mutate_item")
+        );
+    }
+
+    #[test]
+    fn vault_unlock_events_include_unlock_method_metadata() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Vault,
+            OpsProfile::Default,
+            OpsCommand::VaultUnlock {
+                method: VaultUnlockMethod::DeviceBound,
+            },
+        );
+        let decision = OpsPolicyDecision::Allow {
+            reason: "test".to_string(),
+        };
+        let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
+
+        record_ops_request(&mut trail, &envelope);
+        record_ops_response(&mut trail, &envelope, &decision);
+
+        assert_eq!(
+            trail.events()[0]
+                .attributes
+                .get("unlock_method")
+                .map(String::as_str),
+            Some("device_bound")
+        );
+        assert_eq!(
+            trail.events()[1]
+                .attributes
+                .get("unlock_method")
+                .map(String::as_str),
+            Some("device_bound")
         );
     }
 

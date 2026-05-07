@@ -125,6 +125,9 @@ The CLI exposes the first automation surface:
 - `vault --audit-jsonl PATH <subcommand>` wraps headless vault subcommands in typed ops
   request/response audit events
 - `vault seal-status` reports the local vault seal posture without decrypting item payloads
+- `vault seal-status --probe-providers` performs explicit provider availability checks before
+  marking an auto-unseal provider available; device-bound probes verify the secure-storage unwrap
+  material against the keyslot check blob without decrypting vault items
 - `vault federal-evidence` emits the same federal startup evidence from the vault namespace
 
 The native TUI and GUI now evaluate local vault actions through the same typed ops protocol before
@@ -133,9 +136,11 @@ mutate, keyslot, and export flows. TUI launches inherit `vault --audit-jsonl` / 
 policy, and the GUI exposes the same durable local JSONL sink controls for deterministic automation.
 The mTLS process-boundary path now has a live JSONL command transport in `paranoid-ops`; the server
 side evaluates the received envelope only after binding the session to the observed mTLS peer
-certificate, not to client-asserted evidence. The remaining implementation work is additional
-seal-provider health checks, broader PTY coverage over those same command envelopes, and
-release-grade packaging evidence.
+certificate, not to client-asserted evidence. The seal-provider health path now distinguishes
+metadata-only posture from explicit provider probes: configured device-bound slots remain
+`configured` until a probe verifies secure-storage availability, and only then can posture claim
+`auto_unseal_available=true`. The remaining implementation work is broader PTY coverage over those
+same command envelopes and release-grade packaging evidence.
 
 The seal model stays local-first but borrows the operational shape of Vault: a sealed vault can read
 metadata needed to decide how to unlock, but it cannot decrypt stored item payloads. Auto-unseal

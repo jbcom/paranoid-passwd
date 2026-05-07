@@ -595,8 +595,8 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_cli.rs",
-                "let (vault_exists, posture) = seal_posture_for_path(&invocation.open_options.path);",
-                "vault seal-status command evaluates seal posture",
+                "seal_posture_for_path(&invocation.open_options.path, provider_probe);",
+                "vault seal-status command evaluates seal posture with explicit provider-probe mode",
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_cli.rs",

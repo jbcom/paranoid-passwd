@@ -91,6 +91,7 @@ Local vault:
 export PARANOID_MASTER_PASSWORD='correct horse battery staple'
 cargo run -p paranoid-cli -- vault init
 cargo run -p paranoid-cli -- vault seal-status
+cargo run -p paranoid-cli -- vault seal-status --probe-providers
 cargo run -p paranoid-cli -- vault federal-evidence
 cargo run -p paranoid-cli -- vault --audit-jsonl vault-audit.jsonl keyslots
 cargo run -p paranoid-cli -- vault generate-store --title GitHub --username jon@example.com --length 24

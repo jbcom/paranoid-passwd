@@ -2,7 +2,8 @@ use paranoid_audit::{AuditEvent, AuditSurface};
 use paranoid_ops::{
     FederalApprovedMode, FederalCryptoProviderEvidence, OPS_SCHEMA_VERSION, OpsActor, OpsCommand,
     OpsCommandEnvelope, OpsCommandTrace, OpsPolicyContext, OpsProfile, OpsSession, OpsTransport,
-    OpsTransportEvidence, VaultOperationAccess, evaluate_ops_command_envelope,
+    OpsTransportEvidence, VaultOperationAccess, VaultSealPosture, VaultSealProviderEvidence,
+    VaultSealProviderKind, VaultSealState, VaultUnlockMethod, evaluate_ops_command_envelope,
 };
 
 #[test]
@@ -44,6 +45,38 @@ fn tui_keyslot_required_audit_denial_jsonl_fixture_is_stable() {
     assert_jsonl_fixture(
         &trace.audit_events,
         include_str!("fixtures/ops_trace_tui_keyslot_required_audit_denied.audit.jsonl"),
+    );
+}
+
+#[test]
+fn tui_device_bound_unlock_available_provider_trace_fixture_is_stable() {
+    let trace = fixture_trace(
+        "tui.device_unlock",
+        AuditSurface::Tui,
+        OpsProfile::Default,
+        OpsCommand::VaultUnlock {
+            method: VaultUnlockMethod::DeviceBound,
+        },
+        default_context(false, false).with_seal_posture(VaultSealPosture::from_providers(
+            VaultSealState::Sealed,
+            vec![
+                VaultSealProviderEvidence::configured(
+                    "password",
+                    VaultSealProviderKind::PasswordRecovery,
+                    "vault_header",
+                ),
+                VaultSealProviderEvidence::available(
+                    "device",
+                    VaultSealProviderKind::DeviceBound,
+                    "device_provider_health_check",
+                ),
+            ],
+        )),
+    );
+
+    assert_fixture(
+        &trace,
+        include_str!("fixtures/ops_trace_tui_device_bound_unlock_allowed.json"),
     );
 }
 

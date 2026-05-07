@@ -358,6 +358,7 @@ t_recovery_paths() {
     local device_out=""
     local cert_out=""
     local keyslots=""
+    local seal_probe=""
     local inspect_out=""
     local rotate_out=""
 
@@ -382,6 +383,22 @@ t_recovery_paths() {
     contains "$keyslots" "$MNEMONIC_SLOT_ID"$'\tmnemonic_recovery' || return 1
     contains "$keyslots" "$DEVICE_SLOT_ID"$'\tdevice_bound' || return 1
     contains "$keyslots" "$CERT_SLOT_ID"$'\tcertificate_wrapped' || return 1
+
+    seal_probe="$(source_vault seal-status --probe-providers)"
+    DEVICE_SLOT_ID="$DEVICE_SLOT_ID" python3 -c '
+import json
+import os
+import sys
+
+data = json.load(sys.stdin)
+seal = data["seal"]
+device_id = os.environ["DEVICE_SLOT_ID"]
+device = next(provider for provider in seal["providers"] if provider["provider_id"] == device_id)
+assert device["kind"] == "device_bound"
+assert device["status"] == "available"
+assert device["evidence_source"] == "device_provider_health_check"
+assert seal["auto_unseal_available"] is True
+' <<<"$seal_probe"
 
     inspect_out="$(source_vault inspect-keyslot --id "$CERT_SLOT_ID")"
     contains "$inspect_out" "label"$'\t'"laptop" || return 1

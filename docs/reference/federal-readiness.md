@@ -90,6 +90,7 @@ paranoid-passwd --cli --federal-ready --audit-jsonl audit.jsonl --length 32
 paranoid-passwd vault --audit-jsonl vault-audit.jsonl keyslots
 paranoid-passwd vault federal-evidence
 paranoid-passwd vault seal-status
+paranoid-passwd vault seal-status --probe-providers
 ```
 
 ## Crypto Disposition
@@ -141,6 +142,9 @@ and hash-chain evidence.
   certificate-wrapped, and future external auto-unseal paths
 - posture reporting that distinguishes configured auto-unseal from confirmed provider availability
   so evidence does not overstate what the local process has actually checked
+- an explicit provider-probe path for seal status; metadata-only reports keep device-bound slots at
+  `configured`, while `seal-status --probe-providers` marks a device-bound provider `available` only
+  after secure storage returns the unwrap material and the vault keyslot check blob verifies
 
 `paranoid-audit` now provides:
 
