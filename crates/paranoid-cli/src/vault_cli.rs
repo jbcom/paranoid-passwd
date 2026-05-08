@@ -1,6 +1,6 @@
 use paranoid_audit::{
-    AuditEvent, AuditSinkHealth, AuditSurface, assess_optional_jsonl_file_audit_sink,
-    write_events_jsonl,
+    AuditEvent, AuditSinkHealth, AuditSurface, assess_external_audit_device_from_environment,
+    assess_optional_jsonl_file_audit_sink, write_events_jsonl,
 };
 use paranoid_core::{CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, VERSION};
 use paranoid_ops::{
@@ -29,6 +29,7 @@ use std::{
 use crate::vault_tui;
 
 const EX_POLICY_DENY: i32 = 6;
+const EX_POLICY_CHALLENGE: i32 = 7;
 
 pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
     let invocation = parse_vault_args(args)?;
@@ -1185,16 +1186,27 @@ fn evaluate_vault_command_policy(
                 audit_sink_health,
                 evaluation.audit_events.as_slice(),
             )?;
-            if evaluation.is_allowed() {
-                return Ok(None);
+            match &evaluation.decision {
+                OpsPolicyDecision::Allow { .. } => return Ok(None),
+                OpsPolicyDecision::Challenge { .. } => {
+                    print_vault_policy_challenge_json(
+                        &evaluation.envelope.operation_id,
+                        &evaluation.decision,
+                        audit_sink_health,
+                        evaluation.audit_events.as_slice(),
+                    )?;
+                    return Ok(Some(EX_POLICY_CHALLENGE));
+                }
+                OpsPolicyDecision::Deny { .. } => {
+                    print_vault_policy_denial_json(
+                        &evaluation.envelope.operation_id,
+                        &evaluation.decision,
+                        audit_sink_health,
+                        evaluation.audit_events.as_slice(),
+                    )?;
+                    return Ok(Some(EX_POLICY_DENY));
+                }
             }
-            print_vault_policy_denial_json(
-                &evaluation.envelope.operation_id,
-                &evaluation.decision,
-                audit_sink_health,
-                evaluation.audit_events.as_slice(),
-            )?;
-            return Ok(Some(EX_POLICY_DENY));
         }
         Ok(None)
     } else {
@@ -1213,12 +1225,14 @@ fn vault_ops_policy_context(
     audit_sink_health: &AuditSinkHealth,
     seal_posture: Option<VaultSealPosture>,
 ) -> OpsPolicyContext {
+    let external_audit_sink_health = assess_external_audit_device_from_environment();
     OpsPolicyContext {
         profile: invocation.profile,
         audit_sink_required: invocation.audit_jsonl.is_some()
             || invocation.require_audit_sink
             || invocation.profile == OpsProfile::FederalReady,
-        audit_sink_available: audit_sink_health.is_available(),
+        audit_sink_available: audit_sink_health.is_available()
+            || external_audit_sink_health.is_available(),
         crypto_provider: paranoid_ops::FederalCryptoProviderEvidence::collect_from_environment(),
         seal_posture,
     }
@@ -1270,6 +1284,29 @@ fn print_vault_policy_denial_json(
         "operation_id": operation_id,
         "status": "error",
         "error_kind": "policy_denied",
+        "policy_decision": decision,
+        "audit_sink": audit_sink,
+        "audit_events": audit_events,
+    });
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer_pretty(&mut handle, &report).map_err(io::Error::other)?;
+    writeln!(handle)?;
+    handle.flush()
+}
+
+fn print_vault_policy_challenge_json(
+    operation_id: &str,
+    decision: &OpsPolicyDecision,
+    audit_sink: &AuditSinkHealth,
+    audit_events: &[AuditEvent],
+) -> io::Result<()> {
+    let report = serde_json::json!({
+        "schema_version": paranoid_audit::AUDIT_SCHEMA_VERSION,
+        "operation": "vault",
+        "operation_id": operation_id,
+        "status": "challenge_required",
+        "error_kind": "policy_challenge",
         "policy_decision": decision,
         "audit_sink": audit_sink,
         "audit_events": audit_events,

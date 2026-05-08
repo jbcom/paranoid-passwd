@@ -690,6 +690,27 @@ pub fn record_ops_response<'a>(
     event
         .attributes
         .insert("decision".to_string(), decision.status().to_string());
+    match decision {
+        OpsPolicyDecision::Allow { .. } => {}
+        OpsPolicyDecision::Challenge {
+            required_actions, ..
+        } => {
+            event.attributes.insert(
+                "required_actions".to_string(),
+                serde_json::to_string(required_actions)
+                    .expect("required action strings serialize to JSON"),
+            );
+        }
+        OpsPolicyDecision::Deny {
+            missing_controls, ..
+        } => {
+            event.attributes.insert(
+                "missing_controls".to_string(),
+                serde_json::to_string(missing_controls)
+                    .expect("missing control strings serialize to JSON"),
+            );
+        }
+    }
     record_command_attributes(event, &envelope.command);
     event
 }
