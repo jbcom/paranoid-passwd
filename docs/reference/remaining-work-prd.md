@@ -80,18 +80,17 @@ Ship a local-first password manager and generator whose implementation, release 
 ## Next Comprehensive PR Boundary
 
 The current ops/audit work adds typed command envelopes, allow/challenge/deny policy, JSONL audit
-sinks with writable health evidence, external audit-device posture, seal-state primitives, and a
-federal-ready startup evidence path. Headless vault CLI commands, native TUI actions, and native GUI
-automation now share that protocol for covered vault operations rather than drifting back into
-UI-local patches. The next architecture boundary extends the same model into mTLS external
-process-boundary transport implementation behind the pinned command-fixture contract, seal /
-auto-unseal provider policy, and broader assessor fixtures.
+sinks with writable health evidence, external audit-device posture, seal-state primitives, explicit
+seal-provider availability probes, an mTLS process-boundary transport, and a federal-ready startup
+evidence path. Headless vault CLI commands, native TUI actions, and native GUI automation now share
+that protocol for covered vault operations rather than drifting back into UI-local patches. The next
+architecture boundary extends the same model into broader command coverage, federal-mode recovery
+disposition, and release-grade assessor fixtures.
 
 That PR should be scoped around:
 
 - CLI/TUI/GUI JSONL fixtures and additional automation output over the typed ops protocol
-- seal / auto-unseal provider policy
-- mTLS external process-boundary transport implementation and policy evidence
+- broader seal / auto-unseal provider policy and recovery-mode disposition
 - additional federal-ready profile fixtures and configured-provider evidence
 - docs and tests that make the trust boundary reviewable
 
@@ -394,9 +393,10 @@ This PRD is complete when all of the following are true:
 
 ## Immediate Next Actions
 
-1. add external process-boundary command fixtures and extend stable JSON/JSONL traces as new
-   command families are covered
-2. expand seal / auto-unseal provider policy checks and health evidence
+1. extend stable JSON/JSONL traces as additional command families are covered across CLI, TUI, GUI,
+   and mTLS process-boundary sessions
+2. expand federal-mode recovery disposition and seal / auto-unseal provider policy beyond the
+   explicit device-provider probe now in place
 3. run the first canary release from `main` after those architecture boundaries are stable
 4. choose the Windows installer technology and macOS signing/notarization path
 5. update this PRD as those decisions are made

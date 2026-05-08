@@ -1,0 +1,69 @@
+{
+  "audit_events": [
+    {
+      "action": "vault_unlock.request",
+      "attributes": {
+        "command": "vault_unlock",
+        "profile": "default",
+        "request_id": "pp.fixture.request.tui.device_unlock",
+        "session_surface": "tui",
+        "session_transport": "in_process",
+        "unlock_method": "device_bound"
+      },
+      "event_id": "pp.fixture.operation.tui.device_unlock.event.1",
+      "message": "typed ops command request accepted for policy evaluation",
+      "occurred_at_epoch_ms": 0,
+      "operation_id": "pp.fixture.operation.tui.device_unlock",
+      "outcome": "started",
+      "schema_version": 1,
+      "sequence": 1,
+      "severity": "info",
+      "subject": "vault_operation",
+      "surface": "ops"
+    },
+    {
+      "action": "vault_unlock.response",
+      "attributes": {
+        "decision": "allow",
+        "request_id": "pp.fixture.request.tui.device_unlock",
+        "session_surface": "tui",
+        "session_transport": "in_process",
+        "unlock_method": "device_bound"
+      },
+      "event_id": "pp.fixture.operation.tui.device_unlock.event.2",
+      "message": "typed ops command policy response emitted",
+      "occurred_at_epoch_ms": 0,
+      "operation_id": "pp.fixture.operation.tui.device_unlock",
+      "outcome": "success",
+      "schema_version": 1,
+      "sequence": 2,
+      "severity": "notice",
+      "subject": "vault_operation",
+      "surface": "ops"
+    }
+  ],
+  "decision": {
+    "decision": "allow",
+    "reason": "default profile permits local in-process operation"
+  },
+  "envelope": {
+    "actor": {
+      "actor_id": "local_operator",
+      "kind": "local_operator"
+    },
+    "command": {
+      "kind": "vault_unlock",
+      "method": "device_bound"
+    },
+    "operation_id": "pp.fixture.operation.tui.device_unlock",
+    "profile": "default",
+    "request_id": "pp.fixture.request.tui.device_unlock",
+    "schema_version": 1,
+    "session": {
+      "session_id": "pp.fixture.session.tui.device_unlock",
+      "surface": "tui",
+      "transport": "in_process"
+    }
+  },
+  "schema_version": 1
+}

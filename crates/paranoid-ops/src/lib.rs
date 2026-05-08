@@ -247,7 +247,9 @@ impl VaultOperationAccess {
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum OpsCommand {
     GeneratePassword,
-    VaultSealStatus,
+    VaultSealStatus {
+        probe_providers: bool,
+    },
     VaultUnlock {
         method: VaultUnlockMethod,
     },
@@ -262,7 +264,7 @@ impl OpsCommand {
     pub fn name(&self) -> &'static str {
         match self {
             Self::GeneratePassword => "generate_password",
-            Self::VaultSealStatus => "vault_seal_status",
+            Self::VaultSealStatus { .. } => "vault_seal_status",
             Self::VaultUnlock { .. } => "vault_unlock",
             Self::VaultOperation { .. } => "vault_operation",
             Self::FederalEvidence => "federal_evidence",
@@ -272,9 +274,9 @@ impl OpsCommand {
     pub fn subject(&self) -> AuditSubject {
         match self {
             Self::GeneratePassword => AuditSubject::PasswordGeneration,
-            Self::VaultSealStatus | Self::VaultUnlock { .. } | Self::VaultOperation { .. } => {
-                AuditSubject::VaultOperation
-            }
+            Self::VaultSealStatus { .. }
+            | Self::VaultUnlock { .. }
+            | Self::VaultOperation { .. } => AuditSubject::VaultOperation,
             Self::FederalEvidence => AuditSubject::ReleaseAssurance,
         }
     }
@@ -287,7 +289,7 @@ impl OpsCommand {
         match self {
             Self::GeneratePassword | Self::VaultUnlock { .. } => true,
             Self::VaultOperation { access, .. } => access.requires_fips_evidence(),
-            Self::VaultSealStatus | Self::FederalEvidence => false,
+            Self::VaultSealStatus { .. } | Self::FederalEvidence => false,
         }
     }
 }
@@ -565,14 +567,7 @@ pub fn record_ops_request<'a>(
     event
         .attributes
         .insert("command".to_string(), envelope.command.name().to_string());
-    if let OpsCommand::VaultOperation { name, access } = &envelope.command {
-        event
-            .attributes
-            .insert("vault_operation".to_string(), name.clone());
-        event
-            .attributes
-            .insert("vault_access".to_string(), access.as_str().to_string());
-    }
+    record_command_attributes(event, &envelope.command);
     event
 }
 
@@ -601,7 +596,12 @@ pub fn record_ops_response<'a>(
     event
         .attributes
         .insert("decision".to_string(), decision.status().to_string());
-    if let OpsCommand::VaultOperation { name, access } = &envelope.command {
+    record_command_attributes(event, &envelope.command);
+    event
+}
+
+fn record_command_attributes(event: &mut AuditEvent, command: &OpsCommand) {
+    if let OpsCommand::VaultOperation { name, access } = command {
         event
             .attributes
             .insert("vault_operation".to_string(), name.clone());
@@ -609,7 +609,16 @@ pub fn record_ops_response<'a>(
             .attributes
             .insert("vault_access".to_string(), access.as_str().to_string());
     }
-    event
+    if let OpsCommand::VaultSealStatus { probe_providers } = command {
+        event
+            .attributes
+            .insert("probe_providers".to_string(), probe_providers.to_string());
+    }
+    if let OpsCommand::VaultUnlock { method } = command {
+        event
+            .attributes
+            .insert("unlock_method".to_string(), method.as_str().to_string());
+    }
 }
 
 fn record_session_attributes(event: &mut AuditEvent, envelope: &OpsCommandEnvelope) {
@@ -1546,7 +1555,9 @@ mod tests {
         let envelope = OpsCommandEnvelope::local(
             AuditSurface::Cli,
             OpsProfile::Default,
-            OpsCommand::VaultSealStatus,
+            OpsCommand::VaultSealStatus {
+                probe_providers: false,
+            },
         );
         let decision = OpsPolicyDecision::Allow {
             reason: "test".to_string(),
@@ -1612,6 +1623,72 @@ mod tests {
                 .get("vault_operation")
                 .map(String::as_str),
             Some("mutate_item")
+        );
+    }
+
+    #[test]
+    fn vault_seal_status_events_include_probe_provider_metadata() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Vault,
+            OpsProfile::Default,
+            OpsCommand::VaultSealStatus {
+                probe_providers: true,
+            },
+        );
+        let decision = OpsPolicyDecision::Allow {
+            reason: "test".to_string(),
+        };
+        let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
+
+        record_ops_request(&mut trail, &envelope);
+        record_ops_response(&mut trail, &envelope, &decision);
+
+        assert_eq!(
+            trail.events()[0]
+                .attributes
+                .get("probe_providers")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            trail.events()[1]
+                .attributes
+                .get("probe_providers")
+                .map(String::as_str),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn vault_unlock_events_include_unlock_method_metadata() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Vault,
+            OpsProfile::Default,
+            OpsCommand::VaultUnlock {
+                method: VaultUnlockMethod::DeviceBound,
+            },
+        );
+        let decision = OpsPolicyDecision::Allow {
+            reason: "test".to_string(),
+        };
+        let mut trail = AuditTrail::for_operation(envelope.operation_id.clone());
+
+        record_ops_request(&mut trail, &envelope);
+        record_ops_response(&mut trail, &envelope, &decision);
+
+        assert_eq!(
+            trail.events()[0]
+                .attributes
+                .get("unlock_method")
+                .map(String::as_str),
+            Some("device_bound")
+        );
+        assert_eq!(
+            trail.events()[1]
+                .attributes
+                .get("unlock_method")
+                .map(String::as_str),
+            Some("device_bound")
         );
     }
 

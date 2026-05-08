@@ -21,16 +21,16 @@ surface small, concrete, evidence-driven, and hard to forget while the product c
 
 ## Open Inventory
 
-| Area | Location | Required AI Assessment |
-|------|----------|-------------------------------|
-| Chi-squared audit | `crates/paranoid-core/src/lib.rs` | Verify the chi-squared upper-tail interpretation, `p > 0.01` thresholding, and how that maps to the intended generator verdict using cited math references and known-answer tests. |
-| Serial correlation audit | `crates/paranoid-core/src/lib.rs` | Verify the serial-correlation coefficient implementation matches the intended estimator and normalization using cited references and known-answer tests. |
-| External audit-device posture | `crates/paranoid-audit/src/lib.rs` | Verify external audit-device posture, TCP reachability probing, and mTLS JSONL write-ack readiness semantics do not overstate sink availability or federal audit coverage. |
-| Ops policy boundary | `crates/paranoid-ops/src/lib.rs` | Verify the shared ops evaluator is the right authorization and audit-evidence boundary for CLI, TUI, GUI, automation adapters, and seal-provider unlock policy. |
-| Seal lifecycle posture model | `crates/paranoid-seal/src/lib.rs` | Verify the seal/posture model represents unlock, recovery, and auto-unseal provider posture without overstating provider availability. |
-| Device-bound keyslot design | `crates/paranoid-vault/src/lib.rs` | Verify storing the raw master key in platform secure storage plus an AES-GCM verification blob is acceptable for the supported macOS, Windows, and Linux secret-store assumptions. |
-| Mnemonic recovery construction | `crates/paranoid-vault/src/lib.rs` | Verify whether the current 24-word BIP39-derived material should be used directly as the AES-256-GCM wrapping key for mnemonic recovery slots, or replaced by a stronger derivation scheme. |
-| Certificate-wrapped keyslots | `crates/paranoid-vault/src/lib.rs` | Verify CMS recipient selection, content-encryption policy, and the broader certificate-wrapped keyslot design. |
+| Claim ID | Area | Location | Required AI Assessment |
+|----------|------|----------|-------------------------------|
+| `audit.chi-squared-tail` | Chi-squared audit | `crates/paranoid-core/src/lib.rs` | Verify the chi-squared upper-tail interpretation, `p > 0.01` thresholding, and how that maps to the intended generator verdict using cited math references and known-answer tests. |
+| `audit.serial-correlation-estimator` | Serial correlation audit | `crates/paranoid-core/src/lib.rs` | Verify the serial-correlation coefficient implementation matches the intended estimator and normalization using cited references and known-answer tests. |
+| `audit.external-device-health` | External audit-device posture | `crates/paranoid-audit/src/lib.rs` | Verify external audit-device posture, TCP reachability probing, and mTLS JSONL write-ack readiness semantics do not overstate sink availability or federal audit coverage. |
+| `ops.shared-policy-boundary` | Ops policy boundary | `crates/paranoid-ops/src/lib.rs` | Verify the shared ops evaluator is the right authorization and audit-evidence boundary for CLI, TUI, GUI, automation adapters, and seal-provider unlock policy. |
+| `seal.lifecycle-boundary` | Seal lifecycle posture model | `crates/paranoid-seal/src/lib.rs` | Verify the seal/posture model represents unlock, recovery, and auto-unseal provider posture without overstating provider availability; include evidence from `crates/paranoid-ops/src/lib.rs`, CLI vault tests, and the architecture documentation because ops policy consumes this posture. |
+| `vault.device-bound-keyslot` | Device-bound keyslot design | `crates/paranoid-vault/src/lib.rs` | Verify storing the raw master key in platform secure storage plus an AES-GCM verification blob is acceptable for the supported macOS, Windows, and Linux secret-store assumptions. |
+| `vault.mnemonic-recovery-keyslot` | Mnemonic recovery construction | `crates/paranoid-vault/src/lib.rs` | Verify whether the current 24-word BIP39-derived material should be used directly as the AES-256-GCM wrapping key for mnemonic recovery slots, or replaced by a stronger derivation scheme. |
+| `vault.certificate-wrapped-keyslot` | Certificate-wrapped keyslots | `crates/paranoid-vault/src/lib.rs` | Verify CMS recipient selection, content-encryption policy, and the broader certificate-wrapped keyslot design. |
 
 ## Required AI Assessor Output
 
