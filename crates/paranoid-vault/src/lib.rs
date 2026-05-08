@@ -298,21 +298,28 @@ fn keyslot_health_for_slot(
     }
 
     if keyslot.kind == VaultKeyslotKind::DeviceBound {
+        let mut metadata_missing = false;
         if keyslot.device_service.is_none() {
             warnings.push("Device-bound provider service metadata is missing.".to_string());
+            metadata_missing = true;
         }
         if keyslot.device_account.is_none() {
             warnings.push("Device-bound provider account metadata is missing.".to_string());
+            metadata_missing = true;
         }
         if provider_probe.verifies_availability() {
             provider_evidence_source = Some("device_provider_health_check".to_string());
-            match read_verified_device_keyslot_secret(keyslot) {
-                Ok(_) => provider_availability = VaultKeyslotProviderAvailability::Available,
-                Err(error) => {
-                    provider_availability = VaultKeyslotProviderAvailability::Unavailable;
-                    warnings.push(format!(
-                        "Device-bound provider health check failed: {error}"
-                    ));
+            if metadata_missing {
+                provider_availability = VaultKeyslotProviderAvailability::Unavailable;
+            } else {
+                match read_verified_device_keyslot_secret(keyslot) {
+                    Ok(_) => provider_availability = VaultKeyslotProviderAvailability::Available,
+                    Err(error) => {
+                        provider_availability = VaultKeyslotProviderAvailability::Unavailable;
+                        warnings.push(format!(
+                            "Device-bound provider health check failed: {error}"
+                        ));
+                    }
                 }
             }
         }
@@ -5237,6 +5244,62 @@ mod tests {
             health.warnings.iter().any(|warning| {
                 warning.starts_with("Device-bound provider health check failed:")
             })
+        );
+    }
+
+    #[test]
+    fn device_keyslot_provider_probe_skips_check_when_metadata_is_missing() {
+        let keyslot = VaultKeyslot {
+            id: "device-missing-metadata".to_string(),
+            kind: VaultKeyslotKind::DeviceBound,
+            label: Some("daily-device".to_string()),
+            wrapped_by_os_keystore: true,
+            wrap_algorithm: DEVICE_WRAP_ALGORITHM.to_string(),
+            salt_hex: String::new(),
+            nonce_hex: "nonce".to_string(),
+            tag_hex: "tag".to_string(),
+            encrypted_master_key_hex: "ciphertext".to_string(),
+            certificate_fingerprint_sha256: None,
+            certificate_subject: None,
+            certificate_not_before: None,
+            certificate_not_after: None,
+            certificate_not_before_epoch: None,
+            certificate_not_after_epoch: None,
+            mnemonic_language: None,
+            mnemonic_words: None,
+            device_service: None,
+            device_account: None,
+        };
+
+        let health =
+            keyslot_health_for_slot(&keyslot, VaultKeyslotProviderProbe::VerifyAvailability);
+
+        assert!(!health.healthy);
+        assert_eq!(
+            health.provider_availability,
+            VaultKeyslotProviderAvailability::Unavailable
+        );
+        assert_eq!(
+            health.provider_evidence_source.as_deref(),
+            Some("device_provider_health_check")
+        );
+        assert!(
+            health
+                .warnings
+                .iter()
+                .any(|warning| { warning == "Device-bound provider service metadata is missing." })
+        );
+        assert!(
+            health
+                .warnings
+                .iter()
+                .any(|warning| { warning == "Device-bound provider account metadata is missing." })
+        );
+        assert!(
+            !health
+                .warnings
+                .iter()
+                .any(|warning| warning.starts_with("Device-bound provider health check failed:"))
         );
     }
 

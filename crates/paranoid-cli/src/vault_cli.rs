@@ -651,16 +651,15 @@ fn seal_provider_evidence_for_health(
                 .with_warnings(health.warnings)
         }
         VaultKeyslotProviderAvailability::Unavailable => {
-            let warnings = if health.warnings.is_empty() {
-                vec!["Provider availability probe failed.".to_string()]
-            } else {
-                health.warnings
-            };
+            let mut warnings = health.warnings;
+            if warnings.is_empty() {
+                warnings.push("Provider availability probe failed.".to_string());
+            }
             VaultSealProviderEvidence::unavailable(
                 keyslot.id.clone(),
                 provider_kind,
                 evidence_source,
-                "Provider availability probe failed.",
+                warnings[0].clone(),
             )
             .with_warnings(warnings)
         }
@@ -826,7 +825,9 @@ impl VaultCommand {
         match self {
             Self::Help => None,
             Self::FederalEvidence => Some(OpsCommand::FederalEvidence),
-            Self::SealStatus { .. } => Some(OpsCommand::VaultSealStatus),
+            Self::SealStatus { probe_providers } => Some(OpsCommand::VaultSealStatus {
+                probe_providers: *probe_providers,
+            }),
             Self::Init => Some(vault_operation("init", VaultOperationAccess::Keyslot)),
             Self::Keyslots | Self::InspectKeyslot { .. } => {
                 Some(vault_operation("keyslots", VaultOperationAccess::Metadata))
@@ -3076,6 +3077,50 @@ mod tests {
         assert_eq!(evidence.kind, VaultSealProviderKind::DeviceBound);
         assert_eq!(evidence.status, VaultSealProviderStatus::Available);
         assert_eq!(evidence.evidence_source, "device_provider_health_check");
+    }
+
+    #[test]
+    fn seal_provider_evidence_maps_unavailable_device_health() {
+        let keyslot = paranoid_vault::VaultKeyslot {
+            id: "device-test-unavailable".to_string(),
+            kind: VaultKeyslotKind::DeviceBound,
+            label: Some("daily".to_string()),
+            wrapped_by_os_keystore: true,
+            wrap_algorithm: "os-keyring+aes-256-gcm-check".to_string(),
+            salt_hex: String::new(),
+            nonce_hex: "nonce".to_string(),
+            tag_hex: "tag".to_string(),
+            encrypted_master_key_hex: "ciphertext".to_string(),
+            certificate_fingerprint_sha256: None,
+            certificate_subject: None,
+            certificate_not_before: None,
+            certificate_not_after: None,
+            certificate_not_before_epoch: None,
+            certificate_not_after_epoch: None,
+            mnemonic_language: None,
+            mnemonic_words: None,
+            device_service: Some("service".to_string()),
+            device_account: Some("account".to_string()),
+        };
+        let health = paranoid_vault::VaultKeyslotHealth {
+            keyslot_id: keyslot.id.clone(),
+            keyslot_kind: VaultKeyslotKind::DeviceBound,
+            warnings: Vec::new(),
+            healthy: false,
+            provider_availability: VaultKeyslotProviderAvailability::Unavailable,
+            provider_evidence_source: None,
+        };
+
+        let evidence = seal_provider_evidence_for_health(&keyslot, health);
+
+        assert_eq!(evidence.provider_id, "device-test-unavailable");
+        assert_eq!(evidence.kind, VaultSealProviderKind::DeviceBound);
+        assert_eq!(evidence.status, VaultSealProviderStatus::Unavailable);
+        assert_eq!(evidence.evidence_source, "vault_header");
+        assert_eq!(
+            evidence.warnings,
+            vec!["Provider availability probe failed.".to_string()]
+        );
     }
 
     #[test]

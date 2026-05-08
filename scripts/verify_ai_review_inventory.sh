@@ -76,6 +76,7 @@ for required in \
   "Serial correlation audit" \
   "External audit-device posture" \
   "Ops policy boundary" \
+  "seal.lifecycle-boundary" \
   "Seal lifecycle posture model" \
   "Device-bound keyslot design" \
   "Mnemonic recovery construction" \

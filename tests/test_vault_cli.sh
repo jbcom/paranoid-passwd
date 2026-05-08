@@ -393,7 +393,12 @@ import sys
 data = json.load(sys.stdin)
 seal = data["seal"]
 device_id = os.environ["DEVICE_SLOT_ID"]
-device = next(provider for provider in seal["providers"] if provider["provider_id"] == device_id)
+device = next(
+    (provider for provider in seal["providers"] if provider["provider_id"] == device_id),
+    None,
+)
+provider_ids = [provider["provider_id"] for provider in seal["providers"]]
+assert device is not None, f"device provider {device_id!r} not found in {provider_ids!r}"
 assert device["kind"] == "device_bound"
 assert device["status"] == "available"
 assert device["evidence_source"] == "device_provider_health_check"
