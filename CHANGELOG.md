@@ -12,6 +12,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.6.5...paranoid-passwd-v3.7.0) (2026-05-08)
+
+
+### Features
+
+* add federal recovery disposition evidence ([097ff5c](https://github.com/jbcom/paranoid-passwd/commit/097ff5ca1d698b98d898e2935bb648aebca333ff))
+* add mTLS ops command transport ([f56bc90](https://github.com/jbcom/paranoid-passwd/commit/f56bc90b96d92bf3d1aaef538b5b7d645382bff8))
+* add seal provider health evidence ([52fd944](https://github.com/jbcom/paranoid-passwd/commit/52fd94450c1423db11f245fd18a1da769408470b))
+
+
+### Bug Fixes
+
+* align release-please with workspace versioning ([e63ccdd](https://github.com/jbcom/paranoid-passwd/commit/e63ccddc43778f462157d88fced97afda2e4d465))
+* keep cd green when release-please is blocked ([e9ee483](https://github.com/jbcom/paranoid-passwd/commit/e9ee48341b552837f6a78222e1f0e8aaff8c8cdf))
+* use CodeQL config in CD workflow ([a431b02](https://github.com/jbcom/paranoid-passwd/commit/a431b02b6cdff3d68e1f7ae3b949eb09afdc2190))
+
 ## [3.6.5](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.6.4...paranoid-passwd-v3.6.5) (2026-05-06)
 
 
