@@ -1,4 +1,4 @@
-.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-e2e-emulate _test-gui-e2e-emulate test-vault-e2e verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality builder-image _builder-image ci-emulate _ci-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
+.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality builder-image _builder-image ci-emulate _ci-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -27,12 +27,15 @@ HOST_GUI_DMG_ARTIFACT := $(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-$(HO
 HOST_DEB_ARTIFACT := $(DIST_DIR)/paranoid-passwd_$(RELEASE_VERSION)_$(HOST_ARCH).deb
 HOST_GUI_DEB_ARTIFACT := $(DIST_DIR)/paranoid-passwd-gui_$(RELEASE_VERSION)_$(HOST_ARCH).deb
 GUI_E2E_SCREENSHOT ?= $(DIST_DIR)/gui-e2e.png
+GUI_E2E_VIEWPORTS ?= desktop=1280x1024
+GUI_E2E_VISUAL_VIEWPORTS ?= desktop=1280x1024 tablet=900x700 mobile=420x800
 GUI_E2E_TARGET_VOLUME ?= paranoid-passwd-cargo-target-gui-e2e
 GUI_E2E_CLEAN ?= 0
 CI_EMULATE_TARGET_VOLUME ?= paranoid-passwd-cargo-target-ci-emulate
 RELEASE_EMULATE_TARGET_VOLUME ?= paranoid-passwd-cargo-target-release-emulate
 CI_GUI_E2E_TARGET := $(if $(filter linux,$(HOST_OS)),test-gui-e2e)
 LOCAL_GUI_E2E_TARGET := $(if $(filter darwin,$(HOST_OS)),test-gui-e2e-emulate,$(if $(filter linux,$(HOST_OS)),test-gui-e2e))
+LOCAL_GUI_VISUAL_TARGET := $(if $(filter darwin,$(HOST_OS)),test-gui-visual-regression-emulate,$(if $(filter linux,$(HOST_OS)),test-gui-visual-regression))
 CARGO_TARGET_DIR ?= target
 CARGO_DEBUG_DIR := $(CARGO_TARGET_DIR)/debug
 CLI_DEBUG_BIN := $(CARGO_DEBUG_DIR)/paranoid-passwd
@@ -101,9 +104,17 @@ test-gui-e2e: ## Run the real GUI workflow harness under Xvfb and capture a scre
 	cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline
 	bash tests/test_gui_e2e.sh "$(CLI_DEBUG_BIN)" "$(GUI_DEBUG_BIN)" "$(GUI_E2E_SCREENSHOT)"
 
+test-gui-visual-regression: ## Run GUI workflow screenshots across desktop, tablet, and narrow viewport classes
+	cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline
+	bash tests/test_gui_e2e.sh "$(CLI_DEBUG_BIN)" "$(GUI_DEBUG_BIN)" "$(GUI_E2E_SCREENSHOT)" "$(GUI_E2E_VISUAL_VIEWPORTS)"
+
 test-gui-e2e-emulate: ## Run the Linux GUI workflow harness through the custom builder image
 	@bash scripts/configure_local_toolchain.sh --quiet
 	@$(MAKE) _test-gui-e2e-emulate
+
+test-gui-visual-regression-emulate: ## Run the multi-viewport GUI screenshot harness through the custom builder image
+	@bash scripts/configure_local_toolchain.sh --quiet
+	@$(MAKE) _test-gui-e2e-emulate GUI_E2E_VIEWPORTS="$(GUI_E2E_VISUAL_VIEWPORTS)"
 
 _test-gui-e2e-emulate: _builder-image
 	mkdir -p "$(DIST_DIR)"
@@ -113,7 +124,7 @@ _test-gui-e2e-emulate: _builder-image
 		--mount type=volume,source="$(GUI_E2E_TARGET_VOLUME)",target=/cargo-target \
 		-w /github/workspace \
 		"$(BUILDER_IMAGE)" \
-		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0; cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline && bash tests/test_gui_e2e.sh /cargo-target/debug/paranoid-passwd /cargo-target/debug/paranoid-passwd-gui \"$(GUI_E2E_SCREENSHOT)\"'"
+		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0; cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline && bash tests/test_gui_e2e.sh /cargo-target/debug/paranoid-passwd /cargo-target/debug/paranoid-passwd-gui \"$(GUI_E2E_SCREENSHOT)\" \"$(GUI_E2E_VIEWPORTS)\"'"
 	@if [ "$(GUI_E2E_CLEAN)" = "1" ]; then PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(GUI_E2E_TARGET_VOLUME)" >/dev/null 2>&1 || true; fi
 
 test-vault-e2e: ## Run the headless vault CLI end-to-end suite against the debug CLI binary
@@ -166,7 +177,7 @@ quality: ## Run local release-candidate quality gates, including GUI e2e when su
 	PARANOID_STRICT_EXTERNAL_TOOLS=1 PARANOID_RUN_LOCAL_SCANNERS=1 $(MAKE) verify-deep
 	$(MAKE) ci
 	$(MAKE) test-gui-targets
-	$(if $(LOCAL_GUI_E2E_TARGET),$(MAKE) $(LOCAL_GUI_E2E_TARGET))
+	$(if $(LOCAL_GUI_VISUAL_TARGET),$(MAKE) $(LOCAL_GUI_VISUAL_TARGET))
 
 
 builder-image: ## Build or reuse the local builder image keyed to the builder context hash

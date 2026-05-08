@@ -15,8 +15,9 @@ Required checks before merge:
 
 - `make verify-assurance`
 - `make ci` unless the change is strictly docs-only
-- For UI-sensitive changes, `make test-gui-e2e` on Linux or `make test-gui-e2e-emulate` on macOS,
-  plus inspection of the captured screenshot artifact.
+- For UI-sensitive changes, `make test-gui-visual-regression` on Linux or
+  `make test-gui-visual-regression-emulate` on macOS, plus inspection of the captured desktop,
+  tablet, and narrow/mobile-class screenshot artifacts.
 
 Never waive these invariants:
 

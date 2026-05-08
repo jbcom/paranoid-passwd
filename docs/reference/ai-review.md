@@ -43,9 +43,11 @@ answer:
 3. If no, what concrete change is required?
 4. What tests, invariants, or comments should remain after sign-off?
 
-For UI-sensitive changes, the disposition must also cite a rendered screenshot artifact from
-`make test-gui-e2e` on Linux or `make test-gui-e2e-emulate` on macOS. The default screenshot path is
-`dist/release/gui-e2e.png`.
+For UI-sensitive changes, the disposition must also cite rendered screenshot artifacts from
+`make test-gui-visual-regression` on Linux or `make test-gui-visual-regression-emulate` on macOS.
+The viewport classes are desktop, tablet, and narrow/mobile-class. The default artifact set is
+`dist/release/gui-e2e-desktop.png`, `dist/release/gui-e2e-tablet.png`, and
+`dist/release/gui-e2e-mobile.png`.
 
 ## Closeout Rules
 
@@ -73,5 +75,5 @@ bash scripts/verify_ai_review_inventory.sh
 Capture the GUI evidence artifact when the PR touches UI behavior, layout, or branding:
 
 ```bash
-make test-gui-e2e-emulate
+make test-gui-visual-regression-emulate
 ```

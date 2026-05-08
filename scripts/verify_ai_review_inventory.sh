@@ -93,10 +93,13 @@ else
   warn "AI review doc no longer marks the review surface as open"
 fi
 
-if rg -F "dist/release/gui-e2e.png" "$DOC" >/dev/null 2>&1; then
-  pass "AI review reference doc requires GUI screenshot evidence for UI-sensitive changes"
+if rg -F "make test-gui-visual-regression" "$DOC" >/dev/null 2>&1 \
+  && rg -F "dist/release/gui-e2e-desktop.png" "$DOC" >/dev/null 2>&1 \
+  && rg -F "dist/release/gui-e2e-tablet.png" "$DOC" >/dev/null 2>&1 \
+  && rg -F "dist/release/gui-e2e-mobile.png" "$DOC" >/dev/null 2>&1; then
+  pass "AI review reference doc requires multi-viewport GUI screenshot evidence for UI-sensitive changes"
 else
-  fail "AI review reference doc must require GUI screenshot evidence for UI-sensitive changes"
+  fail "AI review reference doc must require multi-viewport GUI screenshot evidence for UI-sensitive changes"
 fi
 
 pass "AI review reference doc contains the expected tracked review areas"

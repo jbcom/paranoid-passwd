@@ -5,6 +5,7 @@ set -euo pipefail
 CLI_BINARY="${1:?path to paranoid-passwd required}"
 GUI_BINARY="${2:?path to paranoid-passwd-gui required}"
 SCREENSHOT_PATH="${3:?output screenshot path required}"
+VIEWPORTS="${4:-desktop=1280x1024}"
 
 for required in xvfb-run import identify; do
   if ! command -v "${required}" >/dev/null 2>&1; then
@@ -15,24 +16,36 @@ done
 
 mkdir -p "$(dirname "${SCREENSHOT_PATH}")"
 
-tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/paranoid-gui-e2e.XXXXXX")"
-cleanup() {
-  rm -rf "${tmpdir}"
-}
-trap cleanup EXIT
+screenshot_for_viewport() {
+  local viewport_name="$1"
+  local viewport_geometry="$2"
+  local screenshot_path="$3"
 
-vault_path="${tmpdir}/vault.sqlite"
-backup_path="${tmpdir}/vault.backup.json"
-outcome_path="${tmpdir}/gui.outcome"
-log_path="${tmpdir}/gui.log"
-audit_path="${tmpdir}/gui-audit.jsonl"
+  if [[ ! "${viewport_geometry}" =~ ^[1-9][0-9]*x[1-9][0-9]*$ ]]; then
+    echo "invalid GUI viewport geometry: ${viewport_name}=${viewport_geometry}" >&2
+    exit 64
+  fi
 
-export PARANOID_MASTER_PASSWORD="correct horse battery staple"
-"${CLI_BINARY}" vault --cli --path "${vault_path}" init >/dev/null
+  local width="${viewport_geometry%x*}"
+  local height="${viewport_geometry#*x}"
+  local tmpdir=""
 
-# The inner script expands inside the Xvfb shell, not in this parent shell.
-# shellcheck disable=SC2016
-xvfb-run -a env WINIT_UNIX_BACKEND=x11 SLINT_BACKEND=software bash -lc '
+  tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/paranoid-gui-e2e.${viewport_name}.XXXXXX")"
+
+  local vault_path="${tmpdir}/vault.sqlite"
+  local backup_path="${tmpdir}/vault.backup.json"
+  local outcome_path="${tmpdir}/gui.outcome"
+  local log_path="${tmpdir}/gui.log"
+  local audit_path="${tmpdir}/gui-audit.jsonl"
+
+  export PARANOID_MASTER_PASSWORD="correct horse battery staple"
+  "${CLI_BINARY}" vault --cli --path "${vault_path}" init >/dev/null
+
+  # The inner script expands inside the Xvfb shell, not in this parent shell.
+  # shellcheck disable=SC2016
+  local rc=0
+  xvfb-run -a --server-args="-screen 0 ${width}x${height}x24" \
+    env WINIT_UNIX_BACKEND=x11 SLINT_BACKEND=software bash -lc '
   set -euo pipefail
 
   gui_binary="$1"
@@ -162,6 +175,49 @@ PY
     echo "GUI automation screenshot was blank or undersized" >&2
     exit 1
   fi
-' _ "${GUI_BINARY}" "${SCREENSHOT_PATH}" "${backup_path}" "${outcome_path}" "${log_path}" "${vault_path}" "${audit_path}"
+' _ "${GUI_BINARY}" "${screenshot_path}" "${backup_path}" "${outcome_path}" "${log_path}" "${vault_path}" "${audit_path}" || rc=$?
+  rm -rf "${tmpdir}"
+  if [[ "$rc" -ne 0 ]]; then
+    return "$rc"
+  fi
+
+  printf 'GUI e2e viewport passed: %s %s\n' "${viewport_name}" "${screenshot_path}"
+}
+
+viewport_count=0
+for _viewport in ${VIEWPORTS}; do
+  viewport_count=$((viewport_count + 1))
+done
+
+viewport_index=0
+for viewport in ${VIEWPORTS}; do
+  viewport_index=$((viewport_index + 1))
+  name="${viewport%%=*}"
+  geometry="${viewport#*=}"
+  if [[ "$name" == "$viewport" ]]; then
+    name="viewport${viewport_index}"
+    geometry="$viewport"
+  fi
+
+  if [[ ! "${name}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "invalid GUI viewport name: ${name}" >&2
+    exit 64
+  fi
+
+  if [[ "$viewport_count" -eq 1 ]]; then
+    viewport_screenshot="${SCREENSHOT_PATH}"
+  else
+    screenshot_dir="$(dirname "${SCREENSHOT_PATH}")"
+    screenshot_file="$(basename "${SCREENSHOT_PATH}")"
+    screenshot_stem="${screenshot_file%.*}"
+    screenshot_ext="${screenshot_file##*.}"
+    if [[ "$screenshot_ext" == "$screenshot_file" ]]; then
+      viewport_screenshot="${screenshot_dir}/${screenshot_stem}-${name}.png"
+    else
+      viewport_screenshot="${screenshot_dir}/${screenshot_stem}-${name}.${screenshot_ext}"
+    fi
+  fi
+  screenshot_for_viewport "$name" "$geometry" "$viewport_screenshot"
+done
 
 printf 'GUI e2e passed: %s\n' "${SCREENSHOT_PATH}"
