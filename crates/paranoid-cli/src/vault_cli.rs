@@ -19,6 +19,7 @@ use paranoid_vault::{
     restore_vault_backup, unlock_vault_for_options,
 };
 use std::{
+    collections::HashMap,
     ffi::OsString,
     fs,
     io::{self, IsTerminal, Write},
@@ -627,11 +628,28 @@ fn seal_posture_for_header(
     provider_probe: VaultKeyslotProviderProbe,
 ) -> VaultSealPosture {
     let keyslot_health = header.keyslot_health_summaries_with_provider_probe(provider_probe);
+    let mut health_by_id: HashMap<String, paranoid_vault::VaultKeyslotHealth> = keyslot_health
+        .into_iter()
+        .map(|health| (health.keyslot_id.clone(), health))
+        .collect();
     let providers = header
         .keyslots
         .iter()
-        .zip(keyslot_health)
-        .map(|(keyslot, health)| seal_provider_evidence_for_health(keyslot, health))
+        .map(|keyslot| {
+            let health = health_by_id.remove(&keyslot.id).unwrap_or_else(|| {
+                paranoid_vault::VaultKeyslotHealth {
+                    keyslot_id: keyslot.id.clone(),
+                    keyslot_kind: keyslot.kind.clone(),
+                    warnings: vec![
+                        "Vault keyslot health summary missing for provider.".to_string(),
+                    ],
+                    healthy: false,
+                    provider_availability: VaultKeyslotProviderAvailability::Unavailable,
+                    provider_evidence_source: Some("vault_header".to_string()),
+                }
+            });
+            seal_provider_evidence_for_health(keyslot, health)
+        })
         .collect();
 
     VaultSealPosture::from_providers(VaultSealMachine::default().state(), providers)

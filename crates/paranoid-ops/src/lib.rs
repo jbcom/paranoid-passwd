@@ -567,24 +567,7 @@ pub fn record_ops_request<'a>(
     event
         .attributes
         .insert("command".to_string(), envelope.command.name().to_string());
-    if let OpsCommand::VaultOperation { name, access } = &envelope.command {
-        event
-            .attributes
-            .insert("vault_operation".to_string(), name.clone());
-        event
-            .attributes
-            .insert("vault_access".to_string(), access.as_str().to_string());
-    }
-    if let OpsCommand::VaultSealStatus { probe_providers } = &envelope.command {
-        event
-            .attributes
-            .insert("probe_providers".to_string(), probe_providers.to_string());
-    }
-    if let OpsCommand::VaultUnlock { method } = &envelope.command {
-        event
-            .attributes
-            .insert("unlock_method".to_string(), method.as_str().to_string());
-    }
+    record_command_attributes(event, &envelope.command);
     event
 }
 
@@ -613,7 +596,12 @@ pub fn record_ops_response<'a>(
     event
         .attributes
         .insert("decision".to_string(), decision.status().to_string());
-    if let OpsCommand::VaultOperation { name, access } = &envelope.command {
+    record_command_attributes(event, &envelope.command);
+    event
+}
+
+fn record_command_attributes(event: &mut AuditEvent, command: &OpsCommand) {
+    if let OpsCommand::VaultOperation { name, access } = command {
         event
             .attributes
             .insert("vault_operation".to_string(), name.clone());
@@ -621,17 +609,16 @@ pub fn record_ops_response<'a>(
             .attributes
             .insert("vault_access".to_string(), access.as_str().to_string());
     }
-    if let OpsCommand::VaultSealStatus { probe_providers } = &envelope.command {
+    if let OpsCommand::VaultSealStatus { probe_providers } = command {
         event
             .attributes
             .insert("probe_providers".to_string(), probe_providers.to_string());
     }
-    if let OpsCommand::VaultUnlock { method } = &envelope.command {
+    if let OpsCommand::VaultUnlock { method } = command {
         event
             .attributes
             .insert("unlock_method".to_string(), method.as_str().to_string());
     }
-    event
 }
 
 fn record_session_attributes(event: &mut AuditEvent, envelope: &OpsCommandEnvelope) {
