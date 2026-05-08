@@ -167,8 +167,9 @@ OpenSSL linkage are not enough.
    certificate reference, operating system, architecture, build id, and profile at startup.
 3. Fail closed when federal mode requires a FIPS provider, approved mode, or required audit sink and
    those prerequisites are missing.
-4. Disposition Argon2id and BIP39 for federal mode. Either disable them in that profile, add an
-   approved-algorithm recovery path, or document a customer-owned compensating-control boundary.
+4. Preserve the current federal recovery disposition: Argon2id password recovery, BIP39 mnemonic
+   recovery, and device-bound unlock remain default-profile features, while strict federal-ready
+   policy disables them and reports the decision as startup evidence.
 5. Add an evidence report that includes SBOM/provenance references, release attestation references,
    audit schema version, policy profile, and provider evidence.
 6. Add a control-mapping document for relevant NIST SP 800-53 Rev5 families, especially AC, AU, CM,

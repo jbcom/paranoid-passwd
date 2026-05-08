@@ -95,18 +95,25 @@ paranoid-passwd vault seal-status --probe-providers
 
 ## Crypto Disposition
 
-The current vault uses Argon2id for recovery-secret derivation and BIP39 for mnemonic recovery. Those
-paths are useful product features, but they must be dispositioned before a strict federal profile can
-claim FIPS-aligned behavior.
+The current vault uses Argon2id for recovery-secret derivation and BIP39 for mnemonic recovery.
+Those paths remain useful default-profile product features, but strict federal-ready mode now treats
+them as non-federal unlock methods instead of silently accepting a weak claim.
 
-The next PR should decide one of these paths:
+The current disposition is:
 
-- keep Argon2id and BIP39 in the default profile, but disable them or mark them non-federal in the
-  federal-ready profile
-- add a federal recovery path backed only by approved algorithms from a validated provider, then make
-  that path mandatory in federal mode
-- document the exact compensating-control story if a customer requires those features inside a
-  broader assessed boundary
+- password recovery through Argon2id is default-profile only under the strict federal-ready policy
+- mnemonic recovery through BIP39 is default-profile only under the strict federal-ready policy
+- device-bound unlock is default-profile only until the secure-storage provider boundary is
+  separately dispositioned
+- certificate-wrapped unlock is the current strict federal-ready unlock path, gated by required
+  audit evidence, approved-mode provider evidence, seal posture evidence, certificate-unseal
+  provider evidence, and fresh operator proof
+
+`--federal-evidence` emits this as machine-readable `recovery_disposition` evidence. Customers who
+require password, mnemonic, or device-bound recovery inside a broader assessed boundary must own that
+compensating-control decision outside the strict federal-ready profile. The vault CLI and TUI route
+federal-ready vault unlocks through the same typed `VaultUnlock` policy check before plaintext vault
+state is loaded.
 
 No code or docs should imply that generic OpenSSL linkage, Argon2id, BIP39, or CMS usage is
 automatically enough for a federal authorization.
@@ -132,7 +139,7 @@ and hash-chain evidence.
   evidence; server-side handling replaces client-asserted transport claims with observed
   peer-certificate evidence before policy evaluation
 - stable JSON responses for automation and evidence capture, including federal startup evidence
-  schema `2` for the external audit-device posture field
+  schema `3` for external audit-device posture and strict recovery-disposition evidence
 
 `paranoid-seal` now provides:
 
@@ -179,6 +186,8 @@ package:
 - FIPS provider evidence and startup self-test report
 - audit-schema reference and sample JSONL traces
 - external audit-device endpoint, mTLS evidence posture, and health status when configured
+- recovery-disposition evidence for password, mnemonic, device-bound, and certificate-wrapped
+  unlock methods
 - control mapping for relevant NIST SP 800-53 Rev5 families, especially AC, AU, CM, IA, SC, SI, and
   SR; see [Federal Control Mapping](./control-mapping.md)
 - configuration baseline guidance, using DoD STIGs where applicable and CIS Level 2 only where a STIG

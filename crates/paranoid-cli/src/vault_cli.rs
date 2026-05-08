@@ -6,8 +6,8 @@ use paranoid_core::{CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest,
 use paranoid_ops::{
     OpsCommand, OpsPolicyContext, OpsPolicyDecision, OpsProfile, SEAL_SCHEMA_VERSION,
     VaultOperationAccess, VaultSealMachine, VaultSealPosture, VaultSealProviderEvidence,
-    VaultSealProviderKind, VaultSealState, collect_federal_startup_evidence_with_audit_sink,
-    evaluate_ops_command,
+    VaultSealProviderKind, VaultSealState, VaultUnlockMethod,
+    collect_federal_startup_evidence_with_audit_sink, evaluate_ops_command,
 };
 use paranoid_vault::{
     GenerateStoreLoginRecord, NewCardRecord, NewIdentityRecord, NewLoginRecord,
@@ -603,7 +603,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
     }
 }
 
-fn seal_posture_for_path(
+pub(crate) fn seal_posture_for_path(
     path: &Path,
     provider_probe: VaultKeyslotProviderProbe,
 ) -> (bool, VaultSealPosture) {
@@ -890,6 +890,45 @@ impl VaultCommand {
             )),
         }
     }
+
+    fn federal_unlock_method(&self, open_options: &VaultOpenOptions) -> Option<VaultUnlockMethod> {
+        match self {
+            Self::Help
+            | Self::Keyslots
+            | Self::FederalEvidence
+            | Self::SealStatus { .. }
+            | Self::InspectKeyslot { .. }
+            | Self::InspectCertificate { .. }
+            | Self::InspectBackup { .. }
+            | Self::InspectTransfer { .. }
+            | Self::ImportBackup { .. } => None,
+            Self::Init => Some(VaultUnlockMethod::PasswordRecovery),
+            Self::List { .. }
+            | Self::Show { .. }
+            | Self::Add { .. }
+            | Self::AddNote { .. }
+            | Self::AddCard { .. }
+            | Self::AddIdentity { .. }
+            | Self::Update { .. }
+            | Self::UpdateNote { .. }
+            | Self::UpdateCard { .. }
+            | Self::UpdateIdentity { .. }
+            | Self::ExportBackup { .. }
+            | Self::ExportTransfer { .. }
+            | Self::ImportTransfer { .. }
+            | Self::Delete { .. }
+            | Self::AddCertSlot { .. }
+            | Self::AddMnemonicSlot { .. }
+            | Self::RotateMnemonicSlot { .. }
+            | Self::AddDeviceSlot { .. }
+            | Self::RewrapCertSlot { .. }
+            | Self::RenameKeyslot { .. }
+            | Self::RemoveKeyslot { .. }
+            | Self::RebindDeviceSlot { .. }
+            | Self::RotateRecoverySecret { .. }
+            | Self::GenerateStore { .. } => Some(vault_unlock_method(open_options)),
+        }
+    }
 }
 
 fn vault_operation(name: &str, access: VaultOperationAccess) -> OpsCommand {
@@ -1119,15 +1158,7 @@ fn evaluate_vault_command_policy(
     let Some(ops_command) = command.ops_command() else {
         return Ok(None);
     };
-    let context = OpsPolicyContext {
-        profile: invocation.profile,
-        audit_sink_required: invocation.audit_jsonl.is_some()
-            || invocation.require_audit_sink
-            || invocation.profile == OpsProfile::FederalReady,
-        audit_sink_available: audit_sink_health.is_available(),
-        crypto_provider: paranoid_ops::FederalCryptoProviderEvidence::collect_from_environment(),
-        seal_posture: None,
-    };
+    let context = vault_ops_policy_context(invocation, audit_sink_health, None);
     let evaluation = evaluate_ops_command(AuditSurface::Vault, ops_command, &context);
     write_optional_vault_audit_jsonl(
         &invocation.audit_jsonl,
@@ -1135,15 +1166,83 @@ fn evaluate_vault_command_policy(
         evaluation.audit_events.as_slice(),
     )?;
     if evaluation.is_allowed() {
-        return Ok(None);
+        if invocation.profile == OpsProfile::FederalReady
+            && let Some(method) = command.federal_unlock_method(&invocation.open_options)
+        {
+            let (_, seal_posture) = seal_posture_for_path(
+                &invocation.open_options.path,
+                vault_unlock_provider_probe(method),
+            );
+            let context =
+                vault_ops_policy_context(invocation, audit_sink_health, Some(seal_posture));
+            let evaluation = evaluate_ops_command(
+                AuditSurface::Vault,
+                OpsCommand::VaultUnlock { method },
+                &context,
+            );
+            write_optional_vault_audit_jsonl(
+                &invocation.audit_jsonl,
+                audit_sink_health,
+                evaluation.audit_events.as_slice(),
+            )?;
+            if evaluation.is_allowed() {
+                return Ok(None);
+            }
+            print_vault_policy_denial_json(
+                &evaluation.envelope.operation_id,
+                &evaluation.decision,
+                audit_sink_health,
+                evaluation.audit_events.as_slice(),
+            )?;
+            return Ok(Some(EX_POLICY_DENY));
+        }
+        Ok(None)
+    } else {
+        print_vault_policy_denial_json(
+            &evaluation.envelope.operation_id,
+            &evaluation.decision,
+            audit_sink_health,
+            evaluation.audit_events.as_slice(),
+        )?;
+        Ok(Some(EX_POLICY_DENY))
     }
-    print_vault_policy_denial_json(
-        &evaluation.envelope.operation_id,
-        &evaluation.decision,
-        audit_sink_health,
-        evaluation.audit_events.as_slice(),
-    )?;
-    Ok(Some(EX_POLICY_DENY))
+}
+
+fn vault_ops_policy_context(
+    invocation: &VaultInvocation,
+    audit_sink_health: &AuditSinkHealth,
+    seal_posture: Option<VaultSealPosture>,
+) -> OpsPolicyContext {
+    OpsPolicyContext {
+        profile: invocation.profile,
+        audit_sink_required: invocation.audit_jsonl.is_some()
+            || invocation.require_audit_sink
+            || invocation.profile == OpsProfile::FederalReady,
+        audit_sink_available: audit_sink_health.is_available(),
+        crypto_provider: paranoid_ops::FederalCryptoProviderEvidence::collect_from_environment(),
+        seal_posture,
+    }
+}
+
+pub(crate) fn vault_unlock_method(open_options: &VaultOpenOptions) -> VaultUnlockMethod {
+    if open_options.mnemonic_phrase.is_some() || open_options.mnemonic_phrase_env.is_some() {
+        return VaultUnlockMethod::MnemonicRecovery;
+    }
+    if open_options.device_slot.is_some() || open_options.use_device_auto {
+        return VaultUnlockMethod::DeviceBound;
+    }
+    match &open_options.auth {
+        VaultAuth::Certificate { .. } => VaultUnlockMethod::CertificateWrapped,
+        VaultAuth::PasswordEnv(_) | VaultAuth::Password(_) => VaultUnlockMethod::PasswordRecovery,
+    }
+}
+
+pub(crate) fn vault_unlock_provider_probe(method: VaultUnlockMethod) -> VaultKeyslotProviderProbe {
+    if method == VaultUnlockMethod::DeviceBound {
+        VaultKeyslotProviderProbe::VerifyAvailability
+    } else {
+        VaultKeyslotProviderProbe::MetadataOnly
+    }
 }
 
 fn write_optional_vault_audit_jsonl(

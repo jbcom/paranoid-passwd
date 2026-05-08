@@ -23,7 +23,8 @@ static LOCAL_OPERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const OPS_SCHEMA_VERSION: u16 = 1;
 pub const OPS_TRANSPORT_EVIDENCE_SCHEMA_VERSION: u16 = 1;
-pub const FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION: u16 = 2;
+pub const FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION: u16 = 3;
+pub const FEDERAL_RECOVERY_DISPOSITION_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -364,6 +365,99 @@ impl FederalCryptoProviderEvidence {
             approved_mode: FederalApprovedMode::Confirmed,
             certificate_reference: Some(certificate_reference.into()),
             evidence_source: "test".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FederalRecoveryProfileDisposition {
+    Allowed,
+    AllowedWithControls,
+    Disabled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FederalRecoveryMethodDisposition {
+    pub method: VaultUnlockMethod,
+    pub construction: String,
+    pub default_profile: FederalRecoveryProfileDisposition,
+    pub federal_ready_profile: FederalRecoveryProfileDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub federal_ready_policy_control: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_controls: Vec<String>,
+    pub assessor_note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FederalRecoveryDisposition {
+    pub schema_version: u16,
+    pub policy: String,
+    pub customer_boundary: String,
+    pub methods: Vec<FederalRecoveryMethodDisposition>,
+}
+
+impl FederalRecoveryDisposition {
+    pub fn current_policy() -> Self {
+        Self {
+            schema_version: FEDERAL_RECOVERY_DISPOSITION_SCHEMA_VERSION,
+            policy: "strict_federal_ready_disables_non_certificate_unlock_methods".to_string(),
+            customer_boundary: "password, mnemonic, and device-bound unlocks remain default-profile features; any federal use outside strict federal-ready mode requires a customer-owned compensating-control disposition".to_string(),
+            methods: vec![
+                FederalRecoveryMethodDisposition {
+                    method: VaultUnlockMethod::PasswordRecovery,
+                    construction: "argon2id_recovery_secret_to_aes_256_gcm_kek".to_string(),
+                    default_profile: FederalRecoveryProfileDisposition::Allowed,
+                    federal_ready_profile: FederalRecoveryProfileDisposition::Disabled,
+                    federal_ready_policy_control: Some(
+                        "non_federal_unlock_method:password_recovery".to_string(),
+                    ),
+                    required_controls: Vec::new(),
+                    assessor_note: "Default-profile recovery only; strict federal-ready policy denies this method until an approved alternative or explicit customer boundary disposition is added.".to_string(),
+                },
+                FederalRecoveryMethodDisposition {
+                    method: VaultUnlockMethod::MnemonicRecovery,
+                    construction: "bip39_24_word_recovery_key_wraps_vault_key_with_aes_256_gcm".to_string(),
+                    default_profile: FederalRecoveryProfileDisposition::Allowed,
+                    federal_ready_profile: FederalRecoveryProfileDisposition::Disabled,
+                    federal_ready_policy_control: Some(
+                        "non_federal_unlock_method:mnemonic_recovery".to_string(),
+                    ),
+                    required_controls: Vec::new(),
+                    assessor_note: "Default-profile wallet-style recovery only; strict federal-ready policy denies this method because BIP39 is not claimed as an approved federal recovery construction.".to_string(),
+                },
+                FederalRecoveryMethodDisposition {
+                    method: VaultUnlockMethod::DeviceBound,
+                    construction: "os_secure_storage_wrapped_keyslot".to_string(),
+                    default_profile: FederalRecoveryProfileDisposition::AllowedWithControls,
+                    federal_ready_profile: FederalRecoveryProfileDisposition::Disabled,
+                    federal_ready_policy_control: Some(
+                        "non_federal_unlock_method:device_bound".to_string(),
+                    ),
+                    required_controls: vec![
+                        "seal_posture_evidence".to_string(),
+                        "auto_unseal_provider_available".to_string(),
+                    ],
+                    assessor_note: "Default-profile passwordless unlock only; strict federal-ready policy denies this method until the provider boundary is separately dispositioned.".to_string(),
+                },
+                FederalRecoveryMethodDisposition {
+                    method: VaultUnlockMethod::CertificateWrapped,
+                    construction: "certificate_wrapped_keyslot_using_runtime_crypto_provider"
+                        .to_string(),
+                    default_profile: FederalRecoveryProfileDisposition::AllowedWithControls,
+                    federal_ready_profile: FederalRecoveryProfileDisposition::AllowedWithControls,
+                    federal_ready_policy_control: None,
+                    required_controls: vec![
+                        "required_audit_sink".to_string(),
+                        "fips_approved_mode".to_string(),
+                        "seal_posture_evidence".to_string(),
+                        "certificate_unseal_provider".to_string(),
+                        "fresh_operator_proof".to_string(),
+                    ],
+                    assessor_note: "Current strict federal-ready unlock path; it still depends on deployment-supplied approved-mode provider evidence and customer certificate lifecycle controls.".to_string(),
+                },
+            ],
         }
     }
 }
@@ -757,6 +851,7 @@ pub struct FederalStartupEvidence {
     pub audit_sink: AuditSinkHealth,
     pub external_audit_device: AuditSinkHealth,
     pub crypto_provider: FederalCryptoProviderEvidence,
+    pub recovery_disposition: FederalRecoveryDisposition,
     pub policy_decision: OpsPolicyDecision,
 }
 
@@ -847,6 +942,7 @@ pub fn collect_federal_startup_evidence_from_input(
         audit_sink: input.audit_sink,
         external_audit_device: input.external_audit_device,
         crypto_provider: input.crypto_provider,
+        recovery_disposition: FederalRecoveryDisposition::current_policy(),
         policy_decision,
     }
 }
@@ -1322,6 +1418,56 @@ mod tests {
             }
             other => panic!("expected deny, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn federal_recovery_disposition_marks_argon2id_and_bip39_default_profile_only() {
+        let disposition = FederalRecoveryDisposition::current_policy();
+
+        let password = disposition
+            .methods
+            .iter()
+            .find(|method| method.method == VaultUnlockMethod::PasswordRecovery)
+            .expect("password recovery disposition");
+        assert_eq!(
+            password.federal_ready_profile,
+            FederalRecoveryProfileDisposition::Disabled
+        );
+        assert_eq!(
+            password.federal_ready_policy_control.as_deref(),
+            Some("non_federal_unlock_method:password_recovery")
+        );
+        assert!(password.construction.contains("argon2id"));
+
+        let mnemonic = disposition
+            .methods
+            .iter()
+            .find(|method| method.method == VaultUnlockMethod::MnemonicRecovery)
+            .expect("mnemonic recovery disposition");
+        assert_eq!(
+            mnemonic.federal_ready_profile,
+            FederalRecoveryProfileDisposition::Disabled
+        );
+        assert_eq!(
+            mnemonic.federal_ready_policy_control.as_deref(),
+            Some("non_federal_unlock_method:mnemonic_recovery")
+        );
+        assert!(mnemonic.construction.contains("bip39"));
+
+        let certificate = disposition
+            .methods
+            .iter()
+            .find(|method| method.method == VaultUnlockMethod::CertificateWrapped)
+            .expect("certificate disposition");
+        assert_eq!(
+            certificate.federal_ready_profile,
+            FederalRecoveryProfileDisposition::AllowedWithControls
+        );
+        assert!(
+            certificate
+                .required_controls
+                .contains(&"fresh_operator_proof".to_string())
+        );
     }
 
     #[test]
@@ -1806,6 +1952,15 @@ mod tests {
         assert_eq!(
             evidence.external_audit_device,
             AuditSinkHealth::not_configured_external_device()
+        );
+        assert_eq!(evidence.recovery_disposition.methods.len(), 4);
+        assert!(
+            evidence
+                .recovery_disposition
+                .methods
+                .iter()
+                .any(|method| method.federal_ready_policy_control.as_deref()
+                    == Some("non_federal_unlock_method:mnemonic_recovery"))
         );
         assert!(matches!(
             evidence.policy_decision,

@@ -109,8 +109,8 @@ crates. Current coverage proves that:
 - audit unit tests cover disabled probes, live TCP reachability probes, and the explicit ready-ack
   path required before an external audit device can satisfy required audit policy
 - a stable denied federal startup fixture and an external-device-ready fixture are checked against
-  the serialized evidence schema; the external audit-device wire shape is versioned as federal
-  startup evidence schema `2`
+  the serialized evidence schema; the external audit-device and recovery-disposition wire shape is
+  versioned as federal startup evidence schema `3`
 - stable CLI/TUI/GUI vault operation trace fixtures pin typed ops envelopes, request/response audit
   events, and JSONL rendering for automation compatibility
 - a stable mTLS process-boundary vault operation fixture pins authenticated transport evidence,

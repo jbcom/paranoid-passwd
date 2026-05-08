@@ -475,8 +475,8 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
-                "FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION: u16 = 2",
-                "federal startup evidence schema version marks the external audit-device wire shape",
+                "FEDERAL_STARTUP_EVIDENCE_SCHEMA_VERSION: u16 = 3",
+                "federal startup evidence schema version is stable for external audit-device posture",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -520,7 +520,7 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-ops/tests/fixtures/federal_startup_denied.json",
-                '"schema_version": 2',
+                '"schema_version": 3',
                 "stable federal startup evidence fixture uses the bumped wire schema",
             ),
             Requirement(
@@ -557,6 +557,98 @@ CLAIMS: tuple[Claim, ...] = (
                 "docs/reference/assurance-claims.md",
                 "`audit.external-device-health` | `tracked-open`",
                 "assurance claim tracks the external audit-device posture disposition",
+            ),
+        ),
+    ),
+    Claim(
+        "federal.recovery-disposition-evidence",
+        "Federal recovery disposition evidence",
+        "ops-security",
+        (
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "pub struct FederalRecoveryDisposition",
+                "ops owns a serializable federal recovery disposition model",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "pub recovery_disposition: FederalRecoveryDisposition",
+                "federal startup evidence includes strict recovery disposition",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "strict_federal_ready_disables_non_certificate_unlock_methods",
+                "ops evidence names the strict federal-ready recovery policy",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "non_federal_unlock_method:password_recovery",
+                "ops policy evidence marks Argon2id password recovery as non-federal",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "non_federal_unlock_method:mnemonic_recovery",
+                "ops policy evidence marks BIP39 mnemonic recovery as non-federal",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "non_federal_unlock_method:device_bound",
+                "ops policy evidence marks device-bound unlock as non-federal",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "Current strict federal-ready unlock path",
+                "ops evidence identifies certificate-wrapped unlock as the current controlled federal path",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_cli.rs",
+                "OpsCommand::VaultUnlock { method }",
+                "vault CLI evaluates the selected unlock method under federal-ready policy",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui.rs",
+                "record_vault_unlock_policy",
+                "vault TUI evaluates the selected unlock method under federal-ready policy",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "federal_recovery_disposition_marks_argon2id_and_bip39_default_profile_only",
+                "ops tests pin the federal recovery disposition model",
+            ),
+            Requirement(
+                "tests/test_vault_cli.sh",
+                "federal recovery disposition gates vault unlock methods",
+                "vault CLI e2e proves federal-ready unlock methods are gated",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/fixtures/federal_startup_denied.json",
+                '"recovery_disposition"',
+                "stable federal startup evidence fixture includes recovery disposition",
+            ),
+            Requirement(
+                "crates/paranoid-ops/tests/fixtures/federal_startup_denied.json",
+                "non_federal_unlock_method:mnemonic_recovery",
+                "stable federal startup evidence fixture marks BIP39 recovery as non-federal",
+            ),
+            Requirement(
+                "tests/test_cli.sh",
+                'data["recovery_disposition"]["methods"]',
+                "CLI federal evidence contract covers recovery disposition",
+            ),
+            Requirement(
+                "docs/reference/federal-readiness.md",
+                "`--federal-evidence` emits this as machine-readable `recovery_disposition` evidence",
+                "federal readiness docs describe recovery-disposition evidence",
+            ),
+            Requirement(
+                "docs/reference/control-mapping.md",
+                "strict recovery disposition",
+                "federal control mapping includes recovery-disposition evidence",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`federal.recovery-disposition-evidence` | `process`",
+                "assurance claims track federal recovery disposition evidence",
             ),
         ),
     ),
