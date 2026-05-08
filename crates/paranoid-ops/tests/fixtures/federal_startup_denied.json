@@ -33,6 +33,55 @@
     "writable": false
   },
   "operating_system": "linux",
+  "recovery_disposition": {
+    "customer_boundary": "password, mnemonic, and device-bound unlocks remain default-profile features; any federal use outside strict federal-ready mode requires a customer-owned compensating-control disposition",
+    "methods": [
+      {
+        "assessor_note": "Default-profile recovery only; strict federal-ready policy denies this method until an approved alternative or explicit customer boundary disposition is added.",
+        "construction": "argon2id_recovery_secret_to_aes_256_gcm_kek",
+        "default_profile": "allowed",
+        "federal_ready_policy_control": "non_federal_unlock_method:password_recovery",
+        "federal_ready_profile": "disabled",
+        "method": "password_recovery"
+      },
+      {
+        "assessor_note": "Default-profile wallet-style recovery only; strict federal-ready policy denies this method because BIP39 is not claimed as an approved federal recovery construction.",
+        "construction": "bip39_24_word_recovery_key_wraps_vault_key_with_aes_256_gcm",
+        "default_profile": "allowed",
+        "federal_ready_policy_control": "non_federal_unlock_method:mnemonic_recovery",
+        "federal_ready_profile": "disabled",
+        "method": "mnemonic_recovery"
+      },
+      {
+        "assessor_note": "Default-profile passwordless unlock only; strict federal-ready policy denies this method until the provider boundary is separately dispositioned.",
+        "construction": "os_secure_storage_wrapped_keyslot",
+        "default_profile": "allowed_with_controls",
+        "federal_ready_policy_control": "non_federal_unlock_method:device_bound",
+        "federal_ready_profile": "disabled",
+        "method": "device_bound",
+        "required_controls": [
+          "seal_posture_evidence",
+          "auto_unseal_provider_available"
+        ]
+      },
+      {
+        "assessor_note": "Current strict federal-ready unlock path; it still depends on deployment-supplied approved-mode provider evidence and customer certificate lifecycle controls.",
+        "construction": "certificate_wrapped_keyslot_using_runtime_crypto_provider",
+        "default_profile": "allowed_with_controls",
+        "federal_ready_profile": "allowed_with_controls",
+        "method": "certificate_wrapped",
+        "required_controls": [
+          "required_audit_sink",
+          "fips_approved_mode",
+          "seal_posture_evidence",
+          "certificate_unseal_provider",
+          "fresh_operator_proof"
+        ]
+      }
+    ],
+    "policy": "strict_federal_ready_disables_non_certificate_unlock_methods",
+    "schema_version": 1
+  },
   "policy_decision": {
     "decision": "deny",
     "missing_controls": [
@@ -43,5 +92,5 @@
   },
   "product_version": "fixture-version",
   "profile": "federal_ready",
-  "schema_version": 2
+  "schema_version": 3
 }

@@ -447,6 +447,92 @@ assert seal["auto_unseal_available"] is True
     return 0
 }
 
+t_federal_recovery_disposition_policy() {
+    local audit_path=""
+    local cert_audit_path=""
+    local err_path=""
+    local out=""
+    local rc=0
+
+    audit_path="$TMPDIR_ROOT/federal-password-audit.jsonl"
+    err_path="$TMPDIR_ROOT/federal-password.err"
+    rc=0
+    out="$(PARANOID_FEDERAL_APPROVED_MODE=confirmed \
+        PARANOID_FEDERAL_CERTIFICATE_REFERENCE="CMVP fixture certificate" \
+        source_vault --federal-ready --audit-jsonl "$audit_path" list --query GitHub 2>"$err_path")" || rc=$?
+    if [[ "$rc" -ne 6 || -s "$err_path" || ! -s "$audit_path" ]]; then
+        return 1
+    fi
+    printf '%s' "$out" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["operation"] == "vault"
+assert data["status"] == "error"
+assert data["error_kind"] == "policy_denied"
+assert data["policy_decision"]["decision"] == "deny"
+assert "non_federal_unlock_method:password_recovery" in data["policy_decision"]["missing_controls"]
+' || return 1
+    AUDIT_JSONL="$audit_path" python3 -c '
+import json
+import os
+
+with open(os.environ["AUDIT_JSONL"], encoding="utf-8") as handle:
+    events = [json.loads(line) for line in handle]
+
+assert [event["action"] for event in events] == [
+    "vault_operation.request",
+    "vault_operation.response",
+    "vault_unlock.request",
+    "vault_unlock.response",
+]
+assert events[1]["attributes"]["decision"] == "allow"
+assert events[3]["attributes"]["decision"] == "deny"
+assert events[2]["attributes"]["unlock_method"] == "password_recovery"
+' || return 1
+
+    cert_audit_path="$TMPDIR_ROOT/federal-certificate-audit.jsonl"
+    err_path="$TMPDIR_ROOT/federal-certificate.err"
+    rc=0
+    out="$(PARANOID_FEDERAL_APPROVED_MODE=confirmed \
+        PARANOID_FEDERAL_CERTIFICATE_REFERENCE="CMVP fixture certificate" \
+        source_vault_with_cert "$CERT2_PEM" "$CERT2_KEY" --federal-ready --audit-jsonl "$cert_audit_path" list --query GitHub 2>"$err_path")" || rc=$?
+    if [[ "$rc" -ne 7 || -s "$err_path" || ! -s "$cert_audit_path" ]]; then
+        return 1
+    fi
+    printf '%s' "$out" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["status"] == "challenge_required"
+assert data["error_kind"] == "policy_challenge"
+assert data["policy_decision"]["decision"] == "challenge"
+assert "fresh_operator_proof" in data["policy_decision"]["required_actions"]
+' || return 1
+    CERT_AUDIT_JSONL="$cert_audit_path" python3 -c '
+import json
+import os
+
+with open(os.environ["CERT_AUDIT_JSONL"], encoding="utf-8") as handle:
+    events = [json.loads(line) for line in handle]
+
+assert [event["action"] for event in events] == [
+    "vault_operation.request",
+    "vault_operation.response",
+    "vault_unlock.request",
+    "vault_unlock.response",
+]
+assert events[1]["attributes"]["decision"] == "allow"
+assert events[3]["attributes"]["decision"] == "challenge"
+assert events[2]["attributes"]["unlock_method"] == "certificate_wrapped"
+assert "fresh_operator_proof" in json.loads(events[3]["attributes"]["required_actions"])
+' || return 1
+
+    return 0
+}
+
 t_backup_and_transfer() {
     local backup_summary=""
     local import_summary=""
@@ -537,6 +623,7 @@ prepare_workspace
 
 check "headless vault init, CRUD, filters, and generate-store rotation" t_init_and_crud
 check "mnemonic, device, and certificate unlock flows" t_recovery_paths
+check "federal recovery disposition gates vault unlock methods" t_federal_recovery_disposition_policy
 check "backup restore and transfer-package round trips" t_backup_and_transfer
 check "recovery-secret rotation and keyslot removal guards" t_rotation_and_removal_guards
 

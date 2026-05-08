@@ -11,8 +11,8 @@ use paranoid_audit::{
 };
 use paranoid_core::{FrameworkId, ParanoidRequest};
 use paranoid_ops::{
-    FederalCryptoProviderEvidence, OpsPolicyContext, OpsProfile, VaultOperationAccess,
-    evaluate_vault_operation,
+    FederalCryptoProviderEvidence, OpsCommand, OpsPolicyContext, OpsProfile, VaultOperationAccess,
+    evaluate_ops_command, evaluate_vault_operation,
 };
 use paranoid_vault::{
     GenerateStoreLoginRecord, MnemonicRecoveryEnrollment, NativeSessionHardening, NewCardRecord,
@@ -1211,12 +1211,48 @@ impl App {
         }
     }
 
+    fn record_vault_unlock_policy(&mut self) -> anyhow::Result<()> {
+        if self.profile != OpsProfile::FederalReady {
+            return Ok(());
+        }
+        let method = crate::vault_cli::vault_unlock_method(&self.options);
+        let (_, seal_posture) = crate::vault_cli::seal_posture_for_path(
+            &self.options.path,
+            crate::vault_cli::vault_unlock_provider_probe(method),
+        );
+        let mut context = self.ops_policy_context();
+        context.seal_posture = Some(seal_posture);
+        let evaluation = evaluate_ops_command(
+            AuditSurface::Tui,
+            OpsCommand::VaultUnlock { method },
+            &context,
+        );
+        self.ops_audit_events
+            .extend(evaluation.audit_events.iter().cloned());
+        if let Some(path) = &self.audit_jsonl
+            && self.audit_sink_health.is_available()
+        {
+            write_events_jsonl(path, evaluation.audit_events.as_slice()).with_context(|| {
+                format!("write TUI vault unlock audit events to {}", path.display())
+            })?;
+        }
+        if evaluation.is_allowed() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "TUI vault unlock policy denied: {:?}",
+                evaluation.decision
+            ))
+        }
+    }
+
     fn unlock_for_operation(
         &mut self,
         operation: &str,
         access: VaultOperationAccess,
     ) -> anyhow::Result<UnlockedVault> {
         self.record_vault_operation_policy(operation, access)?;
+        self.record_vault_unlock_policy()?;
         Ok(unlock_vault_for_options(&self.options)?)
     }
 

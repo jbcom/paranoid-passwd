@@ -26,6 +26,7 @@
       "action": "vault_operation.response",
       "attributes": {
         "decision": "deny",
+        "missing_controls": "[\"required_audit_sink\"]",
         "request_id": "pp.fixture.request.tui.keyslot_denied",
         "session_surface": "tui",
         "session_transport": "in_process",

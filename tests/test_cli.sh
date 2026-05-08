@@ -282,12 +282,16 @@ import json
 import sys
 
 data = json.load(sys.stdin)
-assert data["schema_version"] == 2
+assert data["schema_version"] == 3
 assert data["profile"] == "federal_ready"
 assert data["audit_sink"]["status"] == "not_configured"
 assert data["external_audit_device"]["kind"] == "external_device"
 assert data["external_audit_device"]["status"] == "not_configured"
 assert data["crypto_provider"]["provider_name"] == "OpenSSL"
+assert any(
+    method["federal_ready_policy_control"] == "non_federal_unlock_method:mnemonic_recovery"
+    for method in data["recovery_disposition"]["methods"]
+)
 assert data["policy_decision"]["decision"] == "deny"
 '
 }
