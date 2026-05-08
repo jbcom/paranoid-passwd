@@ -37,10 +37,10 @@ make quality
   license/source policy, ShellCheck warning-or-higher results for repo-owned shell scripts, Python
   syntax for the existing docs/test harness scripts without writing bytecode, tracked-file secret
   scanning, and local visibility of security scanners.
-- `make quality` runs `verify-deep`, the full `ci` target, and the supported GUI e2e target for the
-  host. On macOS it drives the Linux GUI harness through the local builder image; on Linux it uses
-  the native `xvfb-run` harness. This target requires the local security scanner stack and runs the
-  enforced local scanner subset.
+- `make quality` runs `verify-deep`, the full `ci` target, GUI target compile checks, and the
+  supported multi-viewport GUI visual-regression target for the host. On macOS it drives the Linux
+  GUI harness through the local builder image; on Linux it uses the native `xvfb-run` harness. This
+  target requires the local security scanner stack and runs the enforced local scanner subset.
 - Optional external tools (`codeql`, `semgrep`, `cargo-deny`, `cargo-audit`, `cargo-vet`, `syft`,
   `trivy`, and `osv-scanner`) are reported when missing under `make verify-deep`; `make quality`
   sets `PARANOID_STRICT_EXTERNAL_TOOLS=1` and treats missing tools as fatal.
@@ -87,6 +87,15 @@ test-gui-wasm-check` is intentionally strict and warning-clean, but it only chec
 non-secret Slint WASM surface. The native vault and generator crates are not linked for
 `wasm32-unknown-unknown`; target-appropriate vault storage, crypto, packaging, and runtime
 validation remain product work before WASM can become a supported secret-handling surface.
+
+Current GUI platform coverage is explicit:
+
+| GUI surface | Current gate | What it proves |
+| --- | --- | --- |
+| Desktop Slint | `make test-gui-e2e` or `make test-gui-e2e-emulate` | Runs the real GUI binary through the operator workflow, validates durable audit evidence, and captures a rendered screenshot. |
+| Desktop viewport classes | `make test-gui-visual-regression` or `make test-gui-visual-regression-emulate` | Replays the real GUI workflow at desktop, tablet, and narrow/mobile-class viewport sizes and rejects blank or low-information screenshots. |
+| Android Slint | `make test-gui-android-check` | Compile-checks the Rust-native Slint library against the configured Android NDK while preserving native core/vault linkage. Runtime emulator/Maestro coverage remains the next Android gate. |
+| WASM Slint | `make test-gui-wasm-check` | Compile-checks the gated non-secret Slint WASM surface. Secret-handling WASM is not supported until target storage, crypto, and runtime validation are threat-modeled. |
 
 ## Ops, Audit, and Federal Profile Tests
 
@@ -175,6 +184,8 @@ cargo test -p paranoid-core --locked --frozen --offline
   [`tests/test_gui_e2e.sh`](../../../tests/test_gui_e2e.sh), proving the native
   Slint desktop app can run an operator workflow end to end under `xvfb-run`
   and leave a screenshot artifact for review
+- a multi-viewport GUI visual-regression mode that replays the same workflow at desktop, tablet,
+  and narrow/mobile-class viewport sizes and rejects blank or low-information captures
 - vault TUI rendering and launch-policy smoke tests
 - headless CLI end-to-end coverage for the documented vault workflows in
   [`tests/test_vault_cli.sh`](../../../tests/test_vault_cli.sh), including
@@ -199,6 +210,7 @@ cargo build -p paranoid-cli --locked --frozen --offline
 tests/test_cli.sh target/debug/paranoid-passwd
 tests/test_tui_e2e.py target/debug/paranoid-passwd
 tests/test_gui_e2e.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui dist/gui-e2e.png
+tests/test_gui_e2e.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui dist/gui-e2e.png "desktop=1280x1024 tablet=900x700 mobile=420x800"
 tests/test_vault_cli.sh target/debug/paranoid-passwd
 bash scripts/hallucination_check.sh
 bash scripts/supply_chain_verify.sh
@@ -249,6 +261,8 @@ test backend.
 - a real GUI-binary operator harness that launches the desktop app under Xvfb,
   drives the same native update path used by interactive controls, attests the
   workflow result to disk, and captures a rendered screenshot artifact
+- a real GUI-binary visual-regression harness that captures desktop, tablet, and
+  narrow/mobile-class screenshots from the same operator workflow
 - vault refresh, CRUD, `SecureNote`, `Card`, `Identity`, folder, tag, password-history, duplicate-password visibility, structured filtering, generate-and-rotate, encrypted backup export/import, invalid backup restore fail-closed coverage, encrypted transfer export/import, invalid transfer import fail-closed coverage, and backup/transfer summary preview coverage
 - native GUI keyslot inspection, mnemonic-slot rotation, certificate-slot rewrap, relabel, recovery-secret rotation, enrollment, posture-aware removal, device-slot rebind coverage, and active-session continuity after device rebind
 - native GUI direct unlock coverage for recovery-secret, mnemonic, device-bound, and certificate-backed flows
@@ -287,5 +301,8 @@ make release-emulate
   `--help`.
 - `make test-gui-e2e` runs the actionable GUI workflow harness on Linux hosts, while
   `make test-gui-e2e-emulate` drives the same path through the custom builder image on macOS.
+- `make test-gui-visual-regression` captures desktop, tablet, and narrow/mobile-class screenshots
+  on Linux hosts; `make test-gui-visual-regression-emulate` runs the same visual matrix through the
+  builder image on macOS.
 - `scripts/release_validate.sh` is used in CI after the full matrix build to verify all CLI and GUI artifacts, Linux `.deb` packages, package-manager manifests, and `install.sh`.
 - `make verify-branch-protection` checks that GitHub branch protection still matches the active Rust-native required checks.

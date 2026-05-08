@@ -47,7 +47,7 @@ Claim states:
 | `supply-chain.sha-pinned-actions` | `process` | External GitHub Actions remain pinned to full commit SHAs. | `.github/workflows/*.yml`; `scripts/supply_chain_verify.sh` |
 | `release.payload-verification` | `process` | Release artifacts are built, inspected, smoke-tested, checksummed, and verified by repo-owned scripts. | `scripts/build_release_artifact.sh`; `scripts/release_validate.sh`; `scripts/verify_published_release.sh` |
 | `assurance.pr-neutral-ai-assessor` | `process` | PR review has a neutral AI security-assessor profile, path-scoped Copilot instructions, and a deterministic CI gate. | `.github/agents/paranoid-security-auditor.md`; `.github/instructions/security-assurance.instructions.md`; `.github/workflows/security-assurance.yml`; `scripts/security_assurance_gate.py` |
-| `assurance.gui-screenshot-evidence` | `process` | UI-sensitive PR review requires the GUI e2e harness and a captured screenshot artifact. | `Makefile`; `tests/test_gui_e2e.sh`; `docs/reference/ai-review.md`; `.github/agents/paranoid-security-auditor.md` |
+| `assurance.gui-screenshot-evidence` | `process` | UI-sensitive PR review requires the GUI e2e harness and desktop, tablet, and narrow/mobile-class screenshot artifacts. | `Makefile`; `tests/test_gui_e2e.sh`; `docs/reference/ai-review.md`; `.github/agents/paranoid-security-auditor.md` |
 
 ## Release Interpretation
 
