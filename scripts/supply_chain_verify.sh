@@ -28,9 +28,58 @@ contains_fixed() {
   grep -qF -- "$1" "$2"
 }
 
+require_manifest_var() {
+  local name="$1"
+  if [ -n "${!name:-}" ]; then
+    return 0
+  fi
+  fail "scanner toolchain manifest is missing $name"
+  return 1
+}
+
 echo
 echo "Rust-Native Supply Chain Verification"
 echo
+
+scanner_manifest="$REPO_ROOT/supply-chain/scanner-toolchain.env"
+if [ -f "$scanner_manifest" ]; then
+  # shellcheck source=/dev/null
+  . "$scanner_manifest"
+else
+  fail "scanner toolchain manifest is missing"
+fi
+
+SCANNER_TOOLCHAIN_SCHEMA_VERSION="${SCANNER_TOOLCHAIN_SCHEMA_VERSION:-}"
+BUILDER_SCANNER_TOOLS="${BUILDER_SCANNER_TOOLS:-}"
+SEMGREP_APK_PACKAGE="${SEMGREP_APK_PACKAGE:-}"
+SEMGREP_APK_VERSION="${SEMGREP_APK_VERSION:-}"
+OSV_SCANNER_APK_PACKAGE="${OSV_SCANNER_APK_PACKAGE:-}"
+OSV_SCANNER_APK_VERSION="${OSV_SCANNER_APK_VERSION:-}"
+SYFT_APK_PACKAGE="${SYFT_APK_PACKAGE:-}"
+SYFT_APK_VERSION="${SYFT_APK_VERSION:-}"
+TRIVY_APK_PACKAGE="${TRIVY_APK_PACKAGE:-}"
+TRIVY_APK_VERSION="${TRIVY_APK_VERSION:-}"
+CODEQL_ACTION_VERSION="${CODEQL_ACTION_VERSION:-}"
+CODEQL_ACTION_SHA="${CODEQL_ACTION_SHA:-}"
+HOST_LOCAL_SCANNER_TOOLS="${HOST_LOCAL_SCANNER_TOOLS:-}"
+
+if require_manifest_var SCANNER_TOOLCHAIN_SCHEMA_VERSION \
+  && require_manifest_var BUILDER_SCANNER_TOOLS \
+  && require_manifest_var SEMGREP_APK_PACKAGE \
+  && require_manifest_var SEMGREP_APK_VERSION \
+  && require_manifest_var OSV_SCANNER_APK_PACKAGE \
+  && require_manifest_var OSV_SCANNER_APK_VERSION \
+  && require_manifest_var SYFT_APK_PACKAGE \
+  && require_manifest_var SYFT_APK_VERSION \
+  && require_manifest_var TRIVY_APK_PACKAGE \
+  && require_manifest_var TRIVY_APK_VERSION \
+  && require_manifest_var CODEQL_ACTION_VERSION \
+  && require_manifest_var CODEQL_ACTION_SHA \
+  && require_manifest_var HOST_LOCAL_SCANNER_TOOLS; then
+  pass "scanner toolchain manifest is present and complete"
+else
+  fail "scanner toolchain manifest is incomplete"
+fi
 
 if [ -f "$REPO_ROOT/.cargo/config.toml" ] \
   && contains_fixed 'replace-with = "vendored-sources"' "$REPO_ROOT/.cargo/config.toml" \
@@ -94,6 +143,10 @@ if [ -f "$builder" ] \
   && contains_regex '^FROM cgr\.dev/chainguard/wolfi-base@sha256:' "$builder" \
   && contains_fixed 'RUST_APK_PACKAGE=rust-1.95' "$builder" \
   && contains_fixed 'RUST_APK_VERSION=1.95.0-r0' "$builder" \
+  && contains_fixed "ARG SEMGREP_APK_VERSION=${SEMGREP_APK_VERSION}" "$builder" \
+  && contains_fixed "ARG OSV_SCANNER_APK_VERSION=${OSV_SCANNER_APK_VERSION}" "$builder" \
+  && contains_fixed "ARG SYFT_APK_VERSION=${SYFT_APK_VERSION}" "$builder" \
+  && contains_fixed "ARG TRIVY_APK_VERSION=${TRIVY_APK_VERSION}" "$builder" \
   && contains_fixed '--mount=type=cache,target=/var/cache/apk' "$builder" \
   && contains_fixed 'apk add' "$builder" \
   && contains_fixed 'build-base' "$builder" \
@@ -106,10 +159,10 @@ if [ -f "$builder" ] \
   && contains_fixed 'imagemagick-7' "$builder" \
   && contains_fixed 'xvfb-run' "$builder" \
   && contains_fixed 'ripgrep' "$builder" \
-  && contains_fixed 'semgrep' "$builder" \
-  && contains_fixed 'osv-scanner' "$builder" \
-  && contains_fixed 'syft' "$builder" \
-  && contains_fixed 'trivy' "$builder" \
+  && contains_fixed "${SEMGREP_APK_PACKAGE}=\"\${SEMGREP_APK_VERSION}\"" "$builder" \
+  && contains_fixed "${OSV_SCANNER_APK_PACKAGE}=\"\${OSV_SCANNER_APK_VERSION}\"" "$builder" \
+  && contains_fixed "${SYFT_APK_PACKAGE}=\"\${SYFT_APK_VERSION}\"" "$builder" \
+  && contains_fixed "${TRIVY_APK_PACKAGE}=\"\${TRIVY_APK_VERSION}\"" "$builder" \
   && contains_fixed 'py3-pip' "$builder" \
   && contains_fixed 'python3' "$builder" \
   && contains_fixed 'command -v gh' "$builder" \
@@ -125,6 +178,14 @@ if [ -f "$builder" ] \
 else
   fail "builder image is not Wolfi-pinned or is missing required Rust/OpenSSL/docs/scanner packages"
 fi
+
+for builder_tool in $BUILDER_SCANNER_TOOLS; do
+  if contains_fixed "command -v $builder_tool" "$builder"; then
+    :
+  else
+    fail "builder scanner tool $builder_tool is listed in the manifest but missing from builder self-checks"
+  fi
+done
 
 ci_workflow="$REPO_ROOT/.github/workflows/ci.yml"
 if [ -f "$ci_workflow" ] \
@@ -155,6 +216,22 @@ if [ -f "$release_workflow" ] \
 else
   fail "release workflow is not fully scripted in-repo, has drifted from the Wolfi builder, or still swallows errors"
 fi
+
+codeql_refs=$(grep -rE 'github/codeql-action/(init|autobuild|analyze|upload-sarif)@' "$workflow_dir"/*.yml || true)
+if [ -n "$codeql_refs" ] \
+  && ! printf '%s\n' "$codeql_refs" | grep -vF "@${CODEQL_ACTION_SHA} # v${CODEQL_ACTION_VERSION}" >/dev/null; then
+  pass "CodeQL action references match the scanner toolchain manifest"
+else
+  fail "CodeQL action references are missing or drifted from the scanner toolchain manifest"
+fi
+
+for host_tool in $HOST_LOCAL_SCANNER_TOOLS; do
+  if contains_fixed "\"$host_tool\"" "$REPO_ROOT/xtask/src/main.rs"; then
+    :
+  else
+    fail "host-local scanner tool $host_tool is listed in the manifest but missing from xtask visibility checks"
+  fi
+done
 
 if contains_regex '^release-emulate:' "$REPO_ROOT/Makefile" \
   && contains_regex '^release-validate:' "$REPO_ROOT/Makefile"; then

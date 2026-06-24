@@ -13,6 +13,10 @@ FROM cgr.dev/chainguard/wolfi-base@sha256:1af610c4a70668dad46159ee178b20378c79a4
 
 ARG RUST_APK_PACKAGE=rust-1.95
 ARG RUST_APK_VERSION=1.95.0-r0
+ARG SEMGREP_APK_VERSION=1.165.0-r0
+ARG OSV_SCANNER_APK_VERSION=2.4.0-r0
+ARG SYFT_APK_VERSION=1.45.1-r1
+ARG TRIVY_APK_VERSION=0.70.0-r5
 ARG SPHINX_RUSTDOCGEN_VERSION=1.1.0
 ARG TOX_VERSION=4.53.0
 
@@ -56,16 +60,16 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         make \
         openssl \
         openssl-dev \
-        osv-scanner \
+        osv-scanner="${OSV_SCANNER_APK_VERSION}" \
         perl \
         pkgconf \
         py3-pip \
         python3 \
         ripgrep \
-        semgrep \
+        semgrep="${SEMGREP_APK_VERSION}" \
         shadow \
-        syft \
-        trivy \
+        syft="${SYFT_APK_VERSION}" \
+        trivy="${TRIVY_APK_VERSION}" \
         wayland \
         wayland-dev \
         xauth \

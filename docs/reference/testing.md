@@ -44,6 +44,9 @@ make quality
 - Optional external tools (`codeql`, `semgrep`, `cargo-deny`, `cargo-audit`, `cargo-vet`, `syft`,
   `trivy`, and `osv-scanner`) are reported when missing under `make verify-deep`; `make quality`
   sets `PARANOID_STRICT_EXTERNAL_TOOLS=1` and treats missing tools as fatal.
+- `supply-chain/scanner-toolchain.env` records the scanner/tool update contract. The
+  supply-chain verifier checks that Wolfi builder scanner apk versions, CodeQL action SHA pins, and
+  host-local `xtask` visibility checks agree with that manifest.
 - The enforced scanner subset is `cargo audit --no-fetch --stale`, `cargo deny check`, Semgrep
   `--config auto`, and an OSV lockfile report. `cargo-deny` allows unmaintained/unsound advisories
   as warnings only when there is no safe upgrade path; OSV findings with a fixed version remain
