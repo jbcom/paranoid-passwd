@@ -30,7 +30,6 @@ normalize_inventory() {
 
 expected_inventory() {
   cat <<'EOF'
-crates/paranoid-core/src/lib.rs:    // TODO: AI_REVIEW - verify chi-squared upper-tail interpretation and thresholding.
 crates/paranoid-core/src/lib.rs:    // TODO: AI_REVIEW - verify the serial-correlation coefficient matches the intended estimator.
 crates/paranoid-audit/src/lib.rs:// TODO: AI_REVIEW - confirm external audit-device posture and health semantics do not overstate sink availability or federal audit coverage.
 crates/paranoid-ops/src/lib.rs:// TODO: AI_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.
@@ -71,8 +70,16 @@ else
   pass "source TODO inventory matches the expected AI review surface"
 fi
 
+if rg -F "expected open AI review sites: **7**" "$DOC" >/dev/null 2>&1; then
+  pass "AI review reference doc tracks the expected open-site count"
+else
+  fail "AI review reference doc must state the expected open-site count"
+fi
+
 for required in \
   "Chi-squared audit" \
+  "Dispositioned Inventory" \
+  "chi_squared_upper_tail_threshold_brackets_one_percent_critical_value" \
   "Serial correlation audit" \
   "External audit-device posture" \
   "Ops policy boundary" \

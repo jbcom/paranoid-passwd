@@ -14,7 +14,7 @@ surface small, concrete, evidence-driven, and hard to forget while the product c
 ## Current Status
 
 - AI review status: **open**
-- expected open AI review sites: **8**
+- expected open AI review sites: **7**
 - policy: every `TODO: AI_REVIEW` location in source must be listed here and in the inventory check
 - assurance mapping: each open site is represented in [assurance-claims.md](./assurance-claims.md)
   as a `tracked-open` claim
@@ -23,7 +23,6 @@ surface small, concrete, evidence-driven, and hard to forget while the product c
 
 | Claim ID | Area | Location | Required AI Assessment |
 |----------|------|----------|-------------------------------|
-| `audit.chi-squared-tail` | Chi-squared audit | `crates/paranoid-core/src/lib.rs` | Verify the chi-squared upper-tail interpretation, `p > 0.01` thresholding, and how that maps to the intended generator verdict using cited math references and known-answer tests. |
 | `audit.serial-correlation-estimator` | Serial correlation audit | `crates/paranoid-core/src/lib.rs` | Verify the serial-correlation coefficient implementation matches the intended estimator and normalization using cited references and known-answer tests. |
 | `audit.external-device-health` | External audit-device posture | `crates/paranoid-audit/src/lib.rs` | Verify external audit-device posture, TCP reachability probing, and mTLS JSONL write-ack readiness semantics do not overstate sink availability or federal audit coverage. |
 | `ops.shared-policy-boundary` | Ops policy boundary | `crates/paranoid-ops/src/lib.rs` | Verify the shared ops evaluator is the right authorization and audit-evidence boundary for CLI, TUI, GUI, automation adapters, and seal-provider unlock policy. |
@@ -31,6 +30,21 @@ surface small, concrete, evidence-driven, and hard to forget while the product c
 | `vault.device-bound-keyslot` | Device-bound keyslot design | `crates/paranoid-vault/src/lib.rs` | Verify storing the raw master key in platform secure storage plus an AES-GCM verification blob is acceptable for the supported macOS, Windows, and Linux secret-store assumptions. |
 | `vault.mnemonic-recovery-keyslot` | Mnemonic recovery construction | `crates/paranoid-vault/src/lib.rs` | Verify whether the current 24-word BIP39-derived material should be used directly as the AES-256-GCM wrapping key for mnemonic recovery slots, or replaced by a stronger derivation scheme. |
 | `vault.certificate-wrapped-keyslot` | Certificate-wrapped keyslots | `crates/paranoid-vault/src/lib.rs` | Verify CMS recipient selection, content-encryption policy, and the broader certificate-wrapped keyslot design. |
+
+## Dispositioned Inventory
+
+| Claim ID | Area | Disposition | Evidence |
+|----------|------|-------------|----------|
+| `audit.chi-squared-tail` | Chi-squared audit | Acceptable as implemented. `paranoid-core` computes Pearson's chi-squared statistic over the fixed password charset bins, uses `df = N - 1` because no distribution parameters are estimated from the audit sample, converts the statistic through the chi-squared upper tail, and treats `p > 0.01` as the pass condition. A larger statistic is therefore more suspicious, matching the NIST/Sematech chi-square goodness-of-fit rejection rule and upper-tail critical-value table. | `crates/paranoid-core/src/lib.rs`; `chi_squared_known_answers_hold`; `chi_squared_upper_tail_threshold_brackets_one_percent_critical_value`; [NIST/Sematech chi-square goodness-of-fit test](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35f.htm); [NIST/Sematech chi-square critical values](https://www.itl.nist.gov/div898/handbook/eda/section3/eda3674.htm) |
+
+Disposition limits:
+
+- The chi-squared audit is an implementation smoke check for gross uniformity drift in generated
+  batches. It is not a certification of RNG quality and does not replace OpenSSL RNG delegation,
+  rejection-sampling checks, or release assurance.
+- The audit assumes the expected distribution is fixed by the supplied charset. Any future audit
+  that estimates distribution parameters from the observed batch must revisit the degrees-of-freedom
+  calculation before reusing this disposition.
 
 ## Required AI Assessor Output
 
