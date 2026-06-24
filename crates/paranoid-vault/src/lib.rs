@@ -3498,8 +3498,7 @@ fn format_x509_name(name: &X509NameRef) -> String {
             let field = entry.object().nid().short_name().unwrap_or("UNKNOWN");
             let value = entry
                 .data()
-                .as_utf8()
-                .map(|value| value.to_string())
+                .to_string()
                 .unwrap_or_else(|_| hex_encode(entry.data().as_slice()));
             format!("{field}={value}")
         })

@@ -466,8 +466,7 @@ fn certificate_subject(certificate: &X509) -> String {
             let key = entry.object().nid().short_name().unwrap_or("unknown");
             let value = entry
                 .data()
-                .as_utf8()
-                .map(|value| value.to_string())
+                .to_string()
                 .unwrap_or_else(|_| "[non_utf8]".to_string());
             format!("{key}={value}")
         })

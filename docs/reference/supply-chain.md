@@ -83,6 +83,12 @@ The repository now carries `scripts/verify_branch_protection.sh` plus `make veri
 - `Cargo.lock` is committed and release-aware.
 - Cargo dependencies are vendored under `vendor/`.
 - Workspace Cargo commands run with `--locked --frozen --offline` in `make` and CI.
+- Dependabot remains enabled for GitHub Actions only. Cargo dependency PRs are not automated
+  through Dependabot because the repository's `.cargo/config.toml` replaces `crates.io` with the
+  checked-in `vendor/` tree, and Dependabot's Cargo updater does not maintain vendored Cargo
+  source directories. Cargo dependency updates must therefore be maintainer-driven: update
+  `Cargo.toml` / `Cargo.lock`, refresh the affected vendored crates, preserve
+  `.cargo-checksum.json`, and prove the result with locked/frozen/offline Cargo gates before PR.
 - `make verify-deep` runs Rust-native `xtask` checks for offline metadata, dependency source and
   license policy, repo-owned shell linting, Python syntax checks for the existing docs/test harness
   scripts, and tracked-file secret scanning.
