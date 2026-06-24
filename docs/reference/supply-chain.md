@@ -4,22 +4,45 @@ title: Supply Chain
 
 # Supply Chain
 
-The supply-chain model is still builder-first, but the toolchain has changed.
+The supply-chain model is builder-first, and the CI/CD toolchain is explicitly
+back on Wolfi.
 
 ## What the Builder Owns Now
 
 The custom GitHub Action builder image is the repository trust root for:
 
-- a digest-pinned Debian Bookworm slim Rust base image
-- pinned Rust `1.95.0` and pinned `tox`
-- Rust toolchain installation, including `rustfmt` and Clippy
-- OpenSSL development headers
-- a conservative Linux glibc floor for release artifacts
+- a digest-pinned Chainguard Wolfi base image
+- Wolfi `rust-1.95=1.95.0-r0`
+- pinned `tox` and `sphinx-rustdocgen`
+- Rust toolchain installation, including `rustfmt` and Clippy from Wolfi packages
+- OpenSSL development headers from Wolfi packages
 - Xvfb and the Xlib runtime libraries required for GUI screenshot smoke tests
 - Sphinx and Python docs tooling
+- local scanner CLIs used by the deeper release-candidate gates, including `semgrep`,
+  `osv-scanner`, `syft`, and `trivy`
 - `cargo` build / test / clippy / fmt runs
 - docs-site builds from the repository root
 - vendored Cargo dependency resolution
+
+Remote Rust CI invokes the same `make ci` target used locally, inside this builder.
+Linux release validation, published-release surface verification, and downloaded
+asset smoke verification also run through the same builder instead of installing
+ad hoc packages onto the Ubuntu runner.
+
+## Historical CI Rigor Baseline
+
+The older C/WASM GitHub Pages line carried a stricter release discipline than the
+Rust-native branch had drifted into: native CMake/CTest, WASM validation and
+export/import checks, Playwright E2E, CodeQL, SonarCloud, ShellCheck,
+hallucination checks, supply-chain verification, and a Wolfi/melange/apko release
+path.
+
+The Rust-native product no longer ships the browser app or JavaScript
+secret-handling surface, so those exact gates are not copied forward blindly. The
+replacement standard is that remote CI must be at least as strict for the current
+surface: full local `make ci` in Wolfi, docs and link validation, GUI/TUI/vault
+e2e coverage, release payload inspection, published-release verification,
+attestation checks, and repo-owned supply-chain scripts.
 
 ## What It No Longer Builds
 
@@ -43,7 +66,7 @@ Before attestation, the release workflow now validates:
 
 - per-platform archive smoke tests
 - macOS GUI `.dmg` payload validation and host smoke tests
-- Debian package payload validation and Linux host smoke tests for `.deb` artifacts on Ubuntu 24.04
+- Debian package payload validation and Linux smoke tests for `.deb` artifacts in the Wolfi builder
 - aggregate checksums
 - Homebrew / Scoop / Chocolatey manifest generation
 - the docs-hosted `install.sh` flow against a local artifact server

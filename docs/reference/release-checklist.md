@@ -45,7 +45,7 @@ Use this checklist before and after cutting a release from `main`.
 6. If you are validating an already-published tag, verify the public release surface directly.
 
    ```bash
-   make verify-published-release TAG=paranoid-passwd-v3.5.2
+   make verify-published-release TAG=paranoid-passwd-v3.7.0
    ```
 
 ## After Publishing

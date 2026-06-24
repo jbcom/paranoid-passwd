@@ -63,43 +63,59 @@ else
   fail "workflow directory missing"
 fi
 
-if rg -q -- '--locked --frozen --offline' "$REPO_ROOT/.github/workflows/ci.yml" \
-  && rg -q -- '--locked --frozen --offline' "$REPO_ROOT/Makefile"; then
-  pass "CI and make targets use locked/frozen/offline Cargo commands"
+if rg -q -- '--locked --frozen --offline' "$REPO_ROOT/Makefile" \
+  && { rg -q -- '--locked --frozen --offline' "$REPO_ROOT/.github/workflows/ci.yml" \
+    || rg -q 'make ci' "$REPO_ROOT/.github/workflows/ci.yml"; }; then
+  pass "CI reaches Makefile targets that use locked/frozen/offline Cargo commands"
 else
-  fail "locked/frozen/offline Cargo flags missing from CI or Makefile"
+  fail "locked/frozen/offline Cargo flags missing from Makefile, or CI no longer reaches the Makefile gate"
 fi
 
 builder="$REPO_ROOT/.github/actions/builder/Dockerfile"
 if [ -f "$builder" ] \
   && rg -q '^# syntax=docker/dockerfile:1\.' "$builder" \
-  && rg -q '^FROM .+@sha256:' "$builder" \
-  && rg -q 'rust:1\.95\.0-slim-bookworm@sha256:' "$builder" \
-  && rg -q -- '--mount=type=cache' "$builder" \
-  && rg -q 'build-essential' "$builder" \
-  && rg -q 'libfontconfig1-dev' "$builder" \
-  && rg -q 'libssl-dev' "$builder" \
-  && rg -q 'libdbus-1-dev' "$builder" \
-  && rg -q 'libxcursor1' "$builder" \
-  && rg -q 'libxi6' "$builder" \
-  && rg -q 'openssl' "$builder" \
-  && rg -q 'pkg-config' "$builder" \
-  && rg -q 'python3' "$builder" \
+  && rg -q '^FROM cgr\.dev/chainguard/wolfi-base@sha256:' "$builder" \
+  && rg -q 'RUST_APK_PACKAGE=rust-1\.95' "$builder" \
+  && rg -q 'RUST_APK_VERSION=1\.95\.0-r0' "$builder" \
+  && rg -q -- '--mount=type=cache,target=/var/cache/apk' "$builder" \
+  && rg -q 'apk add' "$builder" \
+  && rg -q 'build-base' "$builder" \
+  && rg -q 'fontconfig-dev' "$builder" \
+  && rg -q 'gh' "$builder" \
+  && rg -q 'openssl-dev' "$builder" \
+  && rg -q 'dbus-dev' "$builder" \
+  && rg -q 'libxcursor-dev' "$builder" \
+  && rg -q 'libxi-dev' "$builder" \
+  && rg -q 'imagemagick-7' "$builder" \
+  && rg -q 'xvfb-run' "$builder" \
   && rg -q 'ripgrep' "$builder" \
-  && rg -q 'imagemagick' "$builder" \
-  && rg -q 'xvfb' "$builder" \
-  && rg -q 'rustup component add rustfmt clippy' "$builder" \
-  && rg -q 'rustc --version | grep -F "1\.95\.0"' "$builder" \
-  && rg -q 'cargo-fmt' "$builder" \
+  && rg -q 'semgrep' "$builder" \
+  && rg -q 'osv-scanner' "$builder" \
+  && rg -q 'syft' "$builder" \
+  && rg -q 'trivy' "$builder" \
+  && rg -q 'py3-pip' "$builder" \
+  && rg -q 'python3' "$builder" \
+  && rg -q 'command -v gh' "$builder" \
   && rg -q 'cargo fmt --version' "$builder" \
   && rg -q 'cargo clippy --version' "$builder" \
+  && rg -q 'rustc --version | grep -F "1\.95\.0"' "$builder" \
   && rg -q 'SPHINX_RUSTDOCGEN_VERSION=1\.1\.0' "$builder" \
   && rg -q 'cargo install --locked --root /usr/local' "$builder" \
   && rg -q 'sphinx-rustdocgen@' "$builder" \
-  && rg -q 'tox==' "$builder"; then
-  pass "builder image is digest-pinned and contains the expected Rust/OpenSSL/docs toolchain"
+  && rg -q 'tox==' "$builder" \
+  && ! rg -q 'apt-get|DEBIAN_FRONTEND|rust:1\.95\.0-slim-bookworm' "$builder"; then
+  pass "builder image is Wolfi-based, digest-pinned, and contains the expected Rust/OpenSSL/docs/scanner toolchain"
 else
-  fail "builder image is not pinned or is missing required Rust/OpenSSL/docs packages"
+  fail "builder image is not Wolfi-pinned or is missing required Rust/OpenSSL/docs/scanner packages"
+fi
+
+ci_workflow="$REPO_ROOT/.github/workflows/ci.yml"
+if [ -f "$ci_workflow" ] \
+  && rg -q 'make ci' "$ci_workflow" \
+  && rg -q 'uses: \./\.github/actions/builder' "$ci_workflow"; then
+  pass "remote Rust CI invokes the full local make ci gate inside the repository builder"
+else
+  fail "remote Rust CI no longer invokes the full local make ci gate inside the repository builder"
 fi
 
 release_workflow="$REPO_ROOT/.github/workflows/release.yml"
@@ -115,10 +131,12 @@ if [ -f "$release_workflow" ] \
   && rg -q 'scripts/build_release_artifact\.sh' "$release_workflow" \
   && rg -q 'scripts/smoke_test_release_artifact\.sh' "$release_workflow" \
   && rg -q 'scripts/release_validate\.sh' "$release_workflow" \
+  && rg -q 'uses: \./\.github/actions/builder' "$release_workflow" \
+  && ! rg -q 'apt-get|DEBIAN_FRONTEND' "$release_workflow" \
   && ! rg -q '\|\| true' "$release_workflow"; then
-  pass "release workflow uses repo-owned packaging/validation scripts and fails loud"
+  pass "release workflow uses repo-owned packaging/validation scripts inside the Wolfi builder and fails loud"
 else
-  fail "release workflow is not fully scripted in-repo or still swallows errors"
+  fail "release workflow is not fully scripted in-repo, has drifted from the Wolfi builder, or still swallows errors"
 fi
 
 if rg -q '^release-emulate:' "$REPO_ROOT/Makefile" \

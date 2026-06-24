@@ -30,12 +30,14 @@ This PRD covers only the work **not handled in the current session**:
 
 1. completion of typed ops adoption across vault/TUI/GUI flows and seal / auto-unseal lifecycle
 2. federal-ready operating profile for FedRAMP High, GovCloud, and DoD IL5 customers
-3. live release qualification on GitHub
+3. CI rigor regression prevention and release follow-through
 4. security assurance disposition for the remaining crypto/statistics claims
 5. installer-grade platform packaging and signing
 6. remaining recovery / lifecycle polish that depends on those dispositions
 7. post-GA assurance work that should not be improvised later
-8. vendoring or otherwise pinning the local scanner stack update process (`codeql`, `semgrep`,
+8. maintaining the Wolfi builder as the CI/CD trust root and preventing runner-local package
+   installs from replacing it
+9. vendoring or otherwise pinning the local scanner stack update process (`codeql`, `semgrep`,
    `cargo-deny`, `cargo-audit`, `cargo-vet`, `syft`, `trivy`, and `osv-scanner`) so workstation
    setup itself has the same evidence discipline as the repo gates
 
@@ -61,9 +63,14 @@ The current branch should be treated as the functional baseline:
 - docs, release verification, and supply-chain checks exist
 - the first ops/audit/seal and federal-readiness primitives exist, and CLI/TUI/GUI vault adapters now
   share the local ops policy path for covered flows
+- `paranoid-passwd-v3.7.0` is the proven published-release baseline: local `make ci` passed, and
+  `make verify-published-release TAG=paranoid-passwd-v3.7.0` verified the live asset set,
+  checksums, attestations, and host smoke path on 2026-06-24
+- the repository builder is Wolfi-based again, and remote Rust CI runs the full local `make ci`
+  target inside that builder
 
-The remaining work therefore falls into protocolization, federal readiness, qualification, review,
-packaging, and closure.
+The remaining work therefore falls into protocolization, federal readiness, CI rigor preservation,
+review, packaging, and closure.
 
 ## Product Goal
 
@@ -186,38 +193,53 @@ OpenSSL linkage are not enough.
 - non-federal recovery paths cannot silently run under a strict federal profile
 - [Federal Readiness](./federal-readiness.md) matches implemented behavior
 
-## Workstream 3: Live Release Qualification
+## Workstream 3: CI Rigor and Wolfi Regression Prevention
 
 ### Problem
 
-The repo-owned release pipeline is implemented and locally validated, but it has not yet been proven end to end through a real canary release from `main`.
+The repo now has a proven published-release baseline, but the Rust-native branch drifted from the
+older C/WASM line's stricter CI posture. That older line used Wolfi-based release infrastructure and
+combined native tests, WASM validation, browser E2E, static analysis, hallucination checks,
+supply-chain checks, and release verification. The current product surface is different, but the
+discipline must not be weaker.
 
 ### Goals
 
-- prove the live GitHub release path matches the local builder-first validation path
-- prove the docs/download site resolves to the correct published assets
-- prove package-manifest publication and release verification behave correctly against a real tag
+- keep Wolfi as the CI/CD builder trust root
+- make remote CI mirror local release-candidate quality instead of running a smaller subset
+- preserve published-release verification as a routine regression check
+- rebuild the historical rigor with Rust-native equivalents instead of stale browser-era gates
 
 ### Requirements
 
-1. Cut one canary release from `main`.
-2. Verify the published asset set includes:
-   - CLI archives for every supported platform/arch
-   - GUI archives for every supported platform/arch
-   - Linux `.deb` packages
-   - macOS GUI `.dmg` images
-   - `checksums.txt`
-3. Verify `scripts/verify_published_release.sh` succeeds against the published tag.
-4. Verify GitHub attestation for at least one artifact from each shipped packaging family.
-5. Verify docs download links and `install.sh` resolve and install the intended artifact family.
-6. Verify downstream package-manager PR automation succeeded or failed loudly.
+1. Keep the repository-owned builder on a digest-pinned Wolfi base image.
+2. Keep remote Rust CI running `make ci` inside that builder.
+3. Keep Linux release validation, published-release surface verification, and downloaded-asset smoke
+   verification inside the same builder instead of installing ad hoc packages on the Ubuntu runner.
+4. Treat `paranoid-passwd-v3.7.0` as the current live-release proof point and rerun
+   `make verify-published-release TAG=paranoid-passwd-v3.7.0` or a newer tag after release-pipeline
+   changes.
+5. Keep the historical C/WASM gates mapped to current Rust-native equivalents:
+   - native compile/test/lint through Cargo, Clippy, TUI/GUI/vault e2e, and docs/link checks
+   - retired WASM browser checks replaced by target-gated Slint WASM compile checks only after a
+     separate threat model
+   - browser E2E replaced by native TUI/GUI operator harnesses and screenshot evidence
+   - supply-chain checks, action pinning, hallucination checks, and published-release verification
+     retained as hard gates
+6. Finish pinning or vendoring the scanner/tooling update process so CodeQL, Semgrep, ShellCheck,
+   `cargo-deny`, `cargo-audit`, `cargo-vet`, `syft`, `trivy`, and `osv-scanner` cannot silently drift.
+7. Keep remote dependency-update PRs green and reviewable, with explicit inspection of review threads
+   and checks before merge.
 
 ### Acceptance Criteria
 
-- one canary release completes without manual patching of released assets
-- published-release verification passes against the real tag
-- no stale browser-era or otherwise unexpected assets are attached
-- the release checklist in [release-checklist.md](./release-checklist.md) is sufficient for a second operator to repeat the process
+- supply-chain verification fails if the builder drifts from Wolfi or release validation reintroduces
+  runner-local Linux package installs
+- CI and release workflows use repo-owned scripts and the builder-first path for Linux validation
+- published-release verification passes against the current release tag after workflow changes
+- no stale browser-era or otherwise unexpected assets are attached to release tags
+- the release checklist in [release-checklist.md](./release-checklist.md) is sufficient for a second
+  operator to repeat the process
 
 ## Workstream 4: Security Assurance Disposition
 
@@ -340,7 +362,8 @@ still useful for strengthening public trust claims.
 1. Preserve the claim inventory and generated assurance reports for PRs that touch sensitive surfaces.
 2. Commission external review of tracked crypto/statistics claims when the project wants to upgrade
    a `tracked-open` claim to a stronger public trust claim.
-3. Commission review of the release and supply-chain model after the canary release passes.
+3. Commission review of the release and supply-chain model against the `v3.7.0` proof point or the
+   next release that changes the pipeline.
 4. Preserve the written outcomes inside the repo, not only in external conversations.
 
 ### Acceptance Criteria
@@ -363,7 +386,9 @@ These are not blockers for the current product line, but they should stay explic
 
 ### 1. False Sense of Completion
 
-The code now does a lot, which makes it easy to mistake implementation completeness for production completeness. The live release, assurance-disposition, and installer gaps are still real blockers.
+The code now does a lot, which makes it easy to mistake implementation completeness for production
+completeness. CI rigor preservation, assurance-disposition, and installer gaps are still real
+blockers.
 
 ### 2. Recovery Model Drift
 
@@ -387,7 +412,8 @@ This PRD is complete when all of the following are true:
 1. the current PR is merged and its release-hardening changes are on `main`
 2. the ops/audit/seal comprehensive PR is merged and covered by tests
 3. the federal-ready operating profile has deterministic checks, evidence output, and precise docs
-4. one real canary release from `main` passes end to end
+4. Wolfi builder enforcement, full remote `make ci`, and published-release verification remain green
+   after release-pipeline changes
 5. the assurance claims are fully represented, gate-protected, and dispositioned to the release standard being claimed
 6. supported desktop platforms have standard installer-grade distribution
 7. docs and runbooks match the real shipped product and recovery model
@@ -398,6 +424,8 @@ This PRD is complete when all of the following are true:
    and mTLS process-boundary sessions
 2. expand federal-mode recovery disposition and seal / auto-unseal provider policy beyond the
    explicit device-provider probe now in place
-3. run the first canary release from `main` after those architecture boundaries are stable
-4. choose the Windows installer technology and macOS signing/notarization path
-5. update this PRD as those decisions are made
+3. keep the remote dependency-update queue green and reviewable, including explicit PR thread/check
+   inspection before merge
+4. pin or vendor the remaining scanner/tool update process so local setup has repo-grade evidence
+5. choose the Windows installer technology and macOS signing/notarization path
+6. update this PRD as those decisions are made

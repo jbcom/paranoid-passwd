@@ -19,8 +19,8 @@
 # any change to it ships atomically with the PR that touches it.
 # =================================================================
 
-name: 'paranoid-passwd builder'
-description: 'Run a step inside the repository-owned Debian Bookworm Rust toolchain container.'
+name: 'paranoid-passwd Wolfi builder'
+description: 'Run a step inside the repository-owned Wolfi Rust toolchain container.'
 
 inputs:
   run:
