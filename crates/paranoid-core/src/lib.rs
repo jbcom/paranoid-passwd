@@ -950,7 +950,7 @@ pub fn chi_squared(
         return Ok((chi2, df, 1.0));
     }
 
-    // TODO: AI_REVIEW - verify chi-squared upper-tail interpretation and thresholding.
+    // Dispositioned in docs/reference/ai-review.md: large statistics use the upper tail.
     let distribution = ChiSquared::new(df as f64).map_err(|error| {
         ParanoidError::InvalidArguments(format!("invalid chi-squared degrees of freedom: {error}"))
     })?;
@@ -1134,6 +1134,23 @@ mod tests {
         let (chi2, df, p_value) = chi_squared(&biased, 100, 30, "abc").expect("chi2");
         assert!((chi2 - 6_000.0).abs() < 0.1);
         assert_eq!(df, 2);
+        assert!(p_value < 0.01);
+    }
+
+    #[test]
+    fn chi_squared_upper_tail_threshold_brackets_one_percent_critical_value() {
+        let near_pass = format!("{}{}", "a".repeat(62), "b".repeat(38));
+        let (chi2, df, p_value) = chi_squared(&near_pass, 1, 100, "ab").expect("chi2");
+        assert!((chi2 - 5.76).abs() < 1e-12);
+        assert_eq!(df, 1);
+        assert!((0.016..0.017).contains(&p_value));
+        assert!(p_value > 0.01);
+
+        let near_reject = format!("{}{}", "a".repeat(63), "b".repeat(37));
+        let (chi2, df, p_value) = chi_squared(&near_reject, 1, 100, "ab").expect("chi2");
+        assert!((chi2 - 6.76).abs() < 1e-12);
+        assert_eq!(df, 1);
+        assert!((0.009..0.010).contains(&p_value));
         assert!(p_value < 0.01);
     }
 

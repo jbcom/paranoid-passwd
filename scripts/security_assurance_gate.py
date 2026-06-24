@@ -105,6 +105,21 @@ CLAIMS: tuple[Claim, ...] = (
                 "let df = charset_bytes.len().saturating_sub(1);",
                 "degrees of freedom remain N - 1",
             ),
+            Requirement(
+                "crates/paranoid-core/src/lib.rs",
+                "chi_squared_upper_tail_threshold_brackets_one_percent_critical_value",
+                "core tests bracket the one-percent upper-tail threshold",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "`audit.chi-squared-tail` | Chi-squared audit | Acceptable as implemented.",
+                "AI review disposition closes the chi-squared tail claim",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "NIST/Sematech chi-square critical values",
+                "disposition cites independently verifiable chi-square critical values",
+            ),
         ),
     ),
     Claim(
