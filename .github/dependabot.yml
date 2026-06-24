@@ -1,9 +1,12 @@
 # -----------------------------------------------------------------
 # paranoid-passwd -- Dependabot Configuration
 #
-# Automated dependency updates for:
-#   - GitHub Actions
-#   - Cargo workspace crates
+# Automated dependency updates for GitHub Actions.
+#
+# Cargo crates are deliberately excluded from Dependabot PR automation because this
+# repository replaces crates.io with the checked-in vendor/ tree. Dependabot's Cargo
+# updater cannot maintain vendored Cargo sources, so Cargo dependency updates must
+# be re-vendored by a maintainer and proven with locked/frozen/offline Cargo gates.
 # -----------------------------------------------------------------
 
 version: 2
@@ -23,19 +26,3 @@ updates:
     labels:
       - "dependencies"
       - "ci"
-
-  - package-ecosystem: cargo
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-      timezone: "Etc/UTC"
-    groups:
-      rust-deps:
-        patterns: ["*"]
-    commit-message:
-      prefix: "deps"
-    labels:
-      - "dependencies"
-      - "rust"

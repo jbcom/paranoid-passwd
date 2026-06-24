@@ -45,6 +45,15 @@ else
   fail "vendored Cargo sources are not protected from checkout line-ending rewrites"
 fi
 
+dependabot_config="$REPO_ROOT/.github/dependabot.yml"
+if [ -f "$dependabot_config" ] \
+  && rg -q 'package-ecosystem:[[:space:]]+github-actions' "$dependabot_config" \
+  && ! rg -q 'package-ecosystem:[[:space:]]+cargo' "$dependabot_config"; then
+  pass "Dependabot is scoped to updater-supported ecosystems while Cargo remains maintainer-vendored"
+else
+  fail "Dependabot must not claim Cargo automation until vendored Cargo updates are supported"
+fi
+
 if (cd "$REPO_ROOT" && cargo metadata --locked --frozen --offline --format-version 1 >/dev/null); then
   pass "Cargo metadata resolves fully offline"
 else

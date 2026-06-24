@@ -228,8 +228,10 @@ discipline must not be weaker.
      retained as hard gates
 6. Finish pinning or vendoring the scanner/tooling update process so CodeQL, Semgrep, ShellCheck,
    `cargo-deny`, `cargo-audit`, `cargo-vet`, `syft`, `trivy`, and `osv-scanner` cannot silently drift.
-7. Keep remote dependency-update PRs green and reviewable, with explicit inspection of review threads
-   and checks before merge.
+7. Keep remote dependency-update PRs green and reviewable for ecosystems that the configured updater
+   can actually maintain. Dependabot currently owns GitHub Actions updates only; Cargo dependency
+   updates remain a maintainer re-vendor flow until the repo adopts a Cargo-vendor-aware updater.
+   Explicitly inspect review threads and checks before merge.
 
 ### Acceptance Criteria
 
