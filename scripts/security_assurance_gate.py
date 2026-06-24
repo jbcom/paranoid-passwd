@@ -1031,6 +1031,16 @@ CLAIMS: tuple[Claim, ...] = (
                 "github-actions",
                 "Dependabot tracks GitHub Actions updates",
             ),
+            Requirement(
+                "supply-chain/scanner-toolchain.env",
+                "CODEQL_ACTION_SHA=",
+                "scanner toolchain manifest records the CodeQL action SHA",
+            ),
+            Requirement(
+                "scripts/supply_chain_verify.sh",
+                "scanner toolchain manifest",
+                "supply-chain verifier enforces the scanner toolchain manifest",
+            ),
         ),
     ),
     Claim(

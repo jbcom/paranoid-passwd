@@ -15,9 +15,10 @@ evidence, and offering a federal-ready operating profile.
 
 Primary references:
 
-- [FedRAMP Rev5 documentation and playbooks](https://www.fedramp.gov/docs/rev5/)
-- [FedRAMP Rev5 agency authorization overview](https://www.fedramp.gov/docs/rev5/playbook/csp/authorization/getting-started/)
-- [FedRAMP SSP guidance](https://www.fedramp.gov/docs/rev5/playbook/csp/authorization/ssp/)
+- [FedRAMP Rev5 overview](https://www.fedramp.gov/rev5/)
+- [FedRAMP Rev5 documents and templates](https://www.fedramp.gov/rev5/documents-templates/)
+- [FedRAMP Rev5 agency authorization resources](https://www.fedramp.gov/rev5/agency-authorization/)
+- [FedRAMP SSP template](https://www.fedramp.gov/resources/templates/FedRAMP-High-Moderate-Low-LI-SaaS-Baseline-System-Security-Plan-%28SSP%29.docx)
 - [GSA Cloud Security overview for DoD CC SRG and FedRAMP+](https://cic.gsa.gov/basics/cloud-security/)
 - [NIST CMVP certificate 4985 for the OpenSSL FIPS Provider](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4985)
 

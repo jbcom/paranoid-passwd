@@ -226,8 +226,11 @@ discipline must not be weaker.
    - browser E2E replaced by native TUI/GUI operator harnesses and screenshot evidence
    - supply-chain checks, action pinning, hallucination checks, and published-release verification
      retained as hard gates
-6. Finish pinning or vendoring the scanner/tooling update process so CodeQL, Semgrep, ShellCheck,
-   `cargo-deny`, `cargo-audit`, `cargo-vet`, `syft`, `trivy`, and `osv-scanner` cannot silently drift.
+6. Finish pinning or vendoring the scanner/tooling update process. The repository now has
+   `supply-chain/scanner-toolchain.env` plus supply-chain verification for the Wolfi builder
+   scanner apk pins, CodeQL action SHA pins, and `xtask` host-local scanner visibility. Remaining
+   work is to turn the host-local `ShellCheck`, `cargo-deny`, `cargo-audit`, `cargo-vet`, and
+   `codeql` installation/update path into the same kind of versioned or vendored evidence.
 7. Keep remote dependency-update PRs green and reviewable for ecosystems that the configured updater
    can actually maintain. Dependabot currently owns GitHub Actions updates only; Cargo dependency
    updates remain a maintainer re-vendor flow until the repo adopts a Cargo-vendor-aware updater.
@@ -428,6 +431,7 @@ This PRD is complete when all of the following are true:
    explicit device-provider probe now in place
 3. keep the remote dependency-update queue green and reviewable, including explicit PR thread/check
    inspection before merge
-4. pin or vendor the remaining scanner/tool update process so local setup has repo-grade evidence
+4. finish versioning or vendoring the host-local scanner/tool update path now tracked by
+   `supply-chain/scanner-toolchain.env`
 5. choose the Windows installer technology and macOS signing/notarization path
 6. update this PRD as those decisions are made

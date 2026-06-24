@@ -100,3 +100,20 @@ The repository now carries `scripts/verify_branch_protection.sh` plus `make veri
 - `scripts/supply_chain_verify.sh` verifies vendoring, workflow pinning, and release prerequisites.
 - `scripts/security_assurance_gate.py` verifies the claim-led PR assurance protocol wiring.
 - Release packaging lives in repo-owned scripts instead of workflow-only inline shell.
+
+## Scanner Toolchain Pin Manifest
+
+Scanner and tooling updates are tracked in `supply-chain/scanner-toolchain.env`. That manifest is
+the source of truth for:
+
+- Wolfi apk scanner versions installed into the repository builder (`semgrep`, `osv-scanner`,
+  `syft`, and `trivy`)
+- the pinned `github/codeql-action` version and commit SHA used by workflow CodeQL jobs
+- host-local scanner tools that `xtask` must continue to discover for `make verify-deep` /
+  `make quality`
+
+`scripts/supply_chain_verify.sh` sources the manifest and fails if the Dockerfile, workflow CodeQL
+references, or `xtask` local-tool visibility checks drift from it. Updating a scanner therefore
+requires changing the manifest, updating the corresponding builder or workflow reference, and
+rerunning the assurance gate rather than letting the runner or workstation resolve a new scanner
+version implicitly.
