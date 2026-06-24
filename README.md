@@ -173,7 +173,7 @@ To exercise the release packaging path:
 ```bash
 make smoke-release
 make release-emulate
-make verify-published-release TAG=paranoid-passwd-v3.5.2
+make verify-published-release TAG=paranoid-passwd-v3.7.0
 ```
 
 ## Releases
