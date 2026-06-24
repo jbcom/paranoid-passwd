@@ -43,7 +43,8 @@ pub enum AuditSinkStatus {
     Unverified,
 }
 
-// TODO: AI_REVIEW - confirm external audit-device posture and health semantics do not overstate sink availability or federal audit coverage.
+// Dispositioned in docs/reference/ai-review.md: external audit-device readiness is
+// available only after a configured sink returns matching mTLS JSONL write-ack evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditSinkHealth {
     pub schema_version: u16,
@@ -1385,6 +1386,32 @@ mod tests {
         assert_eq!(ready.status, AuditSinkStatus::Ready);
         assert!(ready.is_available());
         assert_eq!(ready.evidence_source.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn external_audit_device_availability_requires_ready_writable_health() {
+        let mut configured_but_not_writable = AuditSinkHealth::ready_external_device(
+            "siem-primary",
+            "mtls://audit.example.invalid:6514",
+            EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE,
+        );
+        configured_but_not_writable.writable = false;
+        assert!(!configured_but_not_writable.is_available());
+
+        let mut writable_but_not_ready = AuditSinkHealth::ready_external_device(
+            "siem-primary",
+            "mtls://audit.example.invalid:6514",
+            EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE,
+        );
+        writable_but_not_ready.status = AuditSinkStatus::Unverified;
+        assert!(!writable_but_not_ready.is_available());
+
+        let ready = AuditSinkHealth::ready_external_device(
+            "siem-primary",
+            "mtls://audit.example.invalid:6514",
+            EXTERNAL_AUDIT_DEVICE_MTLS_JSONL_ACK_PROBE,
+        );
+        assert!(ready.is_available());
     }
 
     #[test]
