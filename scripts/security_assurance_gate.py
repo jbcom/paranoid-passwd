@@ -124,18 +124,43 @@ CLAIMS: tuple[Claim, ...] = (
     ),
     Claim(
         "audit.serial-correlation-estimator",
-        "Serial-correlation estimator tracking",
+        "Serial-correlation estimator",
         "core-security",
         (
             Requirement(
-                "docs/reference/ai-review.md",
-                "Serial correlation audit",
-                "open serial-correlation AI disposition remains tracked",
+                "crates/paranoid-core/src/lib.rs",
+                "pub fn serial_correlation(data: &[u8]) -> f64",
+                "core exposes serial-correlation audit helper",
             ),
             Requirement(
-                "scripts/verify_ai_review_inventory.sh",
-                "verify the serial-correlation coefficient matches the intended estimator",
-                "inventory check tracks the serial-correlation TODO",
+                "crates/paranoid-core/src/lib.rs",
+                ".windows(2)",
+                "lag-1 numerator uses adjacent non-circular windows",
+            ),
+            Requirement(
+                "crates/paranoid-core/src/lib.rs",
+                "numerator / denominator",
+                "serial-correlation helper keeps full-sample normalization",
+            ),
+            Requirement(
+                "crates/paranoid-core/src/lib.rs",
+                "let serial_pass = serial_correlation.abs() < 0.05;",
+                "audit summary keeps the documented smoke-check threshold",
+            ),
+            Requirement(
+                "crates/paranoid-core/src/lib.rs",
+                "serial_correlation_exact_lag_one_known_answers",
+                "core tests pin exact lag-1 known answers",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "`audit.serial-correlation-estimator` | Serial correlation audit | Acceptable as implemented.",
+                "AI review disposition closes the serial-correlation claim",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "NIST/Sematech autocorrelation",
+                "disposition cites independently verifiable autocorrelation reference",
             ),
         ),
     ),
