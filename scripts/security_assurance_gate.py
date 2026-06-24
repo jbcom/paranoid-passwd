@@ -475,8 +475,8 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-audit/src/lib.rs",
-                "TODO: AI_REVIEW - confirm external audit-device posture and health semantics do not overstate sink availability or federal audit coverage.",
-                "external audit-device posture remains tracked for AI review",
+                "Dispositioned in docs/reference/ai-review.md: external audit-device readiness is",
+                "external audit-device posture source points to the closed disposition",
             ),
             Requirement(
                 "crates/paranoid-audit/src/lib.rs",
@@ -487,6 +487,11 @@ CLAIMS: tuple[Claim, ...] = (
                 "crates/paranoid-audit/src/lib.rs",
                 "value.trim().is_empty()",
                 "external audit-device mTLS evidence rejects empty environment values",
+            ),
+            Requirement(
+                "crates/paranoid-audit/src/lib.rs",
+                "external_audit_device_availability_requires_ready_writable_health",
+                "audit tests prove availability requires ready and writable health",
             ),
             Requirement(
                 "crates/paranoid-audit/src/lib.rs",
@@ -590,13 +595,18 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "docs/reference/ai-review.md",
-                "External audit-device posture",
-                "AI review surface tracks the external audit-device posture disposition",
+                "Acceptable as implemented. External audit-device health evidence is conservative",
+                "AI review surface closes the external audit-device posture disposition",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "TCP reachability remains evidence only and must stay `Unverified`",
+                "AI review surface documents external audit-device disposition limits",
             ),
             Requirement(
                 "docs/reference/assurance-claims.md",
-                "`audit.external-device-health` | `tracked-open`",
-                "assurance claim tracks the external audit-device posture disposition",
+                "`audit.external-device-health` | `enforced`",
+                "assurance claim enforces the external audit-device posture disposition",
             ),
         ),
     ),
