@@ -30,7 +30,6 @@ normalize_inventory() {
 
 expected_inventory() {
   cat <<'EOF'
-crates/paranoid-core/src/lib.rs:    // TODO: AI_REVIEW - verify the serial-correlation coefficient matches the intended estimator.
 crates/paranoid-audit/src/lib.rs:// TODO: AI_REVIEW - confirm external audit-device posture and health semantics do not overstate sink availability or federal audit coverage.
 crates/paranoid-ops/src/lib.rs:// TODO: AI_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.
 crates/paranoid-seal/src/lib.rs:// TODO: AI_REVIEW - confirm the seal/posture model correctly represents unlock and recovery posture without overstating provider availability.
@@ -70,7 +69,7 @@ else
   pass "source TODO inventory matches the expected AI review surface"
 fi
 
-if rg -F "expected open AI review sites: **7**" "$DOC" >/dev/null 2>&1; then
+if rg -F "expected open AI review sites: **6**" "$DOC" >/dev/null 2>&1; then
   pass "AI review reference doc tracks the expected open-site count"
 else
   fail "AI review reference doc must state the expected open-site count"
@@ -81,6 +80,7 @@ for required in \
   "Dispositioned Inventory" \
   "chi_squared_upper_tail_threshold_brackets_one_percent_critical_value" \
   "Serial correlation audit" \
+  "serial_correlation_exact_lag_one_known_answers" \
   "External audit-device posture" \
   "Ops policy boundary" \
   "seal.lifecycle-boundary" \

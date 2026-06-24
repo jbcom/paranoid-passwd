@@ -963,7 +963,7 @@ pub fn serial_correlation(data: &[u8]) -> f64 {
         return 0.0;
     }
 
-    // TODO: AI_REVIEW - verify the serial-correlation coefficient matches the intended estimator.
+    // Dispositioned in docs/reference/ai-review.md: lag-1 autocorrelation uses the NIST form.
     let mean = data.iter().map(|value| f64::from(*value)).sum::<f64>() / data.len() as f64;
     let numerator = data
         .windows(2)
@@ -1161,6 +1161,13 @@ mod tests {
             .map(|idx| if idx % 2 == 0 { b'A' } else { b'z' })
             .collect::<Vec<_>>();
         assert!(serial_correlation(&alternating) < -0.9);
+    }
+
+    #[test]
+    fn serial_correlation_exact_lag_one_known_answers() {
+        assert!((serial_correlation(&[1, 2, 3, 4]) - 0.25).abs() < 1e-12);
+        assert!((serial_correlation(&[1, 4, 1, 4]) + 0.75).abs() < 1e-12);
+        assert!((serial_correlation(&[0, 1, 0]) + (2.0 / 3.0)).abs() < 1e-12);
     }
 
     #[test]
