@@ -78,7 +78,7 @@ if [ -f "$builder" ] \
   && rg -q 'RUST_APK_PACKAGE=rust-1\.95' "$builder" \
   && rg -q 'RUST_APK_VERSION=1\.95\.0-r0' "$builder" \
   && rg -q -- '--mount=type=cache,target=/var/cache/apk' "$builder" \
-  && rg -q 'apk add --no-cache' "$builder" \
+  && rg -q 'apk add' "$builder" \
   && rg -q 'build-base' "$builder" \
   && rg -q 'fontconfig-dev' "$builder" \
   && rg -q 'gh' "$builder" \

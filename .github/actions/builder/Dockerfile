@@ -22,7 +22,7 @@ ENV PATH="/usr/local/bin:${PATH}" \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    apk add --no-cache \
+    apk add \
         bash \
         build-base \
         ca-certificates \
