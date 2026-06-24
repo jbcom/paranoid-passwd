@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+## [v0.10.81] - 2026-06-12
+
+### Fixed
+
+* `SslContextRef::verify_mode` and `SslRef::verify_mode` no longer panic when the verify mode contains bits not modeled by `SslVerifyMode`.
+
+### Added
+
+* Added `SslVerifyMode::CLIENT_ONCE` and `SslVerifyMode::POST_HANDSHAKE`.
+* Added `X509CrlBuilder` and `X509RevokedBuilder`, for building and signing CRLs, along with the `CrlNumber` extension builder.
+* Added `Nid::BRAINPOOL_P224R1` and `Nid::BRAINPOOL_P224T1`.
+* Added `Asn1StringRef::to_string`, which converts the string to UTF-8 without truncating at interior NUL bytes.
+
+### Changed
+
+* Deprecated `Asn1StringRef::as_utf8`, which truncates at the first interior NUL byte, in favor of `Asn1StringRef::to_string`.
+
+## [v0.10.80] - 2026-05-16
+
+### Fixed
+
+* Fixed a buffer overflow in `CipherCtxRef::cipher_update_inplace` when used with AES key-wrap-with-padding ciphers.
+
 ## [v0.10.79] - 2026-05-03
 
 ### Changed
@@ -1094,7 +1117,10 @@
 
 Look at the [release tags] for information about older releases.
 
-[Unreleased]: https://github.com/rust-openssl/rust-openssl/compare/openssl-v0.10.78...master
+[Unreleased]: https://github.com/rust-openssl/rust-openssl/compare/openssl-v0.10.81...master
+[v0.10.81]: https://github.com/rust-openssl/rust-openssl/compare/openssl-v0.10.80...openssl-v0.10.81
+[v0.10.80]: https://github.com/rust-openssl/rust-openssl/compare/openssl-v0.10.79...openssl-v0.10.80
+[v0.10.79]: https://github.com/rust-openssl/rust-openssl/compare/openssl-v0.10.78...openssl-v0.10.79
 [v0.10.78]: https://github.com/rust-openssl/rust-openssl/compare/openssl-v0.10.77...openssl-v0.10.78
 [v0.10.77]: https://github.com/rust-openssl/rust-openssl/compare/openssl-v0.10.76...openssl-v0.10.77
 [v0.10.76]: https://github.com/rust-openssl/rust-openssl/compare/openssl-v0.10.75...openssl-v0.10.76

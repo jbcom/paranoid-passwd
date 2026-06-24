@@ -15,7 +15,7 @@ curl -sSL https://paranoid-passwd.com/install.sh | sh
 Pin a specific version:
 
 ```bash
-curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.5.2
+curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.7.0
 ```
 
 Install into a custom directory:

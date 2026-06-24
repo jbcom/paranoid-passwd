@@ -29,7 +29,7 @@ unexpectedly small.
 If a tag is already published, use the checked-in verifier instead of replaying the commands manually:
 
 ```bash
-make verify-published-release TAG=paranoid-passwd-v3.5.2
+make verify-published-release TAG=paranoid-passwd-v3.7.0
 ```
 
 That script verifies:

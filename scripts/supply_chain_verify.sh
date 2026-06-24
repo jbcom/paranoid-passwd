@@ -20,13 +20,21 @@ fail() {
   failed=1
 }
 
+contains_regex() {
+  grep -qE -- "$1" "$2"
+}
+
+contains_fixed() {
+  grep -qF -- "$1" "$2"
+}
+
 echo
 echo "Rust-Native Supply Chain Verification"
 echo
 
 if [ -f "$REPO_ROOT/.cargo/config.toml" ] \
-  && rg -q 'replace-with = "vendored-sources"' "$REPO_ROOT/.cargo/config.toml" \
-  && rg -q 'directory = "vendor"' "$REPO_ROOT/.cargo/config.toml"; then
+  && contains_fixed 'replace-with = "vendored-sources"' "$REPO_ROOT/.cargo/config.toml" \
+  && contains_fixed 'directory = "vendor"' "$REPO_ROOT/.cargo/config.toml"; then
   pass "Cargo is pinned to vendored sources"
 else
   fail "Cargo vendoring configuration is incomplete"
@@ -39,10 +47,19 @@ else
 fi
 
 if [ -f "$REPO_ROOT/.gitattributes" ] \
-  && rg -q '^vendor/\*\*[[:space:]]+-text[[:space:]]*(#.*)?$' "$REPO_ROOT/.gitattributes"; then
+  && contains_regex '^vendor/\*\*[[:space:]]+-text[[:space:]]*(#.*)?$' "$REPO_ROOT/.gitattributes"; then
   pass "vendored Cargo sources are protected from checkout line-ending rewrites"
 else
   fail "vendored Cargo sources are not protected from checkout line-ending rewrites"
+fi
+
+dependabot_config="$REPO_ROOT/.github/dependabot.yml"
+if [ -f "$dependabot_config" ] \
+  && contains_regex 'package-ecosystem:[[:space:]]+github-actions' "$dependabot_config" \
+  && ! contains_regex 'package-ecosystem:[[:space:]]+cargo' "$dependabot_config"; then
+  pass "Dependabot is scoped to updater-supported ecosystems while Cargo remains maintainer-vendored"
+else
+  fail "Dependabot must not claim Cargo automation until vendored Cargo updates are supported"
 fi
 
 if (cd "$REPO_ROOT" && cargo metadata --locked --frozen --offline --format-version 1 >/dev/null); then
@@ -53,7 +70,7 @@ fi
 
 workflow_dir="$REPO_ROOT/.github/workflows"
 if [ -d "$workflow_dir" ]; then
-  external_uses=$(grep -rE '^[[:space:]]*uses:' "$workflow_dir"/*.yml | grep -v 'uses:[[:space:]]\+\./' || true)
+  external_uses=$(grep -rE '^[[:space:]]*uses:' "$workflow_dir"/*.yml | grep -vE 'uses:[[:space:]]+\./' || true)
   if [ -n "$external_uses" ] && ! printf '%s\n' "$external_uses" | grep -vE '@[a-f0-9]{40}' >/dev/null; then
     pass "external GitHub Actions are SHA-pinned"
   else
@@ -63,66 +80,84 @@ else
   fail "workflow directory missing"
 fi
 
-if rg -q -- '--locked --frozen --offline' "$REPO_ROOT/.github/workflows/ci.yml" \
-  && rg -q -- '--locked --frozen --offline' "$REPO_ROOT/Makefile"; then
-  pass "CI and make targets use locked/frozen/offline Cargo commands"
+if contains_fixed '--locked --frozen --offline' "$REPO_ROOT/Makefile" \
+  && { contains_fixed '--locked --frozen --offline' "$REPO_ROOT/.github/workflows/ci.yml" \
+    || contains_fixed 'make ci' "$REPO_ROOT/.github/workflows/ci.yml"; }; then
+  pass "CI reaches Makefile targets that use locked/frozen/offline Cargo commands"
 else
-  fail "locked/frozen/offline Cargo flags missing from CI or Makefile"
+  fail "locked/frozen/offline Cargo flags missing from Makefile, or CI no longer reaches the Makefile gate"
 fi
 
 builder="$REPO_ROOT/.github/actions/builder/Dockerfile"
 if [ -f "$builder" ] \
-  && rg -q '^# syntax=docker/dockerfile:1\.' "$builder" \
-  && rg -q '^FROM .+@sha256:' "$builder" \
-  && rg -q 'rust:1\.95\.0-slim-bookworm@sha256:' "$builder" \
-  && rg -q -- '--mount=type=cache' "$builder" \
-  && rg -q 'build-essential' "$builder" \
-  && rg -q 'libfontconfig1-dev' "$builder" \
-  && rg -q 'libssl-dev' "$builder" \
-  && rg -q 'libdbus-1-dev' "$builder" \
-  && rg -q 'libxcursor1' "$builder" \
-  && rg -q 'libxi6' "$builder" \
-  && rg -q 'openssl' "$builder" \
-  && rg -q 'pkg-config' "$builder" \
-  && rg -q 'python3' "$builder" \
-  && rg -q 'ripgrep' "$builder" \
-  && rg -q 'imagemagick' "$builder" \
-  && rg -q 'xvfb' "$builder" \
-  && rg -q 'rustup component add rustfmt clippy' "$builder" \
-  && rg -q 'rustc --version | grep -F "1\.95\.0"' "$builder" \
-  && rg -q 'cargo-fmt' "$builder" \
-  && rg -q 'cargo fmt --version' "$builder" \
-  && rg -q 'cargo clippy --version' "$builder" \
-  && rg -q 'SPHINX_RUSTDOCGEN_VERSION=1\.1\.0' "$builder" \
-  && rg -q 'cargo install --locked --root /usr/local' "$builder" \
-  && rg -q 'sphinx-rustdocgen@' "$builder" \
-  && rg -q 'tox==' "$builder"; then
-  pass "builder image is digest-pinned and contains the expected Rust/OpenSSL/docs toolchain"
+  && contains_regex '^# syntax=docker/dockerfile:1\.' "$builder" \
+  && contains_regex '^FROM cgr\.dev/chainguard/wolfi-base@sha256:' "$builder" \
+  && contains_fixed 'RUST_APK_PACKAGE=rust-1.95' "$builder" \
+  && contains_fixed 'RUST_APK_VERSION=1.95.0-r0' "$builder" \
+  && contains_fixed '--mount=type=cache,target=/var/cache/apk' "$builder" \
+  && contains_fixed 'apk add' "$builder" \
+  && contains_fixed 'build-base' "$builder" \
+  && contains_fixed 'fontconfig-dev' "$builder" \
+  && contains_fixed 'gh' "$builder" \
+  && contains_fixed 'openssl-dev' "$builder" \
+  && contains_fixed 'dbus-dev' "$builder" \
+  && contains_fixed 'libxcursor-dev' "$builder" \
+  && contains_fixed 'libxi-dev' "$builder" \
+  && contains_fixed 'imagemagick-7' "$builder" \
+  && contains_fixed 'xvfb-run' "$builder" \
+  && contains_fixed 'ripgrep' "$builder" \
+  && contains_fixed 'semgrep' "$builder" \
+  && contains_fixed 'osv-scanner' "$builder" \
+  && contains_fixed 'syft' "$builder" \
+  && contains_fixed 'trivy' "$builder" \
+  && contains_fixed 'py3-pip' "$builder" \
+  && contains_fixed 'python3' "$builder" \
+  && contains_fixed 'command -v gh' "$builder" \
+  && contains_fixed 'cargo fmt --version' "$builder" \
+  && contains_fixed 'cargo clippy --version' "$builder" \
+  && contains_fixed 'rustc --version | grep -F "1.95.0"' "$builder" \
+  && contains_fixed 'SPHINX_RUSTDOCGEN_VERSION=1.1.0' "$builder" \
+  && contains_fixed 'cargo install --locked --root /usr/local' "$builder" \
+  && contains_fixed 'sphinx-rustdocgen@' "$builder" \
+  && contains_fixed 'tox==' "$builder" \
+  && ! contains_regex 'apt-get|DEBIAN_FRONTEND|rust:1\.95\.0-slim-bookworm' "$builder"; then
+  pass "builder image is Wolfi-based, digest-pinned, and contains the expected Rust/OpenSSL/docs/scanner toolchain"
 else
-  fail "builder image is not pinned or is missing required Rust/OpenSSL/docs packages"
+  fail "builder image is not Wolfi-pinned or is missing required Rust/OpenSSL/docs/scanner packages"
+fi
+
+ci_workflow="$REPO_ROOT/.github/workflows/ci.yml"
+if [ -f "$ci_workflow" ] \
+  && contains_fixed 'make ci' "$ci_workflow" \
+  && contains_fixed 'uses: ./.github/actions/builder' "$ci_workflow"; then
+  pass "remote Rust CI invokes the full local make ci gate inside the repository builder"
+else
+  fail "remote Rust CI no longer invokes the full local make ci gate inside the repository builder"
 fi
 
 release_workflow="$REPO_ROOT/.github/workflows/release.yml"
 if [ -f "$release_workflow" ] \
-  && rg -q 'brew install openssl@3 pkg-config' "$release_workflow" \
-  && rg -q 'vcpkg\.exe.*openssl:x64-windows-static-md' "$release_workflow"; then
+  && contains_fixed 'brew install openssl@3 pkg-config' "$release_workflow" \
+  && contains_regex 'vcpkg\.exe.*openssl:x64-windows-static-md' "$release_workflow"; then
   pass "release workflow installs OpenSSL prerequisites per platform"
 else
   fail "release workflow is missing one or more platform OpenSSL setup steps"
 fi
 
 if [ -f "$release_workflow" ] \
-  && rg -q 'scripts/build_release_artifact\.sh' "$release_workflow" \
-  && rg -q 'scripts/smoke_test_release_artifact\.sh' "$release_workflow" \
-  && rg -q 'scripts/release_validate\.sh' "$release_workflow" \
-  && ! rg -q '\|\| true' "$release_workflow"; then
-  pass "release workflow uses repo-owned packaging/validation scripts and fails loud"
+  && contains_fixed 'scripts/build_release_artifact.sh' "$release_workflow" \
+  && contains_fixed 'scripts/smoke_test_release_artifact.sh' "$release_workflow" \
+  && contains_fixed 'scripts/release_validate.sh' "$release_workflow" \
+  && contains_fixed 'uses: ./.github/actions/builder' "$release_workflow" \
+  && ! contains_regex 'apt-get|DEBIAN_FRONTEND' "$release_workflow" \
+  && ! contains_fixed '|| true' "$release_workflow"; then
+  pass "release workflow uses repo-owned packaging/validation scripts inside the Wolfi builder and fails loud"
 else
-  fail "release workflow is not fully scripted in-repo or still swallows errors"
+  fail "release workflow is not fully scripted in-repo, has drifted from the Wolfi builder, or still swallows errors"
 fi
 
-if rg -q '^release-emulate:' "$REPO_ROOT/Makefile" \
-  && rg -q '^release-validate:' "$REPO_ROOT/Makefile"; then
+if contains_regex '^release-emulate:' "$REPO_ROOT/Makefile" \
+  && contains_regex '^release-validate:' "$REPO_ROOT/Makefile"; then
   pass "Makefile exposes local release emulation and validation targets"
 else
   fail "Makefile is missing local release emulation or validation targets"
@@ -135,21 +170,21 @@ else
 fi
 
 if [ -f "$REPO_ROOT/scripts/verify_published_release.sh" ] \
-  && rg -q '^verify-published-release:' "$REPO_ROOT/Makefile"; then
+  && contains_regex '^verify-published-release:' "$REPO_ROOT/Makefile"; then
   pass "published release verification is available from the repo"
 else
   fail "published release verification is missing"
 fi
 
-if rg -q 'docs-linkcheck' "$REPO_ROOT/tox.ini" \
-  && rg -q 'docs-linkcheck' "$REPO_ROOT/.github/workflows/ci.yml"; then
+if contains_fixed 'docs-linkcheck' "$REPO_ROOT/tox.ini" \
+  && contains_fixed 'docs-linkcheck' "$REPO_ROOT/.github/workflows/ci.yml"; then
   pass "docs link validation is wired into tox and CI"
 else
   fail "docs link validation is missing from tox or CI"
 fi
 
 if [ -f "$REPO_ROOT/scripts/verify_branch_protection.sh" ] \
-  && rg -q '^verify-branch-protection:' "$REPO_ROOT/Makefile"; then
+  && contains_regex '^verify-branch-protection:' "$REPO_ROOT/Makefile"; then
   if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     if bash "$REPO_ROOT/scripts/verify_branch_protection.sh" >/dev/null; then
       pass "branch protection matches the Rust-native required checks"

@@ -150,7 +150,7 @@ verify-branch-protection: ## Verify main branch protection matches the Rust-nati
 	bash scripts/verify_branch_protection.sh
 
 verify-published-release: ## Verify a published GitHub release asset set, attestation, checksums, and host smoke path (TAG=paranoid-passwd-vX.Y.Z)
-	@if [ -z "$(TAG)" ]; then echo "TAG is required, for example: make verify-published-release TAG=paranoid-passwd-v3.5.2"; exit 2; fi
+	@if [ -z "$(TAG)" ]; then echo "TAG is required, for example: make verify-published-release TAG=paranoid-passwd-v3.7.0"; exit 2; fi
 	bash scripts/verify_published_release.sh "$(TAG)"
 
 docs-build: ## Build the Sphinx docs site

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-TAG="${1:?release tag required (e.g. paranoid-passwd-v3.5.2)}"
+TAG="${1:?release tag required (e.g. paranoid-passwd-v3.7.0)}"
 REPO="${2:-jbcom/paranoid-passwd}"
 OWNER="${3:-jbcom}"
 

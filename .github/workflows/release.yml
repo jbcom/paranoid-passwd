@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to build (e.g. paranoid-passwd-v3.5.1)'
+        description: 'Release tag to build (e.g. paranoid-passwd-v3.7.0)'
         required: true
         type: string
 
@@ -164,31 +164,11 @@ jobs:
           path: cli-dist
           merge-multiple: true
 
-      - name: Install Linux GUI smoke dependencies
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            imagemagick \
-            libdbus-1-3 \
-            libfontconfig1 \
-            libx11-6 \
-            libx11-xcb1 \
-            libxcb1 \
-            libxcursor1 \
-            libxi6 \
-            libxinerama1 \
-            libxkbcommon0 \
-            libxkbcommon-x11-0 \
-            libxss1 \
-            x11-xkb-utils \
-            xauth \
-            xvfb
-
       - name: Validate artifacts, manifests, and install.sh
-        shell: bash
-        run: |
-          bash scripts/release_validate.sh '${{ steps.ver.outputs.version }}' cli-dist
+        uses: ./.github/actions/builder
+        with:
+          run: |
+            bash scripts/release_validate.sh '${{ steps.ver.outputs.version }}' cli-dist
 
       - name: Upload validated package manifests
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -274,29 +254,20 @@ jobs:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
 
-      - name: Install Linux GUI smoke dependencies
+      - name: Verify expected assets, checksums, attestation, and smoke path (Linux)
         if: matrix.verify_host == 'linux'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            imagemagick \
-            libdbus-1-3 \
-            libfontconfig1 \
-            libx11-6 \
-            libx11-xcb1 \
-            libxcb1 \
-            libxcursor1 \
-            libxi6 \
-            libxinerama1 \
-            libxkbcommon0 \
-            libxkbcommon-x11-0 \
-            libxss1 \
-            x11-xkb-utils \
-            xauth \
-            xvfb
+        uses: ./.github/actions/builder
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+        with:
+          run: |
+            bash scripts/verify_published_release.sh "${RAW_TAG}" "${GH_REPO}" "${OWNER}"
 
-      - name: Verify expected assets, checksums, attestation, and smoke path
+      - name: Verify expected assets, checksums, attestation, and smoke path (macOS)
+        if: matrix.verify_host == 'darwin'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -539,29 +510,37 @@ jobs:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
 
-      - name: Install Linux GUI smoke dependencies
-        if: runner.os == 'Linux' && matrix.runnable == true && matrix.product_name == 'paranoid-passwd-gui'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            imagemagick \
-            libdbus-1-3 \
-            libfontconfig1 \
-            libx11-6 \
-            libx11-xcb1 \
-            libxcb1 \
-            libxcursor1 \
-            libxi6 \
-            libxinerama1 \
-            libxkbcommon0 \
-            libxkbcommon-x11-0 \
-            libxss1 \
-            x11-xkb-utils \
-            xauth \
-            xvfb
+      - name: Download + verify release asset (Linux)
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/builder
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+          RUNNABLE: ${{ matrix.runnable }}
+        with:
+          run: |
+            ver="${RAW_TAG#paranoid-passwd-v}"
+            if [ '${{ matrix.deb }}' = 'true' ]; then
+              artifact="${{ matrix.product_name }}_${ver}_${{ matrix.target_arch }}.deb"
+            else
+              artifact="${{ matrix.product_name }}-${ver}-${{ matrix.asset_suffix }}"
+            fi
+            gh release download "${RAW_TAG}" -p "${artifact}" -p checksums.txt --repo "${GH_REPO}"
+            gh attestation verify "${artifact}" --owner "${OWNER}"
+            checksum_line="$(awk -v artifact="${artifact}" '$2 == artifact { print; found = 1 } END { if (!found) exit 1 }' checksums.txt)"
+            if command -v sha256sum >/dev/null 2>&1; then
+              printf '%s\n' "${checksum_line}" | sha256sum -c -
+            else
+              printf '%s\n' "${checksum_line}" | shasum -a 256 -c -
+            fi
+            if [ "${RUNNABLE}" = "true" ]; then
+              bash scripts/smoke_test_release_artifact.sh "${ver}" '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "${artifact}" '${{ matrix.product_name }}'
+            fi
 
-      - name: Download + verify release asset
+      - name: Download + verify release asset (macOS)
+        if: runner.os != 'Linux'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
