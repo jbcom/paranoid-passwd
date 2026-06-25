@@ -16,7 +16,7 @@ make release-emulate
 
 `make verify-branch-protection` catches stale required-check policies before they block or silently weaken the release line.
 
-`make smoke-release` packages and verifies the host-native CLI and GUI release artifacts. On Linux hosts that includes both the direct archives and the `.deb` packages. On macOS hosts that includes the direct archives and the GUI `.dmg` image. The smoke path includes checked-in payload-layout validation before any executable smoke assertions run. DMG smoke validation mounts the image for layout checks, then stages the `.app` bundle into a temporary directory before executing `--version` and `--help`, so local proof does not depend on executing directly from a transient read-only image mount. Executable smoke retries only exit code 137, with a bounded retry count, to tolerate transient macOS process kills without masking persistent command failures.
+`make smoke-release` packages and verifies the host-native CLI and GUI release artifacts. On Linux hosts that includes both the direct archives and the `.deb` packages. On macOS hosts that includes the direct archives and the GUI `.dmg` image. On Windows hosts that includes the direct archives and the GUI `.msi` installer. The smoke path includes checked-in payload-layout validation before any executable smoke assertions run. DMG smoke validation mounts the image for layout checks, then stages the `.app` bundle into a temporary directory before executing `--version` and `--help`, so local proof does not depend on executing directly from a transient read-only image mount. MSI smoke validation uses Windows Installer administrative extraction before executing `--version` and `--help`, so proof does not require a persistent machine install. Executable smoke retries only exit code 137, with a bounded retry count, to tolerate transient macOS process kills without masking persistent command failures.
 
 On Linux hosts with the repository builder toolchain, packaged GUI smoke validation also
 captures a screenshot of the rendered window under Xvfb and fails if the capture is blank or
@@ -36,9 +36,15 @@ That script verifies:
 
 - the exact expected asset set
 - checksum integrity for every published CLI and GUI artifact, including Linux `.deb` packages and macOS GUI `.dmg` images
-- expected payload layout for every published CLI and GUI artifact, including macOS `.app` bundles inside archives and `.dmg` images, Linux GUI desktop metadata, and Debian package filesystem roots
-- GitHub attestation for the host-native downloadable artifacts, including Linux `.deb` packages on Linux hosts and the GUI `.dmg` image on macOS hosts
-- the host-native smoke path through `scripts/smoke_test_release_artifact.sh` for both binaries and, on Linux hosts, both `.deb` packages, and on macOS hosts, the GUI `.dmg` image
+- expected payload layout for every published CLI and GUI artifact, including macOS `.app` bundles inside archives and `.dmg` images, Linux GUI desktop metadata, Debian package filesystem roots, and Windows MSI administrative-extraction payloads
+- GitHub attestation for the host-native downloadable artifacts, including Linux `.deb` packages on Linux hosts, the GUI `.dmg` image on macOS hosts, and the GUI `.msi` on Windows hosts
+- the host-native smoke path through `scripts/smoke_test_release_artifact.sh` for both binaries and, on Linux hosts, both `.deb` packages, on macOS hosts, the GUI `.dmg` image, and on Windows hosts, the GUI `.msi`
+
+Set `PARANOID_REQUIRE_WINDOWS_MSI=1` when validating a release that should ship
+the Windows GUI MSI. Older published baselines such as
+`paranoid-passwd-v3.7.0` did not include that artifact, so the verifier keeps
+MSI strictness explicit while automatically validating an MSI if the release
+already includes one.
 
 ## Download a Release
 
@@ -49,6 +55,7 @@ gh release download "$TAG" --repo jbcom/paranoid-passwd \
   -p "paranoid-passwd-${VERSION}-darwin-arm64.tar.gz" \
   -p "paranoid-passwd-gui-${VERSION}-darwin-arm64.tar.gz" \
   -p "paranoid-passwd-gui-${VERSION}-darwin-arm64.dmg" \
+  -p "paranoid-passwd-gui-${VERSION}-windows-amd64.msi" \
   -p "checksums.txt"
 ```
 
@@ -69,6 +76,15 @@ grep "paranoid-passwd-gui-${VERSION}-linux-amd64.tar.gz$" checksums.txt | sha256
 grep "paranoid-passwd-gui_${VERSION}_amd64.deb$" checksums.txt | sha256sum -c
 ```
 
+On Windows:
+
+```powershell
+$msi = "paranoid-passwd-gui-$env:VERSION-windows-amd64.msi"
+$expected = (Select-String "$msi$" checksums.txt).Line.Split()[0].ToLowerInvariant()
+$actual = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw "checksum mismatch for $msi" }
+```
+
 ## Verify GitHub Attestation
 
 ```bash
@@ -84,6 +100,12 @@ On Linux, the same applies to the `.deb` packages:
 ```bash
 gh attestation verify "paranoid-passwd_${VERSION}_amd64.deb" --owner jbcom
 gh attestation verify "paranoid-passwd-gui_${VERSION}_amd64.deb" --owner jbcom
+```
+
+On Windows, the same applies to the MSI:
+
+```powershell
+gh attestation verify "paranoid-passwd-gui-${VERSION}-windows-amd64.msi" --owner jbcom
 ```
 
 ## Verify the Installer Surface

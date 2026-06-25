@@ -22,6 +22,7 @@ permissions: {}
 
 env:
   PARANOID_RELEASE_SIGNING_MODE: ${{ inputs.release_signing_mode || vars.PARANOID_RELEASE_SIGNING_MODE || 'unsigned' }}
+  PARANOID_WIX_VERSION: 7.0.0
 
 jobs:
   build-native:
@@ -172,6 +173,52 @@ jobs:
           "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "OPENSSL_NO_VENDOR=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Install WiX Toolset (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          dotnet tool install --global wix --version $env:PARANOID_WIX_VERSION
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & "$env:USERPROFILE\.dotnet\tools\wix.exe" --version
+
+      - name: Import Windows signing certificate
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1: ${{ secrets.PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1 }}
+          PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          PARANOID_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.PARANOID_WINDOWS_CERTIFICATE_PASSWORD }}
+          PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL: ${{ secrets.PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL }}
+        run: |
+          if ($env:PARANOID_RELEASE_SIGNING_MODE -ne "signed") {
+            Write-Host "Windows release signing mode is unsigned; skipping certificate import"
+            exit 0
+          }
+          if ($env:PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1) {
+            "PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1=$env:PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            if (-not $env:PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64) {
+              Write-Error "PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1 or PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64 is required when PARANOID_RELEASE_SIGNING_MODE=signed"
+              exit 1
+            }
+            if (-not $env:PARANOID_WINDOWS_CERTIFICATE_PASSWORD) {
+              Write-Error "PARANOID_WINDOWS_CERTIFICATE_PASSWORD is required when importing a Windows signing certificate"
+              exit 1
+            }
+            $certPath = Join-Path $env:RUNNER_TEMP "paranoid-windows-signing.pfx"
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64))
+            $password = ConvertTo-SecureString -String $env:PARANOID_WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            if (-not $cert.Thumbprint) {
+              Write-Error "Windows signing certificate import did not return a thumbprint"
+              exit 1
+            }
+            "PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          if ($env:PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL) {
+            "PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL=$env:PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
       - name: Build + package + smoke test inside the builder
         if: runner.os == 'Linux'
         uses: ./.github/actions/builder
@@ -210,6 +257,9 @@ jobs:
           if [ '${{ matrix.target_os }}' = 'darwin' ]; then
             bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' dmg dist/release paranoid-passwd-gui paranoid-gui
             bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "dist/release/paranoid-passwd-gui-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.dmg" paranoid-passwd-gui
+          elif [ '${{ matrix.target_os }}' = 'windows' ]; then
+            bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' msi dist/release paranoid-passwd-gui paranoid-gui
+            bash scripts/smoke_test_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "dist/release/paranoid-passwd-gui-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.msi" paranoid-passwd-gui
           fi
 
       - name: Upload native artifacts
@@ -221,6 +271,7 @@ jobs:
             dist/release/*.zip
             dist/release/*.deb
             dist/release/*.dmg
+            dist/release/*.msi
             dist/release/*.sha256
           retention-days: 7
 
@@ -254,6 +305,7 @@ jobs:
         uses: ./.github/actions/builder
         env:
           PARANOID_RELEASE_SIGNING_ALLOW_HOST_DEFERRED: "1"
+          PARANOID_MSI_ALLOW_HOST_DEFERRED: "1"
         with:
           run: |
             bash scripts/release_validate.sh '${{ steps.ver.outputs.version }}' cli-dist
@@ -306,6 +358,7 @@ jobs:
             cli-dist/*.zip
             cli-dist/*.deb
             cli-dist/*.dmg
+            cli-dist/*.msi
             cli-dist/checksums.txt
 
       - name: Upload everything to release
@@ -316,7 +369,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release upload "${RAW_TAG}" \
-              cli-dist/*.tar.gz cli-dist/*.zip cli-dist/*.deb cli-dist/*.dmg cli-dist/checksums.txt \
+              cli-dist/*.tar.gz cli-dist/*.zip cli-dist/*.deb cli-dist/*.dmg cli-dist/*.msi cli-dist/checksums.txt \
               --repo "${GH_REPO}" --clobber
 
   release-surface-verify:
@@ -335,6 +388,8 @@ jobs:
             runner: ubuntu-24.04
           - verify_host: darwin
             runner: macos-14
+          - verify_host: windows
+            runner: windows-2022
     steps:
       - name: Checkout (for verification scripts)
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -350,6 +405,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
           OWNER: ${{ github.repository_owner }}
+          PARANOID_REQUIRE_WINDOWS_MSI: "1"
+          PARANOID_MSI_ALLOW_HOST_DEFERRED: "1"
         with:
           run: |
             bash scripts/verify_published_release.sh "${RAW_TAG}" "${GH_REPO}" "${OWNER}"
@@ -362,6 +419,20 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
           OWNER: ${{ github.repository_owner }}
+          PARANOID_REQUIRE_WINDOWS_MSI: "1"
+          PARANOID_MSI_ALLOW_HOST_DEFERRED: "1"
+        run: |
+          bash scripts/verify_published_release.sh "${RAW_TAG}" "${GH_REPO}" "${OWNER}"
+
+      - name: Verify expected assets, checksums, attestation, and smoke path (Windows)
+        if: matrix.verify_host == 'windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+          PARANOID_REQUIRE_WINDOWS_MSI: "1"
         run: |
           bash scripts/verify_published_release.sh "${RAW_TAG}" "${GH_REPO}" "${OWNER}"
 

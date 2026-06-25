@@ -50,8 +50,8 @@ Use this checklist before and after cutting a release from `main`.
 
 ## After Publishing
 
-1. Verify that the release workflow produced every expected CLI and GUI artifact plus `checksums.txt`, including Linux `.deb` packages and the macOS GUI `.dmg` images.
-2. Verify that payload-layout validation passed for every archive, `.dmg`, and Debian package, not just the host-runnable smoke artifacts.
+1. Verify that the release workflow produced every expected CLI and GUI artifact plus `checksums.txt`, including Linux `.deb` packages, macOS GUI `.dmg` images, and the Windows GUI `.msi`.
+2. Verify that payload-layout validation passed for every archive, `.dmg`, Debian package, and MSI package, not just the host-runnable smoke artifacts.
 3. Verify there are no stale browser-era or otherwise unexpected assets attached to the release.
 4. Verify GitHub attestation for at least one downloaded artifact from each packaging family you ship.
 5. Re-run installer validation against the published release surface if needed.
@@ -63,6 +63,10 @@ Use this checklist before and after cutting a release from `main`.
 9. For macOS signed candidates, confirm the release workflow imported the Developer ID certificate
    and that `scripts/macos_sign_notarize.sh` signed/notarized both `Paranoid Passwd.app` and the
    GUI `.dmg` before publication.
+10. For Windows signed candidates, confirm the release workflow imported the signing certificate
+    into the current-user certificate store, that `scripts/windows_sign_artifact.sh` signed the
+    staged GUI executable before WiX packaging, and that it signed and verified the GUI `.msi`
+    before publication.
 
 ## Canary Expectations
 
@@ -71,6 +75,7 @@ The first release after a pipeline change should be treated as a canary:
 - inspect the archive matrix
 - inspect the Debian package set
 - inspect the macOS GUI `.dmg` set
+- inspect the Windows GUI `.msi`
 - verify the checksums
 - verify provenance
 - verify `install.sh`

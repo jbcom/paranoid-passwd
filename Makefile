@@ -24,6 +24,7 @@ HOST_ARCHIVE := $(if $(filter windows,$(HOST_OS)),zip,tar.gz)
 HOST_ARTIFACT := $(DIST_DIR)/paranoid-passwd-$(RELEASE_VERSION)-$(HOST_OS)-$(HOST_ARCH).$(HOST_ARCHIVE)
 HOST_GUI_ARTIFACT := $(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-$(HOST_OS)-$(HOST_ARCH).$(HOST_ARCHIVE)
 HOST_GUI_DMG_ARTIFACT := $(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-$(HOST_OS)-$(HOST_ARCH).dmg
+HOST_GUI_MSI_ARTIFACT := $(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-$(HOST_OS)-$(HOST_ARCH).msi
 HOST_DEB_ARTIFACT := $(DIST_DIR)/paranoid-passwd_$(RELEASE_VERSION)_$(HOST_ARCH).deb
 HOST_GUI_DEB_ARTIFACT := $(DIST_DIR)/paranoid-passwd-gui_$(RELEASE_VERSION)_$(HOST_ARCH).deb
 GUI_E2E_SCREENSHOT ?= $(DIST_DIR)/gui-e2e.png
@@ -222,6 +223,10 @@ ifeq ($(HOST_OS),darwin)
 	PARANOID_GUI_BUILD_COMMIT="$(COMMIT)" PARANOID_GUI_BUILD_DATE="$(DATE)" \
 		bash scripts/build_release_artifact.sh "$(RELEASE_VERSION)" "$(HOST_OS)" "$(HOST_ARCH)" "$(HOST_EXT)" dmg "$(DIST_DIR)" paranoid-passwd-gui paranoid-gui
 endif
+ifeq ($(HOST_OS),windows)
+	PARANOID_GUI_BUILD_COMMIT="$(COMMIT)" PARANOID_GUI_BUILD_DATE="$(DATE)" \
+		bash scripts/build_release_artifact.sh "$(RELEASE_VERSION)" "$(HOST_OS)" "$(HOST_ARCH)" "$(HOST_EXT)" msi "$(DIST_DIR)" paranoid-passwd-gui paranoid-gui
+endif
 
 smoke-release: package-release ## Smoke-test the host-native CLI and GUI release archives
 	bash scripts/smoke_test_release_artifact.sh "$(RELEASE_VERSION)" "$(HOST_OS)" "$(HOST_ARCH)" "$(HOST_ARTIFACT)"
@@ -232,6 +237,9 @@ ifeq ($(HOST_OS),linux)
 endif
 ifeq ($(HOST_OS),darwin)
 	bash scripts/smoke_test_release_artifact.sh "$(RELEASE_VERSION)" "$(HOST_OS)" "$(HOST_ARCH)" "$(HOST_GUI_DMG_ARTIFACT)" paranoid-passwd-gui
+endif
+ifeq ($(HOST_OS),windows)
+	bash scripts/smoke_test_release_artifact.sh "$(RELEASE_VERSION)" "$(HOST_OS)" "$(HOST_ARCH)" "$(HOST_GUI_MSI_ARTIFACT)" paranoid-passwd-gui
 endif
 
 release-validate: ## Validate a populated release dist dir, generate package manifests, and smoke-test install.sh

@@ -1336,6 +1336,26 @@ CLAIMS: tuple[Claim, ...] = (
                 "release artifact builder invokes the macOS signing helper for app and dmg payloads",
             ),
             Requirement(
+                "scripts/build_release_artifact.sh",
+                "build_msi_package",
+                "release artifact builder creates the Windows GUI MSI",
+            ),
+            Requirement(
+                "scripts/build_release_artifact.sh",
+                "windows_sign_artifact.sh",
+                "release artifact builder invokes the Windows signing helper for staged executable and MSI payloads",
+            ),
+            Requirement(
+                "scripts/windows_sign_artifact.sh",
+                "PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1",
+                "Windows signing helper requires an imported certificate thumbprint",
+            ),
+            Requirement(
+                "scripts/windows_sign_artifact.sh",
+                "PFX passwords are intentionally not",
+                "Windows signing helper rejects password-on-argv signing",
+            ),
+            Requirement(
                 ".github/workflows/release.yml",
                 "PARANOID_MACOS_CERTIFICATE_P12_BASE64",
                 "release workflow can import a macOS Developer ID certificate from secrets",
@@ -1344,6 +1364,21 @@ CLAIMS: tuple[Claim, ...] = (
                 ".github/workflows/release.yml",
                 "PARANOID_MACOS_NOTARY_KEY_P8_BASE64",
                 "release workflow materializes App Store Connect API key secrets as a temporary file",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "PARANOID_WIX_VERSION",
+                "release workflow pins the WiX Toolset version used to build MSI payloads",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64",
+                "release workflow can import a Windows signing certificate from secrets",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "paranoid-passwd-gui-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.msi",
+                "release workflow builds and smokes the Windows GUI MSI",
             ),
             Requirement(
                 "scripts/verify_platform_signing.sh",
@@ -1361,6 +1396,26 @@ CLAIMS: tuple[Claim, ...] = (
                 "release validation invokes the platform-signing verifier",
             ),
             Requirement(
+                "scripts/release_validate.sh",
+                "GUI_WIN_MSI_AMD64",
+                "release validation requires the Windows GUI MSI in complete release inputs",
+            ),
+            Requirement(
+                "scripts/verify_published_release.sh",
+                "PARANOID_REQUIRE_WINDOWS_MSI",
+                "published release verification can require the Windows GUI MSI for new releases",
+            ),
+            Requirement(
+                "scripts/smoke_test_release_artifact.sh",
+                "msiexec.exe /a",
+                "release smoke validates MSI payloads through administrative extraction",
+            ),
+            Requirement(
+                "scripts/assert_release_payload.sh",
+                "MSI payload validation requires a Windows host",
+                "payload validation fails closed for MSI inspection without Windows or explicit deferral",
+            ),
+            Requirement(
                 "tests/test_platform_signing_verify.sh",
                 "signed macOS dmg fails without verifiable signed payload",
                 "contract tests cover signed-mode fail-closed behavior",
@@ -1369,6 +1424,16 @@ CLAIMS: tuple[Claim, ...] = (
                 "tests/test_platform_signing_verify.sh",
                 "signed macOS app helper requires signing identity",
                 "contract tests cover macOS signing helper credential gating",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "Windows signing helper never accepts PFX password argv",
+                "contract tests prevent password-on-argv Windows signing regressions",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "MSI payload validation can be explicitly host-deferred",
+                "contract tests cover MSI host-deferred aggregation",
             ),
             Requirement(
                 "Makefile",

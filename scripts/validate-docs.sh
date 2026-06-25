@@ -27,6 +27,7 @@ required=(
   "$REPO_ROOT/scripts/verify_published_release.sh"
   "$REPO_ROOT/scripts/verify_platform_signing.sh"
   "$REPO_ROOT/scripts/macos_sign_notarize.sh"
+  "$REPO_ROOT/scripts/windows_sign_artifact.sh"
   "$REPO_ROOT/tests/test_platform_signing_verify.sh"
 )
 
@@ -59,10 +60,15 @@ grep -q "PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE" "$REPO_ROOT/docs/reference/plat
 grep -q "PARANOID_MACOS_NOTARY_KEY_PATH" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "PARANOID_MACOS_NOTARY_KEY_P8_BASE64" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "App-specific passwords are not passed to" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "PFX passwords are not accepted" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "Developer ID Application" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "notarytool" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "stapler validate" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "WiX Toolset MSI" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "PARANOID_WIX_VERSION" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "windows_sign_artifact.sh" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "signtool verify /pa" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "MSIX deferred" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "Flatpak" "$REPO_ROOT/docs/reference/platform-installers.md"
