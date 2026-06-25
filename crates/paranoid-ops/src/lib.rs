@@ -437,7 +437,7 @@ impl FederalRecoveryDisposition {
                     ),
                     required_controls: vec![
                         "seal_posture_evidence".to_string(),
-                        "auto_unseal_provider_available".to_string(),
+                        "device_bound_provider_available".to_string(),
                     ],
                     assessor_note: "Default-profile passwordless unlock only; strict federal-ready policy denies this method until the provider boundary is separately dispositioned.".to_string(),
                 },
@@ -629,18 +629,23 @@ fn append_seal_policy_missing_controls(
     };
 
     match method {
-        VaultUnlockMethod::PasswordRecovery | VaultUnlockMethod::MnemonicRecovery => {
-            if !posture.operator_recovery_configured {
-                missing_controls.push("operator_recovery_provider".to_string());
+        VaultUnlockMethod::PasswordRecovery => {
+            if !posture.has_configured_provider(VaultSealProviderKind::PasswordRecovery) {
+                missing_controls.push("password_recovery_provider".to_string());
+            }
+        }
+        VaultUnlockMethod::MnemonicRecovery => {
+            if !posture.has_configured_provider(VaultSealProviderKind::MnemonicRecovery) {
+                missing_controls.push("mnemonic_recovery_provider".to_string());
             }
         }
         VaultUnlockMethod::DeviceBound => {
-            if !posture.auto_unseal_available {
-                missing_controls.push("auto_unseal_provider_available".to_string());
+            if !posture.has_available_provider(VaultSealProviderKind::DeviceBound) {
+                missing_controls.push("device_bound_provider_available".to_string());
             }
         }
         VaultUnlockMethod::CertificateWrapped => {
-            if !posture.certificate_unseal_configured {
+            if !posture.has_configured_provider(VaultSealProviderKind::CertificateWrapped) {
                 missing_controls.push("certificate_unseal_provider".to_string());
             }
         }
@@ -1501,7 +1506,7 @@ mod tests {
     }
 
     #[test]
-    fn device_bound_unlock_requires_available_auto_unseal_provider() {
+    fn device_bound_unlock_requires_available_device_bound_provider() {
         let envelope = OpsCommandEnvelope::local(
             AuditSurface::Cli,
             OpsProfile::Default,
@@ -1541,7 +1546,137 @@ mod tests {
             } => {
                 assert_eq!(
                     missing_controls,
-                    vec!["auto_unseal_provider_available".to_string()]
+                    vec!["device_bound_provider_available".to_string()]
+                );
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn device_bound_unlock_rejects_generic_external_auto_unseal_availability() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::Default,
+            OpsCommand::VaultUnlock {
+                method: VaultUnlockMethod::DeviceBound,
+            },
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: Some(VaultSealPosture::from_providers(
+                VaultSealState::Sealed,
+                vec![
+                    VaultSealProviderEvidence::configured(
+                        "password",
+                        VaultSealProviderKind::PasswordRecovery,
+                        "test",
+                    ),
+                    VaultSealProviderEvidence::available(
+                        "external",
+                        VaultSealProviderKind::ExternalAutoUnseal,
+                        "external_probe",
+                    ),
+                ],
+            )),
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert_eq!(
+                    missing_controls,
+                    vec!["device_bound_provider_available".to_string()]
+                );
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mnemonic_unlock_requires_mnemonic_recovery_provider() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::Default,
+            OpsCommand::VaultUnlock {
+                method: VaultUnlockMethod::MnemonicRecovery,
+            },
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: Some(VaultSealPosture::from_providers(
+                VaultSealState::Sealed,
+                vec![VaultSealProviderEvidence::configured(
+                    "password",
+                    VaultSealProviderKind::PasswordRecovery,
+                    "test",
+                )],
+            )),
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert_eq!(
+                    missing_controls,
+                    vec!["mnemonic_recovery_provider".to_string()]
+                );
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn password_unlock_requires_password_recovery_provider() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Cli,
+            OpsProfile::Default,
+            OpsCommand::VaultUnlock {
+                method: VaultUnlockMethod::PasswordRecovery,
+            },
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: Some(VaultSealPosture::from_providers(
+                VaultSealState::Sealed,
+                vec![VaultSealProviderEvidence::configured(
+                    "mnemonic",
+                    VaultSealProviderKind::MnemonicRecovery,
+                    "test",
+                )],
+            )),
+        };
+
+        let decision = evaluate_policy(&envelope, &context);
+
+        match decision {
+            OpsPolicyDecision::Deny {
+                missing_controls, ..
+            } => {
+                assert_eq!(
+                    missing_controls,
+                    vec!["password_recovery_provider".to_string()]
                 );
             }
             other => panic!("expected deny, got {other:?}"),

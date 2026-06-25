@@ -139,11 +139,14 @@ crates. Current coverage proves that:
   mismatched challenge rejection
 - typed allow/challenge/deny decisions cover sensitive vault unlock methods
 - ops policy tests require seal posture evidence for federal certificate unlock, require seal
-  posture evidence for device-bound unlock, and require confirmed auto-unseal availability before
-  device-bound unlock can proceed
+  posture evidence for device-bound unlock, and require confirmed device-bound provider
+  availability before device-bound unlock can proceed; password, mnemonic, device-bound, and
+  certificate unlocks are checked against their matching provider kinds instead of generic recovery
+  or auto-unseal flags
 - the seal state machine covers unlock, idle-lock, timeout, and relock transitions
 - seal posture reports configured recovery, certificate, and auto-unseal providers without claiming
-  provider availability before a health check confirms it
+  provider availability before a health check confirms it, and helper tests keep availability
+  method-specific
 - headless `vault seal-status` output includes the same seal posture payload, and
   `vault seal-status --probe-providers` is covered by the vault CLI e2e script to prove
   device-bound providers become `available` only after an explicit secure-storage check

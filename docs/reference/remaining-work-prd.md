@@ -91,13 +91,15 @@ sinks with writable health evidence, external audit-device posture, seal-state p
 seal-provider availability probes, an mTLS process-boundary transport, and a federal-ready startup
 evidence path. Headless vault CLI commands, native TUI actions, and native GUI automation now share
 that protocol for covered vault operations rather than drifting back into UI-local patches. The next
-architecture boundary extends the same model into broader command coverage, federal-mode recovery
-disposition, and release-grade assessor fixtures.
+architecture boundary extends the same model into broader command coverage, the remaining vault
+keyslot recovery dispositions, external/remote auto-unseal expansion, and release-grade assessor
+fixtures.
 
 That PR should be scoped around:
 
 - CLI/TUI/GUI JSONL fixtures and additional automation output over the typed ops protocol
-- broader seal / auto-unseal provider policy and recovery-mode disposition
+- external/remote auto-unseal provider policy beyond the local device-bound probe and the remaining
+  recovery keyslot dispositions
 - additional federal-ready profile fixtures and configured-provider evidence
 - docs and tests that make the trust boundary reviewable
 
@@ -427,8 +429,8 @@ This PRD is complete when all of the following are true:
 
 1. extend stable JSON/JSONL traces as additional command families are covered across CLI, TUI, GUI,
    and mTLS process-boundary sessions
-2. expand federal-mode recovery disposition and seal / auto-unseal provider policy beyond the
-   explicit device-provider probe now in place
+2. expand the remaining vault keyslot dispositions and any future external/remote auto-unseal
+   policy beyond the local method-specific seal posture controls now in place
 3. keep the remote dependency-update queue green and reviewable, including explicit PR thread/check
    inspection before merge
 4. finish versioning or vendoring the host-local scanner/tool update path now tracked by

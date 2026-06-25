@@ -61,7 +61,7 @@
         "method": "device_bound",
         "required_controls": [
           "seal_posture_evidence",
-          "auto_unseal_provider_available"
+          "device_bound_provider_available"
         ]
       },
       {
