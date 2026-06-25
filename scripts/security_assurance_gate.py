@@ -1297,6 +1297,46 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "docs/reference/platform-installers.md",
+                "scripts/verify_platform_signing.sh",
+                "decision record names the repo-owned platform-signing verifier",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "PARANOID_RELEASE_SIGNING_MODE=signed",
+                "decision record documents signed-mode validation",
+            ),
+            Requirement(
+                "scripts/verify_platform_signing.sh",
+                "PARANOID_RELEASE_SIGNING_MODE",
+                "platform-signing verifier is mode-controlled",
+            ),
+            Requirement(
+                "scripts/verify_platform_signing.sh",
+                "signed macOS verification requires a macOS host",
+                "platform-signing verifier fails closed for macOS verification on non-mac hosts",
+            ),
+            Requirement(
+                "scripts/verify_platform_signing.sh",
+                "signtool verify /pa",
+                "platform-signing verifier enforces Windows Authenticode verification",
+            ),
+            Requirement(
+                "scripts/release_validate.sh",
+                "verify_platform_signing.sh",
+                "release validation invokes the platform-signing verifier",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "signed macOS dmg fails without verifiable signed payload",
+                "contract tests cover signed-mode fail-closed behavior",
+            ),
+            Requirement(
+                "Makefile",
+                "test-platform-signing-boundary",
+                "make ci runs platform-signing verifier contract tests",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
                 "no Developer ID app signing, no Apple",
                 "decision record states current macOS signing/notarization is not shipped",
             ),

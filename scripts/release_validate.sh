@@ -112,6 +112,14 @@ validate_archive_payload() {
 
 for archive in "${EXPECTED_ASSETS[@]}"; do
   validate_archive_payload "${archive}"
+  case "${archive}" in
+    paranoid-passwd-gui-*) signing_product_name="paranoid-passwd-gui" ;;
+    *) signing_product_name="paranoid-passwd" ;;
+  esac
+  bash scripts/verify_platform_signing.sh \
+    --mode "${PARANOID_RELEASE_SIGNING_MODE:-unsigned}" \
+    --artifact "${DIST_DIR}/${archive}" \
+    --product "${signing_product_name}"
 done
 
 checksum_input="${DIST_DIR}/checksums.txt.raw"
