@@ -13,10 +13,12 @@ FROM cgr.dev/chainguard/wolfi-base@sha256:1af610c4a70668dad46159ee178b20378c79a4
 
 ARG RUST_APK_PACKAGE=rust-1.95
 ARG RUST_APK_VERSION=1.95.0-r0
+ARG CARGO_AUDIT_APK_VERSION=0.22.2-r2
 ARG SEMGREP_APK_VERSION=1.165.0-r0
 ARG OSV_SCANNER_APK_VERSION=2.4.0-r0
 ARG SYFT_APK_VERSION=1.45.1-r1
 ARG TRIVY_APK_VERSION=0.70.0-r5
+ARG RUSTSEC_ADVISORY_DB_REV=20377f44edabca7c4a765ccdcd05935331b6191f
 ARG SPHINX_RUSTDOCGEN_VERSION=1.1.0
 ARG TOX_VERSION=4.53.0
 
@@ -31,6 +33,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         build-base \
         ca-certificates \
         coreutils \
+        cargo-audit="${CARGO_AUDIT_APK_VERSION}" \
         curl \
         dbus \
         dbus-dev \
@@ -91,13 +94,19 @@ RUN --mount=type=cache,target=/tmp/cargo/registry \
     cargo install --locked --root /usr/local "sphinx-rustdocgen@${SPHINX_RUSTDOCGEN_VERSION}" \
  && rm -rf /tmp/cargo-target /tmp/cargo/bin /tmp/cargo/.crates.toml /tmp/cargo/.crates2.json
 
+RUN git clone https://github.com/RustSec/advisory-db.git /tmp/cargo/advisory-db \
+ && git -C /tmp/cargo/advisory-db checkout --detach "${RUSTSEC_ADVISORY_DB_REV}" \
+ && git -C /tmp/cargo/advisory-db rev-parse HEAD | grep -F "${RUSTSEC_ADVISORY_DB_REV}" >/dev/null
+
 RUN bash --version >/dev/null \
  && cargo --version >/dev/null \
+ && cargo audit --version >/dev/null \
  && cargo clippy --version >/dev/null \
  && cargo fmt --version >/dev/null \
  && fc-cache -f >/dev/null \
  && fc-match sans >/dev/null \
  && command -v dbus-run-session >/dev/null \
+ && command -v cargo-audit >/dev/null \
  && command -v gh >/dev/null \
  && command -v identify >/dev/null \
  && command -v import >/dev/null \
@@ -108,6 +117,7 @@ RUN bash --version >/dev/null \
  && command -v syft >/dev/null \
  && command -v trivy >/dev/null \
  && command -v xvfb-run >/dev/null \
+ && test -d /tmp/cargo/advisory-db/crates \
  && pkgconf --modversion fontconfig >/dev/null \
  && pkgconf --modversion openssl >/dev/null \
  && python3 --version >/dev/null \

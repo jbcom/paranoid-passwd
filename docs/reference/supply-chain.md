@@ -18,8 +18,9 @@ The custom GitHub Action builder image is the repository trust root for:
 - OpenSSL development headers from Wolfi packages
 - Xvfb and the Xlib runtime libraries required for GUI screenshot smoke tests
 - Sphinx and Python docs tooling
-- local scanner CLIs used by the deeper release-candidate gates, including `semgrep`,
-  `osv-scanner`, `syft`, and `trivy`
+- local scanner CLIs used by the deeper release-candidate gates, including `cargo-audit`,
+  `semgrep`, `osv-scanner`, `syft`, and `trivy`
+- a pinned RustSec advisory DB checkout used by builder-emulated `cargo audit --no-fetch`
 - `cargo` build / test / clippy / fmt runs
 - docs-site builds from the repository root
 - vendored Cargo dependency resolution
@@ -95,6 +96,10 @@ The repository now carries `scripts/verify_branch_protection.sh` plus `make veri
 - `make quality` is the local release-candidate gate: it runs `verify-deep`, the enforced local
   scanner subset, `ci`, and the host-supported GUI e2e harness before remote CI is treated as
   confirmation. It also requires the local security scanner stack to be installed.
+- `make quality-emulate` runs the same release-candidate posture inside the custom Wolfi builder
+  where possible: `verify-deep`, the builder-owned scanner subset, `ci`, and the Linux GUI visual
+  regression harness. Shell scripts are parsed with `bash -n` there when the Wolfi package set does
+  not provide ShellCheck.
 - `deny.toml` records the local dependency license/source policy for `cargo-deny`.
 - `scripts/hallucination_check.sh` verifies math/security invariants in `paranoid-core`.
 - `scripts/supply_chain_verify.sh` verifies vendoring, workflow pinning, and release prerequisites.
@@ -106,8 +111,9 @@ The repository now carries `scripts/verify_branch_protection.sh` plus `make veri
 Scanner and tooling updates are tracked in `supply-chain/scanner-toolchain.env`. That manifest is
 the source of truth for:
 
-- Wolfi apk scanner versions installed into the repository builder (`semgrep`, `osv-scanner`,
-  `syft`, and `trivy`)
+- Wolfi apk scanner versions installed into the repository builder (`cargo-audit`, `semgrep`,
+  `osv-scanner`, `syft`, and `trivy`)
+- the RustSec advisory DB revision checked out into the builder for no-fetch cargo-audit runs
 - the pinned `github/codeql-action` version and commit SHA used by workflow CodeQL jobs
 - host-local scanner tools that `xtask` must continue to discover for `make verify-deep` /
   `make quality`
@@ -117,5 +123,5 @@ the source of truth for:
 `scripts/supply_chain_verify.sh` sources the manifest and fails if the Dockerfile, workflow CodeQL
 references, or `xtask` local-tool visibility checks drift from it. Updating a scanner therefore
 requires changing the manifest, updating the corresponding builder, workflow reference, or host
-version check, and rerunning the assurance gate plus `make quality` rather than letting the runner
-or workstation resolve a new scanner version implicitly.
+version check, and rerunning the assurance gate plus `make quality` or `make quality-emulate`
+rather than letting the runner or workstation resolve a new scanner version implicitly.

@@ -1,4 +1,4 @@
-.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e test-platform-signing-boundary verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality builder-image _builder-image ci-emulate _ci-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
+.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e test-platform-signing-boundary verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality quality-emulate builder-image _builder-image ci-emulate _ci-emulate _quality-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -34,6 +34,7 @@ GUI_E2E_VISUAL_VIEWPORTS ?= desktop=1280x1024 tablet=900x700 mobile=420x800
 GUI_E2E_TARGET_VOLUME ?= paranoid-passwd-cargo-target-gui-e2e
 GUI_E2E_CLEAN ?= 0
 CI_EMULATE_TARGET_VOLUME ?= paranoid-passwd-cargo-target-ci-emulate
+QUALITY_EMULATE_TARGET_VOLUME ?= paranoid-passwd-cargo-target-quality-emulate
 RELEASE_EMULATE_TARGET_VOLUME ?= paranoid-passwd-cargo-target-release-emulate
 CI_GUI_E2E_TARGET := $(if $(filter linux,$(HOST_OS)),test-gui-e2e)
 LOCAL_GUI_E2E_TARGET := $(if $(filter darwin,$(HOST_OS)),test-gui-e2e-emulate,$(if $(filter linux,$(HOST_OS)),test-gui-e2e))
@@ -185,6 +186,10 @@ quality: ## Run local release-candidate quality gates, including GUI e2e when su
 	$(MAKE) test-gui-targets
 	$(if $(LOCAL_GUI_VISUAL_TARGET),$(MAKE) $(LOCAL_GUI_VISUAL_TARGET))
 
+quality-emulate: ## Run release-candidate quality gates through the custom Wolfi builder image
+	@bash scripts/configure_local_toolchain.sh --quiet
+	@$(MAKE) _quality-emulate
+
 
 builder-image: ## Build or reuse the local builder image keyed to the builder context hash
 	@bash scripts/configure_local_toolchain.sh --quiet
@@ -207,6 +212,16 @@ _ci-emulate: _builder-image
 		"$(BUILDER_IMAGE)" \
 		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0; make ci'"
 	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(CI_EMULATE_TARGET_VOLUME)" >/dev/null 2>&1 || true
+
+_quality-emulate: _builder-image
+	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(QUALITY_EMULATE_TARGET_VOLUME)" >/dev/null 2>&1 || true
+	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" run --rm --platform "$(BUILDER_PLATFORM)" --user root --entrypoint bash \
+		-v "$$(pwd)":/github/workspace \
+		--mount type=volume,source="$(QUALITY_EMULATE_TARGET_VOLUME)",target=/cargo-target \
+		-w /github/workspace \
+		"$(BUILDER_IMAGE)" \
+		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 PARANOID_BUILDER_SCANNER_SUBSET=1 PARANOID_RUN_LOCAL_SCANNERS=1; make verify-deep; make ci; make test-gui-visual-regression'"
+	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(QUALITY_EMULATE_TARGET_VOLUME)" >/dev/null 2>&1 || true
 
 package-release: ## Build and package the host-native CLI and GUI release archives into $(DIST_DIR)
 	mkdir -p "$(DIST_DIR)"

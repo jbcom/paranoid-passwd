@@ -32,6 +32,9 @@ const RECOMMENDED_EXTERNAL_TOOLS: &[&str] = &[
     "osv-scanner",
 ];
 
+const BUILDER_OWNED_SCANNER_TOOLS: &[&str] =
+    &["cargo-audit", "semgrep", "osv-scanner", "syft", "trivy"];
+
 const SCANNER_TOOLCHAIN_MANIFEST: &str = "supply-chain/scanner-toolchain.env";
 
 const HOST_LOCAL_SCANNER_VERSION_CHECKS: &[HostLocalScannerVersionCheck] = &[
@@ -312,6 +315,12 @@ fn check_shell_scripts(repo_root: &Path, files: &[PathBuf]) -> Result<Vec<Findin
 
     print_step("Running ShellCheck on repo-owned shell scripts");
     let Some(shellcheck) = find_in_path("shellcheck") else {
+        if builder_scanner_subset_enabled() {
+            println!(
+                "WARN shellcheck is not available in the Wolfi builder package set; running bash syntax checks instead"
+            );
+            return check_shell_script_syntax(repo_root, &shell_files);
+        }
         return Ok(vec![Finding::new(
             "shellcheck",
             "shellcheck is required for make verify-deep",
@@ -332,6 +341,33 @@ fn check_shell_scripts(repo_root: &Path, files: &[PathBuf]) -> Result<Vec<Findin
             "ShellCheck reported warning-or-higher findings",
         )])
     }
+}
+
+fn check_shell_script_syntax(repo_root: &Path, shell_files: &[PathBuf]) -> Result<Vec<Finding>> {
+    print_step("Parsing repo-owned shell scripts with bash -n");
+    let Some(bash) = find_in_path("bash") else {
+        return Ok(vec![Finding::new(
+            "shell-syntax",
+            "bash is required for builder-emulated shell syntax checks",
+        )]);
+    };
+
+    let mut findings = Vec::new();
+    for shell_file in shell_files {
+        let status = Command::new(&bash)
+            .arg("-n")
+            .arg(shell_file)
+            .current_dir(repo_root)
+            .status()
+            .with_context(|| format!("failed to parse {}", shell_file.display()))?;
+        if !status.success() {
+            findings.push(Finding::new(
+                "shell-syntax",
+                format!("{} failed bash -n", shell_file.display()),
+            ));
+        }
+    }
+    Ok(findings)
 }
 
 fn check_python_syntax(repo_root: &Path, files: &[PathBuf]) -> Result<Vec<Finding>> {
@@ -449,13 +485,28 @@ fn is_text_file(repo_root: &Path, path: &Path) -> Result<bool> {
 
 fn check_external_tool_visibility() -> Result<Vec<Finding>> {
     print_step("Checking optional local security tool visibility");
-    let missing: Vec<&str> = RECOMMENDED_EXTERNAL_TOOLS
+    let expected_tools = if builder_scanner_subset_enabled() {
+        BUILDER_OWNED_SCANNER_TOOLS
+    } else {
+        RECOMMENDED_EXTERNAL_TOOLS
+    };
+    let missing: Vec<&str> = expected_tools
         .iter()
         .copied()
         .filter(|tool| find_in_path(tool).is_none())
         .collect();
     if missing.is_empty() {
         return Ok(Vec::new());
+    }
+
+    if builder_scanner_subset_enabled() {
+        return Ok(vec![Finding::new(
+            "builder-scanners",
+            format!(
+                "missing builder-owned scanner tools: {}; update .github/actions/builder/Dockerfile or supply-chain/scanner-toolchain.env",
+                missing.join(", ")
+            ),
+        )]);
     }
 
     let message = format!(
@@ -572,28 +623,11 @@ fn check_local_security_scanners(repo_root: &Path) -> Result<Vec<Finding>> {
     }
 
     print_step("Running local security scanners");
-    let commands: [(&str, &str, Vec<&str>); 3] = [
+    let mut commands: Vec<(&str, &str, Vec<&str>)> = vec![
         (
             "cargo-audit",
             "cargo",
             vec!["audit", "--no-fetch", "--stale"],
-        ),
-        (
-            "cargo-deny",
-            "cargo",
-            vec![
-                "deny",
-                "check",
-                "advisories",
-                "licenses",
-                "sources",
-                "bans",
-                "-A",
-                "unmaintained",
-                "-A",
-                "unsound",
-                "--hide-inclusion-graph",
-            ],
         ),
         (
             "semgrep",
@@ -619,6 +653,28 @@ fn check_local_security_scanners(repo_root: &Path) -> Result<Vec<Finding>> {
             ],
         ),
     ];
+    if !builder_scanner_subset_enabled() {
+        commands.insert(
+            1,
+            (
+                "cargo-deny",
+                "cargo",
+                vec![
+                    "deny",
+                    "check",
+                    "advisories",
+                    "licenses",
+                    "sources",
+                    "bans",
+                    "-A",
+                    "unmaintained",
+                    "-A",
+                    "unsound",
+                    "--hide-inclusion-graph",
+                ],
+            ),
+        );
+    }
 
     let mut findings = Vec::new();
     for (check, binary, args) in commands {
@@ -760,6 +816,10 @@ fn find_in_path(binary: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+fn builder_scanner_subset_enabled() -> bool {
+    env::var("PARANOID_BUILDER_SCANNER_SUBSET").as_deref() == Ok("1")
+}
+
 impl Finding {
     fn new(check: &'static str, message: impl Into<String>) -> Self {
         Self {
@@ -788,6 +848,9 @@ mod tests {
             r#"
 # comment
 HOST_LOCAL_SCANNER_TOOLS="shellcheck cargo-deny cargo-audit cargo-vet codeql"
+CARGO_AUDIT_APK_PACKAGE=cargo-audit
+CARGO_AUDIT_APK_VERSION=0.22.2-r2
+RUSTSEC_ADVISORY_DB_REV=20377f44edabca7c4a765ccdcd05935331b6191f
 HOST_SHELLCHECK_VERSION=0.11.0
 HOST_CARGO_DENY_VERSION=0.19.4
 HOST_CARGO_AUDIT_VERSION=0.22.1
@@ -807,6 +870,14 @@ HOST_CODEQL_CLI_VERSION='2.25.3'
         assert_eq!(
             values.get("HOST_CARGO_AUDIT_VERSION").map(String::as_str),
             Some("0.22.1")
+        );
+        assert_eq!(
+            values.get("CARGO_AUDIT_APK_VERSION").map(String::as_str),
+            Some("0.22.2-r2")
+        );
+        assert_eq!(
+            values.get("RUSTSEC_ADVISORY_DB_REV").map(String::as_str),
+            Some("20377f44edabca7c4a765ccdcd05935331b6191f")
         );
     }
 }

@@ -1253,8 +1253,43 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "supply-chain/scanner-toolchain.env",
+                "CARGO_AUDIT_APK_VERSION=",
+                "scanner toolchain manifest records the Wolfi cargo-audit apk pin",
+            ),
+            Requirement(
+                "supply-chain/scanner-toolchain.env",
+                "RUSTSEC_ADVISORY_DB_REV=",
+                "scanner toolchain manifest records the RustSec advisory DB revision",
+            ),
+            Requirement(
+                "supply-chain/scanner-toolchain.env",
                 "HOST_CODEQL_CLI_VERSION=",
                 "scanner toolchain manifest records host-local scanner versions",
+            ),
+            Requirement(
+                ".github/actions/builder/Dockerfile",
+                'cargo-audit="${CARGO_AUDIT_APK_VERSION}"',
+                "Wolfi builder installs the manifest-pinned cargo-audit package",
+            ),
+            Requirement(
+                ".github/actions/builder/Dockerfile",
+                "git -C /tmp/cargo/advisory-db checkout --detach",
+                "Wolfi builder checks out the manifest-pinned RustSec advisory DB",
+            ),
+            Requirement(
+                "Makefile",
+                "quality-emulate",
+                "Makefile exposes the Wolfi builder-owned quality emulation target",
+            ),
+            Requirement(
+                "xtask/src/main.rs",
+                "PARANOID_BUILDER_SCANNER_SUBSET",
+                "xtask has a builder-owned scanner subset mode",
+            ),
+            Requirement(
+                "docs/reference/testing.md",
+                "make quality-emulate",
+                "testing docs describe the Wolfi quality-emulation gate",
             ),
             Requirement(
                 "xtask/src/main.rs",
