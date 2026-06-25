@@ -77,6 +77,8 @@ correlation identifiers, not authentication tokens or cryptographic nonces.
 - an OpenSSL-backed mTLS JSONL command transport that accepts typed command envelopes across a
   process boundary, replaces client-supplied transport claims with server-observed peer-certificate
   evidence, and returns the same typed command trace used by local adapters
+- fail-closed profile validation so externally supplied envelopes cannot downgrade the
+  authoritative `OpsPolicyContext`
 - an explicit `allow`, `challenge`, and `deny` policy decision model
 - federal-ready startup evidence over build id, platform, audit schema, configured audit-sink
   health, and OpenSSL provider evidence

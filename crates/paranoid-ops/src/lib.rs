@@ -534,7 +534,15 @@ pub fn evaluate_policy(
     envelope: &OpsCommandEnvelope,
     context: &OpsPolicyContext,
 ) -> OpsPolicyDecision {
-    let profile = envelope.profile;
+    if envelope.profile != context.profile {
+        return OpsPolicyDecision::Deny {
+            reason: "ops command envelope profile does not match authoritative policy context"
+                .to_string(),
+            missing_controls: vec!["profile_context_mismatch".to_string()],
+        };
+    }
+
+    let profile = context.profile;
     if matches!(envelope.command, OpsCommand::FederalEvidence) {
         return OpsPolicyDecision::Allow {
             reason: "federal evidence collection is allowed so missing controls can be reported"
@@ -818,7 +826,8 @@ pub struct OpsCommandTrace {
     pub audit_events: Vec<AuditEvent>,
 }
 
-// TODO: AI_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.
+// Dispositioned in docs/reference/ai-review.md: adapters enter through this typed evaluator,
+// and externally supplied envelopes fail closed on profile/context mismatch.
 pub fn evaluate_ops_command(
     surface: AuditSurface,
     command: OpsCommand,
@@ -1857,6 +1866,109 @@ mod tests {
                 .map(String::as_str),
             Some("device_bound")
         );
+    }
+
+    #[test]
+    fn policy_envelope_cannot_downgrade_authoritative_context_profile() {
+        let envelope = OpsCommandEnvelope::local(
+            AuditSurface::Ops,
+            OpsProfile::Default,
+            OpsCommand::GeneratePassword,
+        );
+        let context = OpsPolicyContext {
+            profile: OpsProfile::FederalReady,
+            audit_sink_required: true,
+            audit_sink_available: true,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: None,
+        };
+
+        let evaluation = evaluate_ops_command_envelope(envelope, &context);
+
+        match &evaluation.decision {
+            OpsPolicyDecision::Deny {
+                reason,
+                missing_controls,
+            } => {
+                assert_eq!(
+                    reason,
+                    "ops command envelope profile does not match authoritative policy context"
+                );
+                assert_eq!(
+                    missing_controls,
+                    &vec!["profile_context_mismatch".to_string()]
+                );
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+        assert_eq!(
+            evaluation.audit_events[0]
+                .attributes
+                .get("profile")
+                .map(String::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            evaluation.audit_events[1]
+                .attributes
+                .get("missing_controls")
+                .map(String::as_str),
+            Some("[\"profile_context_mismatch\"]")
+        );
+    }
+
+    #[test]
+    fn vault_operation_policy_boundary_preserves_adapter_surface_and_access_metadata() {
+        let context = OpsPolicyContext {
+            profile: OpsProfile::Default,
+            audit_sink_required: false,
+            audit_sink_available: false,
+            crypto_provider: FederalCryptoProviderEvidence::confirmed_for_tests(
+                "CMVP test certificate",
+            ),
+            seal_posture: None,
+        };
+
+        for (surface, expected_surface) in [
+            (AuditSurface::Cli, "cli"),
+            (AuditSurface::Tui, "tui"),
+            (AuditSurface::Gui, "gui"),
+        ] {
+            let evaluation =
+                evaluate_vault_operation(surface, "export", VaultOperationAccess::Export, &context);
+
+            assert!(evaluation.is_allowed());
+            assert_eq!(evaluation.envelope.profile, context.profile);
+            assert_eq!(evaluation.envelope.session.surface, surface);
+            assert_eq!(evaluation.audit_events.len(), 2);
+            for event in &evaluation.audit_events {
+                assert_eq!(
+                    event.attributes.get("request_id").map(String::as_str),
+                    Some(evaluation.envelope.request_id.as_str())
+                );
+                assert_eq!(
+                    event.attributes.get("session_surface").map(String::as_str),
+                    Some(expected_surface)
+                );
+                assert_eq!(
+                    event.attributes.get("vault_operation").map(String::as_str),
+                    Some("export")
+                );
+                assert_eq!(
+                    event.attributes.get("vault_access").map(String::as_str),
+                    Some("export")
+                );
+            }
+            assert_eq!(
+                evaluation.audit_events[1]
+                    .attributes
+                    .get("decision")
+                    .map(String::as_str),
+                Some("allow")
+            );
+        }
     }
 
     #[test]
