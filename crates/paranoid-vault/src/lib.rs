@@ -1151,7 +1151,8 @@ impl UnlockedVault {
             &mnemonic_slot_aad(slot_id),
             self.master_key.as_slice(),
         )?;
-        // TODO: AI_REVIEW - confirm using 24-word BIP39 entropy directly as the AES-256-GCM wrapping key for mnemonic recovery slots is the right recovery construction.
+        // Dispositioned in docs/reference/ai-review.md: generated 24-word BIP39
+        // phrases encode a 256-bit OpenSSL-generated offline recovery key.
         let keyslot = VaultKeyslot {
             id: slot_id.to_string(),
             kind: VaultKeyslotKind::MnemonicRecovery,
@@ -2421,12 +2422,8 @@ pub fn unlock_vault_with_mnemonic(
     configure_connection(&conn)?;
     let header = read_header(&conn)?;
     let keyslot = select_mnemonic_keyslot(&header, slot_id)?;
-    let mnemonic = Mnemonic::parse_in(Language::English, mnemonic_phrase)
-        .map_err(|_| VaultError::UnlockFailed)?;
-    let mnemonic_entropy = mnemonic.to_entropy();
-    if mnemonic_entropy.len() != MASTER_KEY_LEN {
-        return Err(VaultError::UnlockFailed);
-    }
+    validate_mnemonic_keyslot_metadata(keyslot)?;
+    let mnemonic_entropy = mnemonic_entropy_from_phrase(mnemonic_phrase)?;
 
     let master_key = decrypt_blob(
         mnemonic_entropy.as_slice(),
@@ -3604,6 +3601,28 @@ fn mnemonic_slot_aad(id: &str) -> Vec<u8> {
     aad
 }
 
+fn validate_mnemonic_keyslot_metadata(keyslot: &VaultKeyslot) -> Result<(), VaultError> {
+    if keyslot.wrap_algorithm != MNEMONIC_WRAP_ALGORITHM
+        || keyslot.mnemonic_language.as_deref() != Some(MNEMONIC_LANGUAGE)
+        || keyslot.mnemonic_words != Some(MNEMONIC_WORD_COUNT)
+        || keyslot.wrapped_by_os_keystore
+        || !keyslot.salt_hex.is_empty()
+    {
+        return Err(VaultError::UnlockFailed);
+    }
+    Ok(())
+}
+
+fn mnemonic_entropy_from_phrase(mnemonic_phrase: &str) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+    let mnemonic = Mnemonic::parse_in(Language::English, mnemonic_phrase)
+        .map_err(|_| VaultError::UnlockFailed)?;
+    let mnemonic_entropy = Zeroizing::new(mnemonic.to_entropy());
+    if mnemonic_entropy.len() != MASTER_KEY_LEN {
+        return Err(VaultError::UnlockFailed);
+    }
+    Ok(mnemonic_entropy)
+}
+
 fn unix_epoch_now() -> Result<i64, VaultError> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -4454,6 +4473,56 @@ mod tests {
     }
 
     #[test]
+    fn backup_does_not_export_mnemonic_phrase_or_entropy() {
+        let dir = tempdir().expect("tempdir");
+        let source = dir.path().join("vault.sqlite");
+        let backup = dir.path().join("vault-backup.ppv.json");
+        let restored = dir.path().join("restored.sqlite");
+        init_vault(&source, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&source, "correct horse battery staple").expect("unlock");
+        let enrollment = vault
+            .add_mnemonic_keyslot(Some("paper".to_string()))
+            .expect("mnemonic slot");
+        let mnemonic = Mnemonic::parse_in(Language::English, enrollment.mnemonic.as_str())
+            .expect("parse mnemonic");
+        let mnemonic_entropy_hex = hex_encode(mnemonic.to_entropy().as_slice());
+        vault
+            .add_login(NewLoginRecord {
+                title: "Mnemonic Backup".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string(),
+                url: None,
+                notes: None,
+                folder: Some("Recovery".to_string()),
+                tags: vec!["recovery".to_string()],
+            })
+            .expect("add login");
+
+        vault.export_backup(&backup).expect("export backup");
+        let backup_json = fs::read_to_string(&backup).expect("read backup");
+        assert!(
+            !backup_json.contains(enrollment.mnemonic.as_str()),
+            "backup package must not contain the mnemonic phrase"
+        );
+        assert!(
+            !backup_json.contains(mnemonic_entropy_hex.as_str()),
+            "backup package must not contain the raw mnemonic entropy"
+        );
+
+        restore_vault_backup(&backup, &restored, false).expect("restore backup");
+        let restored_vault = unlock_vault_with_mnemonic(
+            &restored,
+            enrollment.mnemonic.as_str(),
+            Some(enrollment.keyslot.id.as_str()),
+        )
+        .expect("unlock restored backup with mnemonic");
+        let items = restored_vault.list_items().expect("list restored");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "Mnemonic Backup");
+    }
+
+    #[test]
     fn inspect_backup_reports_counts_and_posture() {
         let dir = tempdir().expect("tempdir");
         let source = dir.path().join("vault.sqlite");
@@ -5101,10 +5170,14 @@ mod tests {
             Some(MNEMONIC_LANGUAGE)
         );
         assert_eq!(enrollment.keyslot.mnemonic_words, Some(MNEMONIC_WORD_COUNT));
+        assert_eq!(enrollment.keyslot.wrap_algorithm, MNEMONIC_WRAP_ALGORITHM);
         assert_eq!(
             enrollment.mnemonic.split_whitespace().count(),
             usize::from(MNEMONIC_WORD_COUNT)
         );
+        let parsed_mnemonic = Mnemonic::parse_in(Language::English, enrollment.mnemonic.as_str())
+            .expect("generated mnemonic parses");
+        assert_eq!(parsed_mnemonic.to_entropy().len(), MASTER_KEY_LEN);
 
         let unlocked = unlock_vault_with_mnemonic(
             &path,
@@ -5186,6 +5259,62 @@ mod tests {
     }
 
     #[test]
+    fn mnemonic_keyslot_rejects_invalid_word_count_phrase() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let enrollment = vault
+            .add_mnemonic_keyslot(Some("paper".to_string()))
+            .expect("add mnemonic keyslot");
+        let invalid_phrase = enrollment
+            .mnemonic
+            .split_whitespace()
+            .take(usize::from(MNEMONIC_WORD_COUNT) - 1)
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let error = unlock_vault_with_mnemonic(
+            &path,
+            invalid_phrase.as_str(),
+            Some(enrollment.keyslot.id.as_str()),
+        )
+        .expect_err("invalid word count should fail");
+        assert!(matches!(error, VaultError::UnlockFailed));
+    }
+
+    #[test]
+    fn mnemonic_keyslot_metadata_tampering_fails_closed() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let enrollment = vault
+            .add_mnemonic_keyslot(Some("paper".to_string()))
+            .expect("add mnemonic keyslot");
+        let index = vault
+            .header
+            .keyslots
+            .iter()
+            .position(|slot| slot.id == enrollment.keyslot.id)
+            .expect("mnemonic keyslot in header");
+        vault.header.keyslots[index].wrap_algorithm = PASSWORD_WRAP_ALGORITHM.to_string();
+        vault.header.keyslots[index].mnemonic_language = Some("japanese".to_string());
+        vault.header.keyslots[index].mnemonic_words = Some(12);
+        vault.persist_header().expect("persist tampered metadata");
+
+        let error = unlock_vault_with_mnemonic(
+            &path,
+            enrollment.mnemonic.as_str(),
+            Some(enrollment.keyslot.id.as_str()),
+        )
+        .expect_err("tampered metadata should fail");
+        assert!(matches!(error, VaultError::UnlockFailed));
+    }
+
+    #[test]
     fn wrong_mnemonic_fails_closed() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("vault.sqlite");
@@ -5200,7 +5329,11 @@ mod tests {
             .split_whitespace()
             .map(str::to_string)
             .collect::<Vec<_>>();
-        words[0] = "abandon".to_string();
+        words[0] = if words[0] == "abandon" {
+            "ability".to_string()
+        } else {
+            "abandon".to_string()
+        };
         let wrong_phrase = words.join(" ");
 
         let error = unlock_vault_with_mnemonic(

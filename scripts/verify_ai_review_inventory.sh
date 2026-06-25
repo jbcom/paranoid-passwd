@@ -30,7 +30,6 @@ normalize_inventory() {
 
 expected_inventory() {
   cat <<'EOF'
-crates/paranoid-vault/src/lib.rs:        // TODO: AI_REVIEW - confirm using 24-word BIP39 entropy directly as the AES-256-GCM wrapping key for mnemonic recovery slots is the right recovery construction.
 crates/paranoid-vault/src/lib.rs:    // TODO: AI_REVIEW - confirm CMS recipient selection and content-encryption policy for certificate-wrapped keyslots.
 EOF
 }
@@ -65,7 +64,7 @@ else
   pass "source TODO inventory matches the expected AI review surface"
 fi
 
-if rg -F "expected open AI review sites: **2**" "$DOC" >/dev/null 2>&1; then
+if rg -F "expected open AI review sites: **1**" "$DOC" >/dev/null 2>&1; then
   pass "AI review reference doc tracks the expected open-site count"
 else
   fail "AI review reference doc must state the expected open-site count"
@@ -90,6 +89,8 @@ for required in \
   "device_keyslot_rejects_wrong_length_secure_storage_secret" \
   "backup_does_not_export_device_secure_storage_secret" \
   "Mnemonic recovery construction" \
+  "mnemonic_keyslot_metadata_tampering_fails_closed" \
+  "backup_does_not_export_mnemonic_phrase_or_entropy" \
   "Certificate-wrapped keyslots"
 do
   if ! rg -F "$required" "$DOC" >/dev/null 2>&1; then

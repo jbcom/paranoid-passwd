@@ -96,14 +96,16 @@ paranoid-passwd vault seal-status --probe-providers
 
 ## Crypto Disposition
 
-The current vault uses Argon2id for recovery-secret derivation and BIP39 for mnemonic recovery.
+The current vault uses Argon2id for recovery-secret derivation and generated 24-word BIP39
+phrases for mnemonic recovery.
 Those paths remain useful default-profile product features, but strict federal-ready mode now treats
 them as non-federal unlock methods instead of silently accepting a weak claim.
 
 The current disposition is:
 
 - password recovery through Argon2id is default-profile only under the strict federal-ready policy
-- mnemonic recovery through BIP39 is default-profile only under the strict federal-ready policy
+- mnemonic recovery through generated 24-word BIP39 phrases is dispositioned for default-profile
+  offline recovery only under the strict federal-ready policy
 - device-bound unlock is default-profile only: the secure-storage provider boundary is
   dispositioned for local daily unlock, but not for portable recovery, remote auto-unseal, or the
   strict federal-ready unlock path
@@ -117,8 +119,8 @@ compensating-control decision outside the strict federal-ready profile. The vaul
 federal-ready vault unlocks through the same typed `VaultUnlock` policy check before plaintext vault
 state is loaded.
 
-No code or docs should imply that generic OpenSSL linkage, Argon2id, BIP39, or CMS usage is
-automatically enough for a federal authorization.
+No code or docs should imply that generic OpenSSL linkage, Argon2id, generated BIP39 recovery
+phrases, or CMS usage is automatically enough for a federal authorization.
 
 ## Ops and Audit Controls
 

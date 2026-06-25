@@ -269,11 +269,12 @@ and [ai-review.md](./ai-review.md).
 - shared ops policy boundary across CLI, TUI, GUI, and mTLS automation adapters
 - seal lifecycle posture and method-specific unlock policy
 - device-bound keyslot design and local secure-storage assumptions in `paranoid-vault`
+- mnemonic recovery construction and generated 24-word BIP39 recovery-key assumptions in
+  `paranoid-vault`
 
 ### Open Review Areas
 
-1. mnemonic recovery construction in `paranoid-vault`
-2. certificate-wrapped keyslot design, including CMS recipient selection and transport-key policy in `paranoid-vault`
+1. certificate-wrapped keyslot design, including CMS recipient selection and transport-key policy in `paranoid-vault`
 
 ### Requirements
 
@@ -405,7 +406,7 @@ blockers.
 
 ### 2. Recovery Model Drift
 
-If future work changes mnemonic, certificate, or device-bound behavior without revisiting the written recovery docs and the closed device-bound disposition, the product will become harder to operate safely.
+If future work changes mnemonic, certificate, or device-bound behavior without revisiting the written recovery docs and the closed mnemonic and device-bound dispositions, the product will become harder to operate safely.
 
 ### 3. Packaging Drift
 
