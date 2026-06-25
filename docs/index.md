@@ -30,6 +30,7 @@ It ships native tools for daily use, scripting, and recovery operations:
 
 getting-started/index
 guides/tui
+guides/recovery-operations
 reference/index
 api/index
 ```

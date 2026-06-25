@@ -211,6 +211,10 @@ cargo test -p paranoid-core --locked --frozen --offline
 - vault CLI coverage through the shared workspace tests
 - CLI contract coverage through the shell script in [`tests/test_cli.sh`](../../../tests/test_cli.sh)
 - repository verification via `scripts/hallucination_check.sh` and `scripts/supply_chain_verify.sh`
+- the [Recovery Operations](../guides/recovery-operations.md) runbook is checked by
+  `scripts/validate-docs.sh` and the assurance gate so lifecycle docs keep covering mnemonic
+  rotation, certificate rollover, device rebind, backup/restore, transfer packages, daily
+  passwordless unlock, and disaster recovery
 
 Run them with:
 

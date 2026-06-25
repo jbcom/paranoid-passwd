@@ -1286,6 +1286,78 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
+        "release.recovery-operations-runbook",
+        "Recovery operations runbook",
+        "release",
+        (
+            Requirement(
+                "docs/guides/recovery-operations.md",
+                "Recovery Operations",
+                "operator recovery runbook exists",
+            ),
+            Requirement(
+                "docs/guides/recovery-operations.md",
+                "rotate-mnemonic-slot",
+                "runbook documents mnemonic recovery rotation",
+            ),
+            Requirement(
+                "docs/guides/recovery-operations.md",
+                "rewrap-cert-slot",
+                "runbook documents certificate expiration and rollover",
+            ),
+            Requirement(
+                "docs/guides/recovery-operations.md",
+                "rebind-device-slot",
+                "runbook documents device-bound rebind",
+            ),
+            Requirement(
+                "docs/guides/recovery-operations.md",
+                "encrypted backup/restore, selected-item transfer, daily passwordless",
+                "runbook distinguishes recovery operation classes",
+            ),
+            Requirement(
+                "docs/guides/recovery-operations.md",
+                "FedRAMP authorized, DoD IL5 authorized",
+                "runbook preserves precise federal-ready claim language",
+            ),
+            Requirement(
+                "docs/index.md",
+                "guides/recovery-operations",
+                "public docs toctree includes the recovery operations runbook",
+            ),
+            Requirement(
+                "docs/reference/remaining-work-prd.md",
+                "The [Recovery Operations](../guides/recovery-operations.md) runbook now covers",
+                "remaining-work PRD records the lifecycle documentation closure",
+            ),
+            Requirement(
+                "docs/reference/testing.md",
+                "Recovery Operations",
+                "testing docs describe runbook validation",
+            ),
+            Requirement(
+                "scripts/validate-docs.sh",
+                "docs/guides/recovery-operations.md",
+                "docs validation requires the recovery operations runbook",
+            ),
+            Requirement(
+                "tests/test_vault_cli.sh",
+                "backup restore and transfer-package round trips",
+                "headless vault e2e covers documented backup and transfer flows",
+            ),
+            Requirement(
+                "tests/test_vault_cli.sh",
+                "mnemonic, device, and certificate unlock flows",
+                "headless vault e2e covers documented keyslot lifecycle flows",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`release.recovery-operations-runbook` | `process`",
+                "assurance claims track the recovery operations runbook",
+            ),
+        ),
+    ),
+    Claim(
         "assurance.pr-neutral-ai-assessor",
         "Neutral PR AI assurance assessor",
         "assurance-process",
@@ -1402,7 +1474,7 @@ SURFACE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ops-security", ("crates/paranoid-audit/", "crates/paranoid-ops/")),
     ("seal-security", ("crates/paranoid-seal/",)),
     ("supply-chain", (".cargo/", "Cargo.lock", "vendor/", ".github/", "scripts/", "Makefile")),
-    ("security-docs", ("AGENTS.md", "SECURITY.md", "docs/reference/")),
+    ("security-docs", ("AGENTS.md", "SECURITY.md", "docs/reference/", "docs/guides/")),
 )
 
 
