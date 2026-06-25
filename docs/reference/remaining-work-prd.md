@@ -364,6 +364,13 @@ The product has strong recovery mechanics, but operational closure is still inco
    - disaster recovery
 4. Decide whether certificate slot lifecycle needs explicit expiration / rollover runbooks beyond the current health warnings.
 
+The [Recovery Operations](../guides/recovery-operations.md) runbook now covers the operator flow for
+adding recovery keyslots, rotating recovery material, certificate expiration and rollover, device
+rebind, encrypted backup/restore, selected-item transfers, daily passwordless unlock, disaster
+recovery drills, and the strict federal-ready recovery boundary. Existing CLI/TUI/GUI tests already
+exercise the documented mechanics; remaining lifecycle test work should come from new behavior,
+external review findings, or installer/platform-specific recovery evidence.
+
 ### Acceptance Criteria
 
 - an operator can follow the docs to maintain a vault through normal rotation and recovery events
@@ -441,11 +448,10 @@ This PRD is complete when all of the following are true:
 
 1. extend stable JSON/JSONL traces as additional command families are covered across CLI, TUI, GUI,
    and mTLS process-boundary sessions
-2. expand the remaining vault keyslot dispositions and any future external/remote auto-unseal
-   policy beyond the local method-specific seal posture controls now in place
+2. expand any future external/remote auto-unseal policy beyond the local method-specific seal posture
+   controls now in place
 3. keep the remote dependency-update queue green and reviewable, including explicit PR thread/check
    inspection before merge
-4. finish versioning or vendoring the host-local scanner/tool update path now tracked by
-   `supply-chain/scanner-toolchain.env`
-5. choose the Windows installer technology and macOS signing/notarization path
+4. choose the Windows installer technology and macOS signing/notarization path
+5. preserve the Recovery Operations runbook as lifecycle behavior changes
 6. update this PRD as those decisions are made
