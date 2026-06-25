@@ -4,7 +4,7 @@ title: Production Closure and Follow-Up Record
 
 # Production Closure and Follow-Up Record
 
-This document used to track the production and assurance backlog after the
+This document was used to track the production and assurance backlog after the
 Rust-native migration. It now records the closed baseline on `main` and the
 explicit future work that is not a blocker for the current product line.
 
@@ -30,7 +30,7 @@ The production closure work that this PRD originally tracked has landed:
 
 1. CLI, TUI, GUI, and mTLS automation evidence share typed ops policy and
    audit boundaries for covered vault operations.
-   seal-state transitions and seal-provider posture have unit tests and e2e coverage.
+   The closure record preserves the evidence anchor: seal-state transitions and seal-provider posture have unit tests and e2e coverage.
 2. Federal-ready startup evidence and control mapping are deterministic and
    avoid claiming FedRAMP, FIPS, GovCloud, DoD IL5, or other authorization
    status that the project does not hold.
