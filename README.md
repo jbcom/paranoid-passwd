@@ -222,9 +222,9 @@ surface is Slint-native.
 - Encrypted transfer packages are now a distinct exchange path for selected vault items across CLI, TUI, and GUI. `export-transfer` encrypts decrypted item payloads under a fresh data key that can be unwrapped by a recovery secret, a certificate recipient, or both; `import-transfer` brings those items into an already unlocked vault while either preserving ids, replacing matching ids, or remapping conflicts safely.
 - Native interactive surfaces now auto-clear copied secrets from the clipboard after 30 seconds if the clipboard contents are unchanged.
 - Native interactive vault surfaces now auto-lock after 5 minutes of inactivity and clear cached decrypted state before returning to the unlock screen.
-- The remaining open crypto disposition surface is mapped to explicit assurance
-  claims in `docs/reference/assurance-claims.md`, and `scripts/verify_ai_review_inventory.sh`
-  keeps source `TODO: AI_REVIEW` markers synchronized with the docs.
+- The crypto disposition surface is mapped to explicit assurance claims in
+  `docs/reference/assurance-claims.md`, and `scripts/verify_ai_review_inventory.sh`
+  proves there are no untracked source `TODO: AI_REVIEW` markers.
 - Cargo dependencies are vendored and CI runs Cargo in locked, frozen, offline mode.
 - Security verification scripts assert the Rust-native invariants, workflow pinning, and
   security assurance protocol wiring.
@@ -232,5 +232,5 @@ surface is Slint-native.
 - Slint WASM and mobile targets are allowed only as explicit Rust/Slint surfaces with
   separate threat models, release gates, and no JavaScript secret-handling logic.
 
-The remaining tracked-open assurance claim is not external cryptographic approval. It is an explicit
-release claim with deterministic gates, written evidence, and no hidden trust in an LLM author.
+The closed in-repo assurance claims are not external cryptographic approval. They are explicit
+release claims with deterministic gates, written evidence, and no hidden trust in an LLM author.

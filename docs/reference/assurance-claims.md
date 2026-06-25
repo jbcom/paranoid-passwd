@@ -30,7 +30,7 @@ Claim states:
 |---------|-------|-------|----------|
 | `vault.device-bound-keyslot` | `enforced` | Device-bound unlock is a default-profile local-device convenience path: the OS secure-storage value must be an exact 256-bit master-key candidate, the vault header stores only keyring metadata plus an AES-GCM check blob, tampered or missing provider material fails closed, backup packages do not export the device secure-storage secret, and removal/rebind lifecycle operations clean up provider accounts. | `crates/paranoid-vault/src/lib.rs`; vault tests; CLI vault TUI tests; `docs/reference/ai-review.md`; `make verify-assurance` |
 | `vault.mnemonic-recovery-keyslot` | `enforced` | Mnemonic recovery is a default-profile offline recovery path: enrollment generates a 256-bit OpenSSL RNG-backed recovery key, encodes it as a 24-word English BIP39 phrase, validates mnemonic keyslot metadata before unlock, rejects malformed or wrong phrases fail-closed, and backup packages do not export the phrase or raw entropy. | `crates/paranoid-vault/src/lib.rs`; vault tests; `docs/reference/ai-review.md`; `docs/reference/vault-format.md`; `docs/reference/federal-readiness.md`; `make verify-assurance` |
-| `vault.certificate-wrapped-keyslot` | `tracked-open` | Certificate-wrapped keyslots use the current CMS recipient and content-encryption policy until a disposition changes that construction. | `crates/paranoid-vault/src/lib.rs`; vault tests; `docs/reference/ai-review.md` |
+| `vault.certificate-wrapped-keyslot` | `enforced` | Certificate-wrapped keyslots use a single explicit X.509 recipient certificate to CMS-wrap only a fresh 256-bit transport key; the vault master key is separately wrapped with AAD-bound AES-256-GCM, unlock validates certificate metadata and keyslot field shape before unwrap, legacy direct-CMS slots remain read-only compatibility, and backup packages do not export private keys or raw transport keys. | `crates/paranoid-vault/src/lib.rs`; vault tests; `docs/reference/ai-review.md`; `docs/reference/vault-format.md`; `docs/reference/federal-readiness.md`; `make verify-assurance` |
 | `ops.shared-policy-boundary` | `enforced` | The shared ops evaluator gates adapter-initiated vault operations, consumes non-secret seal posture for unlock policy, emits paired request/response audit evidence, preserves adapter surface metadata, rejects caller-supplied profile/context mismatches, and is used by CLI, TUI, GUI, and mTLS automation paths. | `crates/paranoid-ops/src/lib.rs`; CLI vault tests; TUI vault tests; native GUI automation tests; durable GUI JSONL tests; mTLS process-boundary fixtures; `docs/reference/ai-review.md`; `make verify-assurance` |
 | `ops.vault-trace-fixtures` | `enforced` | Stable CLI/TUI/GUI vault operation trace fixtures pin typed command envelopes, policy decisions, redacted request/response audit events, and JSONL rendering. | `crates/paranoid-ops/tests/ops_trace_fixtures.rs`; `crates/paranoid-ops/tests/fixtures/`; `docs/reference/testing.md` |
 | `ops.mtls-process-boundary-fixture` | `enforced` | mTLS process-boundary command fixtures pin authenticated transport evidence, service-account actor context, and fail-closed policy when security-relevant commands lack authenticated transport evidence. | `crates/paranoid-ops/src/lib.rs`; `crates/paranoid-ops/tests/ops_trace_fixtures.rs`; `crates/paranoid-ops/tests/fixtures/ops_trace_mtls_process_boundary_allowed.json`; `docs/reference/testing.md` |
@@ -51,11 +51,11 @@ Claim states:
 
 ## Release Interpretation
 
-`tracked-open` does not mean approved. It means the implementation is explicit, tested, and
-covered by a stable claim identifier, while the repo continues to carry the source-level
-`TODO: AI_REVIEW` marker and the inventory check. A stable release may say those areas
-are tracked and gate-protected, but it must not say they have external cryptographic or
-statistical approval until a written disposition exists.
+If a future claim is marked `tracked-open`, that state will not mean approved. It will mean the
+implementation is explicit, tested, and covered by a stable claim identifier while the repo carries
+the source-level `TODO: AI_REVIEW` marker and inventory check. A stable release may say such areas
+are tracked and gate-protected, but it must not say they have external cryptographic or statistical
+approval until a written disposition exists.
 
 When a pull request changes an enforced or process claim, it must update the relevant gate
 or documentation in the same PR. When it changes a tracked-open claim, it must update this

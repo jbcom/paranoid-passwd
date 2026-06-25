@@ -29,9 +29,7 @@ normalize_inventory() {
 }
 
 expected_inventory() {
-  cat <<'EOF'
-crates/paranoid-vault/src/lib.rs:    // TODO: AI_REVIEW - confirm CMS recipient selection and content-encryption policy for certificate-wrapped keyslots.
-EOF
+  true
 }
 
 echo
@@ -43,7 +41,7 @@ if [ ! -f "$DOC" ]; then
 fi
 
 current="$(
-  rg -n "TODO: AI_REVIEW" "$REPO_ROOT/crates" --glob '*.rs' \
+  { rg -n "TODO: AI_REVIEW" "$REPO_ROOT/crates" --glob '*.rs' || true; } \
     | sed "s#^$REPO_ROOT/##" \
     | normalize_inventory
 )"
@@ -64,7 +62,7 @@ else
   pass "source TODO inventory matches the expected AI review surface"
 fi
 
-if rg -F "expected open AI review sites: **1**" "$DOC" >/dev/null 2>&1; then
+if rg -F "expected open AI review sites: **0**" "$DOC" >/dev/null 2>&1; then
   pass "AI review reference doc tracks the expected open-site count"
 else
   fail "AI review reference doc must state the expected open-site count"
@@ -91,17 +89,22 @@ for required in \
   "Mnemonic recovery construction" \
   "mnemonic_keyslot_metadata_tampering_fails_closed" \
   "backup_does_not_export_mnemonic_phrase_or_entropy" \
-  "Certificate-wrapped keyslots"
+  "Certificate-wrapped keyslots" \
+  "validate_certificate_keyslot_metadata" \
+  "certificate_keyslot_rejects_unsupported_wrap_algorithm" \
+  "certificate_keyslot_metadata_tampering_fails_closed" \
+  "certificate_keyslot_transport_key_shape_tampering_fails_closed" \
+  "backup_does_not_export_certificate_private_key_or_raw_transport_key"
 do
   if ! rg -F "$required" "$DOC" >/dev/null 2>&1; then
     fail "AI review reference doc is missing required section: $required"
   fi
 done
 
-if rg -F "AI review status: **open**" "$DOC" >/dev/null 2>&1; then
-  pass "AI review reference doc still marks the review surface as open"
+if rg -F "AI review status: **closed**" "$DOC" >/dev/null 2>&1; then
+  pass "AI review reference doc marks the review surface as closed"
 else
-  warn "AI review doc no longer marks the review surface as open"
+  fail "AI review reference doc must mark the review surface as closed"
 fi
 
 if rg -F "make test-gui-visual-regression" "$DOC" >/dev/null 2>&1 \
@@ -113,4 +116,4 @@ else
   fail "AI review reference doc must require multi-viewport GUI screenshot evidence for UI-sensitive changes"
 fi
 
-pass "AI review reference doc contains the expected tracked review areas"
+pass "AI review reference doc contains the expected dispositioned review areas"
