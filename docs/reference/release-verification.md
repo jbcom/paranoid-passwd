@@ -39,6 +39,9 @@ That script verifies:
 - expected payload layout for every published CLI and GUI artifact, including macOS `.app` bundles inside archives and `.dmg` images, Linux GUI desktop metadata, Debian package filesystem roots, and Windows MSI administrative-extraction payloads
 - GitHub attestation for the host-native downloadable artifacts, including Linux `.deb` packages on Linux hosts, the GUI `.dmg` image on macOS hosts, and the GUI `.msi` on Windows hosts
 - the host-native smoke path through `scripts/smoke_test_release_artifact.sh` for both binaries and, on Linux hosts, both `.deb` packages, on macOS hosts, the GUI `.dmg` image, and on Windows hosts, the GUI `.msi`
+- per-asset release-download verification for the Windows GUI `.msi` on a Windows runner, so MSI
+  checksum, attestation, platform-signing, and administrative-extraction smoke proof are not only
+  covered by the aggregate published-release verifier
 
 Set `PARANOID_REQUIRE_WINDOWS_MSI=1` when validating a release that should ship
 the Windows GUI MSI. Older published baselines such as

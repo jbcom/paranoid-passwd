@@ -666,6 +666,14 @@ jobs:
             asset_suffix: windows-amd64.zip
             deb: false
             runnable: false
+          - runner: windows-2022
+            label: paranoid-passwd-gui windows/amd64 msi
+            target_os: windows
+            target_arch: amd64
+            product_name: paranoid-passwd-gui
+            asset_suffix: windows-amd64.msi
+            deb: false
+            runnable: true
           - runner: ubuntu-24.04
             label: paranoid-passwd-gui linux/amd64 deb
             target_os: linux
@@ -720,7 +728,7 @@ jobs:
               bash scripts/smoke_test_release_artifact.sh "${ver}" '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "${artifact}" '${{ matrix.product_name }}'
             fi
 
-      - name: Download + verify release asset (macOS)
+      - name: Download + verify release asset (non-Linux)
         if: runner.os != 'Linux'
         shell: bash
         env:
