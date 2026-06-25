@@ -56,6 +56,8 @@ Use this checklist before and after cutting a release from `main`.
 4. Verify GitHub attestation for at least one downloaded artifact from each packaging family you ship.
 5. Re-run installer validation against the published release surface if needed.
 6. Confirm Homebrew, Scoop, and Chocolatey manifests were generated and published through their PR flow.
+7. Do not describe artifacts as platform-signed unless the matching platform checks in
+   [Platform Installers and Signing](./platform-installers.md) passed for the published release.
 
 ## Canary Expectations
 
@@ -68,5 +70,7 @@ The first release after a pipeline change should be treated as a canary:
 - verify provenance
 - verify `install.sh`
 - confirm the docs download links resolve
+- confirm the public docs still describe unsigned artifacts as checksummed and attested, not as
+  platform-signed
 
 If any of those fail, treat the release pipeline as untrusted until the failure is fixed and the validation path passes again.

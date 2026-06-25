@@ -17,6 +17,7 @@ assurance-claims
 ai-review
 remaining-work-prd
 vault-format
+platform-installers
 release-checklist
 testing
 supply-chain
