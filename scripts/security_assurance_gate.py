@@ -1446,6 +1446,11 @@ CLAIMS: tuple[Claim, ...] = (
                 "release workflow builds and smokes the Windows GUI MSI",
             ),
             Requirement(
+                ".github/workflows/release.yml",
+                "paranoid-passwd-gui windows/amd64 msi",
+                "release download verification covers the Windows GUI MSI as its own Windows-host asset",
+            ),
+            Requirement(
                 "scripts/build_release_artifact.sh",
                 "xml_escape",
                 "release artifact builder escapes WXS attribute values",
@@ -1544,6 +1549,11 @@ CLAIMS: tuple[Claim, ...] = (
                 "tests/test_platform_signing_verify.sh",
                 "release validation can defer signed Windows MSI verification to Windows hosts",
                 "contract tests cover signed MSI host deferral",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "release download verification covers the Windows GUI MSI on Windows",
+                "contract tests cover per-asset Windows MSI published-release verification",
             ),
             Requirement(
                 "tests/test_platform_signing_verify.sh",

@@ -54,16 +54,17 @@ Use this checklist before and after cutting a release from `main`.
 2. Verify that payload-layout validation passed for every archive, `.dmg`, Debian package, and MSI package, not just the host-runnable smoke artifacts.
 3. Verify there are no stale browser-era or otherwise unexpected assets attached to the release.
 4. Verify GitHub attestation for at least one downloaded artifact from each packaging family you ship.
-5. Re-run installer validation against the published release surface if needed.
-6. Confirm Homebrew, Scoop, and Chocolatey manifests were generated and published through their PR flow.
-7. Do not describe artifacts as platform-signed unless the matching platform checks in
+5. Confirm the release download verification matrix ran the Windows GUI MSI row on a Windows runner.
+6. Re-run installer validation against the published release surface if needed.
+7. Confirm Homebrew, Scoop, and Chocolatey manifests were generated and published through their PR flow.
+8. Do not describe artifacts as platform-signed unless the matching platform checks in
    [Platform Installers and Signing](./platform-installers.md) passed for the published release.
-8. When validating a platform-signed release candidate, run the release validation path with
+9. When validating a platform-signed release candidate, run the release validation path with
    `PARANOID_RELEASE_SIGNING_MODE=signed` on hosts that can verify the relevant platform signature.
-9. For macOS signed candidates, confirm the release workflow imported the Developer ID certificate
+10. For macOS signed candidates, confirm the release workflow imported the Developer ID certificate
    and that `scripts/macos_sign_notarize.sh` signed/notarized both `Paranoid Passwd.app` and the
    GUI `.dmg` before publication.
-10. For Windows signed candidates, confirm the release workflow imported the signing certificate
+11. For Windows signed candidates, confirm the release workflow imported the signing certificate
     into the current-user certificate store, that `scripts/windows_sign_artifact.sh` signed the
     staged GUI executable before WiX packaging, and that it signed and verified the GUI `.msi`
     before publication.

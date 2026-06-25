@@ -336,4 +336,7 @@ make release-emulate
   on Linux hosts; `make test-gui-visual-regression-emulate` runs the same visual matrix through the
   builder image on macOS.
 - `scripts/release_validate.sh` is used in CI after the full matrix build to verify all CLI and GUI artifacts, Linux `.deb` packages, the Windows GUI `.msi`, package-manager manifests, and `install.sh`. Linux aggregation explicitly defers MSI payload extraction to the paired Windows published-release verifier.
+- The release download verification matrix also includes the Windows GUI `.msi` as its own
+  Windows-host asset so checksum, attestation, platform-signing, and administrative-extraction smoke
+  checks are repeated outside the aggregate release-surface verifier.
 - `make verify-branch-protection` checks that GitHub branch protection still matches the active Rust-native required checks.
