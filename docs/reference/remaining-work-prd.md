@@ -228,11 +228,12 @@ discipline must not be weaker.
    - browser E2E replaced by native TUI/GUI operator harnesses and screenshot evidence
    - supply-chain checks, action pinning, hallucination checks, and published-release verification
      retained as hard gates
-6. Finish pinning or vendoring the scanner/tooling update process. The repository now has
+6. Keep the scanner/tooling update process pinned or vendored. The repository now has
    `supply-chain/scanner-toolchain.env` plus supply-chain verification for the Wolfi builder
-   scanner apk pins, CodeQL action SHA pins, and `xtask` host-local scanner visibility. Remaining
-   work is to turn the host-local `ShellCheck`, `cargo-deny`, `cargo-audit`, `cargo-vet`, and
-   `codeql` installation/update path into the same kind of versioned or vendored evidence.
+   scanner apk pins, CodeQL action SHA pins, `xtask` host-local scanner visibility, and strict-mode
+   version pins for host-local `ShellCheck`, `cargo-deny`, `cargo-audit`, `cargo-vet`, and `codeql`.
+   Remaining work is to vendor or builder-own those host-local tools if the project wants to remove
+   workstation package-manager trust from `make quality` entirely.
 7. Keep remote dependency-update PRs green and reviewable for ecosystems that the configured updater
    can actually maintain. Dependabot currently owns GitHub Actions updates only; Cargo dependency
    updates remain a maintainer re-vendor flow until the repo adopts a Cargo-vendor-aware updater.

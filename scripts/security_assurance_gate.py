@@ -1252,6 +1252,16 @@ CLAIMS: tuple[Claim, ...] = (
                 "scanner toolchain manifest records the CodeQL action SHA",
             ),
             Requirement(
+                "supply-chain/scanner-toolchain.env",
+                "HOST_CODEQL_CLI_VERSION=",
+                "scanner toolchain manifest records host-local scanner versions",
+            ),
+            Requirement(
+                "xtask/src/main.rs",
+                "HOST_CARGO_AUDIT_VERSION",
+                "xtask enforces manifest-pinned host-local scanner versions",
+            ),
+            Requirement(
                 "scripts/supply_chain_verify.sh",
                 "scanner toolchain manifest",
                 "supply-chain verifier enforces the scanner toolchain manifest",

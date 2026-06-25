@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -20,6 +21,7 @@ const EXCLUDED_PREFIXES: &[&str] = &[
 ];
 
 const RECOMMENDED_EXTERNAL_TOOLS: &[&str] = &[
+    "shellcheck",
     "codeql",
     "semgrep",
     "cargo-deny",
@@ -28,6 +30,41 @@ const RECOMMENDED_EXTERNAL_TOOLS: &[&str] = &[
     "syft",
     "trivy",
     "osv-scanner",
+];
+
+const SCANNER_TOOLCHAIN_MANIFEST: &str = "supply-chain/scanner-toolchain.env";
+
+const HOST_LOCAL_SCANNER_VERSION_CHECKS: &[HostLocalScannerVersionCheck] = &[
+    HostLocalScannerVersionCheck {
+        tool: "shellcheck",
+        manifest_key: "HOST_SHELLCHECK_VERSION",
+        command: "shellcheck",
+        args: &["--version"],
+    },
+    HostLocalScannerVersionCheck {
+        tool: "cargo-deny",
+        manifest_key: "HOST_CARGO_DENY_VERSION",
+        command: "cargo-deny",
+        args: &["--version"],
+    },
+    HostLocalScannerVersionCheck {
+        tool: "cargo-audit",
+        manifest_key: "HOST_CARGO_AUDIT_VERSION",
+        command: "cargo-audit",
+        args: &["--version"],
+    },
+    HostLocalScannerVersionCheck {
+        tool: "cargo-vet",
+        manifest_key: "HOST_CARGO_VET_VERSION",
+        command: "cargo-vet",
+        args: &["--version"],
+    },
+    HostLocalScannerVersionCheck {
+        tool: "codeql",
+        manifest_key: "HOST_CODEQL_CLI_VERSION",
+        command: "codeql",
+        args: &["version"],
+    },
 ];
 
 #[derive(Debug)]
@@ -40,6 +77,14 @@ struct Finding {
 struct SecretPattern {
     name: &'static str,
     pattern: Regex,
+}
+
+#[derive(Debug)]
+struct HostLocalScannerVersionCheck {
+    tool: &'static str,
+    manifest_key: &'static str,
+    command: &'static str,
+    args: &'static [&'static str],
 }
 
 fn main() -> Result<()> {
@@ -72,6 +117,7 @@ fn verify_deep() -> Result<()> {
     findings.extend(check_python_syntax(&repo_root, &files)?);
     findings.extend(check_secret_scan(&repo_root, &files)?);
     findings.extend(check_external_tool_visibility()?);
+    findings.extend(check_host_local_scanner_versions(&repo_root)?);
     findings.extend(check_local_security_scanners(&repo_root)?);
 
     println!();
@@ -424,6 +470,102 @@ fn check_external_tool_visibility() -> Result<Vec<Finding>> {
     }
 }
 
+fn check_host_local_scanner_versions(repo_root: &Path) -> Result<Vec<Finding>> {
+    if env::var("PARANOID_STRICT_EXTERNAL_TOOLS").as_deref() != Ok("1") {
+        return Ok(Vec::new());
+    }
+
+    print_step("Checking manifest-pinned local scanner versions");
+    let manifest = load_scanner_manifest(repo_root)?;
+    let mut findings = Vec::new();
+    for check in HOST_LOCAL_SCANNER_VERSION_CHECKS {
+        let Some(expected_version) = manifest.get(check.manifest_key) else {
+            findings.push(Finding::new(
+                "scanner-version",
+                format!(
+                    "{} is missing from {SCANNER_TOOLCHAIN_MANIFEST}",
+                    check.manifest_key
+                ),
+            ));
+            continue;
+        };
+        let Some(binary) = find_in_path(check.command) else {
+            findings.push(Finding::new(
+                "scanner-version",
+                format!(
+                    "{} is required at version {expected_version} but was not found",
+                    check.tool
+                ),
+            ));
+            continue;
+        };
+
+        let output = Command::new(&binary)
+            .args(check.args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .with_context(|| format!("failed to run {} version check", check.tool))?;
+        if !output.status.success() {
+            findings.push(Finding::new(
+                "scanner-version",
+                format!(
+                    "{} version check failed with exit code {}",
+                    check.tool,
+                    output.status.code().unwrap_or(-1)
+                ),
+            ));
+            continue;
+        }
+
+        let mut version_output = String::from_utf8_lossy(&output.stdout).into_owned();
+        version_output.push_str(&String::from_utf8_lossy(&output.stderr));
+        if !version_output.contains(expected_version) {
+            findings.push(Finding::new(
+                "scanner-version",
+                format!(
+                    "{} version drifted from {expected_version}: {}",
+                    check.tool,
+                    version_output
+                        .lines()
+                        .next()
+                        .unwrap_or("<no version output>")
+                ),
+            ));
+        }
+    }
+    Ok(findings)
+}
+
+fn load_scanner_manifest(repo_root: &Path) -> Result<HashMap<String, String>> {
+    let manifest_path = repo_root.join(SCANNER_TOOLCHAIN_MANIFEST);
+    let content = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("read {}", manifest_path.display()))?;
+    Ok(parse_scanner_manifest(&content))
+}
+
+fn parse_scanner_manifest(content: &str) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        values.insert(
+            key.trim().to_string(),
+            raw_value
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string(),
+        );
+    }
+    values
+}
+
 fn check_local_security_scanners(repo_root: &Path) -> Result<Vec<Finding>> {
     if env::var("PARANOID_RUN_LOCAL_SCANNERS").as_deref() != Ok("1") {
         return Ok(Vec::new());
@@ -633,5 +775,38 @@ impl SecretPattern {
             name,
             pattern: Regex::new(pattern).with_context(|| format!("compile {name} regex"))?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_scanner_manifest;
+
+    #[test]
+    fn scanner_manifest_parser_keeps_pinned_tool_versions() {
+        let values = parse_scanner_manifest(
+            r#"
+# comment
+HOST_LOCAL_SCANNER_TOOLS="shellcheck cargo-deny cargo-audit cargo-vet codeql"
+HOST_SHELLCHECK_VERSION=0.11.0
+HOST_CARGO_DENY_VERSION=0.19.4
+HOST_CARGO_AUDIT_VERSION=0.22.1
+HOST_CARGO_VET_VERSION=0.10.2
+HOST_CODEQL_CLI_VERSION='2.25.3'
+"#,
+        );
+
+        assert_eq!(
+            values.get("HOST_LOCAL_SCANNER_TOOLS").map(String::as_str),
+            Some("shellcheck cargo-deny cargo-audit cargo-vet codeql")
+        );
+        assert_eq!(
+            values.get("HOST_CODEQL_CLI_VERSION").map(String::as_str),
+            Some("2.25.3")
+        );
+        assert_eq!(
+            values.get("HOST_CARGO_AUDIT_VERSION").map(String::as_str),
+            Some("0.22.1")
+        );
     }
 }
