@@ -305,6 +305,10 @@ For each open review area:
 ### Problem
 
 The repo now ships archives, Linux `.deb`, and macOS GUI `.dmg` / `.app` payloads, but it does **not** yet ship fully native installer-grade experiences across platforms.
+The platform installer and signing decisions are now recorded in
+[Platform Installers and Signing](./platform-installers.md); remaining work is implementation,
+credential-gated release automation, and published-release verification rather than technology
+selection.
 
 ### Goals
 
@@ -315,24 +319,27 @@ The repo now ships archives, Linux `.deb`, and macOS GUI `.dmg` / `.app` payload
 
 #### macOS
 
-- sign the GUI `.app`
-- notarize the app / disk image
-- verify Gatekeeper-friendly install/open behavior
-- decide whether CLI distribution stays archive-only or also receives a package/install shim
+- sign the GUI `.app` with a Developer ID Application identity
+- notarize the signed app / disk image with `notarytool`
+- staple and verify the ticket with `stapler validate`
+- verify Gatekeeper-friendly install/open behavior with `codesign`, `spctl`, `stapler`, and
+  `hdiutil` checks
+- keep CLI/TUI distribution archive-first and Homebrew-distributed unless a concrete `.pkg` need
+  appears
 
 #### Windows
 
-- add a native signed installer for the GUI
-- decide and standardize the installer technology
-  - expected contenders: WiX/MSI or MSIX
+- add a native signed WiX Toolset MSI installer for the GUI
+- verify the Authenticode signature with `signtool verify /pa`
+- keep MSIX deferred unless a Store, sandbox, or managed-update requirement appears
 - ensure the installed app preserves the same vault/keyslot behavior as archive execution
-- keep CLI distribution separate and scriptable
+- keep CLI/TUI distribution separate and scriptable through zip, Scoop, and Chocolatey
 
 #### Linux
 
 - keep `.deb` as a first-class package format
-- decide whether one additional desktop-oriented package is required
-  - likely candidates: AppImage or Flatpak
+- do not require one additional desktop package for the current release line
+- prefer Flatpak over AppImage if a future desktop-oriented package becomes necessary
 - if added, it must be verifiable through the same payload-inspection model
 
 ### Acceptance Criteria
@@ -452,6 +459,6 @@ This PRD is complete when all of the following are true:
    controls now in place
 3. keep the remote dependency-update queue green and reviewable, including explicit PR thread/check
    inspection before merge
-4. choose the Windows installer technology and macOS signing/notarization path
+4. implement the macOS Developer ID signing/notarization path and Windows WiX Toolset MSI path
 5. preserve the Recovery Operations runbook as lifecycle behavior changes
 6. update this PRD as those decisions are made

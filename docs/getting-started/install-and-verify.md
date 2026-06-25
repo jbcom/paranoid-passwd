@@ -81,6 +81,11 @@ gh attestation verify "paranoid-passwd-gui_${VERSION}_amd64.deb" --owner jbcom
 gh attestation verify "paranoid-passwd-gui-${VERSION}-darwin-arm64.dmg" --owner jbcom
 ```
 
+GitHub artifact attestations verify build provenance. They do not replace
+Developer ID, Apple notarization, Authenticode, or package-manager trust
+requirements. The current platform-signing boundary is tracked in
+[Platform Installers and Signing](../reference/platform-installers.md).
+
 On macOS, replace `sha256sum -c -` with `shasum -a 256 -c -`.
 
 ## Validate the Installer Surface Locally

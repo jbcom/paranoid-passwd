@@ -1286,6 +1286,88 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
+        "release.installer-signing-boundary",
+        "Installer and platform signing boundary",
+        "release",
+        (
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "Platform Installers and Signing",
+                "platform installer and signing decision record exists",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "no Developer ID app signing, no Apple",
+                "decision record states current macOS signing/notarization is not shipped",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "Developer ID Application",
+                "decision record selects Developer ID Application signing for macOS",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "notarytool",
+                "decision record selects notarytool for macOS notarization",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "stapler validate",
+                "decision record requires notarization ticket validation",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "WiX Toolset MSI",
+                "decision record selects WiX Toolset MSI for Windows",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "signtool verify /pa",
+                "decision record requires Windows signature verification",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "MSIX deferred",
+                "decision record explicitly defers MSIX",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "Flatpak",
+                "decision record covers the future Linux Flatpak option",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "AppImage",
+                "decision record covers the future Linux AppImage option",
+            ),
+            Requirement(
+                "docs/index.md",
+                "checksummed and attested native archives",
+                "public docs use attestation language instead of signing overclaim language",
+            ),
+            Requirement(
+                "docs/reference/index.md",
+                "platform-installers",
+                "reference toctree includes platform installer decision record",
+            ),
+            Requirement(
+                "docs/reference/remaining-work-prd.md",
+                "WiX Toolset MSI",
+                "remaining-work PRD records the Windows installer decision",
+            ),
+            Requirement(
+                "scripts/validate-docs.sh",
+                "docs/index.md must not claim signed native archives",
+                "docs validation prevents the signed-native-archive overclaim from returning",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`release.installer-signing-boundary` | `process`",
+                "assurance claims track the installer and signing boundary",
+            ),
+        ),
+    ),
+    Claim(
         "release.recovery-operations-runbook",
         "Recovery operations runbook",
         "release",

@@ -45,6 +45,11 @@ Every release also publishes:
 - `checksums.txt`
 - GitHub build provenance attestations
 
+GitHub build provenance attestations are not platform code signatures. Current
+artifacts are checksummed and attested; macOS Developer ID signing, Apple
+notarization, and a Windows Authenticode-signed installer are tracked in
+[Platform Installers and Signing](../reference/platform-installers.md).
+
 ## Installer and Package Managers
 
 The docs site hosts [`/install.sh`](https://paranoid-passwd.com/install.sh), which resolves the latest compatible `paranoid-passwd` archive for the current Unix-like platform.

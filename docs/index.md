@@ -37,12 +37,14 @@ api/index
 
 ## Download Channels
 
-- [GitHub Releases](https://github.com/jbcom/paranoid-passwd/releases) ship the signed native archives, macOS `.dmg` images for the GUI, Linux `.deb` packages, and checksums.
+- [GitHub Releases](https://github.com/jbcom/paranoid-passwd/releases) ship checksummed and attested native archives, macOS `.dmg` images for the GUI, Linux `.deb` packages, and checksums.
 - `install.sh` is hosted at the docs site root and resolves the latest GitHub Release.
 - Package-manager metadata is still generated from the release workflow for Homebrew, Scoop, and Chocolatey.
 - The release pipeline now validates archive, `.dmg`, and Debian package payloads, manifest generation, and the installer surface before attesting assets.
 - The current release line ships both the CLI/TUI binary and a separate GUI binary through direct archives, with Linux `.deb` packages for both.
 - `install.sh` and package-manager flows remain focused on the CLI/TUI binary; the GUI uses direct-download artifacts until native installer work lands on every supported platform.
+- Platform installer, code-signing, and notarization decisions are tracked in
+  [Platform Installers and Signing](./reference/platform-installers.md).
 
 ## Why It Exists
 

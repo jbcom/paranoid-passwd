@@ -193,7 +193,8 @@ The federal-ready path should produce evidence that a customer can map into an S
 package:
 
 - software bill of materials
-- release checksums and signatures or attestations
+- release checksums and GitHub artifact attestations, with platform signatures
+  included only after platform signing is implemented and verified
 - build provenance and builder-image digest
 - dependency-vendor manifest
 - FIPS provider evidence and startup self-test report
