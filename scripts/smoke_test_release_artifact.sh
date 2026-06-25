@@ -174,20 +174,32 @@ chmod +x "${binary_path}" 2>/dev/null || true
 
 run_binary_output() {
   local label="$1"
+  local attempts=0
+  local max_retries="${SMOKE_SIGKILL_RETRIES:-2}"
   local output
   local status
   shift
 
-  set +e
-  output="$("$@" 2>&1)"
-  status=$?
-  set -e
-  if [ "${status}" -ne 0 ]; then
+  while :; do
+    set +e
+    output="$("$@" 2>&1)"
+    status=$?
+    set -e
+    if [ "${status}" -eq 0 ]; then
+      printf '%s\n' "${output}"
+      return 0
+    fi
+    if [ "${status}" -eq 137 ] && [ "${attempts}" -lt "${max_retries}" ]; then
+      attempts=$((attempts + 1))
+      printf '%s for %s was killed with exit code 137; retrying (%s/%s)\n' \
+        "${label}" "${archive_name}" "${attempts}" "${max_retries}" >&2
+      sleep 1
+      continue
+    fi
     printf '%s failed for %s with exit code %s\n' "${label}" "${archive_name}" "${status}" >&2
     printf '%s\n' "${output}" >&2
     exit "${status}"
-  fi
-  printf '%s\n' "${output}"
+  done
 }
 
 version_output="$(run_binary_output "version smoke" "${binary_path}" --version)"

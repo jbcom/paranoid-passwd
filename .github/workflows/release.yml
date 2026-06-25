@@ -130,6 +130,40 @@ jobs:
           security list-keychains -d user -s "${keychain}"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${keychain_password}" "${keychain}"
 
+      - name: Prepare macOS notarization credentials
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE: ${{ secrets.PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE }}
+          PARANOID_MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.PARANOID_MACOS_NOTARY_KEY_P8_BASE64 }}
+          PARANOID_MACOS_NOTARY_KEY_ID: ${{ secrets.PARANOID_MACOS_NOTARY_KEY_ID }}
+          PARANOID_MACOS_NOTARY_ISSUER: ${{ secrets.PARANOID_MACOS_NOTARY_ISSUER }}
+        run: |
+          if [ "${PARANOID_RELEASE_SIGNING_MODE}" != "signed" ]; then
+            echo "macOS release signing mode is unsigned; skipping notarization credential preparation"
+            exit 0
+          fi
+          if [ -n "${PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE:-}" ]; then
+            echo "Using configured macOS notarization keychain profile"
+            exit 0
+          fi
+          if [ -z "${PARANOID_MACOS_NOTARY_KEY_P8_BASE64:-}" ]; then
+            echo "::error::PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE or PARANOID_MACOS_NOTARY_KEY_P8_BASE64 is required when PARANOID_RELEASE_SIGNING_MODE=signed"
+            exit 1
+          fi
+          if [ -z "${PARANOID_MACOS_NOTARY_KEY_ID:-}" ] || [ -z "${PARANOID_MACOS_NOTARY_ISSUER:-}" ]; then
+            echo "::error::PARANOID_MACOS_NOTARY_KEY_ID and PARANOID_MACOS_NOTARY_ISSUER are required with PARANOID_MACOS_NOTARY_KEY_P8_BASE64"
+            exit 1
+          fi
+          notary_key_path="${RUNNER_TEMP}/paranoid-notary-key.p8"
+          printf '%s' "${PARANOID_MACOS_NOTARY_KEY_P8_BASE64}" | base64 -D > "${notary_key_path}"
+          chmod 600 "${notary_key_path}"
+          {
+            echo "PARANOID_MACOS_NOTARY_KEY_PATH=${notary_key_path}"
+            echo "PARANOID_MACOS_NOTARY_KEY_ID=${PARANOID_MACOS_NOTARY_KEY_ID}"
+            echo "PARANOID_MACOS_NOTARY_ISSUER=${PARANOID_MACOS_NOTARY_ISSUER}"
+          } >> "$GITHUB_ENV"
+
       - name: Install OpenSSL build dependencies (Windows)
         if: runner.os == 'Windows'
         shell: powershell
@@ -167,9 +201,6 @@ jobs:
           PARANOID_GUI_BUILD_DATE: ${{ github.event.release.published_at || github.event.repository.updated_at }}
           PARANOID_MACOS_CODESIGN_IDENTITY: ${{ secrets.PARANOID_MACOS_CODESIGN_IDENTITY }}
           PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE: ${{ secrets.PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE }}
-          PARANOID_MACOS_NOTARY_APPLE_ID: ${{ secrets.PARANOID_MACOS_NOTARY_APPLE_ID }}
-          PARANOID_MACOS_NOTARY_TEAM_ID: ${{ secrets.PARANOID_MACOS_NOTARY_TEAM_ID }}
-          PARANOID_MACOS_NOTARY_PASSWORD: ${{ secrets.PARANOID_MACOS_NOTARY_PASSWORD }}
         run: |
           mkdir -p dist/release
           bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' '${{ matrix.archive }}' dist/release

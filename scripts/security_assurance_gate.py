@@ -1317,8 +1317,13 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "scripts/macos_sign_notarize.sh",
-                "PARANOID_MACOS_NOTARY",
-                "macOS signing helper requires explicit notarization credentials",
+                "PARANOID_MACOS_NOTARY_KEY_PATH",
+                "macOS signing helper supports App Store Connect API key path credentials",
+            ),
+            Requirement(
+                "scripts/macos_sign_notarize.sh",
+                "--keychain-profile",
+                "macOS signing helper supports keychain-profile notarization credentials",
             ),
             Requirement(
                 "scripts/macos_sign_notarize.sh",
@@ -1334,6 +1339,11 @@ CLAIMS: tuple[Claim, ...] = (
                 ".github/workflows/release.yml",
                 "PARANOID_MACOS_CERTIFICATE_P12_BASE64",
                 "release workflow can import a macOS Developer ID certificate from secrets",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "PARANOID_MACOS_NOTARY_KEY_P8_BASE64",
+                "release workflow materializes App Store Connect API key secrets as a temporary file",
             ),
             Requirement(
                 "scripts/verify_platform_signing.sh",

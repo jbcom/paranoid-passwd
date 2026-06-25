@@ -38,10 +38,14 @@ signs and notarizes only when `PARANOID_RELEASE_SIGNING_MODE=signed`; unsigned
 local emulation remains an explicit no-op. Signed mode requires
 `PARANOID_MACOS_CODESIGN_IDENTITY` plus either
 `PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE` or the
-`PARANOID_MACOS_NOTARY_APPLE_ID`, `PARANOID_MACOS_NOTARY_TEAM_ID`, and
-`PARANOID_MACOS_NOTARY_PASSWORD` credential set. The release workflow can import
-a Developer ID certificate from `PARANOID_MACOS_CERTIFICATE_P12_BASE64` and
-`PARANOID_MACOS_CERTIFICATE_PASSWORD` before the helper runs.
+`PARANOID_MACOS_NOTARY_KEY_PATH`, `PARANOID_MACOS_NOTARY_KEY_ID`, and
+`PARANOID_MACOS_NOTARY_ISSUER` App Store Connect API key credential set. The
+release workflow can import a Developer ID certificate from
+`PARANOID_MACOS_CERTIFICATE_P12_BASE64` and
+`PARANOID_MACOS_CERTIFICATE_PASSWORD`, then materialize
+`PARANOID_MACOS_NOTARY_KEY_P8_BASE64` into a temporary `.p8` file before the
+helper runs. App-specific passwords are not passed to `notarytool submit` as
+command-line arguments.
 
 The current release line has no Developer ID app signing, no Apple
 notarization, no stapled notarization ticket, no Windows Authenticode-signed

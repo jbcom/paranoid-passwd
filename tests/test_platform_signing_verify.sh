@@ -71,6 +71,9 @@ assert_fails "missing artifact fails closed" \
 assert_fails "signed macOS dmg fails without verifiable signed payload" \
   bash "${SCRIPT}" --mode signed --artifact "${mac_dmg}" --product paranoid-passwd-gui
 
+assert_fails "macOS signing helper never passes notarization password argv" \
+  grep -q -- "--password" "${MACOS_SCRIPT}"
+
 assert_ok "unsigned macOS app helper records no-op boundary" \
   bash "${MACOS_SCRIPT}" --mode unsigned --kind app --app "${mac_app}"
 
@@ -80,9 +83,17 @@ assert_ok "unsigned macOS dmg helper records no-op boundary" \
 assert_fails "signed macOS app helper requires signing identity" \
   env -u PARANOID_MACOS_CODESIGN_IDENTITY \
     -u PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE \
-    -u PARANOID_MACOS_NOTARY_APPLE_ID \
-    -u PARANOID_MACOS_NOTARY_TEAM_ID \
-    -u PARANOID_MACOS_NOTARY_PASSWORD \
+    -u PARANOID_MACOS_NOTARY_KEY_PATH \
+    -u PARANOID_MACOS_NOTARY_KEY_ID \
+    -u PARANOID_MACOS_NOTARY_ISSUER \
+    bash "${MACOS_SCRIPT}" --mode signed --kind app --app "${mac_app}"
+
+assert_fails "signed macOS app helper requires notarization credentials" \
+  env PARANOID_MACOS_CODESIGN_IDENTITY="Developer ID Application: Example" \
+    -u PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE \
+    -u PARANOID_MACOS_NOTARY_KEY_PATH \
+    -u PARANOID_MACOS_NOTARY_KEY_ID \
+    -u PARANOID_MACOS_NOTARY_ISSUER \
     bash "${MACOS_SCRIPT}" --mode signed --kind app --app "${mac_app}"
 
 assert_fails "invalid macOS signing helper kind fails closed" \

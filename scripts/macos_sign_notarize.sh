@@ -19,7 +19,7 @@ signed mode fails closed unless this host, signing identity, and notarization cr
 Required signed-mode environment:
   PARANOID_MACOS_CODESIGN_IDENTITY
   and either PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE
-  or PARANOID_MACOS_NOTARY_APPLE_ID + PARANOID_MACOS_NOTARY_TEAM_ID + PARANOID_MACOS_NOTARY_PASSWORD
+  or PARANOID_MACOS_NOTARY_KEY_PATH + PARANOID_MACOS_NOTARY_KEY_ID + PARANOID_MACOS_NOTARY_ISSUER
 EOF
 }
 
@@ -106,13 +106,17 @@ fi
 notary_args=()
 if [ -n "${PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE:-}" ]; then
   notary_args=(--keychain-profile "${PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE}")
-elif [ -n "${PARANOID_MACOS_NOTARY_APPLE_ID:-}" ] \
-  && [ -n "${PARANOID_MACOS_NOTARY_TEAM_ID:-}" ] \
-  && [ -n "${PARANOID_MACOS_NOTARY_PASSWORD:-}" ]; then
+elif [ -n "${PARANOID_MACOS_NOTARY_KEY_PATH:-}" ] \
+  && [ -n "${PARANOID_MACOS_NOTARY_KEY_ID:-}" ] \
+  && [ -n "${PARANOID_MACOS_NOTARY_ISSUER:-}" ]; then
+  if [ ! -f "${PARANOID_MACOS_NOTARY_KEY_PATH}" ]; then
+    echo "PARANOID_MACOS_NOTARY_KEY_PATH does not exist: ${PARANOID_MACOS_NOTARY_KEY_PATH}" >&2
+    exit 1
+  fi
   notary_args=(
-    --apple-id "${PARANOID_MACOS_NOTARY_APPLE_ID}"
-    --team-id "${PARANOID_MACOS_NOTARY_TEAM_ID}"
-    --password "${PARANOID_MACOS_NOTARY_PASSWORD}"
+    --key "${PARANOID_MACOS_NOTARY_KEY_PATH}"
+    --key-id "${PARANOID_MACOS_NOTARY_KEY_ID}"
+    --issuer "${PARANOID_MACOS_NOTARY_ISSUER}"
   )
 else
   echo "notarization credentials are required for signed macOS release payloads" >&2
