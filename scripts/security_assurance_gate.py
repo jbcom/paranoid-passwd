@@ -188,18 +188,53 @@ CLAIMS: tuple[Claim, ...] = (
     ),
     Claim(
         "vault.device-bound-keyslot",
-        "Device-bound keyslot tracking",
+        "Device-bound keyslot disposition",
         "vault-security",
         (
             Requirement(
-                "docs/reference/ai-review.md",
-                "Device-bound keyslot design",
-                "open device-bound keyslot AI disposition remains tracked",
+                "crates/paranoid-vault/src/lib.rs",
+                "Dispositioned in docs/reference/ai-review.md: device-bound slots are",
+                "device-bound source points to the closed disposition",
             ),
             Requirement(
-                "scripts/verify_ai_review_inventory.sh",
-                "device-bound keyslot design",
-                "inventory check tracks the device-bound keyslot TODO",
+                "crates/paranoid-vault/src/lib.rs",
+                "master_key.len() != MASTER_KEY_LEN",
+                "device-bound unlock rejects malformed secure-storage secret lengths",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "device_keyslot_rejects_tampered_secure_storage_secret",
+                "vault tests reject tampered secure-storage material",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "device_keyslot_rejects_wrong_length_secure_storage_secret",
+                "vault tests reject wrong-length secure-storage material",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "backup_does_not_export_device_secure_storage_secret",
+                "vault tests prove backup omits device secure-storage secret material",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "removed device keyslot should delete device secret",
+                "vault tests prove device keyslot removal clears secure storage",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "Acceptable as a default-profile local-device convenience unlock",
+                "AI review surface closes the device-bound keyslot disposition",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "backup packages do not contain the device secure-storage secret",
+                "AI review surface documents device-bound backup limits",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.device-bound-keyslot` | `enforced`",
+                "assurance claim enforces the device-bound keyslot disposition",
             ),
         ),
     ),
@@ -797,7 +832,7 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "scripts/verify_ai_review_inventory.sh",
-                "expected open AI review sites: **3**",
+                "expected open AI review sites: **2**",
                 "inventory check tracks the reduced AI review surface",
             ),
             Requirement(

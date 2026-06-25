@@ -1106,7 +1106,8 @@ impl UnlockedVault {
             &device_slot_aad(slot_id.as_str()),
             DEVICE_CHECK_PLAINTEXT,
         )?;
-        // TODO: AI_REVIEW - confirm the device-bound keyslot design of storing the raw master key in OS secure storage plus an AES-GCM verification blob is acceptable across macOS, Windows, and Linux secret stores.
+        // Dispositioned in docs/reference/ai-review.md: device-bound slots are
+        // local-device convenience unlocks, not portable recovery or federal unlock paths.
         let slot = VaultKeyslot {
             id: slot_id,
             kind: VaultKeyslotKind::DeviceBound,
@@ -2485,6 +2486,9 @@ fn read_verified_device_keyslot_secret(
         ))
     })?;
     let master_key = Zeroizing::new(device_store_get_secret(service, account)?);
+    if master_key.len() != MASTER_KEY_LEN {
+        return Err(VaultError::UnlockFailed);
+    }
     let plaintext = decrypt_blob(
         master_key.as_slice(),
         &device_slot_aad(keyslot.id.as_str()),
@@ -4398,6 +4402,58 @@ mod tests {
     }
 
     #[test]
+    fn backup_does_not_export_device_secure_storage_secret() {
+        let dir = tempdir().expect("tempdir");
+        let source = dir.path().join("vault.sqlite");
+        let backup = dir.path().join("vault-backup.ppv.json");
+        let restored = dir.path().join("restored.sqlite");
+        init_vault(&source, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&source, "correct horse battery staple").expect("unlock");
+        let device_slot = vault
+            .add_device_keyslot(Some("daily".to_string()))
+            .expect("device slot");
+        let service = device_slot.device_service.as_deref().expect("service");
+        let account = device_slot.device_account.as_deref().expect("account");
+        let device_secret = device_store_get_secret(service, account).expect("device secret");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string(),
+                url: None,
+                notes: None,
+                folder: Some("Work".to_string()),
+                tags: vec!["work".to_string()],
+            })
+            .expect("add login");
+
+        vault.export_backup(&backup).expect("export backup");
+        let backup_json = fs::read_to_string(&backup).expect("read backup");
+        assert!(
+            !backup_json.contains(hex_encode(device_secret.as_slice()).as_str()),
+            "backup package must not contain the raw device secure-storage secret"
+        );
+        let package: VaultBackupPackage =
+            serde_json::from_str(backup_json.as_str()).expect("parse backup");
+        let backed_up_slot = package
+            .header
+            .keyslots
+            .iter()
+            .find(|slot| slot.id == device_slot.id)
+            .expect("backed-up device slot");
+        assert_eq!(backed_up_slot.kind, VaultKeyslotKind::DeviceBound);
+        assert_eq!(backed_up_slot.device_service.as_deref(), Some(service));
+        assert_eq!(backed_up_slot.device_account.as_deref(), Some(account));
+
+        device_store_delete_secret(service, account).expect("delete local device secret");
+        restore_vault_backup(&backup, &restored, false).expect("restore backup");
+        let error = unlock_vault_with_device(&restored, Some(device_slot.id.as_str()))
+            .expect_err("restored backup should require the same device secure-storage secret");
+        assert!(matches!(error, VaultError::UnlockFailed));
+    }
+
+    #[test]
     fn inspect_backup_reports_counts_and_posture() {
         let dir = tempdir().expect("tempdir");
         let source = dir.path().join("vault.sqlite");
@@ -5247,6 +5303,73 @@ mod tests {
     }
 
     #[test]
+    fn device_keyslot_rejects_tampered_secure_storage_secret() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let keyslot = vault
+            .add_device_keyslot(Some("daily-device".to_string()))
+            .expect("add device keyslot");
+        let service = keyslot.device_service.as_deref().expect("service");
+        let account = keyslot.device_account.as_deref().expect("account");
+        let wrong_master_key = [0xa5; MASTER_KEY_LEN];
+        device_store_set_secret(service, account, wrong_master_key.as_slice())
+            .expect("overwrite device secret");
+
+        let error = unlock_vault_with_device(&path, Some(keyslot.id.as_str()))
+            .expect_err("tampered device secret should fail");
+        assert!(matches!(error, VaultError::UnlockFailed));
+
+        let header = read_vault_header(&path).expect("header");
+        let health = header
+            .assess_keyslot_health_with_provider_probe(
+                keyslot.id.as_str(),
+                VaultKeyslotProviderProbe::VerifyAvailability,
+            )
+            .expect("probed health");
+        assert!(!health.healthy);
+        assert_eq!(
+            health.provider_availability,
+            VaultKeyslotProviderAvailability::Unavailable
+        );
+    }
+
+    #[test]
+    fn device_keyslot_rejects_wrong_length_secure_storage_secret() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let keyslot = vault
+            .add_device_keyslot(Some("daily-device".to_string()))
+            .expect("add device keyslot");
+        let service = keyslot.device_service.as_deref().expect("service");
+        let account = keyslot.device_account.as_deref().expect("account");
+        device_store_set_secret(service, account, b"not-a-32-byte-device-secret")
+            .expect("overwrite device secret");
+
+        let error = unlock_vault_with_device(&path, Some(keyslot.id.as_str()))
+            .expect_err("wrong-length device secret should fail");
+        assert!(matches!(error, VaultError::UnlockFailed));
+
+        let header = read_vault_header(&path).expect("header");
+        let health = header
+            .assess_keyslot_health_with_provider_probe(
+                keyslot.id.as_str(),
+                VaultKeyslotProviderProbe::VerifyAvailability,
+            )
+            .expect("probed health");
+        assert!(!health.healthy);
+        assert_eq!(
+            health.provider_availability,
+            VaultKeyslotProviderAvailability::Unavailable
+        );
+    }
+
+    #[test]
     fn device_keyslot_provider_probe_skips_check_when_metadata_is_missing() {
         let keyslot = VaultKeyslot {
             id: "device-missing-metadata".to_string(),
@@ -5312,6 +5435,9 @@ mod tests {
         let slot = vault
             .add_device_keyslot(Some("daily-device".to_string()))
             .expect("add device keyslot");
+        let service = slot.device_service.as_deref().expect("service").to_string();
+        let account = slot.device_account.as_deref().expect("account").to_string();
+        device_store_get_secret(service.as_str(), account.as_str()).expect("device secret");
         let removed = vault
             .remove_keyslot(&slot.id, true)
             .expect("remove keyslot");
@@ -5324,6 +5450,9 @@ mod tests {
                 .iter()
                 .all(|candidate| candidate.id != slot.id)
         );
+        let error = device_store_get_secret(service.as_str(), account.as_str())
+            .expect_err("removed device keyslot should delete device secret");
+        assert!(matches!(error, VaultError::UnlockFailed));
     }
 
     #[test]

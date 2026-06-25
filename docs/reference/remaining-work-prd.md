@@ -261,17 +261,23 @@ stay gate-protected until they are dispositioned.
 See [security-assurance.md](./security-assurance.md), [assurance-claims.md](./assurance-claims.md),
 and [ai-review.md](./ai-review.md).
 
-### Review Areas
+### Closed Review Areas
 
-1. chi-squared audit interpretation and thresholding in `paranoid-core`
-2. serial-correlation estimator and normalization in `paranoid-core`
-3. device-bound keyslot design and secure-storage assumptions in `paranoid-vault`
-4. mnemonic recovery construction in `paranoid-vault`
-5. certificate-wrapped keyslot design, including CMS recipient selection and transport-key policy in `paranoid-vault`
+- chi-squared audit interpretation and thresholding in `paranoid-core`
+- serial-correlation estimator and normalization in `paranoid-core`
+- external audit-device posture in `paranoid-audit` and `paranoid-ops`
+- shared ops policy boundary across CLI, TUI, GUI, and mTLS automation adapters
+- seal lifecycle posture and method-specific unlock policy
+- device-bound keyslot design and local secure-storage assumptions in `paranoid-vault`
+
+### Open Review Areas
+
+1. mnemonic recovery construction in `paranoid-vault`
+2. certificate-wrapped keyslot design, including CMS recipient selection and transport-key policy in `paranoid-vault`
 
 ### Requirements
 
-For each review area:
+For each open review area:
 
 1. maintain a named assurance claim
 2. decide whether the current implementation is acceptable, acceptable with constraints, or requires change
@@ -399,7 +405,7 @@ blockers.
 
 ### 2. Recovery Model Drift
 
-If future work changes mnemonic, certificate, or device-bound behavior without revisiting the written recovery docs, the product will become harder to operate safely.
+If future work changes mnemonic, certificate, or device-bound behavior without revisiting the written recovery docs and the closed device-bound disposition, the product will become harder to operate safely.
 
 ### 3. Packaging Drift
 

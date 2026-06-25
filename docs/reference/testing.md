@@ -236,7 +236,9 @@ test backend.
 - mnemonic recovery keyslot add/unlock coverage
 - mnemonic recovery keyslot rotation coverage, including fail-closed invalidation of the previous phrase
 - multi-mnemonic-slot explicit-selection coverage
-- device-bound keyslot add/unlock coverage
+- device-bound keyslot add/unlock coverage, including missing provider material, tampered
+  secure-storage material, wrong-length secure-storage material, removal cleanup, and same-device
+  backup semantics that omit the provider secret
 - multi-device-slot explicit-selection coverage
 - certificate-wrapped keyslot add/unlock coverage
 - certificate-wrapped keyslot rewrap coverage, including persisted public metadata updates for fingerprint, subject, and validity, plus native session continuity when a live certificate-authenticated surface rewraps its active slot
