@@ -239,13 +239,23 @@ CLAIMS: tuple[Claim, ...] = (
     ),
     Claim(
         "ops.shared-policy-boundary",
-        "Shared ops policy boundary tracking",
+        "Shared ops policy boundary",
         "ops-security",
         (
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
-                "TODO: AI_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.",
-                "shared ops policy boundary remains tracked for AI review",
+                "Dispositioned in docs/reference/ai-review.md: adapters enter through this typed evaluator",
+                "shared ops policy boundary source points to the closed disposition",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "if envelope.profile != context.profile",
+                "caller-supplied envelopes cannot downgrade the authoritative policy context",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "profile_context_mismatch",
+                "profile/context mismatch has a stable fail-closed control id",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -268,14 +278,39 @@ CLAIMS: tuple[Claim, ...] = (
                 "native GUI persists durable ops audit events when JSONL is configured",
             ),
             Requirement(
-                "docs/reference/ai-review.md",
-                "Ops policy boundary",
-                "open ops policy boundary AI disposition remains tracked",
+                "crates/paranoid-ops/src/mtls_transport.rs",
+                "envelope.session = OpsSession::mtls(surface, session_id, transport_evidence);",
+                "mTLS process-boundary commands replace client-supplied transport claims with observed evidence",
             ),
             Requirement(
-                "scripts/verify_ai_review_inventory.sh",
-                "centralized policy boundary for ops/vault authorization and audit evidence across adapters",
-                "inventory check tracks the ops policy boundary TODO",
+                "crates/paranoid-ops/src/lib.rs",
+                "policy_envelope_cannot_downgrade_authoritative_context_profile",
+                "ops tests prove envelope profile downgrades fail closed",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "vault_operation_policy_boundary_preserves_adapter_surface_and_access_metadata",
+                "ops tests prove CLI/TUI/GUI vault operation surfaces preserve typed metadata",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "Acceptable as implemented after hardening",
+                "AI review surface closes the ops policy boundary disposition",
+            ),
+            Requirement(
+                "docs/reference/ai-review.md",
+                "externally supplied envelopes fail closed with `profile_context_mismatch`",
+                "AI review surface documents profile downgrade limits",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`ops.shared-policy-boundary` | `enforced`",
+                "assurance claim enforces the shared ops policy boundary disposition",
+            ),
+            Requirement(
+                "docs/reference/testing.md",
+                "caller-supplied envelopes cannot downgrade the authoritative policy context",
+                "testing docs cover the authoritative policy context guard",
             ),
         ),
     ),

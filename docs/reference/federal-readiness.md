@@ -135,6 +135,8 @@ and hash-chain evidence.
 - vault operation access classes for metadata, decrypt, mutate, export, import, and keyslot
   lifecycle flows
 - reusable vault operation policy evaluation for CLI, TUI, and native GUI adapters
+- fail-closed profile validation so process-boundary or automation envelopes cannot downgrade the
+  authoritative policy context
 - an OpenSSL-backed TLS-1.3-minimum mTLS JSONL process-boundary command transport that fails closed
   unless a security-relevant command has authenticated peer identity and certificate fingerprint
   evidence; server-side handling replaces client-asserted transport claims with observed

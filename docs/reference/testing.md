@@ -114,6 +114,8 @@ crates. Current coverage proves that:
 - native GUI vault operations emit typed ops request/response policy events to both in-memory
   automation evidence and configured durable JSONL sinks without copying plaintext secrets into audit
   metadata
+- ops unit tests prove caller-supplied envelopes cannot downgrade the authoritative policy context
+  profile, and that CLI/TUI/GUI vault-operation surfaces preserve the same operation/access metadata
 - `--federal-ready` fails closed without confirmed approved-provider evidence
 - federal startup evidence is emitted as JSON
 - federal startup evidence includes external audit-device posture without treating configured-only

@@ -30,7 +30,6 @@ normalize_inventory() {
 
 expected_inventory() {
   cat <<'EOF'
-crates/paranoid-ops/src/lib.rs:// TODO: AI_REVIEW - centralized policy boundary for ops/vault authorization and audit evidence across adapters.
 crates/paranoid-seal/src/lib.rs:// TODO: AI_REVIEW - confirm the seal/posture model correctly represents unlock and recovery posture without overstating provider availability.
 crates/paranoid-vault/src/lib.rs:        // TODO: AI_REVIEW - confirm the device-bound keyslot design of storing the raw master key in OS secure storage plus an AES-GCM verification blob is acceptable across macOS, Windows, and Linux secret stores.
 crates/paranoid-vault/src/lib.rs:        // TODO: AI_REVIEW - confirm using 24-word BIP39 entropy directly as the AES-256-GCM wrapping key for mnemonic recovery slots is the right recovery construction.
@@ -68,7 +67,7 @@ else
   pass "source TODO inventory matches the expected AI review surface"
 fi
 
-if rg -F "expected open AI review sites: **5**" "$DOC" >/dev/null 2>&1; then
+if rg -F "expected open AI review sites: **4**" "$DOC" >/dev/null 2>&1; then
   pass "AI review reference doc tracks the expected open-site count"
 else
   fail "AI review reference doc must state the expected open-site count"
@@ -84,6 +83,8 @@ for required in \
   "external_audit_device_availability_requires_ready_writable_health" \
   "TCP reachability remains evidence only and must stay" \
   "Ops policy boundary" \
+  "policy_envelope_cannot_downgrade_authoritative_context_profile" \
+  "vault_operation_policy_boundary_preserves_adapter_surface_and_access_metadata" \
   "seal.lifecycle-boundary" \
   "Seal lifecycle posture model" \
   "Device-bound keyslot design" \
