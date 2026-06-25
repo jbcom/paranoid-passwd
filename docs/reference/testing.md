@@ -233,9 +233,12 @@ test backend.
 - vault init/unlock round trips
 - CRUD coverage for `Login`, `SecureNote`, `Card`, and `Identity` items, including folder persistence, tag persistence, typed kind/folder/tag/query filtering, login password-history retention on rotation, and duplicate-password detection for login items
 - wrong-password fail-closed coverage
-- mnemonic recovery keyslot add/unlock coverage
+- mnemonic recovery keyslot add/unlock coverage, including generated 24-word phrase shape and
+  recovered 256-bit entropy checks
 - mnemonic recovery keyslot rotation coverage, including fail-closed invalidation of the previous phrase
 - multi-mnemonic-slot explicit-selection coverage
+- mnemonic recovery fail-closed coverage for malformed phrase length, tampered keyslot metadata, and
+  backup packages that omit the phrase and raw entropy
 - device-bound keyslot add/unlock coverage, including missing provider material, tampered
   secure-storage material, wrong-length secure-storage material, removal cleanup, and same-device
   backup semantics that omit the provider secret

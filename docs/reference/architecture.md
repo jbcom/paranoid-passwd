@@ -211,7 +211,7 @@ there, and all security-sensitive crates retain the workspace `forbid` policy.
   - `certificate_wrapped` is the current certificate-based unwrap path
   - `device_bound` is the current passwordless local-unlock path via platform secure storage
 - Argon2id derives the recovery KEK.
-- BIP39 encodes a 24-word recovery phrase for mnemonic recovery slots.
+- BIP39 encodes vault-generated 256-bit recovery entropy as a 24-word phrase for mnemonic recovery slots.
 - OpenSSL-backed AES-256-GCM encrypts item payloads.
 - OpenSSL CMS envelope encryption wraps the master key for certificate slots.
 - Device-bound slots store the unwrap secret in OS secure storage and keep only verification metadata in SQLite; the unlock path requires an exact 256-bit secure-storage value to satisfy the AES-GCM check blob, and backup packages do not export that provider secret.

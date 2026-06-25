@@ -240,18 +240,38 @@ CLAIMS: tuple[Claim, ...] = (
     ),
     Claim(
         "vault.mnemonic-recovery-keyslot",
-        "Mnemonic recovery keyslot tracking",
+        "Mnemonic recovery keyslot disposition",
         "vault-security",
         (
             Requirement(
                 "docs/reference/ai-review.md",
-                "Mnemonic recovery construction",
-                "open mnemonic recovery AI disposition remains tracked",
+                "Acceptable as a default-profile offline recovery construction",
+                "AI review surface closes the mnemonic recovery disposition",
             ),
             Requirement(
-                "scripts/verify_ai_review_inventory.sh",
-                "24-word BIP39 entropy",
-                "inventory check tracks the mnemonic recovery TODO",
+                "crates/paranoid-vault/src/lib.rs",
+                "Dispositioned in docs/reference/ai-review.md: generated 24-word BIP39",
+                "source records the mnemonic recovery disposition",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "validate_mnemonic_keyslot_metadata",
+                "vault unlock validates mnemonic keyslot metadata before unwrap",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "mnemonic_keyslot_metadata_tampering_fails_closed",
+                "vault tests prove tampered mnemonic metadata fails closed",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "backup_does_not_export_mnemonic_phrase_or_entropy",
+                "vault tests prove backups omit mnemonic phrase and raw entropy",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.mnemonic-recovery-keyslot` | `enforced`",
+                "assurance claim enforces the mnemonic recovery disposition",
             ),
         ),
     ),
@@ -832,7 +852,7 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "scripts/verify_ai_review_inventory.sh",
-                "expected open AI review sites: **2**",
+                "expected open AI review sites: **1**",
                 "inventory check tracks the reduced AI review surface",
             ),
             Requirement(

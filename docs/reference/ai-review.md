@@ -14,7 +14,7 @@ surface small, concrete, evidence-driven, and hard to forget while the product c
 ## Current Status
 
 - AI review status: **open**
-- expected open AI review sites: **2**
+- expected open AI review sites: **1**
 - policy: every `TODO: AI_REVIEW` location in source must be listed here and in the inventory check
 - assurance mapping: each open site is represented in [assurance-claims.md](./assurance-claims.md)
   as a `tracked-open` claim
@@ -23,7 +23,6 @@ surface small, concrete, evidence-driven, and hard to forget while the product c
 
 | Claim ID | Area | Location | Required AI Assessment |
 |----------|------|----------|-------------------------------|
-| `vault.mnemonic-recovery-keyslot` | Mnemonic recovery construction | `crates/paranoid-vault/src/lib.rs` | Verify whether the current 24-word BIP39-derived material should be used directly as the AES-256-GCM wrapping key for mnemonic recovery slots, or replaced by a stronger derivation scheme. |
 | `vault.certificate-wrapped-keyslot` | Certificate-wrapped keyslots | `crates/paranoid-vault/src/lib.rs` | Verify CMS recipient selection, content-encryption policy, and the broader certificate-wrapped keyslot design. |
 
 ## Dispositioned Inventory
@@ -36,6 +35,7 @@ surface small, concrete, evidence-driven, and hard to forget while the product c
 | `ops.shared-policy-boundary` | Ops policy boundary | Acceptable as implemented after hardening. CLI, TUI, GUI, and mTLS automation paths share typed `OpsCommandEnvelope` evaluation, paired request/response audit events, adapter surface metadata, vault operation/access metadata, and the same `allow`/`challenge`/`deny` decision model. Local adapters derive envelope profile from the authoritative `OpsPolicyContext`; externally supplied envelopes fail closed with `profile_context_mismatch` if they attempt to downgrade or conflict with that context. The mTLS process-boundary server also replaces client-asserted transport claims with observed peer-certificate evidence before policy evaluation. | `crates/paranoid-ops/src/lib.rs`; `policy_envelope_cannot_downgrade_authoritative_context_profile`; `vault_operation_policy_boundary_preserves_adapter_surface_and_access_metadata`; `evaluate_vault_operation_returns_policy_decision_and_audit_events`; `crates/paranoid-cli/src/main.rs`; `crates/paranoid-cli/src/vault_cli.rs`; `crates/paranoid-cli/src/vault_tui.rs`; `crates/paranoid-gui/src/lib.rs`; stable ops trace fixtures; `tests/test_cli.sh`; `tests/test_vault_cli.sh` |
 | `seal.lifecycle-boundary` | Seal lifecycle posture model | Acceptable as implemented after hardening. `paranoid-seal` owns the serializable seal-state machine and non-secret provider posture, while CLI `vault seal-status` reads vault headers without decrypting item payloads. Metadata-only reports keep provider status at `configured`; `seal-status --probe-providers` marks a device-bound provider `available` only after the explicit secure-storage check succeeds. Ops policy now consumes the posture with method-specific provider checks: password unlock requires a password recovery provider, mnemonic unlock requires a mnemonic provider, device-bound unlock requires an available device-bound provider rather than any generic auto-unseal provider, and certificate unlock requires certificate provider evidence. | `crates/paranoid-seal/src/lib.rs`; `posture_keeps_provider_availability_method_specific`; `recovery_required_state_remains_required_with_recovery_provider`; `posture_reports_certificate_configuration_without_claiming_auto_unseal`; `crates/paranoid-ops/src/lib.rs`; `password_unlock_requires_password_recovery_provider`; `mnemonic_unlock_requires_mnemonic_recovery_provider`; `device_bound_unlock_requires_available_device_bound_provider`; `device_bound_unlock_rejects_generic_external_auto_unseal_availability`; `crates/paranoid-cli/src/vault_cli.rs`; `seal_posture_for_unreadable_vault_does_not_synthesize_provider`; `tests/test_vault_cli.sh`; `docs/reference/architecture.md` |
 | `vault.device-bound-keyslot` | Device-bound keyslot design | Acceptable as a default-profile local-device convenience unlock. The implementation stores the 256-bit vault master key in the platform secure-storage provider under an unguessable account id, stores only keyring metadata and an OpenSSL-backed AES-256-GCM check blob in the SQLite header, rejects missing, wrong-length, deleted, or tampered secure-storage material before exposing unlocked vault state, and deletes or rotates secure-storage accounts during keyslot removal and rebind. | `crates/paranoid-vault/src/lib.rs`; `device_keyslot_unlock_round_trip`; `device_keyslot_provider_probe_reports_unavailable_missing_secret`; `device_keyslot_rejects_tampered_secure_storage_secret`; `device_keyslot_rejects_wrong_length_secure_storage_secret`; `backup_does_not_export_device_secure_storage_secret`; `rebind_device_keyslot_rotates_secure_storage_account`; `tests/test_vault_cli.sh`; `docs/reference/vault-format.md`; `docs/reference/federal-readiness.md` |
+| `vault.mnemonic-recovery-keyslot` | Mnemonic recovery construction | Acceptable as a default-profile offline recovery construction. Enrollment generates 256 bits of OpenSSL RNG-backed entropy, encodes it as a 24-word English BIP39 phrase, and uses the recovered entropy as the AES-256-GCM key that wraps the vault master key. BIP39 is used here as a checksum-protected human transcription format for computer-generated entropy, not as a password KDF or user-authored brainwallet path. Unlock now validates the stored mnemonic keyslot metadata before unwrap, rejects non-24-word or checksum-invalid phrases, keeps recovered entropy zeroized in process, and backup packages preserve only the encrypted keyslot metadata, not the phrase or raw entropy. | `crates/paranoid-vault/src/lib.rs`; `mnemonic_keyslot_unlock_round_trip`; `mnemonic_keyslot_rejects_invalid_word_count_phrase`; `mnemonic_keyslot_metadata_tampering_fails_closed`; `wrong_mnemonic_fails_closed`; `backup_does_not_export_mnemonic_phrase_or_entropy`; [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki); [NIST FIPS 197 AES](https://csrc.nist.gov/pubs/fips/197/final); [NIST SP 800-38D GCM](https://csrc.nist.gov/pubs/sp/800/38/d/final); `docs/reference/vault-format.md`; `docs/reference/federal-readiness.md` |
 
 Disposition limits:
 
@@ -73,6 +73,12 @@ Disposition limits:
   auto-unseal provider, not FedRAMP authorization, not product FIPS validation, and not the strict
   federal-ready unlock path. Backup packages preserve the device keyslot metadata and check blob so
   same-device restores can keep working, but backup packages do not contain the device secure-storage secret and must fail closed when restored without that local provider secret.
+- The mnemonic recovery disposition applies only to phrases generated by this vault implementation
+  from 256 bits of OpenSSL RNG-backed entropy and stored as 24-word English BIP39 recovery phrases.
+  It does not approve user-created phrases, phrase import, split-secret recovery, password-derived
+  recovery phrases, or the strict federal-ready unlock path. Backup packages can keep the encrypted
+  mnemonic keyslot portable, but the operator must protect the phrase separately because the backup
+  never contains the phrase or raw mnemonic entropy.
 
 ## Required AI Assessor Output
 
