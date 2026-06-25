@@ -230,10 +230,13 @@ discipline must not be weaker.
      retained as hard gates
 6. Keep the scanner/tooling update process pinned or vendored. The repository now has
    `supply-chain/scanner-toolchain.env` plus supply-chain verification for the Wolfi builder
-   scanner apk pins, CodeQL action SHA pins, `xtask` host-local scanner visibility, and strict-mode
-   version pins for host-local `ShellCheck`, `cargo-deny`, `cargo-audit`, `cargo-vet`, and `codeql`.
-   Remaining work is to vendor or builder-own those host-local tools if the project wants to remove
-   workstation package-manager trust from `make quality` entirely.
+   scanner apk pins, CodeQL action SHA pins, `xtask` host-local scanner visibility, strict-mode
+   version pins for host-local `ShellCheck`, `cargo-deny`, `cargo-audit`, `cargo-vet`, and `codeql`,
+   and `make quality-emulate` for the builder-owned scanner subset (`cargo-audit`, Semgrep, OSV,
+   Syft, and Trivy visibility). Remaining work is to vendor or builder-own ShellCheck, cargo-deny,
+   cargo-vet, and CodeQL, or add pinned evidence-output policies for the already installed Syft and
+   Trivy tools, if the project wants to remove workstation package-manager trust from `make quality`
+   entirely.
 7. Keep remote dependency-update PRs green and reviewable for ecosystems that the configured updater
    can actually maintain. Dependabot currently owns GitHub Actions updates only; Cargo dependency
    updates remain a maintainer re-vendor flow until the repo adopts a Cargo-vendor-aware updater.
@@ -244,6 +247,8 @@ discipline must not be weaker.
 - supply-chain verification fails if the builder drifts from Wolfi or release validation reintroduces
   runner-local Linux package installs
 - CI and release workflows use repo-owned scripts and the builder-first path for Linux validation
+- `make quality-emulate` proves the release-candidate posture inside the Wolfi builder for the
+  builder-owned scanner subset without requiring workstation scanner installs
 - published-release verification passes against the current release tag after workflow changes
 - no stale browser-era or otherwise unexpected assets are attached to release tags
 - the release checklist in [release-checklist.md](./release-checklist.md) is sufficient for a second

@@ -51,6 +51,9 @@ fi
 
 SCANNER_TOOLCHAIN_SCHEMA_VERSION="${SCANNER_TOOLCHAIN_SCHEMA_VERSION:-}"
 BUILDER_SCANNER_TOOLS="${BUILDER_SCANNER_TOOLS:-}"
+CARGO_AUDIT_APK_PACKAGE="${CARGO_AUDIT_APK_PACKAGE:-}"
+CARGO_AUDIT_APK_VERSION="${CARGO_AUDIT_APK_VERSION:-}"
+RUSTSEC_ADVISORY_DB_REV="${RUSTSEC_ADVISORY_DB_REV:-}"
 SEMGREP_APK_PACKAGE="${SEMGREP_APK_PACKAGE:-}"
 SEMGREP_APK_VERSION="${SEMGREP_APK_VERSION:-}"
 OSV_SCANNER_APK_PACKAGE="${OSV_SCANNER_APK_PACKAGE:-}"
@@ -70,6 +73,9 @@ HOST_CODEQL_CLI_VERSION="${HOST_CODEQL_CLI_VERSION:-}"
 
 if require_manifest_var SCANNER_TOOLCHAIN_SCHEMA_VERSION \
   && require_manifest_var BUILDER_SCANNER_TOOLS \
+  && require_manifest_var CARGO_AUDIT_APK_PACKAGE \
+  && require_manifest_var CARGO_AUDIT_APK_VERSION \
+  && require_manifest_var RUSTSEC_ADVISORY_DB_REV \
   && require_manifest_var SEMGREP_APK_PACKAGE \
   && require_manifest_var SEMGREP_APK_VERSION \
   && require_manifest_var OSV_SCANNER_APK_PACKAGE \
@@ -153,6 +159,8 @@ if [ -f "$builder" ] \
   && contains_regex '^FROM cgr\.dev/chainguard/wolfi-base@sha256:' "$builder" \
   && contains_fixed 'RUST_APK_PACKAGE=rust-1.95' "$builder" \
   && contains_fixed 'RUST_APK_VERSION=1.95.0-r0' "$builder" \
+  && contains_fixed "ARG CARGO_AUDIT_APK_VERSION=${CARGO_AUDIT_APK_VERSION}" "$builder" \
+  && contains_fixed "ARG RUSTSEC_ADVISORY_DB_REV=${RUSTSEC_ADVISORY_DB_REV}" "$builder" \
   && contains_fixed "ARG SEMGREP_APK_VERSION=${SEMGREP_APK_VERSION}" "$builder" \
   && contains_fixed "ARG OSV_SCANNER_APK_VERSION=${OSV_SCANNER_APK_VERSION}" "$builder" \
   && contains_fixed "ARG SYFT_APK_VERSION=${SYFT_APK_VERSION}" "$builder" \
@@ -160,6 +168,10 @@ if [ -f "$builder" ] \
   && contains_fixed '--mount=type=cache,target=/var/cache/apk' "$builder" \
   && contains_fixed 'apk add' "$builder" \
   && contains_fixed 'build-base' "$builder" \
+  && contains_fixed "${CARGO_AUDIT_APK_PACKAGE}=\"\${CARGO_AUDIT_APK_VERSION}\"" "$builder" \
+  && contains_fixed 'https://github.com/RustSec/advisory-db.git' "$builder" \
+  && contains_fixed 'git -C /tmp/cargo/advisory-db checkout --detach "${RUSTSEC_ADVISORY_DB_REV}"' "$builder" \
+  && contains_fixed 'test -d /tmp/cargo/advisory-db/crates' "$builder" \
   && contains_fixed 'fontconfig-dev' "$builder" \
   && contains_fixed 'gh' "$builder" \
   && contains_fixed 'openssl-dev' "$builder" \
@@ -176,6 +188,7 @@ if [ -f "$builder" ] \
   && contains_fixed 'py3-pip' "$builder" \
   && contains_fixed 'python3' "$builder" \
   && contains_fixed 'command -v gh' "$builder" \
+  && contains_fixed 'cargo audit --version' "$builder" \
   && contains_fixed 'cargo fmt --version' "$builder" \
   && contains_fixed 'cargo clippy --version' "$builder" \
   && contains_fixed 'rustc --version | grep -F "1.95.0"' "$builder" \
@@ -256,11 +269,13 @@ for host_version_key in \
   fi
 done
 
-if contains_regex '^release-emulate:' "$REPO_ROOT/Makefile" \
+if contains_regex '^quality-emulate:' "$REPO_ROOT/Makefile" \
+  && contains_regex '^_quality-emulate:' "$REPO_ROOT/Makefile" \
+  && contains_regex '^release-emulate:' "$REPO_ROOT/Makefile" \
   && contains_regex '^release-validate:' "$REPO_ROOT/Makefile"; then
-  pass "Makefile exposes local release emulation and validation targets"
+  pass "Makefile exposes local quality/release emulation and validation targets"
 else
-  fail "Makefile is missing local release emulation or validation targets"
+  fail "Makefile is missing local quality/release emulation or validation targets"
 fi
 
 if [ -f "$REPO_ROOT/docs/public/install.sh" ] && [ -f "$REPO_ROOT/tox.ini" ]; then

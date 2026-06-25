@@ -30,6 +30,7 @@ need structured parsing live in the Rust-native `xtask` crate instead of ad hoc 
 ```bash
 make verify-deep
 make quality
+make quality-emulate
 ```
 
 - `make verify-deep` runs `cargo run -p xtask --locked --frozen --offline -- verify-deep`.
@@ -41,19 +42,27 @@ make quality
   supported multi-viewport GUI visual-regression target for the host. On macOS it drives the Linux
   GUI harness through the local builder image; on Linux it uses the native `xvfb-run` harness. This
   target requires the local security scanner stack and runs the enforced local scanner subset.
+- `make quality-emulate` runs the release-candidate posture through the custom Wolfi builder image:
+  `verify-deep`, the builder-owned scanner subset, `ci`, and the Linux GUI visual-regression
+  harness. In that mode `xtask` treats missing builder-owned scanner tools as fatal, uses the
+  builder-pinned RustSec advisory DB for no-fetch cargo-audit runs, and falls back from ShellCheck
+  to `bash -n` parsing because ShellCheck is still host-local.
 - Optional external tools (`codeql`, `semgrep`, `cargo-deny`, `cargo-audit`, `cargo-vet`, `syft`,
   `trivy`, and `osv-scanner`) are reported when missing under `make verify-deep`; `make quality`
   sets `PARANOID_STRICT_EXTERNAL_TOOLS=1` and treats missing tools as fatal.
 - `supply-chain/scanner-toolchain.env` records the scanner/tool update contract. The
   supply-chain verifier checks that Wolfi builder scanner apk versions, CodeQL action SHA pins, and
-  host-local `xtask` visibility and version checks agree with that manifest. In strict mode, `xtask`
-  checks ShellCheck, cargo-deny, cargo-audit, cargo-vet, and the CodeQL CLI against their manifest
-  pins before running the enforced local scanner subset.
+  host-local `xtask` visibility and version checks agree with that manifest. In strict host mode,
+  `xtask` checks ShellCheck, cargo-deny, cargo-audit, cargo-vet, and the CodeQL CLI against their
+  manifest pins before running the enforced local scanner subset.
 - The enforced scanner subset is `cargo audit --no-fetch --stale`, `cargo deny check`, Semgrep
   `--config auto`, and an OSV lockfile report. `cargo-deny` allows unmaintained/unsound advisories
   as warnings only when there is no safe upgrade path; OSV findings with a fixed version remain
-  blocking. Trivy, Syft, CodeQL, and cargo-vet are installed/visible locally but require pinned
-  policies or evidence-output handling before they become default `make quality` steps.
+  blocking. The builder-owned scanner subset is `cargo audit --no-fetch --stale`, Semgrep
+  `--config auto`, and an OSV lockfile report, with Syft and Trivy installed and visibility-checked
+  for the next pinned evidence-output step. CodeQL, cargo-deny, cargo-vet, Syft, and Trivy remain
+  host-visible or builder-visible but need pinned policies or evidence-output handling before they
+  become universal blocking `make quality` steps.
 
 Python remains in the repo only where it already owns a specific workflow: Sphinx/tox docs and the
 PTY-driven TUI harness. It is not the project automation layer.

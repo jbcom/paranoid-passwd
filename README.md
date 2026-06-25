@@ -166,6 +166,7 @@ To emulate the repository CI flow through the custom builder image:
 
 ```bash
 make ci-emulate
+make quality-emulate
 ```
 
 To exercise the release packaging path:
