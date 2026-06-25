@@ -252,9 +252,9 @@ discipline must not be weaker.
 
 ### Problem
 
-The repo explicitly tracks open `TODO: AI_REVIEW` sites, and the release process does not
-depend on vague review language. Those sites now map to named assurance claims and must
-stay gate-protected until they are dispositioned.
+The repo explicitly tracks any open `TODO: AI_REVIEW` sites, and the release process does not
+depend on vague review language. Those sites map to named assurance claims and must stay
+gate-protected until they are dispositioned.
 
 ### Source of Truth
 
@@ -271,10 +271,14 @@ and [ai-review.md](./ai-review.md).
 - device-bound keyslot design and local secure-storage assumptions in `paranoid-vault`
 - mnemonic recovery construction and generated 24-word BIP39 recovery-key assumptions in
   `paranoid-vault`
+- certificate-wrapped keyslot design, including CMS recipient selection and transport-key policy in
+  `paranoid-vault`
 
 ### Open Review Areas
 
-1. certificate-wrapped keyslot design, including CMS recipient selection and transport-key policy in `paranoid-vault`
+None. New AI review markers must be added to [ai-review.md](./ai-review.md),
+[assurance-claims.md](./assurance-claims.md), and `scripts/verify_ai_review_inventory.sh` in the same
+change that introduces them.
 
 ### Requirements
 
@@ -374,8 +378,8 @@ still useful for strengthening public trust claims.
 ### Requirements
 
 1. Preserve the claim inventory and generated assurance reports for PRs that touch sensitive surfaces.
-2. Commission external review of tracked crypto/statistics claims when the project wants to upgrade
-   a `tracked-open` claim to a stronger public trust claim.
+2. Commission external review of sensitive crypto/statistics claims when the project wants to
+   upgrade an in-repo disposition to a stronger public trust claim.
 3. Commission review of the release and supply-chain model against the `v3.7.0` proof point or the
    next release that changes the pipeline.
 4. Preserve the written outcomes inside the repo, not only in external conversations.

@@ -243,12 +243,15 @@ test backend.
   secure-storage material, wrong-length secure-storage material, removal cleanup, and same-device
   backup semantics that omit the provider secret
 - multi-device-slot explicit-selection coverage
-- certificate-wrapped keyslot add/unlock coverage
+- certificate-wrapped keyslot add/unlock coverage, including explicit validation of supported
+  algorithms, certificate metadata, and AES-GCM field shape before unwrap
 - certificate-wrapped keyslot rewrap coverage, including persisted public metadata updates for fingerprint, subject, and validity, plus native session continuity when a live certificate-authenticated surface rewraps its active slot
 - public certificate preview coverage for headless inspection before enrollment or rewrap
 - headless keyslot-inspection parser coverage
 - certificate keyslot health coverage for expired-recipient detection
 - encrypted private-key certificate unlock coverage
+- certificate backup coverage proving packages preserve the CMS-wrapped transport key and public
+  metadata without exporting the private key or raw transport key
 - password recovery-slot rotation coverage
 - keyslot relabel persistence coverage
 - recovery-posture summary coverage

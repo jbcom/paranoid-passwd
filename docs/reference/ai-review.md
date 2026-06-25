@@ -4,26 +4,24 @@ title: AI Review Surface
 
 # AI Review Surface
 
-This document is the explicit inventory of every open `TODO: AI_REVIEW` site in the repository.
-It feeds the claim-led [security assurance protocol](./security-assurance.md) and is enforced by
-the local assurance gate.
+This document is the explicit inventory of every open `TODO: AI_REVIEW` site in the repository
+and the written disposition record for sites that have been closed. It feeds the claim-led
+[security assurance protocol](./security-assurance.md) and is enforced by the local assurance gate.
 
 Nothing in this file implies those constructions are approved. It exists to keep the AI assessment
 surface small, concrete, evidence-driven, and hard to forget while the product continues to evolve.
 
 ## Current Status
 
-- AI review status: **open**
-- expected open AI review sites: **1**
+- AI review status: **closed**
+- expected open AI review sites: **0**
 - policy: every `TODO: AI_REVIEW` location in source must be listed here and in the inventory check
-- assurance mapping: each open site is represented in [assurance-claims.md](./assurance-claims.md)
-  as a `tracked-open` claim
+- assurance mapping: each open site, if one is added later, must be represented in
+  [assurance-claims.md](./assurance-claims.md) as a `tracked-open` claim until dispositioned
 
 ## Open Inventory
 
-| Claim ID | Area | Location | Required AI Assessment |
-|----------|------|----------|-------------------------------|
-| `vault.certificate-wrapped-keyslot` | Certificate-wrapped keyslots | `crates/paranoid-vault/src/lib.rs` | Verify CMS recipient selection, content-encryption policy, and the broader certificate-wrapped keyslot design. |
+No open `TODO: AI_REVIEW` sites remain.
 
 ## Dispositioned Inventory
 
@@ -36,6 +34,7 @@ surface small, concrete, evidence-driven, and hard to forget while the product c
 | `seal.lifecycle-boundary` | Seal lifecycle posture model | Acceptable as implemented after hardening. `paranoid-seal` owns the serializable seal-state machine and non-secret provider posture, while CLI `vault seal-status` reads vault headers without decrypting item payloads. Metadata-only reports keep provider status at `configured`; `seal-status --probe-providers` marks a device-bound provider `available` only after the explicit secure-storage check succeeds. Ops policy now consumes the posture with method-specific provider checks: password unlock requires a password recovery provider, mnemonic unlock requires a mnemonic provider, device-bound unlock requires an available device-bound provider rather than any generic auto-unseal provider, and certificate unlock requires certificate provider evidence. | `crates/paranoid-seal/src/lib.rs`; `posture_keeps_provider_availability_method_specific`; `recovery_required_state_remains_required_with_recovery_provider`; `posture_reports_certificate_configuration_without_claiming_auto_unseal`; `crates/paranoid-ops/src/lib.rs`; `password_unlock_requires_password_recovery_provider`; `mnemonic_unlock_requires_mnemonic_recovery_provider`; `device_bound_unlock_requires_available_device_bound_provider`; `device_bound_unlock_rejects_generic_external_auto_unseal_availability`; `crates/paranoid-cli/src/vault_cli.rs`; `seal_posture_for_unreadable_vault_does_not_synthesize_provider`; `tests/test_vault_cli.sh`; `docs/reference/architecture.md` |
 | `vault.device-bound-keyslot` | Device-bound keyslot design | Acceptable as a default-profile local-device convenience unlock. The implementation stores the 256-bit vault master key in the platform secure-storage provider under an unguessable account id, stores only keyring metadata and an OpenSSL-backed AES-256-GCM check blob in the SQLite header, rejects missing, wrong-length, deleted, or tampered secure-storage material before exposing unlocked vault state, and deletes or rotates secure-storage accounts during keyslot removal and rebind. | `crates/paranoid-vault/src/lib.rs`; `device_keyslot_unlock_round_trip`; `device_keyslot_provider_probe_reports_unavailable_missing_secret`; `device_keyslot_rejects_tampered_secure_storage_secret`; `device_keyslot_rejects_wrong_length_secure_storage_secret`; `backup_does_not_export_device_secure_storage_secret`; `rebind_device_keyslot_rotates_secure_storage_account`; `tests/test_vault_cli.sh`; `docs/reference/vault-format.md`; `docs/reference/federal-readiness.md` |
 | `vault.mnemonic-recovery-keyslot` | Mnemonic recovery construction | Acceptable as a default-profile offline recovery construction. Enrollment generates 256 bits of OpenSSL RNG-backed entropy, encodes it as a 24-word English BIP39 phrase, and uses the recovered entropy as the AES-256-GCM key that wraps the vault master key. BIP39 is used here as a checksum-protected human transcription format for computer-generated entropy, not as a password KDF or user-authored brainwallet path. Unlock now validates the stored mnemonic keyslot metadata before unwrap, rejects non-24-word or checksum-invalid phrases, keeps recovered entropy zeroized in process, and backup packages preserve only the encrypted keyslot metadata, not the phrase or raw entropy. | `crates/paranoid-vault/src/lib.rs`; `mnemonic_keyslot_unlock_round_trip`; `mnemonic_keyslot_rejects_invalid_word_count_phrase`; `mnemonic_keyslot_metadata_tampering_fails_closed`; `wrong_mnemonic_fails_closed`; `backup_does_not_export_mnemonic_phrase_or_entropy`; [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki); [NIST FIPS 197 AES](https://csrc.nist.gov/pubs/fips/197/final); [NIST SP 800-38D GCM](https://csrc.nist.gov/pubs/sp/800/38/d/final); `docs/reference/vault-format.md`; `docs/reference/federal-readiness.md` |
+| `vault.certificate-wrapped-keyslot` | Certificate-wrapped keyslots | Acceptable as implemented for current keyslots. Enrollment and rewrap select one explicit X.509 recipient certificate, generate a fresh 256-bit OpenSSL RNG-backed transport key, wrap only that transport key with OpenSSL CMS EnvelopedData, and wrap the vault master key separately with AAD-bound AES-256-GCM under the transport key. Unlock validates certificate fingerprint, subject, validity metadata, supported wrap algorithm, current AES-GCM field lengths, and legacy field shape before unwrap. The legacy `cms-envelope+aes-256-cbc` direct master-key slot shape remains read-only compatibility only; new and rewrapped slots use `cms-envelope+transport-key+aes-256-gcm`. Backup packages preserve the public certificate metadata and CMS-wrapped transport key but never contain the private key or raw transport key. | `crates/paranoid-vault/src/lib.rs`; `validate_certificate_keyslot_metadata`; `certificate_keyslot_unlock_round_trip`; `certificate_keyslot_rejects_unsupported_wrap_algorithm`; `certificate_keyslot_metadata_tampering_fails_closed`; `certificate_keyslot_transport_key_shape_tampering_fails_closed`; `legacy_certificate_keyslot_unlock_remains_supported`; `backup_does_not_export_certificate_private_key_or_raw_transport_key`; [RFC 5652 CMS](https://datatracker.ietf.org/doc/html/rfc5652); [NIST FIPS 197 AES](https://csrc.nist.gov/pubs/fips/197/final); [NIST SP 800-38D GCM](https://csrc.nist.gov/pubs/sp/800/38/d/final); `docs/reference/vault-format.md`; `docs/reference/federal-readiness.md` |
 
 Disposition limits:
 
@@ -79,6 +78,12 @@ Disposition limits:
   recovery phrases, or the strict federal-ready unlock path. Backup packages can keep the encrypted
   mnemonic keyslot portable, but the operator must protect the phrase separately because the backup
   never contains the phrase or raw mnemonic entropy.
+- The certificate-wrapped keyslot disposition applies to the current single-recipient X.509 CMS
+  transport-key construction and the tested legacy read path only. It does not approve customer PKI
+  governance, certificate issuance policy, certificate revocation checking, multi-recipient escrow,
+  external HSM/KMS operation, FedRAMP authorization, DoD authorization, or product FIPS validation.
+  AES-256-CBC appears only inside the CMS transport-key envelope for compatibility with OpenSSL CMS;
+  the vault master key is wrapped by AES-256-GCM with associated data in current slots.
 
 ## Required AI Assessor Output
 

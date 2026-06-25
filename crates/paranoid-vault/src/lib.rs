@@ -51,6 +51,8 @@ const MNEMONIC_WRAP_ALGORITHM: &str = "bip39-entropy+aes-256-gcm";
 const LEGACY_CERTIFICATE_WRAP_ALGORITHM: &str = "cms-envelope+aes-256-cbc";
 const CERTIFICATE_WRAP_ALGORITHM: &str = "cms-envelope+transport-key+aes-256-gcm";
 const DEVICE_WRAP_ALGORITHM: &str = "os-keyring+aes-256-gcm-check";
+const AES_GCM_NONCE_LEN: usize = 12;
+const AES_GCM_TAG_LEN: usize = 16;
 const DEVICE_KEYRING_SERVICE: &str = "com.paranoid-passwd.vault";
 const MNEMONIC_LANGUAGE: &str = "english";
 const MNEMONIC_WORD_COUNT: u8 = 24;
@@ -2144,6 +2146,12 @@ struct CertificateWrappedSecret {
     encrypted_secret: EncryptedBlob,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CertificateKeyslotWrapMode {
+    Current,
+    Legacy,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VaultTransferPayload {
     items: Vec<VaultItem>,
@@ -2366,37 +2374,38 @@ pub fn unlock_vault_with_certificate(
     let header = read_header(&conn)?;
 
     let certificate = load_certificate(certificate_pem)?;
-    let fingerprint = certificate_fingerprint_hex(&certificate)?;
+    let metadata = certificate_keyslot_metadata(&certificate)?;
     let keyslot = header
         .keyslots
         .iter()
         .find(|keyslot| {
             keyslot.kind == VaultKeyslotKind::CertificateWrapped
-                && keyslot.certificate_fingerprint_sha256.as_deref() == Some(fingerprint.as_str())
+                && keyslot.certificate_fingerprint_sha256.as_deref()
+                    == Some(metadata.fingerprint_sha256.as_str())
         })
         .ok_or(VaultError::UnlockFailed)?;
+    let wrap_mode = validate_certificate_keyslot_metadata(keyslot, &metadata)?;
     let private_key = load_private_key(private_key_pem, private_key_passphrase)?;
-    let master_key = if keyslot.wrap_algorithm == LEGACY_CERTIFICATE_WRAP_ALGORITHM
-        && keyslot.salt_hex.is_empty()
-        && keyslot.nonce_hex.is_empty()
-        && keyslot.tag_hex.is_empty()
-    {
-        let wrapped = hex_decode(keyslot.encrypted_master_key_hex.as_str())?;
-        unwrap_legacy_secret_with_certificate(wrapped.as_slice(), &certificate, &private_key)
-    } else {
-        unwrap_secret_with_certificate(
+    let master_key = match wrap_mode {
+        CertificateKeyslotWrapMode::Legacy => {
+            let wrapped = decode_certificate_slot_hex(keyslot.encrypted_master_key_hex.as_str())?;
+            unwrap_legacy_secret_with_certificate(wrapped.as_slice(), &certificate, &private_key)
+        }
+        CertificateKeyslotWrapMode::Current => unwrap_secret_with_certificate(
             CertificateWrappedSecret {
-                wrapped_transport_key_der: hex_decode(keyslot.salt_hex.as_str())?,
+                wrapped_transport_key_der: decode_certificate_slot_hex(keyslot.salt_hex.as_str())?,
                 encrypted_secret: EncryptedBlob {
-                    nonce: hex_decode(keyslot.nonce_hex.as_str())?,
-                    tag: hex_decode(keyslot.tag_hex.as_str())?,
-                    ciphertext: hex_decode(keyslot.encrypted_master_key_hex.as_str())?,
+                    nonce: decode_certificate_slot_hex(keyslot.nonce_hex.as_str())?,
+                    tag: decode_certificate_slot_hex(keyslot.tag_hex.as_str())?,
+                    ciphertext: decode_certificate_slot_hex(
+                        keyslot.encrypted_master_key_hex.as_str(),
+                    )?,
                 },
             },
             &certificate,
             &private_key,
             CERTIFICATE_MASTER_KEY_AAD,
-        )
+        ),
     }
     .map_err(|_| VaultError::UnlockFailed)?;
 
@@ -2611,7 +2620,7 @@ fn default_transfer_kdf_params() -> VaultKdfParams {
 
 fn encrypt_blob(key: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<EncryptedBlob, VaultError> {
     let cipher = Cipher::aes_256_gcm();
-    let nonce = random_bytes(12)?;
+    let nonce = random_bytes(AES_GCM_NONCE_LEN)?;
     let mut crypter = Crypter::new(cipher, Mode::Encrypt, key, Some(nonce.as_slice()))
         .map_err(|error| VaultError::CryptoFailure(error.to_string()))?;
     crypter
@@ -2625,7 +2634,7 @@ fn encrypt_blob(key: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<EncryptedBlo
         .finalize(&mut ciphertext[count..])
         .map_err(|error| VaultError::CryptoFailure(error.to_string()))?;
     ciphertext.truncate(count);
-    let mut tag = vec![0_u8; 16];
+    let mut tag = vec![0_u8; AES_GCM_TAG_LEN];
     crypter
         .get_tag(tag.as_mut_slice())
         .map_err(|error| VaultError::CryptoFailure(error.to_string()))?;
@@ -3551,10 +3560,69 @@ fn cms_encrypt_with_certificate(
     let envelope =
         CmsContentInfo::encrypt(&certs, plaintext, Cipher::aes_256_cbc(), CMSOptions::BINARY)
             .map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
-    // TODO: AI_REVIEW - confirm CMS recipient selection and content-encryption policy for certificate-wrapped keyslots.
+    // Dispositioned in docs/reference/ai-review.md: CMS envelopes only a random
+    // 256-bit transport key for one explicit X.509 recipient. Vault secrets are
+    // then wrapped by AAD-bound AES-256-GCM under that transport key.
     envelope
         .to_der()
         .map_err(|error| VaultError::CertificateFailure(error.to_string()))
+}
+
+fn validate_certificate_keyslot_metadata(
+    keyslot: &VaultKeyslot,
+    metadata: &CertificateKeyslotMetadata,
+) -> Result<CertificateKeyslotWrapMode, VaultError> {
+    if keyslot.kind != VaultKeyslotKind::CertificateWrapped
+        || keyslot.wrapped_by_os_keystore
+        || keyslot.certificate_fingerprint_sha256.as_deref()
+            != Some(metadata.fingerprint_sha256.as_str())
+        || keyslot.certificate_subject.as_deref() != Some(metadata.subject.as_str())
+        || keyslot.certificate_not_before.as_deref() != Some(metadata.not_before.as_str())
+        || keyslot.certificate_not_after.as_deref() != Some(metadata.not_after.as_str())
+        || keyslot.certificate_not_before_epoch != Some(metadata.not_before_epoch)
+        || keyslot.certificate_not_after_epoch != Some(metadata.not_after_epoch)
+        || keyslot.mnemonic_language.is_some()
+        || keyslot.mnemonic_words.is_some()
+        || keyslot.device_service.is_some()
+        || keyslot.device_account.is_some()
+    {
+        return Err(VaultError::UnlockFailed);
+    }
+
+    match keyslot.wrap_algorithm.as_str() {
+        CERTIFICATE_WRAP_ALGORITHM => {
+            let wrapped_transport_key = decode_certificate_slot_hex(keyslot.salt_hex.as_str())?;
+            let nonce = decode_certificate_slot_hex(keyslot.nonce_hex.as_str())?;
+            let tag = decode_certificate_slot_hex(keyslot.tag_hex.as_str())?;
+            let ciphertext =
+                decode_certificate_slot_hex(keyslot.encrypted_master_key_hex.as_str())?;
+            if wrapped_transport_key.is_empty()
+                || nonce.len() != AES_GCM_NONCE_LEN
+                || tag.len() != AES_GCM_TAG_LEN
+                || ciphertext.len() != MASTER_KEY_LEN
+            {
+                return Err(VaultError::UnlockFailed);
+            }
+            Ok(CertificateKeyslotWrapMode::Current)
+        }
+        LEGACY_CERTIFICATE_WRAP_ALGORITHM => {
+            let wrapped_master_key =
+                decode_certificate_slot_hex(keyslot.encrypted_master_key_hex.as_str())?;
+            if !keyslot.salt_hex.is_empty()
+                || !keyslot.nonce_hex.is_empty()
+                || !keyslot.tag_hex.is_empty()
+                || wrapped_master_key.is_empty()
+            {
+                return Err(VaultError::UnlockFailed);
+            }
+            Ok(CertificateKeyslotWrapMode::Legacy)
+        }
+        _ => Err(VaultError::UnlockFailed),
+    }
+}
+
+fn decode_certificate_slot_hex(input: &str) -> Result<Vec<u8>, VaultError> {
+    hex_decode(input).map_err(|_| VaultError::UnlockFailed)
 }
 
 fn unwrap_secret_with_certificate(
@@ -4523,6 +4591,89 @@ mod tests {
     }
 
     #[test]
+    fn backup_does_not_export_certificate_private_key_or_raw_transport_key() {
+        let dir = tempdir().expect("tempdir");
+        let source = dir.path().join("vault.sqlite");
+        let backup = dir.path().join("vault-backup.ppv.json");
+        let restored = dir.path().join("restored.sqlite");
+        init_vault(&source, "correct horse battery staple").expect("init");
+
+        let (certificate_pem, private_key_pem) = test_certificate_pair();
+        let mut vault = unlock_vault(&source, "correct horse battery staple").expect("unlock");
+        let keyslot = vault
+            .add_certificate_keyslot(certificate_pem.as_slice(), Some("ops".to_string()))
+            .expect("certificate slot");
+        let wrapped_transport_key_hex = keyslot.salt_hex.clone();
+        let certificate = load_certificate(certificate_pem.as_slice()).expect("load certificate");
+        let private_key =
+            load_private_key(private_key_pem.as_slice(), None).expect("load private key");
+        let raw_transport_key = Zeroizing::new(
+            unwrap_legacy_secret_with_certificate(
+                hex_decode(keyslot.salt_hex.as_str())
+                    .expect("wrapped transport key")
+                    .as_slice(),
+                &certificate,
+                &private_key,
+            )
+            .expect("unwrap transport key"),
+        );
+        let raw_transport_key_hex = hex_encode(raw_transport_key.as_slice());
+        vault
+            .add_secure_note(NewSecureNoteRecord {
+                title: "Certificate Backup".to_string(),
+                content: "certificate path".to_string(),
+                folder: Some("Recovery".to_string()),
+                tags: vec!["recovery".to_string()],
+            })
+            .expect("add note");
+
+        vault.export_backup(&backup).expect("export backup");
+        let backup_json = fs::read_to_string(&backup).expect("read backup");
+        assert!(
+            !backup_json.contains(std::str::from_utf8(private_key_pem.as_slice()).expect("pem")),
+            "backup package must not contain the certificate private key"
+        );
+        assert!(
+            !backup_json.contains(raw_transport_key_hex.as_str()),
+            "backup package must not contain the raw certificate transport key"
+        );
+        assert!(
+            backup_json.contains(wrapped_transport_key_hex.as_str()),
+            "backup package preserves only the CMS-wrapped transport key"
+        );
+        assert!(
+            !backup_json.contains("private_key"),
+            "backup package must not add private-key material fields"
+        );
+
+        let package: VaultBackupPackage =
+            serde_json::from_str(backup_json.as_str()).expect("parse backup");
+        let backed_up_slot = package
+            .header
+            .keyslots
+            .iter()
+            .find(|slot| slot.id == keyslot.id)
+            .expect("backed-up certificate slot");
+        assert_eq!(backed_up_slot.kind, VaultKeyslotKind::CertificateWrapped);
+        assert_eq!(backed_up_slot.wrap_algorithm, CERTIFICATE_WRAP_ALGORITHM);
+        assert_eq!(
+            backed_up_slot.certificate_fingerprint_sha256,
+            keyslot.certificate_fingerprint_sha256
+        );
+
+        restore_vault_backup(&backup, &restored, false).expect("restore backup");
+        let restored_vault = unlock_vault_with_certificate(
+            &restored,
+            certificate_pem.as_slice(),
+            private_key_pem.as_slice(),
+            None,
+        )
+        .expect("unlock restored backup with certificate");
+        let items = restored_vault.list_items().expect("list restored");
+        assert_eq!(items.len(), 1);
+    }
+
+    #[test]
     fn inspect_backup_reports_counts_and_posture() {
         let dir = tempdir().expect("tempdir");
         let source = dir.path().join("vault.sqlite");
@@ -5025,6 +5176,99 @@ mod tests {
             })
             .expect("add note");
         assert_eq!(unlocked.get_item(&item.id).expect("get item").id, item.id);
+    }
+
+    #[test]
+    fn certificate_keyslot_rejects_unsupported_wrap_algorithm() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let (certificate_pem, private_key_pem) = test_certificate_pair();
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let keyslot = vault
+            .add_certificate_keyslot(certificate_pem.as_slice(), Some("laptop".to_string()))
+            .expect("add certificate keyslot");
+        let index = vault
+            .header
+            .keyslots
+            .iter()
+            .position(|slot| slot.id == keyslot.id)
+            .expect("certificate slot in header");
+        vault.header.keyslots[index].wrap_algorithm = PASSWORD_WRAP_ALGORITHM.to_string();
+        vault.persist_header().expect("persist tampered header");
+        drop(vault);
+
+        let error = unlock_vault_with_certificate(
+            &path,
+            certificate_pem.as_slice(),
+            private_key_pem.as_slice(),
+            None,
+        )
+        .expect_err("unsupported certificate keyslot algorithm should fail closed");
+        assert!(matches!(error, VaultError::UnlockFailed));
+    }
+
+    #[test]
+    fn certificate_keyslot_metadata_tampering_fails_closed() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let (certificate_pem, private_key_pem) = test_certificate_pair();
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let keyslot = vault
+            .add_certificate_keyslot(certificate_pem.as_slice(), Some("laptop".to_string()))
+            .expect("add certificate keyslot");
+        let index = vault
+            .header
+            .keyslots
+            .iter()
+            .position(|slot| slot.id == keyslot.id)
+            .expect("certificate slot in header");
+        vault.header.keyslots[index].certificate_subject = Some("CN=tampered.example".to_string());
+        vault.persist_header().expect("persist tampered header");
+        drop(vault);
+
+        let error = unlock_vault_with_certificate(
+            &path,
+            certificate_pem.as_slice(),
+            private_key_pem.as_slice(),
+            None,
+        )
+        .expect_err("tampered certificate metadata should fail closed");
+        assert!(matches!(error, VaultError::UnlockFailed));
+    }
+
+    #[test]
+    fn certificate_keyslot_transport_key_shape_tampering_fails_closed() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let (certificate_pem, private_key_pem) = test_certificate_pair();
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let keyslot = vault
+            .add_certificate_keyslot(certificate_pem.as_slice(), Some("laptop".to_string()))
+            .expect("add certificate keyslot");
+        let index = vault
+            .header
+            .keyslots
+            .iter()
+            .position(|slot| slot.id == keyslot.id)
+            .expect("certificate slot in header");
+        vault.header.keyslots[index].nonce_hex = hex_encode(&[0_u8; AES_GCM_NONCE_LEN - 1]);
+        vault.persist_header().expect("persist tampered header");
+        drop(vault);
+
+        let error = unlock_vault_with_certificate(
+            &path,
+            certificate_pem.as_slice(),
+            private_key_pem.as_slice(),
+            None,
+        )
+        .expect_err("tampered certificate transport-key shape should fail closed");
+        assert!(matches!(error, VaultError::UnlockFailed));
     }
 
     #[test]

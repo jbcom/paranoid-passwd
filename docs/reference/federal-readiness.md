@@ -111,7 +111,9 @@ The current disposition is:
   strict federal-ready unlock path
 - certificate-wrapped unlock is the current strict federal-ready unlock path, gated by required
   audit evidence, approved-mode provider evidence, seal posture evidence, certificate-unseal
-  provider evidence, and fresh operator proof
+  provider evidence, and fresh operator proof; the keyslot construction CMS-wraps only a fresh
+  transport key for one explicit X.509 recipient and keeps the vault master-key wrap under
+  AAD-bound AES-256-GCM
 
 `--federal-evidence` emits this as machine-readable `recovery_disposition` evidence. Customers who
 require password, mnemonic, or device-bound recovery inside a broader assessed boundary must own that
@@ -120,7 +122,10 @@ federal-ready vault unlocks through the same typed `VaultUnlock` policy check be
 state is loaded.
 
 No code or docs should imply that generic OpenSSL linkage, Argon2id, generated BIP39 recovery
-phrases, or CMS usage is automatically enough for a federal authorization.
+phrases, CMS usage, or possession of an X.509 certificate is automatically enough for a federal
+authorization. Certificate-wrapped unlock still depends on deployment-owned certificate issuance,
+private-key protection, revocation/lifecycle controls, validated provider configuration, and the
+customer's assessed operating boundary.
 
 ## Ops and Audit Controls
 

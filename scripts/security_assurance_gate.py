@@ -277,18 +277,53 @@ CLAIMS: tuple[Claim, ...] = (
     ),
     Claim(
         "vault.certificate-wrapped-keyslot",
-        "Certificate-wrapped keyslot tracking",
+        "Certificate-wrapped keyslot disposition",
         "vault-security",
         (
             Requirement(
                 "docs/reference/ai-review.md",
-                "Certificate-wrapped keyslots",
-                "open certificate-wrapped keyslot AI disposition remains tracked",
+                "Acceptable as implemented for current keyslots",
+                "AI review surface closes the certificate-wrapped keyslot disposition",
             ),
             Requirement(
-                "scripts/verify_ai_review_inventory.sh",
-                "CMS recipient selection",
-                "inventory check tracks the certificate-wrapped keyslot TODO",
+                "crates/paranoid-vault/src/lib.rs",
+                "Dispositioned in docs/reference/ai-review.md: CMS envelopes only a random",
+                "source records the certificate-wrapped keyslot disposition",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "validate_certificate_keyslot_metadata",
+                "certificate unlock validates metadata and field shape before unwrap",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "CertificateKeyslotWrapMode::Current",
+                "certificate unlock distinguishes current and legacy keyslot shapes",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "certificate_keyslot_rejects_unsupported_wrap_algorithm",
+                "vault tests reject unsupported certificate keyslot algorithms",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "certificate_keyslot_metadata_tampering_fails_closed",
+                "vault tests reject tampered certificate metadata",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "certificate_keyslot_transport_key_shape_tampering_fails_closed",
+                "vault tests reject malformed certificate transport-key field shape",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "backup_does_not_export_certificate_private_key_or_raw_transport_key",
+                "vault tests prove backups omit certificate private keys and raw transport keys",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.certificate-wrapped-keyslot` | `enforced`",
+                "assurance claim enforces the certificate-wrapped keyslot disposition",
             ),
         ),
     ),
@@ -852,7 +887,7 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "scripts/verify_ai_review_inventory.sh",
-                "expected open AI review sites: **1**",
+                "expected open AI review sites: **0**",
                 "inventory check tracks the reduced AI review surface",
             ),
             Requirement(
