@@ -762,8 +762,8 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-seal/src/lib.rs",
-                "TODO: AI_REVIEW - confirm the seal/posture model correctly represents unlock and recovery posture without overstating provider availability.",
-                "seal posture model remains tracked for AI review",
+                "Dispositioned in docs/reference/ai-review.md: this is non-secret posture evidence",
+                "seal posture AI review claim is dispositioned in source",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -797,18 +797,18 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "scripts/verify_ai_review_inventory.sh",
-                "seal/posture model correctly represents unlock and recovery posture",
-                "inventory check tracks the seal posture TODO",
+                "expected open AI review sites: **3**",
+                "inventory check tracks the reduced AI review surface",
             ),
             Requirement(
                 "docs/reference/ai-review.md",
-                "Seal lifecycle posture model",
-                "open seal posture AI disposition remains tracked",
+                "device-bound unlock requires an available device-bound provider rather than any generic auto-unseal provider",
+                "AI review disposition records method-specific seal policy",
             ),
             Requirement(
                 "docs/reference/assurance-claims.md",
-                "`seal.lifecycle-boundary` | `tracked-open`",
-                "assurance claim tracks the open seal posture AI disposition",
+                "`seal.lifecycle-boundary` | `enforced`",
+                "assurance claim marks the seal posture disposition enforced",
             ),
             Requirement(
                 "docs/reference/testing.md",
@@ -937,8 +937,8 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
-                "auto_unseal_provider_available",
-                "device-bound unlock policy requires available auto-unseal evidence",
+                "device_bound_provider_available",
+                "device-bound unlock policy requires available device-bound evidence",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -947,8 +947,23 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
-                "device_bound_unlock_requires_available_auto_unseal_provider",
-                "ops tests prove device-bound unlock requires confirmed auto-unseal availability",
+                "device_bound_unlock_requires_available_device_bound_provider",
+                "ops tests prove device-bound unlock requires confirmed device-bound availability",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "device_bound_unlock_rejects_generic_external_auto_unseal_availability",
+                "ops tests prove generic auto-unseal availability cannot satisfy device-bound unlock",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "mnemonic_unlock_requires_mnemonic_recovery_provider",
+                "ops tests prove mnemonic unlock requires mnemonic provider evidence",
+            ),
+            Requirement(
+                "crates/paranoid-ops/src/lib.rs",
+                "password_unlock_requires_password_recovery_provider",
+                "ops tests prove password unlock requires password recovery provider evidence",
             ),
             Requirement(
                 "crates/paranoid-ops/src/lib.rs",
@@ -987,6 +1002,16 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-seal/src/lib.rs",
+                "pub fn has_configured_provider(&self, kind: VaultSealProviderKind) -> bool",
+                "seal posture exposes method-specific configured-provider checks",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "pub fn has_available_provider(&self, kind: VaultSealProviderKind) -> bool",
+                "seal posture exposes method-specific available-provider checks",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
                 "recovery_required: state == VaultSealState::RecoveryRequired",
                 "seal posture marks recovery-required state explicitly",
             ),
@@ -999,6 +1024,21 @@ CLAIMS: tuple[Claim, ...] = (
                 "crates/paranoid-seal/src/lib.rs",
                 "provider.status.is_available()",
                 "seal posture only marks auto-unseal available after provider availability is confirmed",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "posture_keeps_provider_availability_method_specific",
+                "seal crate tests keep provider availability method-specific",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "recovery_required_state_remains_required_with_recovery_provider",
+                "seal crate tests keep recovery-required state explicit",
+            ),
+            Requirement(
+                "crates/paranoid-seal/src/lib.rs",
+                "posture_reports_certificate_configuration_without_claiming_auto_unseal",
+                "seal crate tests cover certificate posture without auto-unseal overclaiming",
             ),
             Requirement(
                 "docs/reference/architecture.md",

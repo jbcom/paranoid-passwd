@@ -292,6 +292,12 @@ assert any(
     method["federal_ready_policy_control"] == "non_federal_unlock_method:mnemonic_recovery"
     for method in data["recovery_disposition"]["methods"]
 )
+device = next(
+    method
+    for method in data["recovery_disposition"]["methods"]
+    if method["method"] == "device_bound"
+)
+assert "device_bound_provider_available" in device["required_controls"]
 assert data["policy_decision"]["decision"] == "deny"
 '
 }

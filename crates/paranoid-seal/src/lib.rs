@@ -267,7 +267,8 @@ impl VaultSealProviderEvidence {
     }
 }
 
-// TODO: AI_REVIEW - confirm the seal/posture model correctly represents unlock and recovery posture without overstating provider availability.
+// Dispositioned in docs/reference/ai-review.md: this is non-secret posture evidence,
+// not authorization or decrypted vault state, and provider availability is explicit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VaultSealPosture {
     pub schema_version: u16,
@@ -311,6 +312,18 @@ impl VaultSealPosture {
             provider_count: providers.len(),
             providers,
         }
+    }
+
+    pub fn has_configured_provider(&self, kind: VaultSealProviderKind) -> bool {
+        self.providers.iter().any(|provider| {
+            provider.kind == kind && provider.status != VaultSealProviderStatus::Disabled
+        })
+    }
+
+    pub fn has_available_provider(&self, kind: VaultSealProviderKind) -> bool {
+        self.providers
+            .iter()
+            .any(|provider| provider.kind == kind && provider.status.is_available())
     }
 }
 
@@ -387,6 +400,9 @@ mod tests {
         assert!(posture.operator_recovery_configured);
         assert!(posture.auto_unseal_configured);
         assert!(!posture.auto_unseal_available);
+        assert!(posture.has_configured_provider(VaultSealProviderKind::PasswordRecovery));
+        assert!(posture.has_configured_provider(VaultSealProviderKind::DeviceBound));
+        assert!(!posture.has_available_provider(VaultSealProviderKind::DeviceBound));
         assert_eq!(posture.provider_count, 2);
     }
 
@@ -409,6 +425,8 @@ mod tests {
         );
 
         assert!(posture.auto_unseal_available);
+        assert!(posture.has_available_provider(VaultSealProviderKind::DeviceBound));
+        assert!(!posture.has_available_provider(VaultSealProviderKind::ExternalAutoUnseal));
     }
 
     #[test]
@@ -424,5 +442,68 @@ mod tests {
 
         assert!(posture.recovery_required);
         assert!(!posture.operator_recovery_configured);
+    }
+
+    #[test]
+    fn posture_reports_certificate_configuration_without_claiming_auto_unseal() {
+        let posture = VaultSealPosture::from_providers(
+            VaultSealState::Sealed,
+            vec![
+                VaultSealProviderEvidence::configured(
+                    "password",
+                    VaultSealProviderKind::PasswordRecovery,
+                    "vault_header",
+                ),
+                VaultSealProviderEvidence::configured(
+                    "certificate",
+                    VaultSealProviderKind::CertificateWrapped,
+                    "vault_header",
+                ),
+            ],
+        );
+
+        assert!(posture.certificate_unseal_configured);
+        assert!(!posture.auto_unseal_configured);
+        assert!(!posture.auto_unseal_available);
+        assert!(posture.has_configured_provider(VaultSealProviderKind::CertificateWrapped));
+        assert!(!posture.has_available_provider(VaultSealProviderKind::CertificateWrapped));
+    }
+
+    #[test]
+    fn posture_keeps_provider_availability_method_specific() {
+        let posture = VaultSealPosture::from_providers(
+            VaultSealState::Sealed,
+            vec![
+                VaultSealProviderEvidence::configured(
+                    "device",
+                    VaultSealProviderKind::DeviceBound,
+                    "vault_header",
+                ),
+                VaultSealProviderEvidence::available(
+                    "external",
+                    VaultSealProviderKind::ExternalAutoUnseal,
+                    "external_probe",
+                ),
+            ],
+        );
+
+        assert!(posture.auto_unseal_available);
+        assert!(posture.has_available_provider(VaultSealProviderKind::ExternalAutoUnseal));
+        assert!(!posture.has_available_provider(VaultSealProviderKind::DeviceBound));
+    }
+
+    #[test]
+    fn recovery_required_state_remains_required_with_recovery_provider() {
+        let posture = VaultSealPosture::from_providers(
+            VaultSealState::RecoveryRequired,
+            vec![VaultSealProviderEvidence::configured(
+                "password",
+                VaultSealProviderKind::PasswordRecovery,
+                "vault_header",
+            )],
+        );
+
+        assert!(posture.operator_recovery_configured);
+        assert!(posture.recovery_required);
     }
 }

@@ -141,7 +141,10 @@ side evaluates the received envelope only after binding the session to the obser
 certificate, not to client-asserted evidence. The seal-provider health path now distinguishes
 metadata-only posture from explicit provider probes: configured device-bound slots remain
 `configured` until a probe verifies secure-storage availability, and only then can posture claim
-`auto_unseal_available=true`. The remaining implementation work is broader PTY coverage over those
+`auto_unseal_available=true`. Ops policy consumes the same posture with method-specific checks:
+mnemonic unlock requires mnemonic provider evidence, device-bound unlock requires an available
+device-bound provider rather than generic auto-unseal availability, and certificate unlock requires
+certificate provider evidence. The remaining implementation work is broader PTY coverage over those
 same command envelopes and release-grade packaging evidence.
 
 The seal model stays local-first but borrows the operational shape of Vault: a sealed vault can read
@@ -151,7 +154,7 @@ need for recovery coverage. If a seal provider is rotated, disabled, or becomes 
 and seal layers should expose that as posture and state, and the vault layer should only perform
 rewraps through typed, audited operations. The ops policy context now accepts non-secret seal
 posture evidence: federal certificate unlock requires that posture to be present, and device-bound
-unlock fails closed without seal posture evidence or confirmed auto-unseal availability.
+unlock fails closed without seal posture evidence or confirmed device-bound provider availability.
 
 This split keeps the trust boundaries narrow:
 

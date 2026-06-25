@@ -155,6 +155,8 @@ and hash-chain evidence.
 - an explicit provider-probe path for seal status; metadata-only reports keep device-bound slots at
   `configured`, while `seal-status --probe-providers` marks a device-bound provider `available` only
   after secure storage returns the unwrap material and the vault keyslot check blob verifies
+- method-specific ops policy consumption, so generic auto-unseal availability cannot satisfy a
+  device-bound unlock and recovery unlocks must match their own configured provider kind
 
 `paranoid-audit` now provides:
 
