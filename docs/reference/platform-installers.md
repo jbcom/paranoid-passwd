@@ -26,6 +26,13 @@ metadata, checksums, and host-runnable smoke paths through repo-owned scripts.
 GitHub artifact attestations are build provenance evidence. They are not a
 substitute for platform code signing.
 
+`scripts/verify_platform_signing.sh` is now part of release validation. Its
+default `unsigned` mode records the current boundary: artifacts are checksummed
+and attested, not platform-signed. `PARANOID_RELEASE_SIGNING_MODE=signed` is a
+fail-closed mode for future signed releases; it requires a host that can perform
+the relevant platform verification instead of silently accepting unsigned
+payloads.
+
 The current release line has no Developer ID app signing, no Apple
 notarization, no stapled notarization ticket, no Windows Authenticode-signed
 installer, no MSIX package, no Flatpak package, and no AppImage package.
@@ -112,7 +119,8 @@ verification as the existing archives and `.deb` packages.
 Installer/signing work is not complete until:
 
 - build scripts create the installer or signed payload in-repo
-- validation scripts inspect the package layout and signature state
+- validation scripts inspect the package layout and signature state through
+  `scripts/verify_platform_signing.sh`
 - published-release verification downloads and verifies the released artifact
 - docs name the actual shipped path without overclaiming
 - credentials are optional for local unsigned emulation but mandatory when a

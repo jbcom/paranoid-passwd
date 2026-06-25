@@ -1,4 +1,4 @@
-.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality builder-image _builder-image ci-emulate _ci-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
+.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e test-platform-signing-boundary verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality builder-image _builder-image ci-emulate _ci-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -131,6 +131,9 @@ test-vault-e2e: ## Run the headless vault CLI end-to-end suite against the debug
 	cargo build -p paranoid-cli --locked --frozen --offline
 	bash tests/test_vault_cli.sh "$(CLI_DEBUG_BIN)"
 
+test-platform-signing-boundary: ## Run the release platform-signing verifier contract tests
+	bash tests/test_platform_signing_verify.sh
+
 verify-security: ## Run repository security and supply-chain verification scripts
 	$(MAKE) verify-assurance
 
@@ -170,6 +173,7 @@ ci: ## Run the local equivalent of the repository CI gates
 	$(MAKE) test-tui-e2e
 	$(if $(CI_GUI_E2E_TARGET),$(MAKE) $(CI_GUI_E2E_TARGET))
 	$(MAKE) test-vault-e2e
+	$(MAKE) test-platform-signing-boundary
 	$(MAKE) verify-assurance
 	python3 -m tox -e docs,docs-linkcheck
 

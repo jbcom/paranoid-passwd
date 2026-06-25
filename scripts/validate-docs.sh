@@ -25,6 +25,8 @@ required=(
   "$REPO_ROOT/docs/api/index.md"
   "$REPO_ROOT/docs/public/install.sh"
   "$REPO_ROOT/scripts/verify_published_release.sh"
+  "$REPO_ROOT/scripts/verify_platform_signing.sh"
+  "$REPO_ROOT/tests/test_platform_signing_verify.sh"
 )
 
 for file in "${required[@]}"; do
@@ -48,6 +50,8 @@ if grep -q "signed native archives" "$REPO_ROOT/docs/index.md"; then
 fi
 grep -q "no Developer ID app signing" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "no Apple" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "scripts/verify_platform_signing.sh" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "PARANOID_RELEASE_SIGNING_MODE=signed" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "Developer ID Application" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "notarytool" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "stapler validate" "$REPO_ROOT/docs/reference/platform-installers.md"
@@ -56,6 +60,8 @@ grep -q "signtool verify /pa" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "MSIX deferred" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "Flatpak" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "AppImage" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "verify_platform_signing.sh" "$REPO_ROOT/scripts/release_validate.sh"
+grep -q "test-platform-signing-boundary" "$REPO_ROOT/Makefile"
 grep -q "add-mnemonic-slot" "$REPO_ROOT/docs/guides/recovery-operations.md"
 grep -q "rotate-mnemonic-slot" "$REPO_ROOT/docs/guides/recovery-operations.md"
 grep -q "rewrap-cert-slot" "$REPO_ROOT/docs/guides/recovery-operations.md"

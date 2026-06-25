@@ -58,6 +58,8 @@ Use this checklist before and after cutting a release from `main`.
 6. Confirm Homebrew, Scoop, and Chocolatey manifests were generated and published through their PR flow.
 7. Do not describe artifacts as platform-signed unless the matching platform checks in
    [Platform Installers and Signing](./platform-installers.md) passed for the published release.
+8. When validating a platform-signed release candidate, run the release validation path with
+   `PARANOID_RELEASE_SIGNING_MODE=signed` on hosts that can verify the relevant platform signature.
 
 ## Canary Expectations
 
