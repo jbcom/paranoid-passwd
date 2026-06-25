@@ -85,6 +85,16 @@ assert_fails "Windows signing helper never accepts PFX password argv" \
 assert_ok "Windows signing helper defaults to HTTPS timestamping" \
   grep -q "https://timestamp.digicert.com" "${WINDOWS_SCRIPT}"
 
+assert_fails "signed Windows signing helper rejects non-HTTPS timestamp override" \
+  env PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL="http://timestamp.example.invalid" \
+    bash "${WINDOWS_SCRIPT}" --mode signed --artifact "${win_msi}"
+
+assert_ok "MSI WXS generation XML-escapes file paths" \
+  grep -q "xml_escape" "${BUILD_SCRIPT}"
+
+assert_ok "Makefile normalizes MSYS Windows hosts" \
+  grep -q "s/\\^mingw.*/windows/" "${REPO_ROOT}/Makefile"
+
 assert_ok "unsigned macOS app helper records no-op boundary" \
   bash "${MACOS_SCRIPT}" --mode unsigned --kind app --app "${mac_app}"
 

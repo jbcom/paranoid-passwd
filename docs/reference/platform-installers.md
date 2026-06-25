@@ -61,6 +61,11 @@ defaults to `https://timestamp.digicert.com`; override it with
 `PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL` only for an approved HTTPS timestamp
 authority.
 
+The release workflow installs the pinned WiX .NET tool through a temporary
+NuGet configuration with `signatureValidationMode=require` and the official
+FireGiant package signer fingerprint
+`D95336DD2022934D80E3F3A4F938DD66EC7076BBBA680F76C11F2B54B346D61D`.
+
 The current release line has no Developer ID app signing, no Apple
 notarization, no stapled notarization ticket, no Windows Authenticode-signed
 installer, no MSIX package, no Flatpak package, and no AppImage package.

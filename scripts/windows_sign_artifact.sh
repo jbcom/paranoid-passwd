@@ -63,11 +63,20 @@ case "${mode}" in
 esac
 
 artifact_name="$(basename "${artifact}")"
+timestamp_url="${PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL:-https://timestamp.digicert.com}"
 
 if [ "${mode}" = "unsigned" ]; then
   printf 'Windows signing boundary verified as unsigned/checksummed+attested for %s\n' "${artifact_name}"
   exit 0
 fi
+
+case "${timestamp_url}" in
+  https://*) ;;
+  *)
+    echo "PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL must use https:// for signed Windows artifacts" >&2
+    exit 64
+    ;;
+esac
 
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) ;;
@@ -84,7 +93,6 @@ fi
 
 signtool_cmd="$(command -v signtool || command -v signtool.exe)"
 cert_sha1="${PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1:-}"
-timestamp_url="${PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL:-https://timestamp.digicert.com}"
 
 if [ -z "${cert_sha1}" ]; then
   echo "PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1 is required for signed Windows artifacts" >&2

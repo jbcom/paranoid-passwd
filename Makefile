@@ -12,7 +12,8 @@ DOCKER_BIN_DIR ?=
 RELEASE_VERSION ?= $(shell sed -n 's/^version = "\(.*\)"$$/\1/p' Cargo.toml | head -n 1)
 DIST_DIR ?= dist/release
 BUILDER_CONTEXT_HASH := $(shell if command -v shasum >/dev/null 2>&1; then cat .github/actions/builder/Dockerfile .github/actions/builder/entrypoint.sh | shasum -a 256 | awk '{print substr($$1,1,12)}'; else cat .github/actions/builder/Dockerfile .github/actions/builder/entrypoint.sh | sha256sum | awk '{print substr($$1,1,12)}'; fi)
-HOST_OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+HOST_OS_RAW := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+HOST_OS := $(shell printf '%s\n' "$(HOST_OS_RAW)" | sed -e 's/^mingw.*/windows/' -e 's/^msys.*/windows/' -e 's/^cygwin.*/windows/' -e 's/^darwin.*/darwin/' -e 's/^linux.*/linux/')
 HOST_ARCH := $(shell uname -m | sed -e 's/^x86_64$$/amd64/' -e 's/^aarch64$$/arm64/')
 BUILDER_PLATFORM ?= linux/$(HOST_ARCH)
 BUILDER_PLATFORM_TAG := $(subst /,-,$(BUILDER_PLATFORM))

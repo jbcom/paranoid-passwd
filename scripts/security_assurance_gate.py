@@ -1361,6 +1361,11 @@ CLAIMS: tuple[Claim, ...] = (
                 "Windows signing helper defaults to HTTPS timestamping",
             ),
             Requirement(
+                "scripts/windows_sign_artifact.sh",
+                "PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL must use https://",
+                "Windows signing helper rejects non-HTTPS timestamp overrides",
+            ),
+            Requirement(
                 ".github/workflows/release.yml",
                 "PARANOID_MACOS_CERTIFICATE_P12_BASE64",
                 "release workflow can import a macOS Developer ID certificate from secrets",
@@ -1377,13 +1382,33 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 ".github/workflows/release.yml",
+                "signatureValidationMode",
+                "release workflow requires NuGet package signature validation before installing WiX",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "D95336DD2022934D80E3F3A4F938DD66EC7076BBBA680F76C11F2B54B346D61D",
+                "release workflow trusts the official FireGiant WiX package signer fingerprint",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
                 "PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64",
                 "release workflow can import a Windows signing certificate from secrets",
             ),
             Requirement(
                 ".github/workflows/release.yml",
+                "PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL must use https://",
+                "release workflow rejects non-HTTPS Windows timestamp overrides",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
                 "paranoid-passwd-gui-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.msi",
                 "release workflow builds and smokes the Windows GUI MSI",
+            ),
+            Requirement(
+                "scripts/build_release_artifact.sh",
+                "xml_escape",
+                "release artifact builder escapes WXS attribute values",
             ),
             Requirement(
                 "scripts/verify_platform_signing.sh",
@@ -1442,8 +1467,28 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "tests/test_platform_signing_verify.sh",
+                "signed Windows signing helper rejects non-HTTPS timestamp override",
+                "contract tests prevent non-HTTPS timestamp overrides",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "MSI WXS generation XML-escapes file paths",
+                "contract tests cover WXS path escaping",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
                 "MSI payload validation can be explicitly host-deferred",
                 "contract tests cover MSI host-deferred aggregation",
+            ),
+            Requirement(
+                "Makefile",
+                "s/^mingw.*/windows/",
+                "Makefile normalizes Windows POSIX-shell host names before release branching",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "Makefile normalizes MSYS Windows hosts",
+                "contract tests cover Windows host normalization",
             ),
             Requirement(
                 "Makefile",

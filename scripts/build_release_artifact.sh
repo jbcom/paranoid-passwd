@@ -63,6 +63,15 @@ path_for_windows_tool() {
   fi
 }
 
+xml_escape() {
+  printf '%s' "$1" | sed \
+    -e 's/&/\&amp;/g' \
+    -e 's/"/\&quot;/g' \
+    -e "s/'/\&apos;/g" \
+    -e 's/</\&lt;/g' \
+    -e 's/>/\&gt;/g'
+}
+
 add_linux_gui_metadata() {
   local share_root="$1"
 
@@ -243,9 +252,9 @@ build_msi_package() {
     --artifact "${stage_dir}/${PRODUCT_NAME}${EXT}"
 
   wxs_path="${stage_root}/${stage_name}.wxs"
-  exe_source="$(path_for_windows_tool "${stage_dir}/${PRODUCT_NAME}${EXT}")"
-  license_source="$(path_for_windows_tool "${stage_dir}/LICENSE")"
-  readme_source="$(path_for_windows_tool "${stage_dir}/README.md")"
+  exe_source="$(xml_escape "$(path_for_windows_tool "${stage_dir}/${PRODUCT_NAME}${EXT}")")"
+  license_source="$(xml_escape "$(path_for_windows_tool "${stage_dir}/LICENSE")")"
+  readme_source="$(xml_escape "$(path_for_windows_tool "${stage_dir}/README.md")")"
 
   cat > "${wxs_path}" <<WXS
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">

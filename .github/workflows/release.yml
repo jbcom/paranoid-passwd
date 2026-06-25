@@ -177,7 +177,21 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          dotnet tool install --global wix --version $env:PARANOID_WIX_VERSION
+          $nugetConfig = Join-Path $env:RUNNER_TEMP "wix-nuget.config"
+          @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <config>
+              <add key="signatureValidationMode" value="require" />
+            </config>
+            <trustedSigners>
+              <author name="firegiant">
+                <certificate fingerprint="D95336DD2022934D80E3F3A4F938DD66EC7076BBBA680F76C11F2B54B346D61D" hashAlgorithm="SHA256" allowUntrustedRoot="false" />
+              </author>
+            </trustedSigners>
+          </configuration>
+          "@ | Set-Content -Path $nugetConfig -Encoding utf8
+          dotnet tool install --global wix --version $env:PARANOID_WIX_VERSION --configfile $nugetConfig
           "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & "$env:USERPROFILE\.dotnet\tools\wix.exe" --version
 
@@ -216,6 +230,10 @@ jobs:
             "PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
           if ($env:PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL) {
+            if ($env:PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL -notmatch '^https://') {
+              Write-Error "PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL must use https://"
+              exit 1
+            }
             "PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL=$env:PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
 
