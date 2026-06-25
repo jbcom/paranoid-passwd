@@ -220,7 +220,7 @@ _quality-emulate: _builder-image
 		--mount type=volume,source="$(QUALITY_EMULATE_TARGET_VOLUME)",target=/cargo-target \
 		-w /github/workspace \
 		"$(BUILDER_IMAGE)" \
-		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 PARANOID_BUILDER_SCANNER_SUBSET=1 PARANOID_RUN_LOCAL_SCANNERS=1; make verify-deep; make ci; make test-gui-visual-regression'"
+		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_HOME=/tmp/cargo CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 PARANOID_BUILDER_SCANNER_SUBSET=1 PARANOID_RUN_LOCAL_SCANNERS=1 && make verify-deep && make ci && make test-gui-visual-regression'"
 	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(QUALITY_EMULATE_TARGET_VOLUME)" >/dev/null 2>&1 || true
 
 package-release: ## Build and package the host-native CLI and GUI release archives into $(DIST_DIR)
