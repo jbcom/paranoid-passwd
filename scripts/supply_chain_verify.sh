@@ -62,6 +62,11 @@ TRIVY_APK_VERSION="${TRIVY_APK_VERSION:-}"
 CODEQL_ACTION_VERSION="${CODEQL_ACTION_VERSION:-}"
 CODEQL_ACTION_SHA="${CODEQL_ACTION_SHA:-}"
 HOST_LOCAL_SCANNER_TOOLS="${HOST_LOCAL_SCANNER_TOOLS:-}"
+HOST_SHELLCHECK_VERSION="${HOST_SHELLCHECK_VERSION:-}"
+HOST_CARGO_DENY_VERSION="${HOST_CARGO_DENY_VERSION:-}"
+HOST_CARGO_AUDIT_VERSION="${HOST_CARGO_AUDIT_VERSION:-}"
+HOST_CARGO_VET_VERSION="${HOST_CARGO_VET_VERSION:-}"
+HOST_CODEQL_CLI_VERSION="${HOST_CODEQL_CLI_VERSION:-}"
 
 if require_manifest_var SCANNER_TOOLCHAIN_SCHEMA_VERSION \
   && require_manifest_var BUILDER_SCANNER_TOOLS \
@@ -75,7 +80,12 @@ if require_manifest_var SCANNER_TOOLCHAIN_SCHEMA_VERSION \
   && require_manifest_var TRIVY_APK_VERSION \
   && require_manifest_var CODEQL_ACTION_VERSION \
   && require_manifest_var CODEQL_ACTION_SHA \
-  && require_manifest_var HOST_LOCAL_SCANNER_TOOLS; then
+  && require_manifest_var HOST_LOCAL_SCANNER_TOOLS \
+  && require_manifest_var HOST_SHELLCHECK_VERSION \
+  && require_manifest_var HOST_CARGO_DENY_VERSION \
+  && require_manifest_var HOST_CARGO_AUDIT_VERSION \
+  && require_manifest_var HOST_CARGO_VET_VERSION \
+  && require_manifest_var HOST_CODEQL_CLI_VERSION; then
   pass "scanner toolchain manifest is present and complete"
 else
   fail "scanner toolchain manifest is incomplete"
@@ -230,6 +240,19 @@ for host_tool in $HOST_LOCAL_SCANNER_TOOLS; do
     :
   else
     fail "host-local scanner tool $host_tool is listed in the manifest but missing from xtask visibility checks"
+  fi
+done
+
+for host_version_key in \
+  HOST_SHELLCHECK_VERSION \
+  HOST_CARGO_DENY_VERSION \
+  HOST_CARGO_AUDIT_VERSION \
+  HOST_CARGO_VET_VERSION \
+  HOST_CODEQL_CLI_VERSION; do
+  if contains_fixed "$host_version_key" "$REPO_ROOT/xtask/src/main.rs"; then
+    :
+  else
+    fail "host-local scanner version key $host_version_key is missing from xtask version checks"
   fi
 done
 

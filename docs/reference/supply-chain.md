@@ -111,9 +111,11 @@ the source of truth for:
 - the pinned `github/codeql-action` version and commit SHA used by workflow CodeQL jobs
 - host-local scanner tools that `xtask` must continue to discover for `make verify-deep` /
   `make quality`
+- host-local scanner versions for ShellCheck, cargo-deny, cargo-audit, cargo-vet, and the CodeQL CLI
+  when `make quality` enables strict local-tool checking
 
 `scripts/supply_chain_verify.sh` sources the manifest and fails if the Dockerfile, workflow CodeQL
 references, or `xtask` local-tool visibility checks drift from it. Updating a scanner therefore
-requires changing the manifest, updating the corresponding builder or workflow reference, and
-rerunning the assurance gate rather than letting the runner or workstation resolve a new scanner
-version implicitly.
+requires changing the manifest, updating the corresponding builder, workflow reference, or host
+version check, and rerunning the assurance gate plus `make quality` rather than letting the runner
+or workstation resolve a new scanner version implicitly.
