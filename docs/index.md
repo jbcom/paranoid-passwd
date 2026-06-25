@@ -18,7 +18,7 @@ It ships native tools for daily use, scripting, and recovery operations:
 - `paranoid-vault` stores encrypted local `Login`, `SecureNote`, `Card`, and `Identity` records with explicit recovery posture.
 - the public website is docs and downloads only; the retired browser generator and JavaScript
   trust boundary are gone from the product surface.
-- remaining open crypto/statistics dispositions are tracked as assurance claims instead of scattered source comments.
+- closed crypto/statistics, keyslot, ops, audit, and seal dispositions are tracked as assurance claims instead of scattered source comments.
 - the project is licensed as `GPL-3.0-only`, which keeps the password manager open source
   under a reciprocal license and enables Slint's GPLv3 native GUI path.
 - future Slint WASM or mobile targets must be explicit Rust/Slint surfaces with their own

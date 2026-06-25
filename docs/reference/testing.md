@@ -8,7 +8,7 @@ The native product line keeps generator, vault, and release behavior covered in 
 keeping the retired browser app out of the product surface. Slint WASM and mobile targets are
 treated as explicit Rust-native target surfaces with their own threat model and local checks.
 
-The remaining open disposition surface is tracked separately in
+The closed AI review disposition surface is tracked separately in
 [AI Review Surface](./ai-review.md) and mapped to [Assurance Claims](./assurance-claims.md).
 The repository enforces that inventory with `scripts/verify_ai_review_inventory.sh` and the
 claim-led gate in `scripts/security_assurance_gate.py`.
@@ -19,7 +19,7 @@ Run the full assurance gate with:
 make verify-assurance
 ```
 
-That command verifies the hallucination checks, supply-chain checks, open AI review inventory, and
+That command verifies the hallucination checks, supply-chain checks, AI review inventory, and
 security assurance protocol wiring.
 
 ## Local Release-Candidate Quality Gate
@@ -164,7 +164,7 @@ crates. Current coverage proves that:
 - redaction removes sensitive attributes instead of copying or hashing secrets
 - hash-chain verification detects tampered event streams
 
-The remaining test expansion is now narrower:
+Future non-blocking test expansion is now narrower:
 
 - keyed correlation hashes only after the approved primitive and low-entropy secret risk are
   dispositioned
