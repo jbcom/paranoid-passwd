@@ -26,6 +26,7 @@ required=(
   "$REPO_ROOT/docs/public/install.sh"
   "$REPO_ROOT/scripts/verify_published_release.sh"
   "$REPO_ROOT/scripts/verify_platform_signing.sh"
+  "$REPO_ROOT/scripts/macos_sign_notarize.sh"
   "$REPO_ROOT/tests/test_platform_signing_verify.sh"
 )
 
@@ -51,7 +52,13 @@ fi
 grep -q "no Developer ID app signing" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "no Apple" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "scripts/verify_platform_signing.sh" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "scripts/macos_sign_notarize.sh" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "PARANOID_RELEASE_SIGNING_MODE=signed" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "PARANOID_MACOS_CODESIGN_IDENTITY" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "PARANOID_MACOS_NOTARY_KEY_PATH" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "PARANOID_MACOS_NOTARY_KEY_P8_BASE64" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "App-specific passwords are not passed to" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "Developer ID Application" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "notarytool" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "stapler validate" "$REPO_ROOT/docs/reference/platform-installers.md"

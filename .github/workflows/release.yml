@@ -9,8 +9,19 @@ on:
         description: 'Release tag to build (e.g. paranoid-passwd-v3.7.0)'
         required: true
         type: string
+      release_signing_mode:
+        description: 'Release signing mode: unsigned or signed'
+        required: false
+        default: unsigned
+        type: choice
+        options:
+          - unsigned
+          - signed
 
 permissions: {}
+
+env:
+  PARANOID_RELEASE_SIGNING_MODE: ${{ inputs.release_signing_mode || vars.PARANOID_RELEASE_SIGNING_MODE || 'unsigned' }}
 
 jobs:
   build-native:
@@ -80,6 +91,79 @@ jobs:
             echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig"
           } >> "$GITHUB_ENV"
 
+      - name: Import macOS signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          PARANOID_MACOS_CODESIGN_IDENTITY: ${{ secrets.PARANOID_MACOS_CODESIGN_IDENTITY }}
+          PARANOID_MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.PARANOID_MACOS_CERTIFICATE_P12_BASE64 }}
+          PARANOID_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.PARANOID_MACOS_CERTIFICATE_PASSWORD }}
+          PARANOID_MACOS_KEYCHAIN_PASSWORD: ${{ secrets.PARANOID_MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          if [ "${PARANOID_RELEASE_SIGNING_MODE}" != "signed" ]; then
+            echo "macOS release signing mode is unsigned; skipping certificate import"
+            exit 0
+          fi
+          if [ -z "${PARANOID_MACOS_CODESIGN_IDENTITY:-}" ]; then
+            echo "::error::PARANOID_MACOS_CODESIGN_IDENTITY is required when PARANOID_RELEASE_SIGNING_MODE=signed"
+            exit 1
+          fi
+          if [ -z "${PARANOID_MACOS_CERTIFICATE_P12_BASE64:-}" ]; then
+            echo "::notice::No PARANOID_MACOS_CERTIFICATE_P12_BASE64 secret was provided; relying on an existing runner keychain identity"
+            exit 0
+          fi
+          if [ -z "${PARANOID_MACOS_CERTIFICATE_PASSWORD:-}" ]; then
+            echo "::error::PARANOID_MACOS_CERTIFICATE_PASSWORD is required when importing a macOS signing certificate"
+            exit 1
+          fi
+          keychain="${RUNNER_TEMP}/paranoid-signing.keychain-db"
+          cert_path="${RUNNER_TEMP}/paranoid-signing.p12"
+          keychain_password="${PARANOID_MACOS_KEYCHAIN_PASSWORD:-}"
+          if [ -z "${keychain_password}" ]; then
+            keychain_password="$(openssl rand -hex 24)"
+          fi
+          printf '%s' "${PARANOID_MACOS_CERTIFICATE_P12_BASE64}" | base64 -D > "${cert_path}"
+          security create-keychain -p "${keychain_password}" "${keychain}"
+          security set-keychain-settings -lut 21600 "${keychain}"
+          security unlock-keychain -p "${keychain_password}" "${keychain}"
+          security import "${cert_path}" -k "${keychain}" -P "${PARANOID_MACOS_CERTIFICATE_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/security
+          security list-keychains -d user -s "${keychain}"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${keychain_password}" "${keychain}"
+
+      - name: Prepare macOS notarization credentials
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE: ${{ secrets.PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE }}
+          PARANOID_MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.PARANOID_MACOS_NOTARY_KEY_P8_BASE64 }}
+          PARANOID_MACOS_NOTARY_KEY_ID: ${{ secrets.PARANOID_MACOS_NOTARY_KEY_ID }}
+          PARANOID_MACOS_NOTARY_ISSUER: ${{ secrets.PARANOID_MACOS_NOTARY_ISSUER }}
+        run: |
+          if [ "${PARANOID_RELEASE_SIGNING_MODE}" != "signed" ]; then
+            echo "macOS release signing mode is unsigned; skipping notarization credential preparation"
+            exit 0
+          fi
+          if [ -n "${PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE:-}" ]; then
+            echo "Using configured macOS notarization keychain profile"
+            exit 0
+          fi
+          if [ -z "${PARANOID_MACOS_NOTARY_KEY_P8_BASE64:-}" ]; then
+            echo "::error::PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE or PARANOID_MACOS_NOTARY_KEY_P8_BASE64 is required when PARANOID_RELEASE_SIGNING_MODE=signed"
+            exit 1
+          fi
+          if [ -z "${PARANOID_MACOS_NOTARY_KEY_ID:-}" ] || [ -z "${PARANOID_MACOS_NOTARY_ISSUER:-}" ]; then
+            echo "::error::PARANOID_MACOS_NOTARY_KEY_ID and PARANOID_MACOS_NOTARY_ISSUER are required with PARANOID_MACOS_NOTARY_KEY_P8_BASE64"
+            exit 1
+          fi
+          notary_key_path="${RUNNER_TEMP}/paranoid-notary-key.p8"
+          printf '%s' "${PARANOID_MACOS_NOTARY_KEY_P8_BASE64}" | base64 -D > "${notary_key_path}"
+          chmod 600 "${notary_key_path}"
+          {
+            echo "PARANOID_MACOS_NOTARY_KEY_PATH=${notary_key_path}"
+            echo "PARANOID_MACOS_NOTARY_KEY_ID=${PARANOID_MACOS_NOTARY_KEY_ID}"
+            echo "PARANOID_MACOS_NOTARY_ISSUER=${PARANOID_MACOS_NOTARY_ISSUER}"
+          } >> "$GITHUB_ENV"
+
       - name: Install OpenSSL build dependencies (Windows)
         if: runner.os == 'Windows'
         shell: powershell
@@ -115,6 +199,8 @@ jobs:
           PARANOID_CLI_BUILD_DATE: ${{ github.event.release.published_at || github.event.repository.updated_at }}
           PARANOID_GUI_BUILD_COMMIT: ${{ steps.commit.outputs.sha }}
           PARANOID_GUI_BUILD_DATE: ${{ github.event.release.published_at || github.event.repository.updated_at }}
+          PARANOID_MACOS_CODESIGN_IDENTITY: ${{ secrets.PARANOID_MACOS_CODESIGN_IDENTITY }}
+          PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE: ${{ secrets.PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE }}
         run: |
           mkdir -p dist/release
           bash scripts/build_release_artifact.sh '${{ steps.ver.outputs.version }}' '${{ matrix.target_os }}' '${{ matrix.target_arch }}' '${{ matrix.ext }}' '${{ matrix.archive }}' dist/release
@@ -166,6 +252,8 @@ jobs:
 
       - name: Validate artifacts, manifests, and install.sh
         uses: ./.github/actions/builder
+        env:
+          PARANOID_RELEASE_SIGNING_ALLOW_HOST_DEFERRED: "1"
         with:
           run: |
             bash scripts/release_validate.sh '${{ steps.ver.outputs.version }}' cli-dist
@@ -535,6 +623,10 @@ jobs:
             else
               printf '%s\n' "${checksum_line}" | shasum -a 256 -c -
             fi
+            bash scripts/verify_platform_signing.sh \
+              --mode "${PARANOID_RELEASE_SIGNING_MODE:-unsigned}" \
+              --artifact "${artifact}" \
+              --product '${{ matrix.product_name }}'
             if [ "${RUNNABLE}" = "true" ]; then
               bash scripts/smoke_test_release_artifact.sh "${ver}" '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "${artifact}" '${{ matrix.product_name }}'
             fi
@@ -563,6 +655,10 @@ jobs:
           else
             printf '%s\n' "${checksum_line}" | shasum -a 256 -c -
           fi
+          bash scripts/verify_platform_signing.sh \
+            --mode "${PARANOID_RELEASE_SIGNING_MODE:-unsigned}" \
+            --artifact "${artifact}" \
+            --product '${{ matrix.product_name }}'
           if [ "${RUNNABLE}" = "true" ]; then
             bash scripts/smoke_test_release_artifact.sh "${ver}" '${{ matrix.target_os }}' '${{ matrix.target_arch }}' "${artifact}" '${{ matrix.product_name }}'
           fi

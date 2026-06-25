@@ -116,6 +116,13 @@ for archive in "${EXPECTED_ASSETS[@]}"; do
     paranoid-passwd-gui-*) signing_product_name="paranoid-passwd-gui" ;;
     *) signing_product_name="paranoid-passwd" ;;
   esac
+  if [ "${PARANOID_RELEASE_SIGNING_MODE:-unsigned}" = "signed" ] \
+    && [ "${PARANOID_RELEASE_SIGNING_ALLOW_HOST_DEFERRED:-0}" = "1" ] \
+    && [[ "${archive}" == paranoid-passwd-gui-*-darwin-* ]] \
+    && [ "$(uname -s)" != "Darwin" ]; then
+    printf 'signed macOS platform verification deferred to macOS host: %s\n' "${archive}" >&2
+    continue
+  fi
   bash scripts/verify_platform_signing.sh \
     --mode "${PARANOID_RELEASE_SIGNING_MODE:-unsigned}" \
     --artifact "${DIST_DIR}/${archive}" \

@@ -60,6 +60,9 @@ Use this checklist before and after cutting a release from `main`.
    [Platform Installers and Signing](./platform-installers.md) passed for the published release.
 8. When validating a platform-signed release candidate, run the release validation path with
    `PARANOID_RELEASE_SIGNING_MODE=signed` on hosts that can verify the relevant platform signature.
+9. For macOS signed candidates, confirm the release workflow imported the Developer ID certificate
+   and that `scripts/macos_sign_notarize.sh` signed/notarized both `Paranoid Passwd.app` and the
+   GUI `.dmg` before publication.
 
 ## Canary Expectations
 

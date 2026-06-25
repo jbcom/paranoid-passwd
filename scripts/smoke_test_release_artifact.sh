@@ -111,6 +111,32 @@ extract_dmg() {
   search_root="${mount_point}"
 }
 
+stage_dmg_app_for_execution() {
+  local current_binary="$1"
+  local app_source
+  local staged_app
+
+  case "${current_binary}" in
+    *.app/Contents/MacOS/*) ;;
+    *)
+      printf 'binary in %s is not inside a macOS .app bundle: %s\n' "${archive_name}" "${current_binary}" >&2
+      exit 1
+      ;;
+  esac
+
+  app_source="${current_binary%%.app/Contents/MacOS/*}.app"
+  staged_app="${tmpdir}/dmg-exec/$(basename "${app_source}")"
+  mkdir -p "$(dirname "${staged_app}")"
+
+  if command -v ditto >/dev/null 2>&1; then
+    ditto "${app_source}" "${staged_app}"
+  else
+    cp -R "${app_source}" "${staged_app}"
+  fi
+
+  printf '%s/Contents/MacOS/%s\n' "${staged_app}" "${PRODUCT_NAME}"
+}
+
 case "${archive_name}" in
   *.tar.gz) tar -xzf "${ARCHIVE_PATH}" -C "${tmpdir}" ;;
   *.zip) extract_zip ;;
@@ -140,24 +166,40 @@ if [ -z "${binary_path}" ]; then
   exit 1
 fi
 
+if [[ "${archive_name}" == *.dmg ]]; then
+  binary_path="$(stage_dmg_app_for_execution "${binary_path}")"
+fi
+
 chmod +x "${binary_path}" 2>/dev/null || true
 
 run_binary_output() {
   local label="$1"
+  local attempts=0
+  local max_retries="${SMOKE_SIGKILL_RETRIES:-2}"
   local output
   local status
   shift
 
-  set +e
-  output="$("$@" 2>&1)"
-  status=$?
-  set -e
-  if [ "${status}" -ne 0 ]; then
+  while :; do
+    set +e
+    output="$("$@" 2>&1)"
+    status=$?
+    set -e
+    if [ "${status}" -eq 0 ]; then
+      printf '%s\n' "${output}"
+      return 0
+    fi
+    if [ "${status}" -eq 137 ] && [ "${attempts}" -lt "${max_retries}" ]; then
+      attempts=$((attempts + 1))
+      printf '%s for %s was killed with exit code 137; retrying (%s/%s)\n' \
+        "${label}" "${archive_name}" "${attempts}" "${max_retries}" >&2
+      sleep 1
+      continue
+    fi
     printf '%s failed for %s with exit code %s\n' "${label}" "${archive_name}" "${status}" >&2
     printf '%s\n' "${output}" >&2
     exit "${status}"
-  fi
-  printf '%s\n' "${output}"
+  done
 }
 
 version_output="$(run_binary_output "version smoke" "${binary_path}" --version)"

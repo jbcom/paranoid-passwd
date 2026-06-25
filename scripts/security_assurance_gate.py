@@ -1311,6 +1311,41 @@ CLAIMS: tuple[Claim, ...] = (
                 "platform-signing verifier is mode-controlled",
             ),
             Requirement(
+                "scripts/macos_sign_notarize.sh",
+                "PARANOID_MACOS_CODESIGN_IDENTITY",
+                "macOS signing helper requires an explicit Developer ID signing identity",
+            ),
+            Requirement(
+                "scripts/macos_sign_notarize.sh",
+                "PARANOID_MACOS_NOTARY_KEY_PATH",
+                "macOS signing helper supports App Store Connect API key path credentials",
+            ),
+            Requirement(
+                "scripts/macos_sign_notarize.sh",
+                "--keychain-profile",
+                "macOS signing helper supports keychain-profile notarization credentials",
+            ),
+            Requirement(
+                "scripts/macos_sign_notarize.sh",
+                "signed macOS signing and notarization requires a macOS host",
+                "macOS signing helper fails closed outside macOS signed-mode hosts",
+            ),
+            Requirement(
+                "scripts/build_release_artifact.sh",
+                "macos_sign_notarize.sh",
+                "release artifact builder invokes the macOS signing helper for app and dmg payloads",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "PARANOID_MACOS_CERTIFICATE_P12_BASE64",
+                "release workflow can import a macOS Developer ID certificate from secrets",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "PARANOID_MACOS_NOTARY_KEY_P8_BASE64",
+                "release workflow materializes App Store Connect API key secrets as a temporary file",
+            ),
+            Requirement(
                 "scripts/verify_platform_signing.sh",
                 "signed macOS verification requires a macOS host",
                 "platform-signing verifier fails closed for macOS verification on non-mac hosts",
@@ -1329,6 +1364,11 @@ CLAIMS: tuple[Claim, ...] = (
                 "tests/test_platform_signing_verify.sh",
                 "signed macOS dmg fails without verifiable signed payload",
                 "contract tests cover signed-mode fail-closed behavior",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "signed macOS app helper requires signing identity",
+                "contract tests cover macOS signing helper credential gating",
             ),
             Requirement(
                 "Makefile",

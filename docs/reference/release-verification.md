@@ -16,7 +16,7 @@ make release-emulate
 
 `make verify-branch-protection` catches stale required-check policies before they block or silently weaken the release line.
 
-`make smoke-release` packages and verifies the host-native CLI and GUI release artifacts. On Linux hosts that includes both the direct archives and the `.deb` packages. On macOS hosts that includes the direct archives and the GUI `.dmg` image. The smoke path includes checked-in payload-layout validation before any executable smoke assertions run.
+`make smoke-release` packages and verifies the host-native CLI and GUI release artifacts. On Linux hosts that includes both the direct archives and the `.deb` packages. On macOS hosts that includes the direct archives and the GUI `.dmg` image. The smoke path includes checked-in payload-layout validation before any executable smoke assertions run. DMG smoke validation mounts the image for layout checks, then stages the `.app` bundle into a temporary directory before executing `--version` and `--help`, so local proof does not depend on executing directly from a transient read-only image mount. Executable smoke retries only exit code 137, with a bounded retry count, to tolerate transient macOS process kills without masking persistent command failures.
 
 On Linux hosts with the repository builder toolchain, packaged GUI smoke validation also
 captures a screenshot of the rendered window under Xvfb and fails if the capture is blank or

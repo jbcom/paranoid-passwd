@@ -316,7 +316,7 @@ make smoke-release
 make release-emulate
 ```
 
-- `make smoke-release` builds and smoke-tests the host-native CLI and GUI artifacts, including Linux `.deb` packages on Linux hosts and the GUI `.dmg` image on macOS hosts.
+- `make smoke-release` builds and smoke-tests the host-native CLI and GUI artifacts, including Linux `.deb` packages on Linux hosts and the GUI `.dmg` image on macOS hosts. DMG smoke validation mounts the image for layout inspection and stages the `.app` bundle before executable checks. Exit code 137 is retried with a bounded retry count to keep transient macOS process kills from weakening the release gate.
 - `make release-emulate` drives the Linux release packaging path through the custom builder image, including `.deb` outputs.
 - Linux GUI smoke validation now includes an Xvfb-backed screenshot capture of the packaged
   GUI window so the release path proves a real frame renders instead of only checking
