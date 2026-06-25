@@ -40,6 +40,7 @@ fi
 stage_name="${PRODUCT_NAME}-${VERSION}-${TARGET_OS}-${TARGET_ARCH}"
 stage_root="${OUT_DIR}/stage"
 stage_dir="${stage_root}/${stage_name}"
+source scripts/release_path_utils.sh
 if [ "${ARCHIVE}" = "deb" ]; then
   artifact="${OUT_DIR}/${PRODUCT_NAME}_${VERSION}_${TARGET_ARCH}.deb"
 elif [ "${ARCHIVE}" = "dmg" ]; then
@@ -54,14 +55,6 @@ target_root="${CARGO_TARGET_DIR:-target}"
 target_root="${target_root%/}"
 binary_path="${target_root}/release/${PRODUCT_NAME}${EXT}"
 release_signing_mode="${PARANOID_RELEASE_SIGNING_MODE:-unsigned}"
-
-path_for_windows_tool() {
-  if command -v cygpath >/dev/null 2>&1; then
-    cygpath -w "$1"
-  else
-    printf '%s\n' "$1"
-  fi
-}
 
 xml_escape() {
   printf '%s' "$1" | sed \
@@ -258,7 +251,7 @@ build_msi_package() {
 
   cat > "${wxs_path}" <<WXS
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Id="com.jbcom.paranoid-passwd.gui" Name="Paranoid Passwd"
+  <Package Id="*" Name="Paranoid Passwd"
            Manufacturer="Jon Bogaty" Version="${VERSION}"
            UpgradeCode="2f79e1b5-49e4-4a8a-a6a8-1ecda82af8fe">
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />

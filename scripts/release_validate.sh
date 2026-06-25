@@ -134,6 +134,13 @@ for archive in "${EXPECTED_ASSETS[@]}"; do
     printf 'signed macOS platform verification deferred to macOS host: %s\n' "${archive}" >&2
     continue
   fi
+  if [ "${PARANOID_RELEASE_SIGNING_MODE:-unsigned}" = "signed" ] \
+    && [ "${PARANOID_RELEASE_SIGNING_ALLOW_HOST_DEFERRED:-0}" = "1" ] \
+    && [[ "${archive}" == *.msi ]] \
+    && [[ "$(uname -s)" != MINGW* && "$(uname -s)" != MSYS* && "$(uname -s)" != CYGWIN* ]]; then
+    printf 'signed Windows platform verification deferred to Windows host: %s\n' "${archive}" >&2
+    continue
+  fi
   bash scripts/verify_platform_signing.sh \
     --mode "${PARANOID_RELEASE_SIGNING_MODE:-unsigned}" \
     --artifact "${DIST_DIR}/${archive}" \

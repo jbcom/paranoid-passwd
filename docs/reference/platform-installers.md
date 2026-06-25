@@ -65,6 +65,11 @@ The release workflow installs the pinned WiX .NET tool through a temporary
 NuGet configuration with `signatureValidationMode=require` and the official
 FireGiant package signer fingerprint
 `D95336DD2022934D80E3F3A4F938DD66EC7076BBBA680F76C11F2B54B346D61D`.
+Generated MSI packages use WiX-owned package-code generation (`Package Id="*"`)
+so each installer build receives a valid package GUID. Non-Windows aggregation
+may only defer signed MSI signature verification when
+`PARANOID_RELEASE_SIGNING_ALLOW_HOST_DEFERRED=1`; the Windows host still performs
+the Authenticode verification path.
 
 The current release line has no Developer ID app signing, no Apple
 notarization, no stapled notarization ticket, no Windows Authenticode-signed

@@ -65,6 +65,8 @@ grep -q "PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64" "$REPO_ROOT/docs/reference/pla
 grep -q "PFX passwords are not accepted" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "https://timestamp.digicert.com" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "D95336DD2022934D80E3F3A4F938DD66EC7076BBBA680F76C11F2B54B346D61D" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -Fq 'Package Id="*"' "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "PARANOID_RELEASE_SIGNING_ALLOW_HOST_DEFERRED=1" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "Developer ID Application" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "notarytool" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "stapler validate" "$REPO_ROOT/docs/reference/platform-installers.md"

@@ -16,14 +16,7 @@ payload_root=""
 control_root=""
 mounted_dmg=""
 msi_deferred=0
-
-path_for_windows_tool() {
-  if command -v cygpath >/dev/null 2>&1; then
-    cygpath -w "$1"
-  else
-    printf '%s\n' "$1"
-  fi
-}
+source scripts/release_path_utils.sh
 
 extract_zip() {
   if [ -z "${PYTHON_BIN}" ]; then
@@ -259,9 +252,9 @@ case "${PRODUCT_NAME}:${TARGET_OS}:${archive_name}" in
     ;;
   paranoid-passwd-gui:windows:*)
     if [[ "${archive_name}" == *.msi ]]; then
-      binary_path="$(find "${payload_root}" -type f -name "${PRODUCT_NAME}.exe" | head -n 1)"
-      license_path="$(find "${payload_root}" -type f -name LICENSE | head -n 1)"
-      readme_path="$(find "${payload_root}" -type f -name README.md | head -n 1)"
+      binary_path="$(find_exactly_one_file_named "${payload_root}" "${PRODUCT_NAME}.exe" "${PRODUCT_NAME}.exe")"
+      license_path="$(find_exactly_one_file_named "${payload_root}" "LICENSE" LICENSE)"
+      readme_path="$(find_exactly_one_file_named "${payload_root}" "README.md" README.md)"
       test -n "${binary_path}"
       test -n "${license_path}"
       test -n "${readme_path}"

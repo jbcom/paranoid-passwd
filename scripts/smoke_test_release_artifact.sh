@@ -14,14 +14,7 @@ stage_name="${PRODUCT_NAME}-${VERSION}-${TARGET_OS}-${TARGET_ARCH}"
 tmpdir="$(mktemp -d)"
 search_root="${tmpdir}/${stage_name}"
 mounted_dmg=""
-
-path_for_windows_tool() {
-  if command -v cygpath >/dev/null 2>&1; then
-    cygpath -w "$1"
-  else
-    printf '%s\n' "$1"
-  fi
-}
+source scripts/release_path_utils.sh
 
 if [[ "${archive_name}" == *.dmg ]]; then
   bash scripts/assert_release_payload.sh \
@@ -190,14 +183,11 @@ if [[ "${archive_name}" != *.dmg ]]; then
     "${PRODUCT_NAME}"
 fi
 
-binary_path="$(
-  find "${search_root}" -type f \
-    \( -name "${PRODUCT_NAME}" -o -name "${PRODUCT_NAME}.exe" \) | head -n 1
-)"
-if [ -z "${binary_path}" ]; then
-  echo "binary not found in ${ARCHIVE_PATH}" >&2
-  exit 1
-fi
+binary_path="$(find_exactly_one_file_named \
+  "${search_root}" \
+  "${PRODUCT_NAME} binary" \
+  "${PRODUCT_NAME}" \
+  "${PRODUCT_NAME}.exe")"
 
 if [[ "${archive_name}" == *.dmg ]]; then
   binary_path="$(stage_dmg_app_for_execution "${binary_path}")"
