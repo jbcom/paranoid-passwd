@@ -1356,6 +1356,11 @@ CLAIMS: tuple[Claim, ...] = (
                 "Windows signing helper rejects password-on-argv signing",
             ),
             Requirement(
+                "scripts/windows_sign_artifact.sh",
+                "https://timestamp.digicert.com",
+                "Windows signing helper defaults to HTTPS timestamping",
+            ),
+            Requirement(
                 ".github/workflows/release.yml",
                 "PARANOID_MACOS_CERTIFICATE_P12_BASE64",
                 "release workflow can import a macOS Developer ID certificate from secrets",
@@ -1429,6 +1434,11 @@ CLAIMS: tuple[Claim, ...] = (
                 "tests/test_platform_signing_verify.sh",
                 "Windows signing helper never accepts PFX password argv",
                 "contract tests prevent password-on-argv Windows signing regressions",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "Windows signing helper defaults to HTTPS timestamping",
+                "contract tests prevent unsigned HTTP timestamp regressions",
             ),
             Requirement(
                 "tests/test_platform_signing_verify.sh",

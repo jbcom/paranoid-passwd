@@ -63,6 +63,7 @@ grep -q "App-specific passwords are not passed to" "$REPO_ROOT/docs/reference/pl
 grep -q "PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "PFX passwords are not accepted" "$REPO_ROOT/docs/reference/platform-installers.md"
+grep -q "https://timestamp.digicert.com" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "Developer ID Application" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "notarytool" "$REPO_ROOT/docs/reference/platform-installers.md"
 grep -q "stapler validate" "$REPO_ROOT/docs/reference/platform-installers.md"

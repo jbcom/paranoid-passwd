@@ -82,6 +82,9 @@ assert_fails "macOS signing helper never passes notarization password argv" \
 assert_fails "Windows signing helper never accepts PFX password argv" \
   grep -Eq -- '(^|[[:space:]])/p([[:space:]]|$)|CERTIFICATE_PASSWORD' "${WINDOWS_SCRIPT}"
 
+assert_ok "Windows signing helper defaults to HTTPS timestamping" \
+  grep -q "https://timestamp.digicert.com" "${WINDOWS_SCRIPT}"
+
 assert_ok "unsigned macOS app helper records no-op boundary" \
   bash "${MACOS_SCRIPT}" --mode unsigned --kind app --app "${mac_app}"
 

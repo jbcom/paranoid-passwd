@@ -15,7 +15,9 @@ unsigned mode records the current checksummed+attested release boundary.
 signed mode requires a Windows host, signtool, and
 PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1 for a certificate already imported into
 the current user's certificate store. PFX passwords are intentionally not
-accepted here so secrets are not passed through process argv.
+accepted here so secrets are not passed through process argv. The timestamp
+endpoint defaults to HTTPS and can be overridden with
+PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL.
 EOF
 }
 
@@ -82,7 +84,7 @@ fi
 
 signtool_cmd="$(command -v signtool || command -v signtool.exe)"
 cert_sha1="${PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1:-}"
-timestamp_url="${PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL:-http://timestamp.digicert.com}"
+timestamp_url="${PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL:-https://timestamp.digicert.com}"
 
 if [ -z "${cert_sha1}" ]; then
   echo "PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1 is required for signed Windows artifacts" >&2

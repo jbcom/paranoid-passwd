@@ -56,7 +56,10 @@ imported into the current user's certificate store. The release workflow can
 import that certificate from `PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64` and
 `PARANOID_WINDOWS_CERTIFICATE_PASSWORD`, then pass only the imported
 certificate thumbprint to the helper. PFX passwords are not accepted by the
-helper and are not passed to `signtool` as command-line arguments.
+helper and are not passed to `signtool` as command-line arguments. Timestamping
+defaults to `https://timestamp.digicert.com`; override it with
+`PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL` only for an approved HTTPS timestamp
+authority.
 
 The current release line has no Developer ID app signing, no Apple
 notarization, no stapled notarization ticket, no Windows Authenticode-signed
