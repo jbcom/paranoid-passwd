@@ -104,8 +104,9 @@ The current disposition is:
 
 - password recovery through Argon2id is default-profile only under the strict federal-ready policy
 - mnemonic recovery through BIP39 is default-profile only under the strict federal-ready policy
-- device-bound unlock is default-profile only until the secure-storage provider boundary is
-  separately dispositioned
+- device-bound unlock is default-profile only: the secure-storage provider boundary is
+  dispositioned for local daily unlock, but not for portable recovery, remote auto-unseal, or the
+  strict federal-ready unlock path
 - certificate-wrapped unlock is the current strict federal-ready unlock path, gated by required
   audit evidence, approved-mode provider evidence, seal posture evidence, certificate-unseal
   provider evidence, and fresh operator proof

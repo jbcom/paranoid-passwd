@@ -51,7 +51,7 @@ That means backup export/import preserves the same keyslot model, encrypted item
 - certificate-wrapped slots
 - device-bound slots
 
-Export does not decrypt items into a new storage format. Restore recreates a normal `vault.sqlite` file from the serialized encrypted rows and header.
+Export does not decrypt items into a new storage format. Restore recreates a normal `vault.sqlite` file from the serialized encrypted rows and header. Device-bound backup semantics are intentionally same-device only: the package preserves the device keyslot metadata and check blob, but it does not contain the device secure-storage secret. A restore can use that slot only if the same platform secure-storage account is still present and the check blob verifies the exact 256-bit master-key candidate.
 
 Backup packages can now be inspected before restore through a read-only `VaultBackupSummary`, which reports item-kind counts, keyslot posture, keyslot detail summaries including certificate metadata, and whether the current build can restore the package directly without mutating a live vault.
 
@@ -98,7 +98,7 @@ Mnemonic recovery slots use a 24-word English BIP39 phrase as a wallet-style rec
 
 Certificate slots wrap the same master key with an X.509 recipient certificate using OpenSSL CMS envelope encryption. The header also stores public certificate metadata needed for lifecycle management, including the fingerprint, subject, validity window, and canonical epoch values used by the shared keyslot-health layer. This preserves one vault format while allowing multiple unlock paths.
 
-Device-bound slots store the unwrap secret in platform secure storage and keep only an AES-256-GCM verification blob plus keyring metadata in the SQLite header. That gives the product passwordless daily unlock without collapsing recovery or certificate support into the same path.
+Device-bound slots store the unwrap secret in platform secure storage and keep only an AES-256-GCM verification blob plus keyring metadata in the SQLite header. Unlock rejects missing, wrong-length, deleted, or tampered secure-storage values before exposing plaintext vault state. That gives the product passwordless daily unlock without collapsing recovery or certificate support into the same path, and it remains a default-profile local convenience path rather than portable recovery or the strict federal-ready unlock path.
 
 The lifecycle stays explicit in the application layer: interactive and headless native surfaces can inspect slots, compute a shared recovery posture, emit shared recovery recommendations, enroll new mnemonic/device/certificate slots, rotate mnemonic recovery slots in place, rotate the password recovery slot in place, remove non-recovery slots, and rebind device-bound slots to a fresh secure-storage account without changing the underlying SQLite file format. Native certificate rewrap forms can also update the active certificate key path and passphrase alongside the replacement recipient certificate so session continuity does not depend on stale unlock material after a rotation.
 

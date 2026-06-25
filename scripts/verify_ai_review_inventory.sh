@@ -30,7 +30,6 @@ normalize_inventory() {
 
 expected_inventory() {
   cat <<'EOF'
-crates/paranoid-vault/src/lib.rs:        // TODO: AI_REVIEW - confirm the device-bound keyslot design of storing the raw master key in OS secure storage plus an AES-GCM verification blob is acceptable across macOS, Windows, and Linux secret stores.
 crates/paranoid-vault/src/lib.rs:        // TODO: AI_REVIEW - confirm using 24-word BIP39 entropy directly as the AES-256-GCM wrapping key for mnemonic recovery slots is the right recovery construction.
 crates/paranoid-vault/src/lib.rs:    // TODO: AI_REVIEW - confirm CMS recipient selection and content-encryption policy for certificate-wrapped keyslots.
 EOF
@@ -66,7 +65,7 @@ else
   pass "source TODO inventory matches the expected AI review surface"
 fi
 
-if rg -F "expected open AI review sites: **3**" "$DOC" >/dev/null 2>&1; then
+if rg -F "expected open AI review sites: **2**" "$DOC" >/dev/null 2>&1; then
   pass "AI review reference doc tracks the expected open-site count"
 else
   fail "AI review reference doc must state the expected open-site count"
@@ -87,6 +86,9 @@ for required in \
   "seal.lifecycle-boundary" \
   "Seal lifecycle posture model" \
   "Device-bound keyslot design" \
+  "device_keyslot_rejects_tampered_secure_storage_secret" \
+  "device_keyslot_rejects_wrong_length_secure_storage_secret" \
+  "backup_does_not_export_device_secure_storage_secret" \
   "Mnemonic recovery construction" \
   "Certificate-wrapped keyslots"
 do
