@@ -43,6 +43,7 @@ artifact_name="$(basename "${artifact}")"
 target_root="${CARGO_TARGET_DIR:-target}"
 target_root="${target_root%/}"
 binary_path="${target_root}/release/${PRODUCT_NAME}${EXT}"
+macos_signing_mode="${PARANOID_RELEASE_SIGNING_MODE:-unsigned}"
 
 add_linux_gui_metadata() {
   local share_root="$1"
@@ -180,55 +181,17 @@ build_dmg_package() {
     -ov \
     -format UDZO \
     "${artifact}"
+  bash scripts/macos_sign_notarize.sh \
+    --mode "${macos_signing_mode}" \
+    --kind dmg \
+    --dmg "${artifact}"
 }
 
-rm -rf "${stage_dir}"
-mkdir -p "${stage_dir}"
+stage_macos_gui_app() {
+  local app_name="Paranoid Passwd.app"
+  local bundle_root="${stage_dir}/${app_name}/Contents"
+  local bundle_exec_dir="${bundle_root}/MacOS"
 
-cargo build -p "${CARGO_PACKAGE}" --release --locked --frozen --offline
-
-if [ "${ARCHIVE}" = "deb" ]; then
-  build_deb_package
-elif [ "${ARCHIVE}" = "dmg" ]; then
-  if [ "${PRODUCT_NAME}" = "paranoid-passwd-gui" ] && [ "${TARGET_OS}" = "darwin" ]; then
-    app_name="Paranoid Passwd.app"
-    bundle_root="${stage_dir}/${app_name}/Contents"
-    bundle_exec_dir="${bundle_root}/MacOS"
-    mkdir -p "${bundle_exec_dir}"
-    cp "${binary_path}" "${bundle_exec_dir}/${PRODUCT_NAME}"
-    cat > "${bundle_root}/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleDevelopmentRegion</key>
-  <string>en</string>
-  <key>CFBundleExecutable</key>
-  <string>${PRODUCT_NAME}</string>
-  <key>CFBundleIdentifier</key>
-  <string>com.jbcom.paranoid-passwd.gui</string>
-  <key>CFBundleInfoDictionaryVersion</key>
-  <string>6.0</string>
-  <key>CFBundleName</key>
-  <string>Paranoid Passwd</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleShortVersionString</key>
-  <string>${VERSION}</string>
-  <key>CFBundleVersion</key>
-  <string>${VERSION}</string>
-  <key>LSMinimumSystemVersion</key>
-  <string>12.0</string>
-  <key>NSHighResolutionCapable</key>
-  <true/>
-</dict>
-</plist>
-PLIST
-  fi
-elif [ "${PRODUCT_NAME}" = "paranoid-passwd-gui" ] && [ "${TARGET_OS}" = "darwin" ]; then
-  app_name="Paranoid Passwd.app"
-  bundle_root="${stage_dir}/${app_name}/Contents"
-  bundle_exec_dir="${bundle_root}/MacOS"
   mkdir -p "${bundle_exec_dir}"
   cp "${binary_path}" "${bundle_exec_dir}/${PRODUCT_NAME}"
   cat > "${bundle_root}/Info.plist" <<PLIST
@@ -259,6 +222,25 @@ elif [ "${PRODUCT_NAME}" = "paranoid-passwd-gui" ] && [ "${TARGET_OS}" = "darwin
 </dict>
 </plist>
 PLIST
+  bash scripts/macos_sign_notarize.sh \
+    --mode "${macos_signing_mode}" \
+    --kind app \
+    --app "${stage_dir}/${app_name}"
+}
+
+rm -rf "${stage_dir}"
+mkdir -p "${stage_dir}"
+
+cargo build -p "${CARGO_PACKAGE}" --release --locked --frozen --offline
+
+if [ "${ARCHIVE}" = "deb" ]; then
+  build_deb_package
+elif [ "${ARCHIVE}" = "dmg" ]; then
+  if [ "${PRODUCT_NAME}" = "paranoid-passwd-gui" ] && [ "${TARGET_OS}" = "darwin" ]; then
+    stage_macos_gui_app
+  fi
+elif [ "${PRODUCT_NAME}" = "paranoid-passwd-gui" ] && [ "${TARGET_OS}" = "darwin" ]; then
+  stage_macos_gui_app
 else
   cp "${binary_path}" "${stage_dir}/"
 fi

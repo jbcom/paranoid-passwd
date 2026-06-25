@@ -319,7 +319,8 @@ selection.
 
 #### macOS
 
-- sign the GUI `.app` with a Developer ID Application identity
+- sign the GUI `.app` with a Developer ID Application identity through the
+  credential-gated `scripts/macos_sign_notarize.sh` release helper
 - notarize the signed app / disk image with `notarytool`
 - staple and verify the ticket with `stapler validate`
 - verify Gatekeeper-friendly install/open behavior with `codesign`, `spctl`, `stapler`, and
@@ -459,6 +460,7 @@ This PRD is complete when all of the following are true:
    controls now in place
 3. keep the remote dependency-update queue green and reviewable, including explicit PR thread/check
    inspection before merge
-4. implement the macOS Developer ID signing/notarization path and Windows WiX Toolset MSI path
+4. prove the macOS Developer ID signing/notarization path with configured release credentials and
+   implement the Windows WiX Toolset MSI path
 5. preserve the Recovery Operations runbook as lifecycle behavior changes
 6. update this PRD as those decisions are made

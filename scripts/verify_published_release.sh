@@ -188,6 +188,25 @@ for artifact in "${host_attested_artifacts[@]}"; do
   )
 done
 
+verify_host_platform_signing() {
+  local artifact="$1"
+  local product_name="$2"
+
+  bash scripts/verify_platform_signing.sh \
+    --mode "${PARANOID_RELEASE_SIGNING_MODE:-unsigned}" \
+    --artifact "${tmpdir}/${artifact}" \
+    --product "${product_name}"
+}
+
+verify_host_platform_signing "${host_cli_artifact}" paranoid-passwd
+verify_host_platform_signing "${host_gui_artifact}" paranoid-passwd-gui
+if [ "${host_os}" = "linux" ]; then
+  verify_host_platform_signing "${host_cli_deb}" paranoid-passwd
+  verify_host_platform_signing "${host_gui_deb}" paranoid-passwd-gui
+elif [ "${host_os}" = "darwin" ]; then
+  verify_host_platform_signing "${host_gui_dmg}" paranoid-passwd-gui
+fi
+
 bash scripts/smoke_test_release_artifact.sh "${VERSION}" "${host_os}" "${host_arch}" "${tmpdir}/${host_cli_artifact}"
 bash scripts/smoke_test_release_artifact.sh "${VERSION}" "${host_os}" "${host_arch}" "${tmpdir}/${host_gui_artifact}" paranoid-passwd-gui
 if [ "${host_os}" = "linux" ]; then

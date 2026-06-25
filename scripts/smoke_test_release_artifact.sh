@@ -111,6 +111,32 @@ extract_dmg() {
   search_root="${mount_point}"
 }
 
+stage_dmg_app_for_execution() {
+  local current_binary="$1"
+  local app_source
+  local staged_app
+
+  case "${current_binary}" in
+    *.app/Contents/MacOS/*) ;;
+    *)
+      printf 'binary in %s is not inside a macOS .app bundle: %s\n' "${archive_name}" "${current_binary}" >&2
+      exit 1
+      ;;
+  esac
+
+  app_source="${current_binary%%.app/Contents/MacOS/*}.app"
+  staged_app="${tmpdir}/dmg-exec/$(basename "${app_source}")"
+  mkdir -p "$(dirname "${staged_app}")"
+
+  if command -v ditto >/dev/null 2>&1; then
+    ditto "${app_source}" "${staged_app}"
+  else
+    cp -R "${app_source}" "${staged_app}"
+  fi
+
+  printf '%s/Contents/MacOS/%s\n' "${staged_app}" "${PRODUCT_NAME}"
+}
+
 case "${archive_name}" in
   *.tar.gz) tar -xzf "${ARCHIVE_PATH}" -C "${tmpdir}" ;;
   *.zip) extract_zip ;;
@@ -138,6 +164,10 @@ binary_path="$(
 if [ -z "${binary_path}" ]; then
   echo "binary not found in ${ARCHIVE_PATH}" >&2
   exit 1
+fi
+
+if [[ "${archive_name}" == *.dmg ]]; then
+  binary_path="$(stage_dmg_app_for_execution "${binary_path}")"
 fi
 
 chmod +x "${binary_path}" 2>/dev/null || true

@@ -33,6 +33,16 @@ fail-closed mode for future signed releases; it requires a host that can perform
 the relevant platform verification instead of silently accepting unsigned
 payloads.
 
+`scripts/macos_sign_notarize.sh` is the credential-gated macOS build helper. It
+signs and notarizes only when `PARANOID_RELEASE_SIGNING_MODE=signed`; unsigned
+local emulation remains an explicit no-op. Signed mode requires
+`PARANOID_MACOS_CODESIGN_IDENTITY` plus either
+`PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE` or the
+`PARANOID_MACOS_NOTARY_APPLE_ID`, `PARANOID_MACOS_NOTARY_TEAM_ID`, and
+`PARANOID_MACOS_NOTARY_PASSWORD` credential set. The release workflow can import
+a Developer ID certificate from `PARANOID_MACOS_CERTIFICATE_P12_BASE64` and
+`PARANOID_MACOS_CERTIFICATE_PASSWORD` before the helper runs.
+
 The current release line has no Developer ID app signing, no Apple
 notarization, no stapled notarization ticket, no Windows Authenticode-signed
 installer, no MSIX package, no Flatpak package, and no AppImage package.
@@ -72,6 +82,9 @@ hdiutil verify paranoid-passwd-gui-<version>-darwin-arm64.dmg
 The release workflow must fail closed when signing mode is requested and the
 required credentials are missing. Unsigned local release emulation may continue
 to exist, but unsigned output must stay labeled as unsigned.
+Linux release aggregation may defer signed macOS checks only when a paired macOS
+published-release verification job is responsible for running `codesign`,
+`spctl`, `stapler`, and `hdiutil` against the downloaded artifacts.
 
 The CLI/TUI binary stays archive-first and Homebrew-distributed for now. A
 macOS `.pkg` is deferred until there is a concrete install-management need that
@@ -121,6 +134,8 @@ Installer/signing work is not complete until:
 - build scripts create the installer or signed payload in-repo
 - validation scripts inspect the package layout and signature state through
   `scripts/verify_platform_signing.sh`
+- macOS signed release builds run `scripts/macos_sign_notarize.sh` for the `.app`
+  before archive/DMG creation and for the `.dmg` after image creation
 - published-release verification downloads and verifies the released artifact
 - docs name the actual shipped path without overclaiming
 - credentials are optional for local unsigned emulation but mandatory when a

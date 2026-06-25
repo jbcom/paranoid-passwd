@@ -4,6 +4,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${REPO_ROOT}/scripts/verify_platform_signing.sh"
+MACOS_SCRIPT="${REPO_ROOT}/scripts/macos_sign_notarize.sh"
 tmpdir="$(mktemp -d)"
 
 cleanup() {
@@ -47,10 +48,13 @@ assert_fails() {
 linux_archive="${tmpdir}/paranoid-passwd-1.2.3-linux-amd64.tar.gz"
 linux_deb="${tmpdir}/paranoid-passwd_1.2.3_amd64.deb"
 mac_dmg="${tmpdir}/paranoid-passwd-gui-1.2.3-darwin-arm64.dmg"
+mac_app="${tmpdir}/Paranoid Passwd.app"
 
 : > "${linux_archive}"
 : > "${linux_deb}"
 : > "${mac_dmg}"
+mkdir -p "${mac_app}/Contents/MacOS"
+: > "${mac_app}/Contents/MacOS/paranoid-passwd-gui"
 
 assert_ok "unsigned mode records current release boundary" \
   bash "${SCRIPT}" --mode unsigned --artifact "${linux_archive}" --product paranoid-passwd
@@ -66,6 +70,26 @@ assert_fails "missing artifact fails closed" \
 
 assert_fails "signed macOS dmg fails without verifiable signed payload" \
   bash "${SCRIPT}" --mode signed --artifact "${mac_dmg}" --product paranoid-passwd-gui
+
+assert_ok "unsigned macOS app helper records no-op boundary" \
+  bash "${MACOS_SCRIPT}" --mode unsigned --kind app --app "${mac_app}"
+
+assert_ok "unsigned macOS dmg helper records no-op boundary" \
+  bash "${MACOS_SCRIPT}" --mode unsigned --kind dmg --dmg "${mac_dmg}"
+
+assert_fails "signed macOS app helper requires signing identity" \
+  env -u PARANOID_MACOS_CODESIGN_IDENTITY \
+    -u PARANOID_MACOS_NOTARY_KEYCHAIN_PROFILE \
+    -u PARANOID_MACOS_NOTARY_APPLE_ID \
+    -u PARANOID_MACOS_NOTARY_TEAM_ID \
+    -u PARANOID_MACOS_NOTARY_PASSWORD \
+    bash "${MACOS_SCRIPT}" --mode signed --kind app --app "${mac_app}"
+
+assert_fails "invalid macOS signing helper kind fails closed" \
+  bash "${MACOS_SCRIPT}" --mode unsigned --kind maybe --app "${mac_app}"
+
+assert_fails "missing macOS app helper payload fails closed" \
+  bash "${MACOS_SCRIPT}" --mode unsigned --kind app --app "${tmpdir}/missing.app"
 
 printf '\n%s passed, %s failed\n' "${pass}" "${fail}"
 if [ "${fail}" -ne 0 ]; then
