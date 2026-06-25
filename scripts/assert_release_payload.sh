@@ -15,6 +15,8 @@ tmpdir="$(mktemp -d)"
 payload_root=""
 control_root=""
 mounted_dmg=""
+msi_deferred=0
+source scripts/release_path_utils.sh
 
 extract_zip() {
   if [ -z "${PYTHON_BIN}" ]; then
@@ -106,6 +108,37 @@ extract_dmg() {
   payload_root="${mount_point}"
 }
 
+extract_msi() {
+  local extract_root="${tmpdir}/msi-admin"
+  local log_path="${tmpdir}/msi-admin.log"
+
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+      if [ "${PARANOID_MSI_ALLOW_HOST_DEFERRED:-0}" = "1" ]; then
+        printf 'skipping MSI payload validation on non-Windows host: %s\n' "${archive_name}" >&2
+        payload_root="${tmpdir}/msi-deferred"
+        msi_deferred=1
+        mkdir -p "${payload_root}"
+        return 0
+      fi
+      echo "MSI payload validation requires a Windows host: ${archive_name}" >&2
+      exit 1
+      ;;
+  esac
+
+  if ! command -v msiexec.exe >/dev/null 2>&1; then
+    echo "msiexec.exe is required to inspect MSI payloads: ${archive_name}" >&2
+    exit 1
+  fi
+
+  mkdir -p "${extract_root}"
+  msiexec.exe /a "$(path_for_windows_tool "${ARCHIVE_PATH}")" /qn \
+    "TARGETDIR=$(path_for_windows_tool "${extract_root}")" \
+    "/L*v" "$(path_for_windows_tool "${log_path}")"
+  payload_root="${extract_root}"
+}
+
 cleanup() {
   if [ -n "${mounted_dmg}" ]; then
     hdiutil detach -quiet "${mounted_dmg}" >/dev/null 2>&1 || true
@@ -130,11 +163,19 @@ case "${archive_name}" in
   *.dmg)
     extract_dmg
     ;;
+  *.msi)
+    extract_msi
+    ;;
   *)
     echo "unsupported archive path: ${ARCHIVE_PATH}" >&2
     exit 64
     ;;
 esac
+
+if [ "${msi_deferred}" = "1" ]; then
+  printf 'payload layout host-deferred for %s\n' "${archive_name}"
+  exit 0
+fi
 
 if [[ "${archive_name}" == *.deb ]]; then
   control_file="${control_root}/control"
@@ -210,7 +251,16 @@ case "${PRODUCT_NAME}:${TARGET_OS}:${archive_name}" in
     grep -F "<id>com.jbcom.paranoid-passwd.gui</id>" "${appdata_path}" >/dev/null
     ;;
   paranoid-passwd-gui:windows:*)
-    test -f "${payload_root}/${PRODUCT_NAME}.exe"
+    if [[ "${archive_name}" == *.msi ]]; then
+      binary_path="$(find_exactly_one_file_named "${payload_root}" "${PRODUCT_NAME}.exe" "${PRODUCT_NAME}.exe")"
+      license_path="$(find_exactly_one_file_named "${payload_root}" "LICENSE" LICENSE)"
+      readme_path="$(find_exactly_one_file_named "${payload_root}" "README.md" README.md)"
+      test -n "${binary_path}"
+      test -n "${license_path}"
+      test -n "${readme_path}"
+    else
+      test -f "${payload_root}/${PRODUCT_NAME}.exe"
+    fi
     ;;
   *)
     echo "unsupported product/target combination: ${PRODUCT_NAME}:${TARGET_OS}" >&2

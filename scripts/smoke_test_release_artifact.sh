@@ -14,6 +14,7 @@ stage_name="${PRODUCT_NAME}-${VERSION}-${TARGET_OS}-${TARGET_ARCH}"
 tmpdir="$(mktemp -d)"
 search_root="${tmpdir}/${stage_name}"
 mounted_dmg=""
+source scripts/release_path_utils.sh
 
 if [[ "${archive_name}" == *.dmg ]]; then
   bash scripts/assert_release_payload.sh \
@@ -111,6 +112,30 @@ extract_dmg() {
   search_root="${mount_point}"
 }
 
+extract_msi() {
+  local extract_root="${tmpdir}/msi-admin"
+  local log_path="${tmpdir}/msi-admin.log"
+
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+      echo "MSI smoke validation requires a Windows host: ${archive_name}" >&2
+      exit 1
+      ;;
+  esac
+
+  if ! command -v msiexec.exe >/dev/null 2>&1; then
+    echo "msiexec.exe is required to smoke-test MSI payloads: ${archive_name}" >&2
+    exit 1
+  fi
+
+  mkdir -p "${extract_root}"
+  msiexec.exe /a "$(path_for_windows_tool "${ARCHIVE_PATH}")" /qn \
+    "TARGETDIR=$(path_for_windows_tool "${extract_root}")" \
+    "/L*v" "$(path_for_windows_tool "${log_path}")"
+  search_root="${extract_root}"
+}
+
 stage_dmg_app_for_execution() {
   local current_binary="$1"
   local app_source
@@ -142,6 +167,7 @@ case "${archive_name}" in
   *.zip) extract_zip ;;
   *.deb) extract_deb ;;
   *.dmg) extract_dmg ;;
+  *.msi) extract_msi ;;
   *)
     echo "unsupported archive path: ${ARCHIVE_PATH}" >&2
     exit 64
@@ -157,14 +183,11 @@ if [[ "${archive_name}" != *.dmg ]]; then
     "${PRODUCT_NAME}"
 fi
 
-binary_path="$(
-  find "${search_root}" -type f \
-    \( -name "${PRODUCT_NAME}" -o -name "${PRODUCT_NAME}.exe" \) | head -n 1
-)"
-if [ -z "${binary_path}" ]; then
-  echo "binary not found in ${ARCHIVE_PATH}" >&2
-  exit 1
-fi
+binary_path="$(find_exactly_one_file_named \
+  "${search_root}" \
+  "${PRODUCT_NAME} binary" \
+  "${PRODUCT_NAME}" \
+  "${PRODUCT_NAME}.exe")"
 
 if [[ "${archive_name}" == *.dmg ]]; then
   binary_path="$(stage_dmg_app_for_execution "${binary_path}")"

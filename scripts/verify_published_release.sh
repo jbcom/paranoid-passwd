@@ -37,10 +37,24 @@ EXPECTED_ASSETS=(
   "paranoid-passwd-gui_${VERSION}_arm64.deb"
 )
 
+GUI_WIN_MSI="paranoid-passwd-gui-${VERSION}-windows-amd64.msi"
+if [ "${PARANOID_REQUIRE_WINDOWS_MSI:-0}" = "1" ]; then
+  EXPECTED_ASSETS+=("${GUI_WIN_MSI}")
+fi
+
 ACTUAL_ASSETS=()
 while IFS= read -r asset; do
   ACTUAL_ASSETS+=("${asset}")
 done < <(gh release view "${TAG}" --repo "${REPO}" --json assets --jq '.assets[].name' | LC_ALL=C sort)
+
+if [ "${PARANOID_REQUIRE_WINDOWS_MSI:-0}" != "1" ]; then
+  for asset in "${ACTUAL_ASSETS[@]}"; do
+    if [ "${asset}" = "${GUI_WIN_MSI}" ]; then
+      EXPECTED_ASSETS+=("${GUI_WIN_MSI}")
+      break
+    fi
+  done
+fi
 
 EXPECTED_SORTED=()
 while IFS= read -r asset; do
@@ -90,6 +104,7 @@ fi
 
 host_cli_artifact="paranoid-passwd-${VERSION}-${host_os}-${host_arch}.${archive_ext}"
 host_gui_artifact="paranoid-passwd-gui-${VERSION}-${host_os}-${host_arch}.${archive_ext}"
+host_gui_msi="paranoid-passwd-gui-${VERSION}-${host_os}-${host_arch}.msi"
 host_gui_dmg="paranoid-passwd-gui-${VERSION}-${host_os}-${host_arch}.dmg"
 host_cli_deb="paranoid-passwd_${VERSION}_${host_arch}.deb"
 host_gui_deb="paranoid-passwd-gui_${VERSION}_${host_arch}.deb"
@@ -160,6 +175,15 @@ for artifact in "${EXPECTED_ARCHIVES[@]}"; do
       target_arch="${artifact##*_}"
       target_arch="${target_arch%.deb}"
       ;;
+    *.msi)
+      product_name="paranoid-passwd-gui"
+      base_name="${artifact%.msi}"
+      parsed_version="${base_name#${product_name}-}"
+      parsed_version="${parsed_version%%-*}"
+      target_os="${base_name#${product_name}-${parsed_version}-}"
+      target_os="${target_os%%-*}"
+      target_arch="${base_name##*-}"
+      ;;
     *)
       echo "unsupported release artifact: ${artifact}" >&2
       exit 64
@@ -179,6 +203,8 @@ if [ "${host_os}" = "linux" ]; then
   host_attested_artifacts+=("${host_cli_deb}" "${host_gui_deb}")
 elif [ "${host_os}" = "darwin" ]; then
   host_attested_artifacts+=("${host_gui_dmg}")
+elif [ "${host_os}" = "windows" ] && [ "${PARANOID_REQUIRE_WINDOWS_MSI:-0}" = "1" ]; then
+  host_attested_artifacts+=("${host_gui_msi}")
 fi
 
 for artifact in "${host_attested_artifacts[@]}"; do
@@ -205,6 +231,8 @@ if [ "${host_os}" = "linux" ]; then
   verify_host_platform_signing "${host_gui_deb}" paranoid-passwd-gui
 elif [ "${host_os}" = "darwin" ]; then
   verify_host_platform_signing "${host_gui_dmg}" paranoid-passwd-gui
+elif [ "${host_os}" = "windows" ] && [ "${PARANOID_REQUIRE_WINDOWS_MSI:-0}" = "1" ]; then
+  verify_host_platform_signing "${host_gui_msi}" paranoid-passwd-gui
 fi
 
 bash scripts/smoke_test_release_artifact.sh "${VERSION}" "${host_os}" "${host_arch}" "${tmpdir}/${host_cli_artifact}"
@@ -214,6 +242,8 @@ if [ "${host_os}" = "linux" ]; then
   bash scripts/smoke_test_release_artifact.sh "${VERSION}" "${host_os}" "${host_arch}" "${tmpdir}/${host_gui_deb}" paranoid-passwd-gui
 elif [ "${host_os}" = "darwin" ]; then
   bash scripts/smoke_test_release_artifact.sh "${VERSION}" "${host_os}" "${host_arch}" "${tmpdir}/${host_gui_dmg}" paranoid-passwd-gui
+elif [ "${host_os}" = "windows" ] && [ "${PARANOID_REQUIRE_WINDOWS_MSI:-0}" = "1" ]; then
+  bash scripts/smoke_test_release_artifact.sh "${VERSION}" "${host_os}" "${host_arch}" "${tmpdir}/${host_gui_msi}" paranoid-passwd-gui
 fi
 
 printf 'published release verified for %s (%s, %s)\n' \

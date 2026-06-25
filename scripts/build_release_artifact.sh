@@ -13,7 +13,7 @@ CARGO_PACKAGE="${8:-paranoid-cli}"
 PYTHON_BIN="${PYTHON:-$(command -v python3 || command -v python || true)}"
 
 case "${ARCHIVE}" in
-  tar.gz|zip|deb|dmg) ;;
+  tar.gz|zip|deb|dmg|msi) ;;
   *)
     echo "unsupported archive format: ${ARCHIVE}" >&2
     exit 64
@@ -28,14 +28,25 @@ if [ "${ARCHIVE}" = "dmg" ] && ! command -v hdiutil >/dev/null 2>&1; then
   echo "hdiutil is required to package dmg artifacts" >&2
   exit 1
 fi
+if [ "${ARCHIVE}" = "msi" ] && [ "${TARGET_OS}" != "windows" ]; then
+  echo "msi packaging is only supported for windows targets" >&2
+  exit 64
+fi
+if [ "${ARCHIVE}" = "msi" ] && [ "${PRODUCT_NAME}" != "paranoid-passwd-gui" ]; then
+  echo "msi packaging is only supported for paranoid-passwd-gui" >&2
+  exit 64
+fi
 
 stage_name="${PRODUCT_NAME}-${VERSION}-${TARGET_OS}-${TARGET_ARCH}"
 stage_root="${OUT_DIR}/stage"
 stage_dir="${stage_root}/${stage_name}"
+source scripts/release_path_utils.sh
 if [ "${ARCHIVE}" = "deb" ]; then
   artifact="${OUT_DIR}/${PRODUCT_NAME}_${VERSION}_${TARGET_ARCH}.deb"
 elif [ "${ARCHIVE}" = "dmg" ]; then
   artifact="${OUT_DIR}/${stage_name}.dmg"
+elif [ "${ARCHIVE}" = "msi" ]; then
+  artifact="${OUT_DIR}/${stage_name}.msi"
 else
   artifact="${OUT_DIR}/${stage_name}.${ARCHIVE}"
 fi
@@ -43,7 +54,16 @@ artifact_name="$(basename "${artifact}")"
 target_root="${CARGO_TARGET_DIR:-target}"
 target_root="${target_root%/}"
 binary_path="${target_root}/release/${PRODUCT_NAME}${EXT}"
-macos_signing_mode="${PARANOID_RELEASE_SIGNING_MODE:-unsigned}"
+release_signing_mode="${PARANOID_RELEASE_SIGNING_MODE:-unsigned}"
+
+xml_escape() {
+  printf '%s' "$1" | sed \
+    -e 's/&/\&amp;/g' \
+    -e 's/"/\&quot;/g' \
+    -e "s/'/\&apos;/g" \
+    -e 's/</\&lt;/g' \
+    -e 's/>/\&gt;/g'
+}
 
 add_linux_gui_metadata() {
   local share_root="$1"
@@ -182,9 +202,87 @@ build_dmg_package() {
     -format UDZO \
     "${artifact}"
   bash scripts/macos_sign_notarize.sh \
-    --mode "${macos_signing_mode}" \
+    --mode "${release_signing_mode}" \
     --kind dmg \
     --dmg "${artifact}"
+}
+
+build_msi_package() {
+  local wix_cmd="${WIX:-}"
+  local wix_arch
+  local wxs_path
+  local exe_source
+  local license_source
+  local readme_source
+
+  if [ "${PRODUCT_NAME}" != "paranoid-passwd-gui" ] || [ "${TARGET_OS}" != "windows" ]; then
+    echo "msi packaging is only supported for paranoid-passwd-gui on windows targets" >&2
+    exit 64
+  fi
+
+  if [ -z "${wix_cmd}" ]; then
+    wix_cmd="$(command -v wix || command -v wix.exe || true)"
+  fi
+  if [ -z "${wix_cmd}" ]; then
+    echo "WiX Toolset wix command is required to package msi artifacts" >&2
+    exit 1
+  fi
+
+  case "${TARGET_ARCH}" in
+    amd64) wix_arch="x64" ;;
+    arm64) wix_arch="arm64" ;;
+    *)
+      echo "unsupported Windows MSI architecture: ${TARGET_ARCH}" >&2
+      exit 64
+      ;;
+  esac
+
+  cp "${binary_path}" "${stage_dir}/${PRODUCT_NAME}${EXT}"
+  cp LICENSE README.md "${stage_dir}/"
+
+  bash scripts/windows_sign_artifact.sh \
+    --mode "${release_signing_mode}" \
+    --artifact "${stage_dir}/${PRODUCT_NAME}${EXT}"
+
+  wxs_path="${stage_root}/${stage_name}.wxs"
+  exe_source="$(xml_escape "$(path_for_windows_tool "${stage_dir}/${PRODUCT_NAME}${EXT}")")"
+  license_source="$(xml_escape "$(path_for_windows_tool "${stage_dir}/LICENSE")")"
+  readme_source="$(xml_escape "$(path_for_windows_tool "${stage_dir}/README.md")")"
+
+  cat > "${wxs_path}" <<WXS
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Id="*" Name="Paranoid Passwd"
+           Manufacturer="Jon Bogaty" Version="${VERSION}"
+           UpgradeCode="2f79e1b5-49e4-4a8a-a6a8-1ecda82af8fe">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Paranoid Passwd">
+        <Component Id="GuiExecutable" Guid="46b87264-3476-41a7-9de4-340c50956699">
+          <File Id="ParanoidPasswdGuiExe" Source="${exe_source}" KeyPath="yes" />
+        </Component>
+        <Component Id="LicenseFile" Guid="4f6d19fb-927e-4475-bdc9-f063191b1acf">
+          <File Id="ParanoidPasswdLicense" Source="${license_source}" KeyPath="yes" />
+        </Component>
+        <Component Id="ReadmeFile" Guid="45661679-3365-4060-9aa9-f411f142e637">
+          <File Id="ParanoidPasswdReadme" Source="${readme_source}" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="DefaultFeature" Title="Paranoid Passwd" Level="1">
+      <ComponentRef Id="GuiExecutable" />
+      <ComponentRef Id="LicenseFile" />
+      <ComponentRef Id="ReadmeFile" />
+    </Feature>
+  </Package>
+</Wix>
+WXS
+
+  rm -f "${artifact}"
+  "${wix_cmd}" build -arch "${wix_arch}" -pdbtype none -out "${artifact}" "${wxs_path}"
+  bash scripts/windows_sign_artifact.sh \
+    --mode "${release_signing_mode}" \
+    --artifact "${artifact}"
 }
 
 stage_macos_gui_app() {
@@ -223,7 +321,7 @@ stage_macos_gui_app() {
 </plist>
 PLIST
   bash scripts/macos_sign_notarize.sh \
-    --mode "${macos_signing_mode}" \
+    --mode "${release_signing_mode}" \
     --kind app \
     --app "${stage_dir}/${app_name}"
 }
@@ -239,6 +337,8 @@ elif [ "${ARCHIVE}" = "dmg" ]; then
   if [ "${PRODUCT_NAME}" = "paranoid-passwd-gui" ] && [ "${TARGET_OS}" = "darwin" ]; then
     stage_macos_gui_app
   fi
+elif [ "${ARCHIVE}" = "msi" ]; then
+  :
 elif [ "${PRODUCT_NAME}" = "paranoid-passwd-gui" ] && [ "${TARGET_OS}" = "darwin" ]; then
   stage_macos_gui_app
 else
@@ -257,6 +357,8 @@ if [ "${ARCHIVE}" = "deb" ]; then
   :
 elif [ "${ARCHIVE}" = "dmg" ]; then
   build_dmg_package
+elif [ "${ARCHIVE}" = "msi" ]; then
+  build_msi_package
 elif [ "${ARCHIVE}" = "zip" ]; then
   "${PYTHON_BIN}" - "${stage_root}" "${stage_name}" "${artifact}" <<'PY'
 from pathlib import Path

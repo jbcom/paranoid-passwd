@@ -316,7 +316,7 @@ make smoke-release
 make release-emulate
 ```
 
-- `make smoke-release` builds and smoke-tests the host-native CLI and GUI artifacts, including Linux `.deb` packages on Linux hosts and the GUI `.dmg` image on macOS hosts. DMG smoke validation mounts the image for layout inspection and stages the `.app` bundle before executable checks. Exit code 137 is retried with a bounded retry count to keep transient macOS process kills from weakening the release gate.
+- `make smoke-release` builds and smoke-tests the host-native CLI and GUI artifacts, including Linux `.deb` packages on Linux hosts, the GUI `.dmg` image on macOS hosts, and the GUI `.msi` installer on Windows hosts. DMG smoke validation mounts the image for layout inspection and stages the `.app` bundle before executable checks. MSI smoke validation uses Windows Installer administrative extraction before executable checks. Exit code 137 is retried with a bounded retry count to keep transient macOS process kills from weakening the release gate.
 - `make release-emulate` drives the Linux release packaging path through the custom builder image, including `.deb` outputs.
 - Linux GUI smoke validation now includes an Xvfb-backed screenshot capture of the packaged
   GUI window so the release path proves a real frame renders instead of only checking
@@ -326,5 +326,5 @@ make release-emulate
 - `make test-gui-visual-regression` captures desktop, tablet, and narrow/mobile-class screenshots
   on Linux hosts; `make test-gui-visual-regression-emulate` runs the same visual matrix through the
   builder image on macOS.
-- `scripts/release_validate.sh` is used in CI after the full matrix build to verify all CLI and GUI artifacts, Linux `.deb` packages, package-manager manifests, and `install.sh`.
+- `scripts/release_validate.sh` is used in CI after the full matrix build to verify all CLI and GUI artifacts, Linux `.deb` packages, the Windows GUI `.msi`, package-manager manifests, and `install.sh`. Linux aggregation explicitly defers MSI payload extraction to the paired Windows published-release verifier.
 - `make verify-branch-protection` checks that GitHub branch protection still matches the active Rust-native required checks.

@@ -16,6 +16,7 @@ GitHub Releases currently ship:
 - direct CLI/TUI archives for Linux, macOS, and Windows
 - direct GUI archives for Linux, macOS, and Windows
 - macOS GUI `.dmg` images containing `Paranoid Passwd.app`
+- Windows GUI `.msi` installers built with WiX Toolset
 - Linux `.deb` packages for both binaries
 - `checksums.txt`
 - GitHub build provenance attestations
@@ -46,6 +47,29 @@ release workflow can import a Developer ID certificate from
 `PARANOID_MACOS_NOTARY_KEY_P8_BASE64` into a temporary `.p8` file before the
 helper runs. App-specific passwords are not passed to `notarytool submit` as
 command-line arguments.
+
+`scripts/windows_sign_artifact.sh` is the credential-gated Windows signing
+helper. It signs only when `PARANOID_RELEASE_SIGNING_MODE=signed`; unsigned
+local emulation remains an explicit no-op. Signed mode requires a Windows host,
+`signtool`, and `PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1` for a certificate already
+imported into the current user's certificate store. The release workflow can
+import that certificate from `PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64` and
+`PARANOID_WINDOWS_CERTIFICATE_PASSWORD`, then pass only the imported
+certificate thumbprint to the helper. PFX passwords are not accepted by the
+helper and are not passed to `signtool` as command-line arguments. Timestamping
+defaults to `https://timestamp.digicert.com`; override it with
+`PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL` only for an approved HTTPS timestamp
+authority.
+
+The release workflow installs the pinned WiX .NET tool through a temporary
+NuGet configuration with `signatureValidationMode=require` and the official
+FireGiant package signer fingerprint
+`D95336DD2022934D80E3F3A4F938DD66EC7076BBBA680F76C11F2B54B346D61D`.
+Generated MSI packages use WiX-owned package-code generation (`Package Id="*"`)
+so each installer build receives a valid package GUID. Non-Windows aggregation
+may only defer signed MSI signature verification when
+`PARANOID_RELEASE_SIGNING_ALLOW_HOST_DEFERRED=1`; the Windows host still performs
+the Authenticode verification path.
 
 The current release line has no Developer ID app signing, no Apple
 notarization, no stapled notarization ticket, no Windows Authenticode-signed
@@ -96,9 +120,17 @@ justifies another package surface.
 
 ## Windows Decision
 
-The selected Windows GUI installer path is WiX Toolset MSI. The MSI should be
-the first native Windows installer surface because it is auditable, familiar to
+The selected Windows GUI installer path is WiX Toolset MSI. The MSI is the
+first native Windows installer surface because it is auditable, familiar to
 enterprise deployment tooling, and does not require Store-style packaging.
+
+The release workflow installs the pinned WiX .NET tool version declared by
+`PARANOID_WIX_VERSION`, builds
+`paranoid-passwd-gui-<version>-windows-amd64.msi`, validates the MSI payload on
+a Windows host through administrative extraction, and includes the MSI in
+checksums and GitHub artifact attestations. Linux release aggregation may defer
+MSI payload extraction only when the paired Windows published-release
+verification job is responsible for the MSI payload and smoke checks.
 
 The installer must preserve the same local vault and keyslot behavior as the
 zip artifact. Installer tests should verify that vault creation, unlock, backup
@@ -113,6 +145,10 @@ payload verifier should include:
 ```powershell
 signtool verify /pa paranoid-passwd-gui-<version>-windows-amd64.msi
 ```
+
+Signed Windows release builds sign the staged GUI executable before WiX binds it
+into the MSI, then sign and verify the MSI after creation. Unsigned MSI output
+must remain labeled as unsigned/checksummed/attested.
 
 MSIX deferred unless a real Store, sandbox, or managed-update requirement
 appears. The CLI/TUI binary remains zip-first plus Scoop and Chocolatey metadata.
@@ -140,6 +176,9 @@ Installer/signing work is not complete until:
   `scripts/verify_platform_signing.sh`
 - macOS signed release builds run `scripts/macos_sign_notarize.sh` for the `.app`
   before archive/DMG creation and for the `.dmg` after image creation
+- Windows release builds create the GUI MSI with WiX and run
+  `scripts/windows_sign_artifact.sh` for the staged executable and MSI when
+  signed mode is requested
 - published-release verification downloads and verifies the released artifact
 - docs name the actual shipped path without overclaiming
 - credentials are optional for local unsigned emulation but mandatory when a
@@ -147,5 +186,7 @@ Installer/signing work is not complete until:
 - Linux validation continues through the Wolfi builder instead of replacing it
   with runner-local package installs
 
-This document closes the installer technology decision. It does not claim that
-macOS signing/notarization or the Windows MSI implementation has shipped yet.
+This document closes the installer technology decision and records the current
+macOS and Windows implementation boundaries. It does not claim platform-signed
+or notarized artifacts unless signed release mode and the matching host
+verification jobs pass for the published release.

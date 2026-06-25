@@ -20,6 +20,7 @@ GUI_DARWIN_ARM64="paranoid-passwd-gui-${VERSION}-darwin-arm64.tar.gz"
 GUI_DMG_AMD64="paranoid-passwd-gui-${VERSION}-darwin-amd64.dmg"
 GUI_DMG_ARM64="paranoid-passwd-gui-${VERSION}-darwin-arm64.dmg"
 GUI_WIN_AMD64="paranoid-passwd-gui-${VERSION}-windows-amd64.zip"
+GUI_WIN_MSI_AMD64="paranoid-passwd-gui-${VERSION}-windows-amd64.msi"
 GUI_DEB_AMD64="paranoid-passwd-gui_${VERSION}_amd64.deb"
 GUI_DEB_ARM64="paranoid-passwd-gui_${VERSION}_arm64.deb"
 EXPECTED_ASSETS=(
@@ -37,6 +38,7 @@ EXPECTED_ASSETS=(
   "${GUI_DMG_AMD64}"
   "${GUI_DMG_ARM64}"
   "${GUI_WIN_AMD64}"
+  "${GUI_WIN_MSI_AMD64}"
   "${GUI_DEB_AMD64}"
   "${GUI_DEB_ARM64}"
 )
@@ -96,6 +98,15 @@ validate_archive_payload() {
       target_arch="${artifact##*_}"
       target_arch="${target_arch%.deb}"
       ;;
+    *.msi)
+      product_name="paranoid-passwd-gui"
+      base_name="${artifact%.msi}"
+      parsed_version="${base_name#${product_name}-}"
+      parsed_version="${parsed_version%%-*}"
+      target_os="${base_name#${product_name}-${parsed_version}-}"
+      target_os="${target_os%%-*}"
+      target_arch="${base_name##*-}"
+      ;;
     *)
       echo "unsupported release artifact: ${artifact}" >&2
       exit 64
@@ -123,6 +134,13 @@ for archive in "${EXPECTED_ASSETS[@]}"; do
     printf 'signed macOS platform verification deferred to macOS host: %s\n' "${archive}" >&2
     continue
   fi
+  if [ "${PARANOID_RELEASE_SIGNING_MODE:-unsigned}" = "signed" ] \
+    && [ "${PARANOID_RELEASE_SIGNING_ALLOW_HOST_DEFERRED:-0}" = "1" ] \
+    && [[ "${archive}" == *.msi ]] \
+    && [[ "$(uname -s)" != MINGW* && "$(uname -s)" != MSYS* && "$(uname -s)" != CYGWIN* ]]; then
+    printf 'signed Windows platform verification deferred to Windows host: %s\n' "${archive}" >&2
+    continue
+  fi
   bash scripts/verify_platform_signing.sh \
     --mode "${PARANOID_RELEASE_SIGNING_MODE:-unsigned}" \
     --artifact "${DIST_DIR}/${archive}" \
@@ -145,6 +163,7 @@ cat \
   "${DIST_DIR}/${GUI_DMG_AMD64}.sha256" \
   "${DIST_DIR}/${GUI_DMG_ARM64}.sha256" \
   "${DIST_DIR}/${GUI_WIN_AMD64}.sha256" \
+  "${DIST_DIR}/${GUI_WIN_MSI_AMD64}.sha256" \
   "${DIST_DIR}/${GUI_DEB_AMD64}.sha256" \
   "${DIST_DIR}/${GUI_DEB_ARM64}.sha256" \
   > "${checksum_input}"

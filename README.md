@@ -184,12 +184,12 @@ Release archives are published on [GitHub Releases](https://github.com/jbcom/par
 - install and verification guides
 - generated Rust API docs via `sphinxcontrib-rust`
 
-The shipped release surface now has two native binaries, each published through direct archives, with Linux also shipping `.deb` packages for both:
+The shipped release surface now has two native binaries, each published through direct archives, with Linux also shipping `.deb` packages for both and Windows shipping a GUI `.msi` installer:
 
 - `paranoid-passwd`, which contains the scriptable CLI, the generator wizard TUI, and the native vault TUI with `Login`, `SecureNote`, `Card`, and `Identity` CRUD, folder-plus-tag local organization, encrypted password history for login rotation, duplicate-password detection for login items, native keyslot inspection, recovery-posture reporting, enrollment, certificate rewrap, relabeling, recovery-secret rotation, removal, and device-slot rebind, direct native unlock input for recovery-secret, mnemonic, device-slot, and certificate-backed access, encrypted backup export/import flows, and generate-and-store flows that can either create a new login or rotate an existing one in place
 - `paranoid-passwd-gui`, which ships the dedicated desktop surface over the same generator and vault model, including native keyslot management, backup inspection/import, and the full local vault CRUD flow
 
-`install.sh` and package-manager flows remain intentionally focused on `paranoid-passwd`. The GUI is distributed as direct archives, native macOS `.dmg` images, and Linux `.deb` packages until native installer work is complete on every platform.
+`install.sh` and package-manager flows remain intentionally focused on `paranoid-passwd`. The GUI is distributed as direct archives, native macOS `.dmg` images, Linux `.deb` packages, and a Windows WiX `.msi` installer; platform signing remains a separate signed-mode release boundary.
 
 ## License
 

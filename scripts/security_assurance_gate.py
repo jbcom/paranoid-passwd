@@ -1336,6 +1336,41 @@ CLAIMS: tuple[Claim, ...] = (
                 "release artifact builder invokes the macOS signing helper for app and dmg payloads",
             ),
             Requirement(
+                "scripts/build_release_artifact.sh",
+                "build_msi_package",
+                "release artifact builder creates the Windows GUI MSI",
+            ),
+            Requirement(
+                "scripts/build_release_artifact.sh",
+                'Package Id="*"',
+                "release artifact builder lets WiX generate each MSI package code",
+            ),
+            Requirement(
+                "scripts/build_release_artifact.sh",
+                "windows_sign_artifact.sh",
+                "release artifact builder invokes the Windows signing helper for staged executable and MSI payloads",
+            ),
+            Requirement(
+                "scripts/windows_sign_artifact.sh",
+                "PARANOID_WINDOWS_SIGNTOOL_CERT_SHA1",
+                "Windows signing helper requires an imported certificate thumbprint",
+            ),
+            Requirement(
+                "scripts/windows_sign_artifact.sh",
+                "PFX passwords are intentionally not",
+                "Windows signing helper rejects password-on-argv signing",
+            ),
+            Requirement(
+                "scripts/windows_sign_artifact.sh",
+                "https://timestamp.digicert.com",
+                "Windows signing helper defaults to HTTPS timestamping",
+            ),
+            Requirement(
+                "scripts/windows_sign_artifact.sh",
+                "PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL must use https://",
+                "Windows signing helper rejects non-HTTPS timestamp overrides",
+            ),
+            Requirement(
                 ".github/workflows/release.yml",
                 "PARANOID_MACOS_CERTIFICATE_P12_BASE64",
                 "release workflow can import a macOS Developer ID certificate from secrets",
@@ -1344,6 +1379,51 @@ CLAIMS: tuple[Claim, ...] = (
                 ".github/workflows/release.yml",
                 "PARANOID_MACOS_NOTARY_KEY_P8_BASE64",
                 "release workflow materializes App Store Connect API key secrets as a temporary file",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "PARANOID_WIX_VERSION",
+                "release workflow pins the WiX Toolset version used to build MSI payloads",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "signatureValidationMode",
+                "release workflow requires NuGet package signature validation before installing WiX",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "D95336DD2022934D80E3F3A4F938DD66EC7076BBBA680F76C11F2B54B346D61D",
+                "release workflow trusts the official FireGiant WiX package signer fingerprint",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "PARANOID_WINDOWS_CERTIFICATE_PFX_BASE64",
+                "release workflow can import a Windows signing certificate from secrets",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "PARANOID_WINDOWS_SIGNTOOL_TIMESTAMP_URL must use https://",
+                "release workflow rejects non-HTTPS Windows timestamp overrides",
+            ),
+            Requirement(
+                ".github/workflows/release.yml",
+                "paranoid-passwd-gui-${{ steps.ver.outputs.version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}.msi",
+                "release workflow builds and smokes the Windows GUI MSI",
+            ),
+            Requirement(
+                "scripts/build_release_artifact.sh",
+                "xml_escape",
+                "release artifact builder escapes WXS attribute values",
+            ),
+            Requirement(
+                "scripts/release_path_utils.sh",
+                "path_for_windows_tool",
+                "release scripts share Windows path conversion logic",
+            ),
+            Requirement(
+                "scripts/release_path_utils.sh",
+                "find_exactly_one_file_named",
+                "release payload checks fail closed on duplicate file matches",
             ),
             Requirement(
                 "scripts/verify_platform_signing.sh",
@@ -1361,6 +1441,36 @@ CLAIMS: tuple[Claim, ...] = (
                 "release validation invokes the platform-signing verifier",
             ),
             Requirement(
+                "scripts/release_validate.sh",
+                "GUI_WIN_MSI_AMD64",
+                "release validation requires the Windows GUI MSI in complete release inputs",
+            ),
+            Requirement(
+                "scripts/release_validate.sh",
+                "signed Windows platform verification deferred to Windows host",
+                "release validation can aggregate signed releases while deferring MSI signature checks to Windows",
+            ),
+            Requirement(
+                "scripts/verify_published_release.sh",
+                "PARANOID_REQUIRE_WINDOWS_MSI",
+                "published release verification can require the Windows GUI MSI for new releases",
+            ),
+            Requirement(
+                "scripts/smoke_test_release_artifact.sh",
+                "msiexec.exe /a",
+                "release smoke validates MSI payloads through administrative extraction",
+            ),
+            Requirement(
+                "scripts/assert_release_payload.sh",
+                "MSI payload validation requires a Windows host",
+                "payload validation fails closed for MSI inspection without Windows or explicit deferral",
+            ),
+            Requirement(
+                "scripts/assert_release_payload.sh",
+                "find_exactly_one_file_named",
+                "MSI payload validation requires exact file matches",
+            ),
+            Requirement(
                 "tests/test_platform_signing_verify.sh",
                 "signed macOS dmg fails without verifiable signed payload",
                 "contract tests cover signed-mode fail-closed behavior",
@@ -1369,6 +1479,61 @@ CLAIMS: tuple[Claim, ...] = (
                 "tests/test_platform_signing_verify.sh",
                 "signed macOS app helper requires signing identity",
                 "contract tests cover macOS signing helper credential gating",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "Windows signing helper never accepts PFX password argv",
+                "contract tests prevent password-on-argv Windows signing regressions",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "Windows signing helper defaults to HTTPS timestamping",
+                "contract tests prevent unsigned HTTP timestamp regressions",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "signed Windows signing helper rejects non-HTTPS timestamp override",
+                "contract tests prevent non-HTTPS timestamp overrides",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "MSI WXS generation XML-escapes file paths",
+                "contract tests cover WXS path escaping",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "MSI WXS package code is generated by WiX",
+                "contract tests cover generated MSI package codes",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "release validation can defer signed Windows MSI verification to Windows hosts",
+                "contract tests cover signed MSI host deferral",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "release path helper rejects duplicate payload matches",
+                "contract tests cover duplicate payload match failures",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "release scripts share Windows path utility",
+                "contract tests keep release path conversion centralized",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "MSI payload validation can be explicitly host-deferred",
+                "contract tests cover MSI host-deferred aggregation",
+            ),
+            Requirement(
+                "Makefile",
+                "s/^mingw.*/windows/",
+                "Makefile normalizes Windows POSIX-shell host names before release branching",
+            ),
+            Requirement(
+                "tests/test_platform_signing_verify.sh",
+                "Makefile normalizes MSYS Windows hosts",
+                "contract tests cover Windows host normalization",
             ),
             Requirement(
                 "Makefile",
@@ -1399,6 +1564,16 @@ CLAIMS: tuple[Claim, ...] = (
                 "docs/reference/platform-installers.md",
                 "WiX Toolset MSI",
                 "decision record selects WiX Toolset MSI for Windows",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                'Package Id="*"',
+                "decision record documents WiX-generated MSI package codes",
+            ),
+            Requirement(
+                "docs/reference/platform-installers.md",
+                "PARANOID_RELEASE_SIGNING_ALLOW_HOST_DEFERRED=1",
+                "decision record documents signed MSI host deferral limits",
             ),
             Requirement(
                 "docs/reference/platform-installers.md",

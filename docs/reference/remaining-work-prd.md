@@ -304,7 +304,7 @@ For each open review area:
 
 ### Problem
 
-The repo now ships archives, Linux `.deb`, and macOS GUI `.dmg` / `.app` payloads, but it does **not** yet ship fully native installer-grade experiences across platforms.
+The repo now ships archives, Linux `.deb`, macOS GUI `.dmg` / `.app` payloads, and a Windows GUI WiX `.msi`, but it does **not** yet have signed native installer proof for every platform.
 The platform installer and signing decisions are now recorded in
 [Platform Installers and Signing](./platform-installers.md); remaining work is implementation,
 credential-gated release automation, and published-release verification rather than technology
@@ -330,10 +330,12 @@ selection.
 
 #### Windows
 
-- add a native signed WiX Toolset MSI installer for the GUI
-- verify the Authenticode signature with `signtool verify /pa`
+- keep the native WiX Toolset MSI installer for the GUI in the release workflow
+- prove the signed-mode Authenticode path with configured release credentials and
+  `signtool verify /pa`
 - keep MSIX deferred unless a Store, sandbox, or managed-update requirement appears
-- ensure the installed app preserves the same vault/keyslot behavior as archive execution
+- ensure the MSI administrative-extraction and installed-app paths preserve the same vault/keyslot
+  behavior as archive execution
 - keep CLI/TUI distribution separate and scriptable through zip, Scoop, and Chocolatey
 
 #### Linux
@@ -460,7 +462,7 @@ This PRD is complete when all of the following are true:
    controls now in place
 3. keep the remote dependency-update queue green and reviewable, including explicit PR thread/check
    inspection before merge
-4. prove the macOS Developer ID signing/notarization path with configured release credentials and
-   implement the Windows WiX Toolset MSI path
+4. prove the macOS Developer ID signing/notarization path and Windows Authenticode MSI path with
+   configured release credentials and published-release verification
 5. preserve the Recovery Operations runbook as lifecycle behavior changes
 6. update this PRD as those decisions are made
