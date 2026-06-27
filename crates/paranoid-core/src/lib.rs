@@ -1270,4 +1270,83 @@ mod tests {
                 .all(|password| password.selected_compliance_pass)
         );
     }
+
+    #[test]
+    fn secure_preview_masks_long_passwords_and_passes_short_ones() {
+        assert_eq!(secure_preview("ab"), "ab");
+        assert_eq!(secure_preview("abcd"), "abcd");
+        assert_eq!(secure_preview("abcde"), "•bcde");
+        assert_eq!(secure_preview("Sup3r$ecret!"), "••••••••ret!");
+        assert_eq!(secure_preview("a").chars().count(), 1);
+        assert_eq!(secure_preview("abcdefgh"), "••••efgh");
+        assert_eq!(secure_preview("abcdefgh").chars().count(), 8);
+    }
+
+    #[test]
+    fn framework_id_parse_accepts_all_documented_aliases() {
+        assert_eq!(FrameworkId::parse("nist"), Some(FrameworkId::Nist));
+        assert_eq!(FrameworkId::parse("pci"), Some(FrameworkId::PciDss));
+        assert_eq!(FrameworkId::parse("pci_dss"), Some(FrameworkId::PciDss));
+        assert_eq!(FrameworkId::parse("pci-dss"), Some(FrameworkId::PciDss));
+        assert_eq!(FrameworkId::parse("hipaa"), Some(FrameworkId::Hipaa));
+        assert_eq!(FrameworkId::parse("soc2"), Some(FrameworkId::Soc2));
+        assert_eq!(FrameworkId::parse("soc_2"), Some(FrameworkId::Soc2));
+        assert_eq!(FrameworkId::parse("soc-2"), Some(FrameworkId::Soc2));
+        assert_eq!(FrameworkId::parse("gdpr"), Some(FrameworkId::Gdpr));
+        assert_eq!(FrameworkId::parse("iso27001"), Some(FrameworkId::Iso27001));
+        assert_eq!(FrameworkId::parse("iso-27001"), Some(FrameworkId::Iso27001));
+        assert_eq!(FrameworkId::parse("iso_27001"), Some(FrameworkId::Iso27001));
+        assert_eq!(FrameworkId::parse("NIST"), None);
+        assert_eq!(FrameworkId::parse("PCI"), None);
+        assert_eq!(FrameworkId::parse("unknown"), None);
+        assert_eq!(FrameworkId::parse(""), None);
+    }
+
+    #[test]
+    fn framework_id_round_trips_through_as_str_and_parse() {
+        for framework in FRAMEWORKS {
+            let canonical = framework.id.as_str();
+            assert_eq!(FrameworkId::parse(canonical), Some(framework.id));
+            assert_eq!(format!("{}", framework.id), canonical);
+        }
+    }
+
+    #[test]
+    fn resolve_named_presets_have_expected_shapes() {
+        let alnum = resolve_charset("alnum").expect("alnum preset");
+        assert!(alnum.chars().all(|ch| ch.is_ascii_alphanumeric()));
+        assert_eq!(alnum.len(), 62);
+
+        let alnum_symbols = resolve_charset("alnum-symbols").expect("alnum-symbols preset");
+        assert!(alnum_symbols.starts_with(&alnum));
+        assert!(alnum_symbols.len() > 62);
+
+        let hex = resolve_charset("hex").expect("hex preset");
+        assert!(hex.chars().all(|ch| ch.is_ascii_hexdigit()));
+        assert_eq!(hex.len(), 16);
+
+        let full = resolve_charset("full").expect("full preset");
+        assert!(full.len() == 94);
+        assert!(full.chars().all(|ch| ch.is_ascii_graphic()));
+    }
+
+    #[test]
+    fn compute_entropy_metrics_known_answers_hold() {
+        let metrics = compute_entropy_metrics(62, 12, 1);
+        assert!((metrics.bits_per_char - 62_f64.log2()).abs() < 1e-12);
+        assert!((metrics.total_entropy - 12.0 * 62_f64.log2()).abs() < 1e-12);
+        assert!((metrics.log10_search_space - 12.0 * 62_f64.log10()).abs() < 1e-12);
+        assert!(metrics.brute_force_years > 0.0);
+        assert!(metrics.collision_probability >= 0.0 && metrics.collision_probability <= 1.0);
+        assert!(metrics.passwords_for_50pct > 0.0);
+
+        let hex_metrics = compute_entropy_metrics(16, 8, 1);
+        assert!((hex_metrics.bits_per_char - 4.0).abs() < 1e-12);
+        assert!((hex_metrics.total_entropy - 32.0).abs() < 1e-12);
+        assert!((hex_metrics.log10_search_space - 8.0 * 16_f64.log10()).abs() < 1e-12);
+
+        let large_batch = compute_entropy_metrics(94, 24, 1000);
+        assert!(large_batch.collision_probability > 0.0);
+        assert!(large_batch.collision_probability <= 1.0);
+    }
 }

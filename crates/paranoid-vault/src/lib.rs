@@ -5991,6 +5991,93 @@ mod tests {
     }
 
     #[test]
+    fn recovery_recommendations_match_posture_gaps() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let fresh = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let recommendations = fresh.header().recovery_recommendations();
+        assert_eq!(recommendations.len(), 3);
+        assert!(
+            recommendations
+                .iter()
+                .any(|recommendation| recommendation.contains("mnemonic recovery slot"))
+        );
+        assert!(
+            recommendations
+                .iter()
+                .any(|recommendation| recommendation.contains("device-bound slot"))
+        );
+        assert!(
+            recommendations
+                .iter()
+                .any(|recommendation| recommendation.contains("certificate-wrapped slot"))
+        );
+
+        let (cert_pem, _) = test_certificate_pair();
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_mnemonic_keyslot(Some("paper".to_string()))
+            .expect("mnemonic slot");
+        vault
+            .add_device_keyslot(Some("daily".to_string()))
+            .expect("device slot");
+        vault
+            .add_certificate_keyslot(cert_pem.as_slice(), Some("ops".to_string()))
+            .expect("cert slot");
+
+        let complete = vault.header().recovery_recommendations();
+        assert!(
+            complete.is_empty(),
+            "recommendations should be empty when posture is complete, got {complete:?}"
+        );
+    }
+
+    #[test]
+    fn password_history_does_not_grow_when_password_is_unchanged() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let item = vault
+            .add_login(NewLoginRecord {
+                title: "Example".to_string(),
+                username: "jon@example.com".to_string(),
+                password: "Sup3r$ecret!".to_string(),
+                url: None,
+                notes: None,
+                folder: Some("Personal".to_string()),
+                tags: vec!["personal".to_string()],
+            })
+            .expect("add");
+
+        vault
+            .update_login(
+                &item.id,
+                UpdateLoginRecord {
+                    title: Some("Example Updated".to_string()),
+                    password: Some("Sup3r$ecret!".to_string()),
+                    ..UpdateLoginRecord::default()
+                },
+            )
+            .expect("update with same password");
+
+        let fetched = vault.get_item(&item.id).expect("show");
+        let VaultItemPayload::Login(login) = fetched.payload else {
+            panic!("expected login payload");
+        };
+        assert_eq!(login.title, "Example Updated");
+        assert_eq!(login.password, "Sup3r$ecret!");
+        assert!(
+            login.password_history.is_empty(),
+            "history must not grow when password is unchanged, got {} entries",
+            login.password_history.len()
+        );
+    }
+
+    #[test]
     fn rebind_device_keyslot_rotates_secure_storage_account() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("vault.sqlite");

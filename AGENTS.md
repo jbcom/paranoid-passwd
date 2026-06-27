@@ -98,6 +98,7 @@ Before committing:
 | `crates/paranoid-core` | password generation, OpenSSL-backed RNG/SHA-256, statistical audit, compliance checks |
 | `crates/paranoid-audit` | redacted structured audit events and JSON/JSONL evidence primitives |
 | `crates/paranoid-ops` | typed operation orchestration, automation reports, and policy boundary scaffolding |
+| `crates/paranoid-seal` | vault seal/unseal finite state machine and provider posture evidence (non-secret); consumed by paranoid-ops as policy input |
 | `crates/paranoid-cli` | scriptable CLI plus full-screen wizard TUI |
 | `crates/paranoid-gui` | Slint-native GUI surface plus target-gated desktop, mobile, and WASM build checks |
 | `crates/paranoid-vault` | encrypted local storage, keyslots, backup/transfer packages, and recovery posture |
@@ -111,7 +112,7 @@ The GUI crate uses `unsafe_code = "deny"` instead of the workspace `forbid` beca
 generated Rust lowers that lint internally and Rust 2024 marks exported Android/WASM ABI entrypoint
 attributes as unsafe. Handwritten GUI Rust remains checked by `scripts/hallucination_check.sh`;
 only exact `#[unsafe(no_mangle)]` ABI attributes are allowed there, and `paranoid-core`,
-`paranoid-audit`, `paranoid-ops`, `paranoid-cli`, and `paranoid-vault` keep the workspace-level
+`paranoid-audit`, `paranoid-ops`, `paranoid-seal`, `paranoid-cli`, and `paranoid-vault` keep the workspace-level
 `forbid` policy.
 
 ### Product Surface

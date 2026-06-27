@@ -506,4 +506,138 @@ mod tests {
         assert!(posture.operator_recovery_configured);
         assert!(posture.recovery_required);
     }
+
+    #[test]
+    fn vault_seal_state_round_trips_through_serde() {
+        for state in [
+            VaultSealState::Sealed,
+            VaultSealState::ChallengePending,
+            VaultSealState::Unsealed,
+            VaultSealState::IdleLockPending,
+            VaultSealState::SealedAfterTimeout,
+            VaultSealState::RecoveryRequired,
+        ] {
+            let json = serde_json::to_string(&state).expect("serialize state");
+            let deserialized: VaultSealState =
+                serde_json::from_str(&json).expect("deserialize state");
+            assert_eq!(deserialized, state);
+        }
+    }
+
+    #[test]
+    fn vault_seal_event_round_trips_through_serde() {
+        for event in [
+            VaultSealEvent::UnlockRequested,
+            VaultSealEvent::ChallengeIssued,
+            VaultSealEvent::ChallengeSatisfied,
+            VaultSealEvent::UnlockSucceeded,
+            VaultSealEvent::UnlockFailed,
+            VaultSealEvent::IdleTimeoutStarted,
+            VaultSealEvent::ActivityObserved,
+            VaultSealEvent::IdleTimeoutExpired,
+            VaultSealEvent::ManualLock,
+            VaultSealEvent::RecoveryRequired,
+        ] {
+            let json = serde_json::to_string(&event).expect("serialize event");
+            let deserialized: VaultSealEvent =
+                serde_json::from_str(&json).expect("deserialize event");
+            assert_eq!(deserialized, event);
+        }
+    }
+
+    #[test]
+    fn vault_seal_transition_round_trips_through_serde() {
+        let transition = VaultSealTransition {
+            from: VaultSealState::Sealed,
+            event: VaultSealEvent::UnlockRequested,
+            to: VaultSealState::ChallengePending,
+        };
+        let json = serde_json::to_string(&transition).expect("serialize transition");
+        let deserialized: VaultSealTransition =
+            serde_json::from_str(&json).expect("deserialize transition");
+        assert_eq!(deserialized, transition);
+    }
+
+    #[test]
+    fn vault_seal_provider_evidence_round_trips_through_serde() {
+        let evidence = VaultSealProviderEvidence::configured(
+            "password",
+            VaultSealProviderKind::PasswordRecovery,
+            "vault_header",
+        );
+        let json = serde_json::to_string(&evidence).expect("serialize evidence");
+        let deserialized: VaultSealProviderEvidence =
+            serde_json::from_str(&json).expect("deserialize evidence");
+        assert_eq!(deserialized, evidence);
+    }
+
+    #[test]
+    fn vault_seal_posture_round_trips_through_serde() {
+        let posture = VaultSealPosture::from_providers(
+            VaultSealState::Sealed,
+            vec![
+                VaultSealProviderEvidence::configured(
+                    "password",
+                    VaultSealProviderKind::PasswordRecovery,
+                    "vault_header",
+                ),
+                VaultSealProviderEvidence::available(
+                    "device",
+                    VaultSealProviderKind::DeviceBound,
+                    "provider_health_check",
+                ),
+            ],
+        );
+        let json = serde_json::to_string(&posture).expect("serialize posture");
+        let deserialized: VaultSealPosture =
+            serde_json::from_str(&json).expect("deserialize posture");
+        assert_eq!(deserialized, posture);
+    }
+
+    #[test]
+    fn provider_evidence_unavailable_carries_warning() {
+        let evidence = VaultSealProviderEvidence::unavailable(
+            "device",
+            VaultSealProviderKind::DeviceBound,
+            "provider_health_check",
+            "keyring access denied",
+        );
+        assert_eq!(evidence.status, VaultSealProviderStatus::Unavailable);
+        assert_eq!(evidence.warnings, vec!["keyring access denied".to_string()]);
+    }
+
+    #[test]
+    fn provider_evidence_with_warnings_replaces_warnings() {
+        let evidence = VaultSealProviderEvidence::configured(
+            "cert",
+            VaultSealProviderKind::CertificateWrapped,
+            "vault_header",
+        )
+        .with_warnings(vec!["expiring soon".to_string()]);
+        assert_eq!(evidence.warnings, vec!["expiring soon".to_string()]);
+    }
+
+    #[test]
+    fn disabled_provider_excluded_from_configured_providers() {
+        let posture = VaultSealPosture::from_providers(
+            VaultSealState::Sealed,
+            vec![
+                VaultSealProviderEvidence {
+                    schema_version: SEAL_SCHEMA_VERSION,
+                    provider_id: "disabled".to_string(),
+                    kind: VaultSealProviderKind::DeviceBound,
+                    status: VaultSealProviderStatus::Disabled,
+                    evidence_source: "operator_override".to_string(),
+                    warnings: Vec::new(),
+                },
+                VaultSealProviderEvidence::configured(
+                    "password",
+                    VaultSealProviderKind::PasswordRecovery,
+                    "vault_header",
+                ),
+            ],
+        );
+        assert!(!posture.has_configured_provider(VaultSealProviderKind::DeviceBound));
+        assert!(posture.has_configured_provider(VaultSealProviderKind::PasswordRecovery));
+    }
 }
