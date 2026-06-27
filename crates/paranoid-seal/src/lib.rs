@@ -509,15 +509,19 @@ mod tests {
 
     #[test]
     fn vault_seal_state_round_trips_through_serde() {
-        for state in [
-            VaultSealState::Sealed,
-            VaultSealState::ChallengePending,
-            VaultSealState::Unsealed,
-            VaultSealState::IdleLockPending,
-            VaultSealState::SealedAfterTimeout,
-            VaultSealState::RecoveryRequired,
+        for (state, expected_json) in [
+            (VaultSealState::Sealed, "\"sealed\""),
+            (VaultSealState::ChallengePending, "\"challenge_pending\""),
+            (VaultSealState::Unsealed, "\"unsealed\""),
+            (VaultSealState::IdleLockPending, "\"idle_lock_pending\""),
+            (
+                VaultSealState::SealedAfterTimeout,
+                "\"sealed_after_timeout\"",
+            ),
+            (VaultSealState::RecoveryRequired, "\"recovery_required\""),
         ] {
             let json = serde_json::to_string(&state).expect("serialize state");
+            assert_eq!(json, expected_json);
             let deserialized: VaultSealState =
                 serde_json::from_str(&json).expect("deserialize state");
             assert_eq!(deserialized, state);
@@ -526,19 +530,29 @@ mod tests {
 
     #[test]
     fn vault_seal_event_round_trips_through_serde() {
-        for event in [
-            VaultSealEvent::UnlockRequested,
-            VaultSealEvent::ChallengeIssued,
-            VaultSealEvent::ChallengeSatisfied,
-            VaultSealEvent::UnlockSucceeded,
-            VaultSealEvent::UnlockFailed,
-            VaultSealEvent::IdleTimeoutStarted,
-            VaultSealEvent::ActivityObserved,
-            VaultSealEvent::IdleTimeoutExpired,
-            VaultSealEvent::ManualLock,
-            VaultSealEvent::RecoveryRequired,
+        for (event, expected_json) in [
+            (VaultSealEvent::UnlockRequested, "\"unlock_requested\""),
+            (VaultSealEvent::ChallengeIssued, "\"challenge_issued\""),
+            (
+                VaultSealEvent::ChallengeSatisfied,
+                "\"challenge_satisfied\"",
+            ),
+            (VaultSealEvent::UnlockSucceeded, "\"unlock_succeeded\""),
+            (VaultSealEvent::UnlockFailed, "\"unlock_failed\""),
+            (
+                VaultSealEvent::IdleTimeoutStarted,
+                "\"idle_timeout_started\"",
+            ),
+            (VaultSealEvent::ActivityObserved, "\"activity_observed\""),
+            (
+                VaultSealEvent::IdleTimeoutExpired,
+                "\"idle_timeout_expired\"",
+            ),
+            (VaultSealEvent::ManualLock, "\"manual_lock\""),
+            (VaultSealEvent::RecoveryRequired, "\"recovery_required\""),
         ] {
             let json = serde_json::to_string(&event).expect("serialize event");
+            assert_eq!(json, expected_json);
             let deserialized: VaultSealEvent =
                 serde_json::from_str(&json).expect("deserialize event");
             assert_eq!(deserialized, event);

@@ -1025,11 +1025,13 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 pub fn secure_preview(password: &str) -> String {
-    if password.len() <= 4 {
+    let char_count = password.chars().count();
+    if char_count <= 4 {
         return password.to_string();
     }
-    let suffix = &password[password.len() - 4..];
-    format!("{}{}", "•".repeat(password.len() - 4), suffix)
+    let mask_count = char_count - 4;
+    let suffix: String = password.chars().skip(mask_count).collect();
+    format!("{}{}", "•".repeat(mask_count), suffix)
 }
 
 #[cfg(test)]
@@ -1280,6 +1282,7 @@ mod tests {
         assert_eq!(secure_preview("a").chars().count(), 1);
         assert_eq!(secure_preview("abcdefgh"), "••••efgh");
         assert_eq!(secure_preview("abcdefgh").chars().count(), 8);
+        assert_eq!(secure_preview("密码123"), "•码123");
     }
 
     #[test]
