@@ -4033,6 +4033,7 @@ name = "paranoid-seal"
 version = "3.7.0"
 dependencies = [
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
