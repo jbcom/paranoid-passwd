@@ -65,7 +65,7 @@ jobs:
 
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
@@ -301,7 +301,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout (for scripts and installer)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
@@ -369,7 +369,7 @@ jobs:
           rm -f ./*.sha256
 
       - name: Attest release artifacts
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: |
             cli-dist/*.tar.gz
@@ -410,7 +410,7 @@ jobs:
             runner: windows-2022
     steps:
       - name: Checkout (for verification scripts)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
@@ -466,7 +466,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout (for scripts)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -690,7 +690,7 @@ jobs:
             runnable: false
     steps:
       - name: Checkout (for smoke scripts)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
