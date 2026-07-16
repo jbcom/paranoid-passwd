@@ -6,6 +6,7 @@
 //! PTY: see the `scripted` module for the deterministic scripted-mode driver
 //! used by `PARANOID_TUI_SCRIPT`.
 
+pub mod capability_detect;
 pub mod scripted;
 pub mod tui;
 pub mod vault_cli;

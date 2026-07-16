@@ -50,6 +50,7 @@ struct CliOptions {
     audit_jsonl: Option<PathBuf>,
     require_audit_sink: bool,
     federal_evidence: bool,
+    detect_environment: bool,
     explicit_operational_flag: bool,
 }
 
@@ -70,6 +71,7 @@ impl Default for CliOptions {
             audit_jsonl: None,
             require_audit_sink: false,
             federal_evidence: false,
+            detect_environment: false,
             explicit_operational_flag: false,
         }
     }
@@ -109,6 +111,14 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
             option_env!("PARANOID_CLI_BUILD_DATE").unwrap_or("dev"),
         );
         print_federal_evidence_json(&evidence)?;
+        return Ok(EX_OK);
+    }
+
+    if options.detect_environment {
+        let report = paranoid_cli::capability_detect::collect_capability_report(
+            &paranoid_vault::default_vault_path(),
+        );
+        print_capability_report_json(&report)?;
         return Ok(EX_OK);
     }
 
@@ -305,6 +315,11 @@ fn parse_args(args: Vec<OsString>) -> anyhow::Result<ParseOutcome> {
                 options.require_audit_sink = true;
                 options.explicit_operational_flag = true;
             }
+            Long("detect-environment") => {
+                options.detect_environment = true;
+                options.output = OutputFormat::Json;
+                options.explicit_operational_flag = true;
+            }
             Long("tui") => options.mode = LaunchMode::Tui,
             Long("cli") => options.mode = LaunchMode::Cli,
             Short('V') | Long("version") => {
@@ -372,6 +387,8 @@ Output:
       --profile PROFILE    Policy profile: default | federal-ready
       --federal-ready      Alias for --profile federal-ready --require-audit-sink
       --federal-evidence   Emit federal-ready startup evidence as JSON
+      --detect-environment Emit OS keychain, clipboard, display server, and
+                           seal-provider capability evidence as JSON
       --no-audit           Skip the statistical audit
       --quiet              Suppress audit stage output on stderr
   -V, --version            Print version info and exit
@@ -431,6 +448,14 @@ fn print_federal_evidence_json(evidence: &paranoid_ops::FederalStartupEvidence) 
     let stdout = io::stdout();
     let mut handle = stdout.lock();
     serde_json::to_writer_pretty(&mut handle, evidence).map_err(io::Error::other)?;
+    writeln!(handle)?;
+    handle.flush()
+}
+
+fn print_capability_report_json(report: &paranoid_ops::CapabilityReport) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer_pretty(&mut handle, report).map_err(io::Error::other)?;
     writeln!(handle)?;
     handle.flush()
 }
@@ -752,6 +777,22 @@ mod tests {
         assert_eq!(options.profile, OpsProfile::FederalReady);
         assert_eq!(options.output, OutputFormat::Json);
         assert!(options.require_audit_sink);
+        assert!(!should_launch_tui(&options, true));
+    }
+
+    #[test]
+    fn detect_environment_forces_json_mode() {
+        let ParseOutcome::Run(options) = parse_args(vec![
+            OsString::from("paranoid-passwd"),
+            OsString::from("--detect-environment"),
+        ])
+        .expect("parse") else {
+            panic!("expected run options");
+        };
+
+        assert!(options.detect_environment);
+        assert_eq!(options.output, OutputFormat::Json);
+        assert!(options.explicit_operational_flag);
         assert!(!should_launch_tui(&options, true));
     }
 }

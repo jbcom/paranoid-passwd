@@ -106,7 +106,7 @@ completeness critic + dedicated architecture review.
   `PARANOID_TEST_DEVICE_STORE_DIR` pattern) feeding newline-delimited key
   sequences. This is the prerequisite for P2.3/P2.5 and for agentic control of
   the TUI. Accept: a scripted run completes the generator wizard headlessly.
-- [ ] **P2.2 Capability-detection evidence module** — first-run/install-time
+- [x] **P2.2 Capability-detection evidence module** — first-run/install-time
   probes for OS keychain (`keyring`), clipboard (`arboard`), display server
   (Quartz/X11/Wayland/none), and configured seal providers, modeled on the
   existing `FederalCryptoProviderEvidence::collect_from_environment()` pattern;

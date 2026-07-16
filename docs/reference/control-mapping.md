@@ -18,6 +18,7 @@ system security plan.
 | Artifact | Producer | Purpose |
 |---|---|---|
 | `--federal-evidence` JSON | CLI / vault CLI | Startup evidence for profile, build id, OS, architecture, audit sink posture, external audit-device posture, cryptographic provider evidence, strict recovery disposition, and policy decision. |
+| `--detect-environment` JSON | CLI | First-run capability evidence for OS keychain and clipboard availability, display server detection, and configured seal-provider evidence. |
 | `--audit-jsonl` JSONL | CLI / TUI / GUI adapters | Redacted request/response policy events for security-relevant operations. |
 | Ops trace fixtures | `crates/paranoid-ops/tests/fixtures/` | Stable CLI/TUI/GUI command-envelope examples for automation compatibility and assessor traceability. |
 | Release checksums and attestations | Release workflow | Artifact integrity and provenance evidence for shipped archives and packages. |

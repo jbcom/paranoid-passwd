@@ -356,6 +356,30 @@ assert data["policy_decision"]["missing_controls"] == ["required_audit_sink"]
 }
 check "--audit-jsonl fails closed when configured sink is unavailable" t_unavailable_audit_sink_denial
 
+# --- Test 21: detect-environment emits capability report
+t_detect_environment() {
+    local out
+    out="$("$BIN" --detect-environment)"
+    printf '%s' "$out" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+assert data["schema_version"] == 1
+assert data["operating_system"]
+assert data["architecture"]
+assert data["os_keychain"]["status"] in ("available", "unavailable", "not_checked")
+assert data["os_keychain"]["evidence_source"] == "keyring_probe"
+assert data["clipboard"]["status"] in ("available", "unavailable", "not_checked")
+assert data["clipboard"]["evidence_source"] == "arboard_probe"
+assert data["display_server"]["kind"] in (
+    "quartz", "wayland", "x11", "windows", "headless"
+)
+assert isinstance(data["seal_providers"], list)
+'
+}
+check "--detect-environment emits capability report" t_detect_environment
+
 # --- Summary
 printf '\n'
 printf '%d passed, %d failed\n' "$PASSES" "$FAILS"
