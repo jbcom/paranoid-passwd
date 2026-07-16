@@ -9,6 +9,7 @@ use paranoid_audit::{
 };
 use paranoid_core::{
     CharsetSpec, FrameworkId, GenerationReport, ParanoidError, ParanoidRequest, VERSION,
+    secure_preview,
 };
 use paranoid_ops::{
     GeneratePasswordError, GeneratePasswordOperation, GeneratePasswordOutcome, OpsCommand,
@@ -659,17 +660,15 @@ fn map_error_to_exit_code(error: &ParanoidError) -> i32 {
     }
 }
 
-fn secure_preview(password: &str) -> String {
-    if password.len() <= 4 {
-        return password.to_string();
-    }
-    let suffix = &password[password.len() - 4..];
-    format!("{}{}", "•".repeat(password.len() - 4), suffix)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secure_preview_masks_multi_byte_passwords_without_panicking() {
+        assert_eq!(secure_preview("密码123"), "•码123");
+        assert_eq!(secure_preview("パスワード7890"), "•••••7890");
+    }
 
     #[test]
     fn auto_mode_launches_tui_on_interactive_terminal_without_operational_flags() {
