@@ -37,6 +37,12 @@ jobs:
 
   deploy-pages:
     name: Deploy Docs to GitHub Pages
+    # Tier B-adjacent (id-token:write, publishes to GitHub Pages). Per
+    # docs/reference/ci-design.md's P6.4 boundary: this job MUST NOT
+    # restore any PR-writable cache. It intentionally has no actions/cache
+    # step and always builds the docs venv fresh from the digest-pinned
+    # builder image — only ci.yml's PR-side docs job (contents:read, no
+    # OIDC token) caches the tox/Sphinx virtualenvs.
     runs-on: ubuntu-24.04
     if: github.event_name == 'push'
     needs: release-please
@@ -53,7 +59,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build docs site from the repository root
+      - name: Build docs site from the repository root (fresh, no cache)
         uses: ./.github/actions/builder
         with:
           run: |

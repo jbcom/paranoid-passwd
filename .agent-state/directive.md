@@ -94,7 +94,7 @@ P6.0 CI research + two-tier trust design.
   documented bootstrap gap.
 - [x] P6.3 Tier-A cargo target cache (save-if main-only; release restores
   nothing).
-- [ ] P6.4 docs/tox toolchain cache (deploy-pages stays cache-free:
+- [x] P6.4 docs/tox toolchain cache (deploy-pages stays cache-free:
   id-token:write). Double docs build already killed by P6.2.
 - [ ] P6.5 fmt fastest-first job split.
 - [ ] P6.6 least-privilege + trust-boundary audit of all workflows.

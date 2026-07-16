@@ -79,6 +79,21 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Cache the tox/Sphinx virtualenvs (Tier A, PR-writable, never read by deploy-pages)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # tox has no toxworkdir override in tox.ini, so it defaults to
+          # .tox/ under cwd, which is $GITHUB_WORKSPACE bind-mounted into
+          # the builder container at /github/workspace — the same
+          # host-visible-bind-mount trick the rust job uses for
+          # CARGO_TARGET_DIR. No env var override is needed here.
+          path: .tox
+          # tox.ini pins every docs dependency version inline (no separate
+          # requirements file), so hashing it alone is a complete cache key.
+          key: docs-tox-${{ runner.os }}-${{ hashFiles('tox.ini') }}
+          restore-keys: |
+            docs-tox-${{ runner.os }}-
+
       - name: Build the Sphinx docs site inside the builder
         uses: ./.github/actions/builder
         with:
