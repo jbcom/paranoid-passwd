@@ -147,14 +147,17 @@ completeness critic + dedicated architecture review.
 
 ## P3 — CI/release hardening (branch: ci-hardening)
 
-- [ ] [WAIT] **P3.1 (implemented on ci-hardening branch, flips [x] arrive with its merge) PR-gated dependency/SAST job** — cargo-audit, osv-scanner (min
+- [x] **P3.1 PR-gated dependency/SAST job** — cargo-audit, osv-scanner (min
   set; ideally `PARANOID_RUN_LOCAL_SCANNERS=1 make verify-deep`) in the builder
   container on every PR; today scanners run only in local `make quality`.
-- [ ] [WAIT] **P3.2 (implemented on ci-hardening branch, flips [x] arrive with its merge) Required checks** — add `Security Assurance` to branch-protection
+- [x] **P3.2 Required checks** — add `Security Assurance` to branch-protection
   required checks and to `verify_branch_protection.sh:18-23` expected list.
-- [ ] [WAIT] **P3.3 (implemented on ci-hardening branch, flips [x] arrive with its merge) Android/WASM compile-checks in CI** — add to ci.yml (or record an
-  explicit risk disposition in AGENTS.md + testing.md if deliberately local).
-- [ ] [WAIT] **P3.4 (implemented on ci-hardening branch, flips [x] arrive with its merge) Builder-image retry hardening** — wrap `apk add`/`pip install` in
+  Live settings applied post-merge; main's verify_branch_protection.sh passes.
+- [x] **P3.3 Android/WASM compile-checks in CI** — resolved as documented-risk
+  disposition: the hermetic Wolfi builder has no rustup/NDK/wasm32 std (verified
+  empirically in the pinned base image), so both checks stay local-only with
+  root cause recorded in AGENTS.md + testing.md.
+- [x] **P3.4 Builder-image retry hardening** — wrap `apk add`/`pip install` in
   bounded retry loops; the PR #136 Docs Build failure was a transient Wolfi
   CDN error requiring manual re-run.
 
