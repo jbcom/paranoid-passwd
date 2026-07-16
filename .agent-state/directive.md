@@ -211,6 +211,11 @@ completeness critic + dedicated architecture review.
   branch-protection required checks (Dependency Scan, Security Assurance)
 - [ ] [WAIT] P0.7 executor (Argon2id defaults) running on security-hardening
 - [ ] [WAIT] P4.2/P4.3 executor workflow running on docs-truth worktree
+- [ ] [WAIT] P5.3a/P5.4 executor workflow running on extensibility worktree
+- [ ] [WAIT] P1, P2, remaining P4/P5 items blocked on the merges above (vault/docs
+  file overlap) — unblock order: P0 merge → P1; ci-hardening merge → branch
+  protection; P2 after P1; P4 remainder after P2.4 + ci-hardening; P5.1/P5.2
+  after P1; extending.md after P5.1/P5.2
 
 ## Review-refuted / explicitly not queued
 
