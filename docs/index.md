@@ -33,6 +33,7 @@ guides/tui
 guides/recovery-operations
 reference/index
 api/index
+contributing
 ```
 
 ## Download Channels
@@ -48,9 +49,9 @@ api/index
 
 ## Contributing
 
-Human contributors: see [`CONTRIBUTING.md`](../CONTRIBUTING.md) in the repository root for
-environment setup, the verification flow (`make ci`, `make quality`), where code belongs across
-the seven crates, the test-layer breakdown, current extension points, and PR conventions.
+Human contributors: see [Contributing](./contributing.md) for environment setup, the
+verification flow (`make ci`, `make quality`), where code belongs across the seven crates,
+the test-layer breakdown, current extension points, and PR conventions.
 
 ## Why It Exists
 

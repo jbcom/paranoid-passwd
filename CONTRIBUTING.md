@@ -150,7 +150,9 @@ placement:
 
 - Keep security-sensitive logic in `crates/paranoid-core`.
 - Do not reintroduce browser, WASM, or webview runtime surfaces as a secret-handling path.
-- Keep rejection sampling at `(256/N)*N - 1`.
+- Keep the rejection sampling boundary at `((256 / charset_len) * charset_len) - 1`: this is
+  the highest acceptable random byte value for the charset. Bytes greater than this value must
+  be rejected and re-drawn to avoid modulo bias.
 - Keep chi-squared pass logic at `p > 0.01` and degrees of freedom at `N - 1`.
 - Do not add `unsafe` Rust without explicit repository disposition and assurance-script coverage
   (`scripts/hallucination_check.sh` scans for handwritten `unsafe`; only Slint-generated code and
