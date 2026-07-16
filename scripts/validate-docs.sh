@@ -129,6 +129,15 @@ fi
 # under docs/. Subcommand names are extracted mechanically from the `Some("name") => ...` arms of
 # the `let command = match command.as_deref() { ... };` block, not hardcoded here, so a renamed,
 # added, or removed subcommand in code fails this gate instead of silently passing.
+# Concatenated markdown corpus for the coverage checks below. Built with
+# find+cat instead of grep --include, which busybox grep (the CI builder
+# image) does not support.
+docs_md_corpus="$(find "$REPO_ROOT/docs" -type f -name '*.md' -exec cat {} +)"
+if [ -z "$docs_md_corpus" ]; then
+  echo "failed to read any markdown files under $REPO_ROOT/docs" >&2
+  exit 1
+fi
+
 vault_cli_src="$REPO_ROOT/crates/paranoid-cli/src/vault_cli.rs"
 mapfile -t vault_subcommands < <(awk '/let command = match command\.as_deref\(\) \{/{flag=1} flag{print} flag && /^    \};$/{exit}' "$vault_cli_src" | grep -oE 'Some\("[a-z-]+"\)' | sed -E 's/Some\("([a-z-]+)"\)/\1/')
 if [ "${#vault_subcommands[@]}" -eq 0 ]; then
@@ -137,7 +146,7 @@ if [ "${#vault_subcommands[@]}" -eq 0 ]; then
 fi
 missing_vault_subcommands=()
 for subcommand in "${vault_subcommands[@]}"; do
-  if ! grep -rq --include='*.md' -- "$subcommand" "$REPO_ROOT/docs"; then
+  if ! grep -qF -- "$subcommand" <<<"$docs_md_corpus"; then
     missing_vault_subcommands+=("$subcommand")
   fi
 done
@@ -158,7 +167,7 @@ if [ "${#gui_callbacks[@]}" -eq 0 ]; then
 fi
 missing_gui_callbacks=()
 for callback in "${gui_callbacks[@]}"; do
-  if ! grep -rq --include='*.md' -- "$callback" "$REPO_ROOT/docs"; then
+  if ! grep -qF -- "$callback" <<<"$docs_md_corpus"; then
     missing_gui_callbacks+=("$callback")
   fi
 done
