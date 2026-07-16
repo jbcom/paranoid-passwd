@@ -234,7 +234,7 @@ impl std::fmt::Debug for GuiState {
             .field("vault_items", &self.vault_items)
             .field("vault_posture", &self.vault_posture)
             .field("keyslot_summary", &self.keyslot_summary)
-            .field("selected_item", &self.selected_item)
+            .field("selected_item", &"<redacted>")
             .field("automation_status", &self.automation_status)
             .finish()
     }
@@ -1464,6 +1464,38 @@ mod tests {
             };
             assert!(!debug_output.contains(password));
         }
+    }
+
+    #[test]
+    fn gui_state_debug_output_never_leaks_enrolled_mnemonic_phrase() {
+        let tmpdir = tempfile::tempdir().expect("temporary GUI mnemonic directory");
+        let vault_path = tmpdir.path().join("vault.sqlite");
+        init_vault(&vault_path, "correct horse battery staple").expect("test vault init");
+
+        let mut state = GuiState {
+            vault_secret: "correct horse battery staple".to_string(),
+            ..GuiState::default()
+        };
+        enroll_mnemonic_from_ui(
+            &mut state,
+            &SharedString::from(vault_path.to_string_lossy().to_string()),
+            &SharedString::from("correct horse battery staple"),
+            &SharedString::from("paper-backup"),
+        )
+        .expect("mnemonic enrollment succeeds");
+
+        assert!(state.selected_item.contains("New recovery phrase:"));
+        let mnemonic = state
+            .selected_item
+            .strip_prefix("New recovery phrase: ")
+            .and_then(|rest| rest.split_once('\n'))
+            .map(|(phrase, _)| phrase.to_string())
+            .expect("selected_item carries the raw recovery phrase for the operator to record");
+        assert!(!mnemonic.is_empty());
+
+        let debug_output = format!("{state:?}");
+        assert!(debug_output.contains("selected_item: \"<redacted>\""));
+        assert!(!debug_output.contains(&mnemonic));
     }
 
     #[test]
