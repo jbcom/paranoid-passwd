@@ -94,8 +94,12 @@ grep -q "import-transfer" "$REPO_ROOT/docs/guides/recovery-operations.md"
 grep -q "daily passwordless unlock" "$REPO_ROOT/docs/guides/recovery-operations.md"
 grep -q "disaster recovery" "$REPO_ROOT/docs/guides/recovery-operations.md"
 
-workspace_version="$(grep -m1 '^version = ' "$REPO_ROOT/Cargo.toml" | sed -E 's/^version = "([^"]+)"$/\1/')"
-stale_pins="$(rg -no 'paranoid-passwd-v[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/docs" | rg -v "paranoid-passwd-v${workspace_version}\$" || true)"
+workspace_version="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^\s*version\s*=\s*"([^"]+)".*/\1/p}' -E "$REPO_ROOT/Cargo.toml" | head -n1)"
+# Lines marked with the "docs-version-history" marker document past releases on
+# purpose (e.g. "v3.7.0 did not include an MSI") and must not be flagged just
+# because the workspace version has since moved on. Exclude those lines before
+# checking for stale pins.
+stale_pins="$(grep -rnE "paranoid-passwd-v[0-9]+\.[0-9]+\.[0-9]+" "$REPO_ROOT/docs" | grep -v -F "docs-version-history" | grep -vE "paranoid-passwd-v${workspace_version}([^0-9.]|\$)" || true)"
 if [ -n "$stale_pins" ]; then
   echo "docs/ contains version pins that do not match workspace version $workspace_version:" >&2
   echo "$stale_pins" >&2
