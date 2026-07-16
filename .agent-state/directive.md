@@ -43,13 +43,19 @@ completeness critic + dedicated architecture review.
   (`DEFAULT_MEMORY_COST_KIB == 65_536`, `DEFAULT_ITERATIONS == 3`,
   `DEFAULT_PARALLELISM == 1`, `paranoid-vault/src/lib.rs:46-48`) in a unit test
   so cost regressions can't land silently.
-- [ ] **P0.7 Evaluate Argon2id parameter strength** (review feedback, PR #140)
+- [x] **P0.7 Evaluate Argon2id parameter strength** (review feedback, PR #140)
   — assess defaults against current OWASP Argon2id guidance; for a "paranoid"
   posture the 64 MiB memory cost is likely low (libsodium MODERATE tier is
   256 MiB / 3 iter). If raised: new defaults apply to newly created vaults
   only (existing vaults unlock via header-stored `VaultKdfParams`), update the
   P0.5 KAT and `docs/reference/vault-format.md`, and add an unlock test for a
   vault created with the old params.
+  Raised `DEFAULT_MEMORY_COST_KIB` to 262_144 (256 MiB, libsodium MODERATE
+  parity); t=3/p=1 unchanged. Measured release-profile derive time: 64 MiB
+  88.6ms, 128 MiB 156.3ms, 256 MiB 335.1ms — well under any acceptable
+  interactive-unlock ceiling. `unlock_vault` reads `header.kdf`
+  (`crates/paranoid-vault/src/lib.rs:2354`) so existing vaults are unaffected;
+  proved via `vault_created_with_legacy_kdf_params_still_unlocks`.
 - [x] **P0.6 WASM surface vs rule #2 reconciliation** (premise corrected per
   PR #140 review) — the GUI wasm32 cdylib entrypoint exists
   (`paranoid-gui/Cargo.toml:17,32-36`) but is deliberately runtime-gated
@@ -68,7 +74,7 @@ completeness critic + dedicated architecture review.
 
 ## P1 — Architecture refactors (branch: seal-and-crypto-boundaries)
 
-- [ ] **P1.1 Seal posture single source of truth** (citation corrected per
+- [ ] [WAIT] **P1.1 (blocked: PR #141 merge) Seal posture single source of truth** (citation corrected per
   PR #140 review: `paranoid-ops/lib.rs:1363-1663` is `#[cfg(test)]` fixtures,
   not a production path) — `paranoid-vault` never depends on `paranoid-seal`;
   the production posture derivation lives in `vault_cli.rs:610-685`, outside
@@ -77,21 +83,21 @@ completeness critic + dedicated architecture review.
   (refactor, not shim — callers move in the same commit). Accept: exactly one
   production derivation site, in `paranoid-vault`; test fixtures constructing
   `VaultSealPosture` directly are exempt.
-- [ ] **P1.2 `mtls_transport` disposition** — 546-line public module in
+- [ ] [WAIT] **P1.2 (blocked: PR #141 merge) `mtls_transport` disposition** — 546-line public module in
   `paranoid-ops` with zero callers in cli/gui. **Decision**: not speculative
   infra we ship as dead pub API — gate behind a cargo feature consumed by its
   integration tests, and document the intended remote-ops consumer in
   `docs/reference/architecture.md`; wire-in happens when that feature ships.
-- [ ] **P1.3 Single mTLS construction path** — `paranoid-audit` hand-builds an
+- [ ] [WAIT] **P1.3 (blocked: PR #141 merge) Single mTLS construction path** — `paranoid-audit` hand-builds an
   `SslConnector` for the external-device probe, duplicating
   `OpsMtlsClientConfig` logic. Extract one shared helper (in `paranoid-core`,
   consistent with single-crypto-surface) used by both.
-- [ ] **P1.4 X.509 primitives into core** — `paranoid-vault` imports `openssl`
+- [ ] [WAIT] **P1.4 (blocked: PR #141 merge) X.509 primitives into core** — `paranoid-vault` imports `openssl`
   directly for `load_certificate` / `certificate_fingerprint_hex` /
   `certificate_time_to_epoch` / `inspect_certificate_pem`
   (`lib.rs:3453-3523`); move the primitives to `paranoid-core`, drop vault's
   direct `openssl` dependency if nothing else needs it.
-- [ ] **P1.5 Split the monoliths** — `paranoid-vault/src/lib.rs` (6,268 lines)
+- [ ] [WAIT] **P1.5 (blocked: PR #141 merge) Split the monoliths** — `paranoid-vault/src/lib.rs` (6,268 lines)
   and `vault_tui.rs` into responsibility modules (vault: keyslots /
   backup-transfer / recovery-posture / lifecycle; tui: screen state / panels /
   mutation handlers). Pure moves + visibility fixes, no behavior change;
@@ -99,36 +105,36 @@ completeness critic + dedicated architecture review.
 
 ## P2 — E2E & capability detection (branch: e2e-and-detection; ordered — later items depend on earlier)
 
-- [ ] **P2.1 Scriptable TUI driving surface** — extract the event-independent
+- [ ] [WAIT] **P2.1 Scriptable TUI driving surface** (executor workflow wf_d2d6fd5a running on e2e-and-detection) — extract the event-independent
   step function (`App::handle_key`, `tui.rs:355`, plus worker polling) into a
   testable surface and add a deterministic scripted mode
   (`--script <path>` / `PARANOID_TUI_SCRIPT`, matching the existing
   `PARANOID_TEST_DEVICE_STORE_DIR` pattern) feeding newline-delimited key
   sequences. This is the prerequisite for P2.3/P2.5 and for agentic control of
   the TUI. Accept: a scripted run completes the generator wizard headlessly.
-- [ ] **P2.2 Capability-detection evidence module** — first-run/install-time
+- [ ] [WAIT] **P2.2 Capability-detection evidence module** (same workflow, sequenced after P2.1) — first-run/install-time
   probes for OS keychain (`keyring`), clipboard (`arboard`), display server
   (Quartz/X11/Wayland/none), and configured seal providers, modeled on the
   existing `FederalCryptoProviderEvidence::collect_from_environment()` pattern;
   expose via `--detect-environment` CLI flag (parallel to
   `--federal-evidence`). Evidence structs, serde-locked wire shape, KATs.
-- [ ] **P2.3 TUI environment-approval screen** — first screen when no vault
+- [ ] [WAIT] **P2.3 (blocked: P2.1/P2.2 landing) TUI environment-approval screen** — first screen when no vault
   exists at `default_vault_path()` (`native_access.rs:201-222`) and reachable
   by hotkey: renders detected capabilities + suggested seal-provider
   configuration, user accepts/adjusts. Accept: PTY e2e drives the approval
   flow via the P2.1 scripted mode.
-- [ ] **P2.4 Vendor `slint-testing` + real widget-event GUI tests** — add
+- [ ] [WAIT] **P2.4 (blocked: PR #141 merge (gui files)) Vendor `slint-testing` + real widget-event GUI tests** — add
   dev-dependency matching vendored slint 1.16.1 (cargo vendor per the
   locked/frozen/offline rule), then in-process tests using
   `slint::testing::send_mouse_click`/keyboard events driving the REAL widget
   tree (init-vault → add-login → generate-rotate → enroll-mnemonic →
   export-backup), asserting window property state. Closes the gap where GUI
   e2e bypasses callback wiring entirely.
-- [ ] **P2.5 Extend TUI PTY e2e** — wrong-password → `UnlockBlocked` seal
+- [ ] [WAIT] **P2.5 (blocked: P2.1 landing) Extend TUI PTY e2e** — wrong-password → `UnlockBlocked` seal
   screen → recover; recovery-secret rotation; and a second PTY session against
   the same vault proving restart persistence (items + keyslots visible,
   unlock works).
-- [ ] **P2.6 e2e matrix split: `make e2e-ci` / `make e2e-local`** — `e2e-ci`
+- [ ] [WAIT] **P2.6 (blocked: P2.4/P2.5 landing) e2e matrix split: `make e2e-ci` / `make e2e-local`** — `e2e-ci`
   aggregates the headless-deterministic set (CLI contract, vault CLI, PTY TUI,
   xvfb GUI screenshot + slint-testing widget tests); `e2e-local` adds
   real-display/real-input runs: on macOS drive the actual GUI with real mouse
@@ -154,29 +160,29 @@ completeness critic + dedicated architecture review.
 
 ## P4 — Documentation truth (branch: docs-truth)
 
-- [ ] **P4.1 Fix GUI parity overclaims** — `docs/reference/architecture.md`
+- [ ] [WAIT] **P4.1 (blocked: P2.4 + ci-hardening merge) Fix GUI parity overclaims** — `docs/reference/architecture.md`
   (lines ~56-61, 135, 167, 218, 221), `docs/guides/tui.md:171`: scope GUI
   claims to the actual 8-callback surface; `docs/reference/testing.md:297-300`:
   remove fabricated GUI coverage claims (keyslot inspection, rotation, rewrap,
   rebind coverage that doesn't exist). Re-check after P2.4 lands and update to
   the then-true surface.
-- [ ] **P4.2 Document the six undocumented vault subcommands** — `vault show`,
+- [ ] [WAIT] **P4.2 Document the six undocumented vault subcommands** (executor workflow wf_59422769 on docs-truth) — `vault show`,
   `update`, `update-note`, `update-card`, `update-identity`, `delete` in
   `docs/getting-started/index.md`.
-- [ ] **P4.3 Version-pin drift** — `docs/public/install.sh:6` and
+- [ ] [WAIT] **P4.3 Version-pin drift** (same workflow) — `docs/public/install.sh:6` and
   `docs/getting-started/index.md:48` still say v3.6.5; fix to current and add
   a validate-docs.sh assertion tying doc version strings to workspace
   Cargo.toml so the class is dead.
-- [ ] **P4.4 Document all six compliance frameworks** — hipaa/soc2/gdpr/
+- [ ] [WAIT] **P4.4 (blocked: docs-truth merge (validate-docs.sh)) Document all six compliance frameworks** — hipaa/soc2/gdpr/
   iso27001 appear nowhere in the Sphinx site despite `--help` listing them;
   add canonical list + aliases, and validate-docs.sh greps per framework id.
-- [ ] **P4.5 testing.md completeness** — name `make test-tui-e2e` and
+- [ ] [WAIT] **P4.5 (blocked: P2.6 landing) testing.md completeness** — name `make test-tui-e2e` and
   `make test-vault-e2e` (CI-load-bearing, currently undocumented); document
   the P2.6 e2e split.
-- [ ] **P4.6 Mechanical doc-coverage gates** — script asserting (a) every vault
+- [ ] [WAIT] **P4.6 (blocked: docs-truth merge) Mechanical doc-coverage gates** — script asserting (a) every vault
   subcommand match-arm appears in docs/, (b) every GUI `on_*` callback name is
   documented; wire into `make docs-check`.
-- [ ] **P4.7 CLAUDE.md accuracy** (depends on P2.4) — replace the "GUI
+- [ ] [WAIT] **P4.7 (blocked: P2.4 landing) CLAUDE.md accuracy** (depends on P2.4) — replace the "GUI
   scaffold" framing: native desktop GUI callbacks are implemented; real
   widget-event coverage lands with P2.4 (state whichever is true when this
   item executes). Only the WASM path is intentionally gated (align with P0.6
@@ -184,21 +190,21 @@ completeness critic + dedicated architecture review.
 
 ## P5 — Extensibility & contributor experience (branch: extensibility)
 
-- [ ] **P5.1 Data-driven framework/charset registries** — convert `FRAMEWORKS`
+- [ ] [WAIT] **P5.1 (blocked: P1 merge) Data-driven framework/charset registries** — convert `FRAMEWORKS`
   (`paranoid-core/src/lib.rs:177-291`) and named charsets to build-validated
   data manifests (TOML under `crates/paranoid-core/data/`) so adding a
   framework/preset is a data PR; crypto-invariant math stays in Rust.
   Accept: existing FrameworkId tests pass unchanged; new framework addable
   without touching enum dispatch sites.
-- [ ] **P5.2 Seal-provider trait seam** — define the provider trait in
+- [ ] [WAIT] **P5.2 (blocked: P1.1 landing) Seal-provider trait seam** — define the provider trait in
   `paranoid-seal` (probe/evidence/kind) that existing kinds implement, giving
   contributors one place to add a provider (coordinates with P1.1).
-- [ ] **P5.3 CONTRIBUTING.md + docs/reference/extending.md** — dev setup
+- [ ] [WAIT] **P5.3 CONTRIBUTING.md + docs/reference/extending.md** (CONTRIBUTING half in executor workflow wf_9c9b9104 on extensibility; extending.md blocked on P5.1/P5.2) — dev setup
   (`make bootstrap-local`/`configure`/`ci`), crate boundary rules, how to add
   tests at each layer, PR conventions, and the three extension points
   (frameworks, charsets, seal providers) with worked examples; link from
   README and docs/index.md.
-- [ ] **P5.4 `.remember/` + `.ralph-tui/` disposition** — tracked agent-loop
+- [ ] [WAIT] **P5.4 `.remember/` + `.ralph-tui/` disposition** (same workflow) — tracked agent-loop
   scaffolding (empty remember.md, ralph-tui setup-wizard config) with no
   documented purpose: either document in AGENTS.md tooling section or untrack
   + gitignore. **Decision**: untrack + gitignore unless the user's ralph
