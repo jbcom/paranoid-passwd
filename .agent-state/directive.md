@@ -8,9 +8,11 @@ completeness critic + dedicated architecture review.
 
 - **Orchestrator**: main Claude session. **Executors**: Sonnet 5 agents via
   Workflow, one workflow per work unit, adversarial verify on risky changes.
-- One local branch per work unit (a `##` section below unless noted), forward
-  commits, one PR at the end of the unit, squash-merge when green + threads
-  resolved. Flip `[ ]`→`[x]` in the same commit that lands the item.
+- AMENDED (user, 2026-07-16): ALL remaining work lands as forward commits on
+  the single `integration` branch (consolidates security-hardening,
+  extensibility, docs-frameworks, e2e-and-detection). One integration PR,
+  continuously updated, squash-merged when the queue drains. Flip `[ ]`→`[x]`
+  in the same commit that lands the item.
 - Every commit: docs and tests move with code. `make ci` green locally before
   push. Zero-exception rules in CLAUDE.md are non-negotiable.
 - Definition of done for the whole directive: nothing undone, untested, or
