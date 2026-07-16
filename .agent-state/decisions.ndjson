@@ -1,1 +1,2 @@
 {"ts":"2026-07-16T16:51:13.872Z","sha":"bcaac8265781f1afc624872a6203dfb800099b0e","subject":"test: harden coverage for silent-regression-risk APIs (#136)","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
+{"ts":"2026-07-16T17:22:21.132Z","sha":"73d4678dd02e6b4a754765994cf6fdf073ba6982","subject":"chore: track agent-state decisions journal (#139)","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
