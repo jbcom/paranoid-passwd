@@ -712,7 +712,7 @@ struct CertificateRewrapForm {
     focus_index: usize,
     cert_path: String,
     key_path: String,
-    key_passphrase: String,
+    key_passphrase: SecretString,
 }
 
 impl CertificateRewrapForm {
@@ -732,8 +732,16 @@ impl CertificateRewrapForm {
         match self.selected_field() {
             CertificateRewrapField::CertPath => Some(&mut self.cert_path),
             CertificateRewrapField::KeyPath => Some(&mut self.key_path),
+            CertificateRewrapField::KeyPassphrase | CertificateRewrapField::Save => None,
+        }
+    }
+
+    fn selected_secret_mut(&mut self) -> Option<&mut SecretString> {
+        match self.selected_field() {
             CertificateRewrapField::KeyPassphrase => Some(&mut self.key_passphrase),
-            CertificateRewrapField::Save => None,
+            CertificateRewrapField::CertPath
+            | CertificateRewrapField::KeyPath
+            | CertificateRewrapField::Save => None,
         }
     }
 }
@@ -748,21 +756,21 @@ struct CertificateSlotForm {
 #[derive(Debug, Clone, Default)]
 struct RecoverySecretForm {
     focus_index: usize,
-    new_secret: String,
-    confirm_secret: String,
+    new_secret: SecretString,
+    confirm_secret: SecretString,
 }
 
 #[derive(Debug, Clone)]
 struct UnlockForm {
     focus_index: usize,
     mode: UnlockMode,
-    password: String,
-    mnemonic_phrase: String,
+    password: SecretString,
+    mnemonic_phrase: SecretString,
     mnemonic_slot: String,
     device_slot: String,
     cert_path: String,
     key_path: String,
-    key_passphrase: String,
+    key_passphrase: SecretString,
 }
 
 #[derive(Debug, Clone)]
@@ -812,7 +820,7 @@ struct ImportBackupForm {
 struct ExportTransferForm {
     focus_index: usize,
     path: String,
-    package_password: String,
+    package_password: SecretString,
     cert_path: String,
 }
 
@@ -821,10 +829,10 @@ struct ImportTransferForm {
     focus_index: usize,
     path: String,
     replace_existing: bool,
-    package_password: String,
+    package_password: SecretString,
     cert_path: String,
     key_path: String,
-    key_passphrase: String,
+    key_passphrase: SecretString,
 }
 
 impl Default for UnlockForm {
@@ -832,13 +840,13 @@ impl Default for UnlockForm {
         Self {
             focus_index: 0,
             mode: UnlockMode::Password,
-            password: String::new(),
-            mnemonic_phrase: String::new(),
+            password: SecretString::default(),
+            mnemonic_phrase: SecretString::default(),
             mnemonic_slot: String::new(),
             device_slot: String::new(),
             cert_path: String::new(),
             key_path: String::new(),
-            key_passphrase: String::new(),
+            key_passphrase: SecretString::default(),
         }
     }
 }
@@ -901,9 +909,17 @@ impl ExportTransferForm {
     fn selected_value_mut(&mut self) -> Option<&mut String> {
         match self.selected_field() {
             ExportTransferField::Path => Some(&mut self.path),
-            ExportTransferField::PackagePassword => Some(&mut self.package_password),
             ExportTransferField::CertPath => Some(&mut self.cert_path),
-            ExportTransferField::Save => None,
+            ExportTransferField::PackagePassword | ExportTransferField::Save => None,
+        }
+    }
+
+    fn selected_secret_mut(&mut self) -> Option<&mut SecretString> {
+        match self.selected_field() {
+            ExportTransferField::PackagePassword => Some(&mut self.package_password),
+            ExportTransferField::Path
+            | ExportTransferField::CertPath
+            | ExportTransferField::Save => None,
         }
     }
 }
@@ -924,11 +940,24 @@ impl ImportTransferForm {
     fn selected_value_mut(&mut self) -> Option<&mut String> {
         match self.selected_field() {
             ImportTransferField::Path => Some(&mut self.path),
-            ImportTransferField::PackagePassword => Some(&mut self.package_password),
             ImportTransferField::CertPath => Some(&mut self.cert_path),
             ImportTransferField::KeyPath => Some(&mut self.key_path),
+            ImportTransferField::PackagePassword
+            | ImportTransferField::KeyPassphrase
+            | ImportTransferField::ReplaceExisting
+            | ImportTransferField::Save => None,
+        }
+    }
+
+    fn selected_secret_mut(&mut self) -> Option<&mut SecretString> {
+        match self.selected_field() {
+            ImportTransferField::PackagePassword => Some(&mut self.package_password),
             ImportTransferField::KeyPassphrase => Some(&mut self.key_passphrase),
-            ImportTransferField::ReplaceExisting | ImportTransferField::Save => None,
+            ImportTransferField::Path
+            | ImportTransferField::CertPath
+            | ImportTransferField::KeyPath
+            | ImportTransferField::ReplaceExisting
+            | ImportTransferField::Save => None,
         }
     }
 }
@@ -968,7 +997,7 @@ impl RecoverySecretForm {
         self.focus_index = (self.focus_index as isize + delta).clamp(0, len - 1) as usize;
     }
 
-    fn selected_value_mut(&mut self) -> Option<&mut String> {
+    fn selected_secret_mut(&mut self) -> Option<&mut SecretString> {
         match self.selected_field() {
             RecoverySecretField::NewSecret => Some(&mut self.new_secret),
             RecoverySecretField::Confirm => Some(&mut self.confirm_secret),
@@ -1030,12 +1059,18 @@ impl UnlockForm {
 
     fn selected_value_mut(&mut self) -> Option<&mut String> {
         match (self.mode, self.selected_field()) {
-            (UnlockMode::Password, UnlockField::Primary) => Some(&mut self.password),
-            (UnlockMode::Mnemonic, UnlockField::Primary) => Some(&mut self.mnemonic_phrase),
             (UnlockMode::Mnemonic, UnlockField::Secondary) => Some(&mut self.mnemonic_slot),
             (UnlockMode::Device, UnlockField::Primary) => Some(&mut self.device_slot),
             (UnlockMode::Certificate, UnlockField::Primary) => Some(&mut self.cert_path),
             (UnlockMode::Certificate, UnlockField::Secondary) => Some(&mut self.key_path),
+            _ => None,
+        }
+    }
+
+    fn selected_secret_mut(&mut self) -> Option<&mut SecretString> {
+        match (self.mode, self.selected_field()) {
+            (UnlockMode::Password, UnlockField::Primary) => Some(&mut self.password),
+            (UnlockMode::Mnemonic, UnlockField::Primary) => Some(&mut self.mnemonic_phrase),
             (UnlockMode::Certificate, UnlockField::Tertiary) => Some(&mut self.key_passphrase),
             _ => None,
         }
@@ -1393,12 +1428,10 @@ impl App {
 
         match self.unlock_form.mode {
             UnlockMode::Password => {
-                self.options.auth =
-                    VaultAuth::Password(SecretString::new(self.unlock_form.password.clone()));
+                self.options.auth = VaultAuth::Password(self.unlock_form.password.clone());
             }
             UnlockMode::Mnemonic => {
-                self.options.mnemonic_phrase =
-                    Some(SecretString::new(self.unlock_form.mnemonic_phrase.clone()));
+                self.options.mnemonic_phrase = Some(self.unlock_form.mnemonic_phrase.clone());
                 self.options.mnemonic_slot =
                     normalize_optional_field(&self.unlock_form.mnemonic_slot);
             }
@@ -1415,8 +1448,7 @@ impl App {
                     cert_path: self.unlock_form.cert_path.trim().into(),
                     key_path: self.unlock_form.key_path.trim().into(),
                     key_passphrase_env: None,
-                    key_passphrase: normalize_optional_field(&self.unlock_form.key_passphrase)
-                        .map(SecretString::new),
+                    key_passphrase: normalize_optional_secret(&self.unlock_form.key_passphrase),
                 };
             }
         }
@@ -1682,6 +1714,7 @@ impl App {
             }
             _ => {
                 edit_form_value(self.unlock_form.selected_value_mut(), key);
+                edit_form_value(self.unlock_form.selected_secret_mut(), key);
                 false
             }
         }
@@ -2202,6 +2235,7 @@ impl App {
             }
             _ => {
                 edit_form_value(form.selected_value_mut(), key);
+                edit_form_value(form.selected_secret_mut(), key);
                 false
             }
         }
@@ -2236,7 +2270,7 @@ impl App {
                 false
             }
             _ => {
-                edit_form_value(self.recovery_secret_form.selected_value_mut(), key);
+                edit_form_value(self.recovery_secret_form.selected_secret_mut(), key);
                 false
             }
         }
@@ -2425,6 +2459,7 @@ impl App {
             }
             _ => {
                 edit_form_value(self.export_transfer_form.selected_value_mut(), key);
+                edit_form_value(self.export_transfer_form.selected_secret_mut(), key);
                 false
             }
         }
@@ -2479,6 +2514,7 @@ impl App {
             }
             _ => {
                 edit_form_value(self.import_transfer_form.selected_value_mut(), key);
+                edit_form_value(self.import_transfer_form.selected_secret_mut(), key);
                 false
             }
         }
@@ -2559,7 +2595,7 @@ impl App {
         replaced_slot: &paranoid_vault::VaultKeyslot,
         replacement_cert_path: &str,
         replacement_key_path: Option<&str>,
-        replacement_key_passphrase: Option<&str>,
+        replacement_key_passphrase: Option<&SecretString>,
     ) {
         let (active_cert_path, active_key_path, active_key_passphrase_env, active_key_passphrase) =
             match &self.options.auth {
@@ -2615,7 +2651,7 @@ impl App {
                 None => active_key_passphrase_env,
             },
             key_passphrase: match replacement_key_passphrase {
-                Some(passphrase) => Some(SecretString::new(passphrase.to_string())),
+                Some(passphrase) => Some(passphrase.clone()),
                 None => active_key_passphrase,
             },
         };
@@ -2875,7 +2911,7 @@ impl App {
         self.export_transfer_form = ExportTransferForm {
             focus_index: 0,
             path: default_transfer_export_path(&self.options.path),
-            package_password: String::new(),
+            package_password: SecretString::default(),
             cert_path: String::new(),
         };
         self.screen = Screen::ExportTransfer;
@@ -2901,10 +2937,10 @@ impl App {
             focus_index: 0,
             path: default_transfer_export_path(&self.options.path),
             replace_existing: false,
-            package_password: String::new(),
+            package_password: SecretString::default(),
             cert_path: String::new(),
             key_path: String::new(),
-            key_passphrase: String::new(),
+            key_passphrase: SecretString::default(),
         };
         self.screen = Screen::ImportTransfer;
         self.status =
@@ -3360,7 +3396,7 @@ impl App {
         }
 
         let package_password =
-            normalize_optional_field(&self.export_transfer_form.package_password);
+            normalize_optional_secret(&self.export_transfer_form.package_password);
         let cert_path = normalize_optional_field(&self.export_transfer_form.cert_path);
         if package_password.is_none() && cert_path.is_none() {
             self.status =
@@ -3385,7 +3421,7 @@ impl App {
                     .export_transfer_package(
                         output.as_str(),
                         &self.filters.as_filter(),
-                        package_password.as_deref(),
+                        package_password.as_ref().map(SecretString::as_str),
                         cert_pem.as_deref(),
                     )
                     .map_err(anyhow::Error::from)
@@ -3417,10 +3453,10 @@ impl App {
         }
 
         let package_password =
-            normalize_optional_field(&self.import_transfer_form.package_password);
+            normalize_optional_secret(&self.import_transfer_form.package_password);
         let cert_path = normalize_optional_field(&self.import_transfer_form.cert_path);
         let key_path = normalize_optional_field(&self.import_transfer_form.key_path);
-        let key_passphrase = normalize_optional_field(&self.import_transfer_form.key_passphrase);
+        let key_passphrase = normalize_optional_secret(&self.import_transfer_form.key_passphrase);
         let use_password = package_password.is_some();
         let use_certificate = cert_path.is_some() || key_path.is_some();
         if use_password && use_certificate {
@@ -3469,7 +3505,7 @@ impl App {
                         input.as_str(),
                         cert_pem.as_slice(),
                         key_pem.as_slice(),
-                        key_passphrase.as_deref(),
+                        key_passphrase.as_ref().map(SecretString::as_str),
                         self.import_transfer_form.replace_existing,
                     )
                 };
@@ -3659,7 +3695,7 @@ impl App {
         }
         let replacement_key_path = normalize_optional_field(&self.certificate_rewrap_form.key_path);
         let replacement_key_passphrase =
-            normalize_optional_field(&self.certificate_rewrap_form.key_passphrase);
+            normalize_optional_secret(&self.certificate_rewrap_form.key_passphrase);
         match fs::read(&cert_path) {
             Ok(cert_pem) => {
                 match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot)
@@ -3673,7 +3709,7 @@ impl App {
                                 &slot,
                                 cert_path.as_str(),
                                 replacement_key_path.as_deref(),
-                                replacement_key_passphrase.as_deref(),
+                                replacement_key_passphrase.as_ref(),
                             );
                             self.header = Some(vault.header().clone());
                             self.selected_keyslot_index = self
@@ -3774,7 +3810,7 @@ impl App {
                         self.options.auth,
                         VaultAuth::PasswordEnv(_) | VaultAuth::Password(_)
                     ) {
-                        self.options.auth = VaultAuth::Password(SecretString::new(new_secret));
+                        self.options.auth = VaultAuth::Password(new_secret);
                     }
                     self.recovery_secret_form = RecoverySecretForm::default();
                     self.screen = Screen::Keyslots;
@@ -4010,16 +4046,52 @@ impl App {
     }
 }
 
-fn edit_form_value(buffer: Option<&mut String>, key: KeyEvent) {
+trait EditableText {
+    fn edit_pop(&mut self);
+    fn edit_clear(&mut self);
+    fn edit_push(&mut self, ch: char);
+}
+
+impl EditableText for String {
+    fn edit_pop(&mut self) {
+        self.pop();
+    }
+
+    fn edit_clear(&mut self) {
+        self.clear();
+    }
+
+    fn edit_push(&mut self, ch: char) {
+        self.push(ch);
+    }
+}
+
+impl EditableText for SecretString {
+    fn edit_pop(&mut self) {
+        self.pop();
+    }
+
+    fn edit_clear(&mut self) {
+        self.clear();
+    }
+
+    fn edit_push(&mut self, ch: char) {
+        self.push(ch);
+    }
+}
+
+fn edit_form_value<T: EditableText>(buffer: Option<&mut T>, key: KeyEvent) {
     let Some(buffer) = buffer else {
         return;
     };
     match key.code {
         KeyCode::Backspace => {
-            buffer.pop();
+            buffer.edit_pop();
         }
-        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => buffer.clear(),
-        KeyCode::Char(ch) if (32..=126).contains(&(ch as u32)) => buffer.push(ch),
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            buffer.edit_clear();
+        }
+        KeyCode::Char(ch) if (32..=126).contains(&(ch as u32)) => buffer.edit_push(ch),
         _ => {}
     }
 }
@@ -4675,14 +4747,14 @@ fn unlock_blocked_panel(app: &App) -> Paragraph<'static> {
             lines.push(form_line(
                 matches!(form.selected_field(), UnlockField::Primary),
                 "Recovery secret",
-                &masked_value(&form.password),
+                &masked_value(form.password.as_str()),
             ));
         }
         UnlockMode::Mnemonic => {
             lines.push(form_line(
                 matches!(form.selected_field(), UnlockField::Primary),
                 "Recovery phrase",
-                &masked_value(&form.mnemonic_phrase),
+                &masked_value(form.mnemonic_phrase.as_str()),
             ));
             lines.push(form_line(
                 matches!(form.selected_field(), UnlockField::Secondary),
@@ -4711,7 +4783,7 @@ fn unlock_blocked_panel(app: &App) -> Paragraph<'static> {
             lines.push(form_line(
                 matches!(form.selected_field(), UnlockField::Tertiary),
                 "Key passphrase (optional)",
-                &masked_value(&form.key_passphrase),
+                &masked_value(form.key_passphrase.as_str()),
             ));
         }
     }
@@ -5455,7 +5527,7 @@ fn rewrap_certificate_slot_panel(app: &App) -> Paragraph<'static> {
         form_line(
             matches!(form.selected_field(), CertificateRewrapField::KeyPassphrase),
             "Replacement key passphrase (optional)",
-            &masked_value(&form.key_passphrase),
+            &masked_value(form.key_passphrase.as_str()),
         ),
         form_action_line(
             matches!(form.selected_field(), CertificateRewrapField::Save),
@@ -5547,12 +5619,12 @@ fn rotate_recovery_secret_panel(app: &App) -> Paragraph<'static> {
         form_line(
             matches!(form.selected_field(), RecoverySecretField::NewSecret),
             "New recovery secret",
-            &masked_value(&form.new_secret),
+            &masked_value(form.new_secret.as_str()),
         ),
         form_line(
             matches!(form.selected_field(), RecoverySecretField::Confirm),
             "Confirm recovery secret",
-            &masked_value(&form.confirm_secret),
+            &masked_value(form.confirm_secret.as_str()),
         ),
         form_action_line(
             matches!(form.selected_field(), RecoverySecretField::Save),
@@ -5868,7 +5940,7 @@ fn export_backup_panel(app: &App) -> Paragraph<'static> {
 
 fn export_transfer_panel(app: &App) -> Paragraph<'static> {
     let form = &app.export_transfer_form;
-    let package_password = if form.package_password.trim().is_empty() {
+    let package_password = if form.package_password.as_str().trim().is_empty() {
         "(unset)"
     } else {
         "(set)"
@@ -5966,7 +6038,7 @@ fn import_backup_panel(app: &App) -> Paragraph<'static> {
 fn import_transfer_panel(app: &App) -> Paragraph<'static> {
     let form = &app.import_transfer_form;
     let replace_existing = if form.replace_existing { "yes" } else { "no" };
-    let package_password = if form.package_password.trim().is_empty() {
+    let package_password = if form.package_password.as_str().trim().is_empty() {
         "(unset)"
     } else {
         "(set)"
@@ -5981,7 +6053,7 @@ fn import_transfer_panel(app: &App) -> Paragraph<'static> {
     } else {
         form.key_path.as_str()
     };
-    let key_passphrase = if form.key_passphrase.trim().is_empty() {
+    let key_passphrase = if form.key_passphrase.as_str().trim().is_empty() {
         "(unset)"
     } else {
         "(set)"
@@ -6153,7 +6225,7 @@ fn current_transfer_selection_lines(app: &App, form: &ExportTransferForm) -> Vec
         )),
         Line::raw(format!(
             "unwrap paths: recovery_secret={} certificate={}",
-            !form.package_password.trim().is_empty(),
+            !form.package_password.as_str().trim().is_empty(),
             !form.cert_path.trim().is_empty()
         )),
     ];
@@ -6316,6 +6388,15 @@ fn normalize_optional_field(value: &str) -> Option<String> {
         None
     } else {
         Some(trimmed.to_string())
+    }
+}
+
+fn normalize_optional_secret(value: &SecretString) -> Option<SecretString> {
+    let trimmed = value.as_str().trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(SecretString::new(trimmed.to_string()))
     }
 }
 
@@ -7626,8 +7707,10 @@ mod tests {
         let mut app = App::new(options);
         app.open_keyslots();
         app.open_rotate_recovery_secret();
-        app.recovery_secret_form.new_secret = "new battery horse staple".to_string();
-        app.recovery_secret_form.confirm_secret = "new battery horse staple".to_string();
+        app.recovery_secret_form.new_secret =
+            SecretString::new("new battery horse staple".to_string());
+        app.recovery_secret_form.confirm_secret =
+            SecretString::new("new battery horse staple".to_string());
         app.submit_rotate_recovery_secret();
 
         assert!(matches!(app.screen, Screen::Keyslots));
@@ -7792,7 +7875,8 @@ mod tests {
 
         source_app.open_export_transfer();
         source_app.export_transfer_form.path = transfer_path.display().to_string();
-        source_app.export_transfer_form.package_password = "transfer secret".to_string();
+        source_app.export_transfer_form.package_password =
+            SecretString::new("transfer secret".to_string());
         source_app.submit_export_transfer();
 
         assert!(matches!(source_app.screen, Screen::Vault));
@@ -7812,7 +7896,8 @@ mod tests {
         let mut dest_app = App::new(dest_options);
         dest_app.open_import_transfer();
         dest_app.import_transfer_form.path = transfer_path.display().to_string();
-        dest_app.import_transfer_form.package_password = "transfer secret".to_string();
+        dest_app.import_transfer_form.package_password =
+            SecretString::new("transfer secret".to_string());
         dest_app.submit_import_transfer();
 
         assert!(matches!(dest_app.screen, Screen::Vault));
@@ -7913,7 +7998,8 @@ mod tests {
         let original_id = app.detail.as_ref().expect("detail").id.clone();
         app.open_import_transfer();
         app.import_transfer_form.path = invalid_transfer.display().to_string();
-        app.import_transfer_form.package_password = "transfer secret".to_string();
+        app.import_transfer_form.package_password =
+            SecretString::new("transfer secret".to_string());
         app.submit_import_transfer();
 
         assert!(matches!(app.screen, Screen::ImportTransfer));
@@ -7989,7 +8075,7 @@ mod tests {
         let mut app = App::new(password_only_options(&path));
         assert!(matches!(app.screen, Screen::UnlockBlocked));
 
-        app.unlock_form.password = "correct horse battery staple".to_string();
+        app.unlock_form.password = SecretString::new("correct horse battery staple".to_string());
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
@@ -8168,12 +8254,74 @@ mod tests {
         assert!(matches!(app.screen, Screen::UnlockBlocked));
 
         app.unlock_form.mode = UnlockMode::Mnemonic;
-        app.unlock_form.mnemonic_phrase = enrollment.mnemonic;
+        app.unlock_form.mnemonic_phrase = SecretString::new(enrollment.mnemonic);
         app.unlock_form.mnemonic_slot = enrollment.keyslot.id;
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
         assert!(app.status.contains("Vault unlocked"));
+    }
+
+    #[test]
+    fn form_debug_output_never_leaks_secret_text() {
+        let unlock_form = UnlockForm {
+            password: SecretString::new("correct horse battery staple".to_string()),
+            mnemonic_phrase: SecretString::new(
+                "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong".to_string(),
+            ),
+            key_passphrase: SecretString::new("pkcs8-passphrase".to_string()),
+            ..UnlockForm::default()
+        };
+        let unlock_debug = format!("{unlock_form:?}");
+        assert!(unlock_debug.contains("<redacted>"));
+        assert!(!unlock_debug.contains("correct horse battery staple"));
+        assert!(!unlock_debug.contains("zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong"));
+        assert!(!unlock_debug.contains("pkcs8-passphrase"));
+
+        let certificate_rewrap_form = CertificateRewrapForm {
+            key_passphrase: SecretString::new("cert-rewrap-passphrase".to_string()),
+            ..CertificateRewrapForm::default()
+        };
+        let certificate_rewrap_debug = format!("{certificate_rewrap_form:?}");
+        assert!(certificate_rewrap_debug.contains("<redacted>"));
+        assert!(!certificate_rewrap_debug.contains("cert-rewrap-passphrase"));
+
+        let recovery_secret_form = RecoverySecretForm {
+            new_secret: SecretString::new("new battery horse staple".to_string()),
+            confirm_secret: SecretString::new("new battery horse staple".to_string()),
+            ..RecoverySecretForm::default()
+        };
+        let recovery_secret_debug = format!("{recovery_secret_form:?}");
+        assert!(recovery_secret_debug.contains("<redacted>"));
+        assert!(!recovery_secret_debug.contains("new battery horse staple"));
+
+        let export_transfer_form = ExportTransferForm {
+            package_password: SecretString::new("transfer package secret".to_string()),
+            ..ExportTransferForm::default()
+        };
+        let export_transfer_debug = format!("{export_transfer_form:?}");
+        assert!(export_transfer_debug.contains("<redacted>"));
+        assert!(!export_transfer_debug.contains("transfer package secret"));
+
+        let import_transfer_form = ImportTransferForm {
+            package_password: SecretString::new("import package secret".to_string()),
+            key_passphrase: SecretString::new("import key passphrase".to_string()),
+            ..ImportTransferForm::default()
+        };
+        let import_transfer_debug = format!("{import_transfer_form:?}");
+        assert!(import_transfer_debug.contains("<redacted>"));
+        assert!(!import_transfer_debug.contains("import package secret"));
+        assert!(!import_transfer_debug.contains("import key passphrase"));
+    }
+
+    #[test]
+    fn normalize_optional_secret_trims_surrounding_whitespace() {
+        let padded = SecretString::new("  hunter2  \t".to_string());
+        let normalized = normalize_optional_secret(&padded).expect("non-empty secret");
+        assert_eq!(normalized.as_str(), "hunter2");
+
+        let blank = SecretString::new("   ".to_string());
+        assert!(normalize_optional_secret(&blank).is_none());
     }
 
     #[test]

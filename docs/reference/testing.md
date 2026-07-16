@@ -67,6 +67,16 @@ make quality-emulate
 Python remains in the repo only where it already owns a specific workflow: Sphinx/tox docs and the
 PTY-driven TUI harness. It is not the project automation layer.
 
+## Remote Dependency Scan
+
+`.github/workflows/ci.yml` runs a `Dependency Scan` job on pull requests and `workflow_dispatch`
+(skipped on `push`) that executes `cargo run -p xtask -- dependency-scan` inside the same Wolfi
+builder image the `Rust Build + Tests` job uses. That subcommand runs `cargo audit --no-fetch
+--stale` and the same OSV lockfile actionable-findings check as `make quality` /
+`make quality-emulate`, and fails the job on any actionable advisory. It is a scanners-only job,
+not the full `verify-deep`/`quality` gate, so it stays fast on every pull request; Semgrep,
+cargo-deny, Syft, and Trivy remain local-only or `make quality-emulate`-only.
+
 ## Local Build Chain Configure
 
 The repository owns local toolchain discovery through:
@@ -110,6 +120,22 @@ Current GUI platform coverage is explicit:
 | Desktop viewport classes | `make test-gui-visual-regression` or `make test-gui-visual-regression-emulate` | Replays the real GUI workflow at desktop, tablet, and narrow/mobile-class viewport sizes and rejects blank or low-information screenshots. |
 | Android Slint | `make test-gui-android-check` | Compile-checks the Rust-native Slint library against the configured Android NDK while preserving native core/vault linkage. Runtime emulator/Maestro coverage remains the next Android gate. |
 | WASM Slint | `make test-gui-wasm-check` | Compile-checks the gated non-secret Slint WASM surface. Secret-handling WASM is not supported until target storage, crypto, and runtime validation are threat-modeled. |
+
+### Android and WASM Checks Are Local-Only
+
+Neither `make test-gui-android-check` nor `make test-gui-wasm-check` runs in GitHub Actions. The
+`.github/actions/builder` Wolfi image installs a single pinned `rust-1.95` apk package that ships
+only the host `aarch64-unknown-linux-gnu` std rlib. It has no `rustup` (the only tool that installs
+additional target std components) and no Android NDK apk — the Wolfi package index does not carry
+one. `rustc` recognizes the `wasm32-unknown-unknown` target triple, but `cargo check --target
+wasm32-unknown-unknown` fails with `error[E0463]: can't find crate for core` there because that
+target's std is not installed, and linking the pinned system `rustc` into `rustup` cannot add
+components (`rustup` only manages components for toolchains it installed itself). Making either
+check pass in CI would require replacing the pinned-apk, offline-first builder trust model with a
+network-fetched, rustup-managed Rust toolchain, which is out of scope for a compile-check gate.
+Both checks stay local-only, gated on `make bootstrap-local` (installs `aarch64-linux-android` and
+`wasm32-unknown-unknown` through a locally installed `rustup`), until that trust-model trade-off is
+revisited.
 
 ## Ops, Audit, and Federal Profile Tests
 

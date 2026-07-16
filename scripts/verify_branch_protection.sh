@@ -18,8 +18,10 @@ fi
 expected_checks=(
   "CodeQL (python)"
   "CodeQL (rust)"
+  "Dependency Scan"
   "Docs Build"
   "Rust Build + Tests"
+  "Security Assurance"
 )
 
 mapfile -t actual_checks < <(

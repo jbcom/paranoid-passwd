@@ -187,6 +187,42 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
+        "surface.wasm-gated-compile-check",
+        "GUI WASM surface is compile-checked and runtime-gated",
+        "product-surface",
+        (
+            Requirement(
+                "crates/paranoid-gui/src/lib.rs",
+                r'#\[cfg\(target_arch = "wasm32"\)\]\n'
+                r"fn wire_callbacks\([^\n]*\n"
+                r'(?:(?!\nfn )(?!paranoid_core::|paranoid_vault::|paranoid_audit::|paranoid_ops::)[\s\S])*?'
+                r"WASM Slint surface is compile-checked only\. Secret generation, vault unlock, "
+                r"storage, recovery, backup, and clipboard operations are disabled until target "
+                r"storage and crypto are threat-modeled\."
+                r'(?:(?!\nfn )(?!paranoid_core::|paranoid_vault::|paranoid_audit::|paranoid_ops::)[\s\S])*?'
+                r"\n}\n",
+                "wasm32 wire_callbacks branch carries the runtime gate message and makes no "
+                "paranoid_core/paranoid_vault/paranoid_audit/paranoid_ops calls",
+                True,
+            ),
+            Requirement(
+                "crates/paranoid-gui/Cargo.toml",
+                "Compile-only support for the gated non-secret Slint WASM surface",
+                "GUI manifest documents the wasm32 target as compile-only and gated",
+            ),
+            Requirement(
+                "scripts/hallucination_check.sh",
+                "WASM GUI target remains a gated non-secret Slint surface without native vault/core linkage",
+                "hallucination check verifies the wasm32 dependency tree stays free of native secret-handling crates",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`surface.wasm-gated-compile-check` | `enforced`",
+                "assurance claim enforces the wasm32 gated compile-check posture",
+            ),
+        ),
+    ),
+    Claim(
         "vault.device-bound-keyslot",
         "Device-bound keyslot disposition",
         "vault-security",

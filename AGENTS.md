@@ -124,6 +124,22 @@ only exact `#[unsafe(no_mangle)]` ABI attributes are allowed there, and `paranoi
 - The GUI direction is Slint-first native desktop/mobile, not a webview wrapper.
 - Slint WASM can be considered only as a compiled Rust/Slint canvas target with no JavaScript secret-handling logic and no DOM/CSS application rewrite.
 
+### GUI Cross-Target Checks Are Local-Only
+
+`make test-gui-android-check` and `make test-gui-wasm-check` do not run in GitHub Actions. The
+`.github/actions/builder` Wolfi image installs a single pinned `rust-1.95` apk package with only
+the host `aarch64-unknown-linux-gnu` std rlib; it carries neither `rustup` (component installer),
+an Android NDK apk (none exists in the Wolfi index), nor a prebuilt `wasm32-unknown-unknown` std
+rlib. `rustc --print target-list` recognizes the `wasm32-unknown-unknown` triple, but `cargo check
+--target wasm32-unknown-unknown` fails with `error[E0463]: can't find crate for core` because that
+target's std is not installed. Linking a bare system `rustc` into `rustup` cannot add components
+either (`rustup` only manages components for toolchains it installed itself), so making either
+check pass in CI would mean abandoning the pinned-apk/offline trust model for a
+network-fetched, rustup-managed toolchain — out of scope for a compile-check gate. Both checks stay
+local-only via `make bootstrap-local` (installs `aarch64-linux-android` and
+`wasm32-unknown-unknown` through a locally installed `rustup`) until that trust-model trade-off is
+revisited.
+
 ### Dependency Trust Model
 
 - Cargo dependencies are vendored under `vendor/`.

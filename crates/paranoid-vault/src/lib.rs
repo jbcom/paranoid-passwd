@@ -43,7 +43,7 @@ const ITEM_AAD_PREFIX: &[u8] = b"paranoid-passwd::vault::item::";
 const TRANSFER_KEY_AAD: &[u8] = b"paranoid-passwd::vault::transfer::key";
 const TRANSFER_PAYLOAD_AAD: &[u8] = b"paranoid-passwd::vault::transfer::payload";
 const SQLITE_APPLICATION_ID: i64 = 1_347_446_356;
-const DEFAULT_MEMORY_COST_KIB: u32 = 65_536;
+const DEFAULT_MEMORY_COST_KIB: u32 = 262_144;
 const DEFAULT_ITERATIONS: u32 = 3;
 const DEFAULT_PARALLELISM: u32 = 1;
 const PASSWORD_WRAP_ALGORITHM: &str = "argon2id+aes-256-gcm";
@@ -926,12 +926,25 @@ pub struct UpdateIdentityRecord {
     pub tags: Option<Vec<String>>,
 }
 
-#[derive(Debug)]
 pub struct UnlockedVault {
     path: PathBuf,
     conn: Connection,
     header: VaultHeader,
     master_key: Zeroizing<Vec<u8>>,
+}
+
+impl std::fmt::Debug for UnlockedVault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UnlockedVault")
+            .field("path", &self.path)
+            .field("conn", &self.conn)
+            .field("header", &self.header)
+            .field(
+                "master_key",
+                &format_args!("<redacted> ({} bytes)", self.master_key.len()),
+            )
+            .finish()
+    }
 }
 
 impl UnlockedVault {
@@ -3999,6 +4012,102 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn argon2id_default_kdf_parameters_known_answers_hold() {
+        assert_eq!(DEFAULT_MEMORY_COST_KIB, 262_144);
+        assert_eq!(DEFAULT_ITERATIONS, 3);
+        assert_eq!(DEFAULT_PARALLELISM, 1);
+    }
+
+    #[test]
+    fn argon2id_derive_key_matches_known_answer() {
+        // Deliberately small (8 MiB) cost parameters so this test stays fast;
+        // production defaults are locked separately above. Fixed password,
+        // fixed salt, explicit params: pins algorithm identity (argon2id),
+        // version (0x13), salt handling, and output length end to end.
+        let params = VaultKdfParams {
+            algorithm: "argon2id".to_string(),
+            memory_cost_kib: 8192,
+            iterations: 3,
+            parallelism: 1,
+            derived_key_len: 32,
+        };
+        let salt = SaltString::encode_b64(&[7_u8; 16]).expect("salt");
+        let derived = derive_key("correct horse battery staple", &salt, &params)
+            .expect("argon2id derivation succeeds");
+        assert_eq!(derived.len(), 32);
+        assert_eq!(
+            hex_encode(derived.as_slice()),
+            "1fa5912167c7e28c5f8b3a77089ee2a64ba6a5672a142a11fb19523448d04bc3"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_argon2id_derive_cost_by_memory() {
+        for (label, memory_cost_kib) in [
+            ("64MiB (previous default)", 65_536_u32),
+            ("128MiB", 131_072_u32),
+            (
+                "256MiB (libsodium MODERATE parity, new default)",
+                262_144_u32,
+            ),
+        ] {
+            let params = VaultKdfParams {
+                algorithm: "argon2id".to_string(),
+                memory_cost_kib,
+                iterations: DEFAULT_ITERATIONS,
+                parallelism: DEFAULT_PARALLELISM,
+                derived_key_len: MASTER_KEY_LEN,
+            };
+            let salt = SaltString::encode_b64(&[7_u8; 16]).expect("salt");
+            let start = std::time::Instant::now();
+            derive_key("correct horse battery staple", &salt, &params).expect("derive");
+            eprintln!("{label}: {:?}", start.elapsed());
+        }
+    }
+
+    #[test]
+    fn vault_created_with_legacy_kdf_params_still_unlocks() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        let header = init_vault(&path, "correct horse battery staple").expect("init");
+        assert_eq!(header.kdf.memory_cost_kib, DEFAULT_MEMORY_COST_KIB);
+
+        let legacy_params = VaultKdfParams {
+            algorithm: "argon2id".to_string(),
+            memory_cost_kib: 65_536,
+            iterations: 3,
+            parallelism: 1,
+            derived_key_len: MASTER_KEY_LEN,
+        };
+        let salt_bytes = random_bytes(16).expect("salt bytes");
+        let salt = SaltString::encode_b64(salt_bytes.as_slice()).expect("salt");
+        let kek = derive_key("correct horse battery staple", &salt, &legacy_params).expect("kek");
+        let master_key = random_bytes(MASTER_KEY_LEN).expect("master key");
+        let wrapped =
+            encrypt_blob(kek.as_slice(), MASTER_KEY_AAD, master_key.as_slice()).expect("wrap");
+
+        let mut legacy_header = header;
+        legacy_header.kdf = legacy_params;
+        legacy_header.keyslots[0].salt_hex = hex_encode(salt.as_str().as_bytes());
+        legacy_header.keyslots[0].nonce_hex = hex_encode(&wrapped.nonce);
+        legacy_header.keyslots[0].tag_hex = hex_encode(&wrapped.tag);
+        legacy_header.keyslots[0].encrypted_master_key_hex = hex_encode(&wrapped.ciphertext);
+
+        let conn = Connection::open(&path).expect("open");
+        conn.execute(
+            "UPDATE metadata SET value = ?1 WHERE key = 'header_json'",
+            params![serde_json::to_string(&legacy_header).expect("serialize")],
+        )
+        .expect("rewrite header");
+        drop(conn);
+
+        let vault = unlock_vault(&path, "correct horse battery staple")
+            .expect("legacy-params vault must still unlock");
+        assert_eq!(vault.list_items().expect("list").len(), 0);
+    }
+
+    #[test]
     fn init_unlock_and_login_crud_round_trip() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("vault.sqlite");
@@ -4055,6 +4164,26 @@ mod tests {
 
         vault.delete_item(&item.id).expect("delete");
         assert!(vault.list_items().expect("list").is_empty());
+    }
+
+    #[test]
+    fn unlocked_vault_debug_redacts_master_key() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+
+        let debug_output = format!("{vault:?}");
+
+        assert!(debug_output.contains("<redacted>"));
+        let key_hex = hex_encode(&vault.master_key);
+        assert!(!debug_output.contains(&key_hex));
+        assert!(
+            !debug_output
+                .as_bytes()
+                .windows(vault.master_key.len())
+                .any(|window| window == vault.master_key.as_slice())
+        );
     }
 
     #[test]

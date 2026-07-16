@@ -28,64 +28,74 @@ ENV PATH="/usr/local/bin:${PATH}" \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    apk add \
-        bash \
-        build-base \
-        ca-certificates \
-        coreutils \
-        cargo-audit="${CARGO_AUDIT_APK_VERSION}" \
-        curl \
-        dbus \
-        dbus-dev \
-        dbus-x11 \
-        font-liberation \
-        fontconfig \
-        fontconfig-dev \
-        gh \
-        git \
-        imagemagick-7 \
-        libx11 \
-        libx11-dev \
-        libxcb \
-        libxcb-dev \
-        libxcursor \
-        libxcursor-dev \
-        libxfixes \
-        libxfixes-dev \
-        libxi \
-        libxi-dev \
-        libxinerama \
-        libxinerama-dev \
-        libxkbcommon \
-        libxkbcommon-dev \
-        libxss \
-        libxss-dev \
-        make \
-        openssl \
-        openssl-dev \
-        osv-scanner="${OSV_SCANNER_APK_VERSION}" \
-        perl \
-        pkgconf \
-        py3-pip \
-        python3 \
-        ripgrep \
-        semgrep="${SEMGREP_APK_VERSION}" \
-        shadow \
-        syft="${SYFT_APK_VERSION}" \
-        trivy="${TRIVY_APK_VERSION}" \
-        wayland \
-        wayland-dev \
-        xauth \
-        xkeyboard-config \
-        xorg-server \
-        xorg-server-common \
-        xvfb-run \
-        "${RUST_APK_PACKAGE}=${RUST_APK_VERSION}"
+    for attempt in 1 2 3; do \
+        apk add \
+            bash \
+            build-base \
+            ca-certificates \
+            coreutils \
+            cargo-audit="${CARGO_AUDIT_APK_VERSION}" \
+            curl \
+            dbus \
+            dbus-dev \
+            dbus-x11 \
+            font-liberation \
+            fontconfig \
+            fontconfig-dev \
+            gh \
+            git \
+            imagemagick-7 \
+            libx11 \
+            libx11-dev \
+            libxcb \
+            libxcb-dev \
+            libxcursor \
+            libxcursor-dev \
+            libxfixes \
+            libxfixes-dev \
+            libxi \
+            libxi-dev \
+            libxinerama \
+            libxinerama-dev \
+            libxkbcommon \
+            libxkbcommon-dev \
+            libxss \
+            libxss-dev \
+            make \
+            openssl \
+            openssl-dev \
+            osv-scanner="${OSV_SCANNER_APK_VERSION}" \
+            perl \
+            pkgconf \
+            py3-pip \
+            python3 \
+            ripgrep \
+            semgrep="${SEMGREP_APK_VERSION}" \
+            shadow \
+            syft="${SYFT_APK_VERSION}" \
+            trivy="${TRIVY_APK_VERSION}" \
+            wayland \
+            wayland-dev \
+            xauth \
+            xkeyboard-config \
+            xorg-server \
+            xorg-server-common \
+            xvfb-run \
+            "${RUST_APK_PACKAGE}=${RUST_APK_VERSION}" && break; \
+        if [ "${attempt}" = "3" ]; then exit 1; fi; \
+        echo "apk add failed (attempt ${attempt}/3), retrying in 5s..." >&2; \
+        sleep 5; \
+    done
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install --break-system-packages "tox==${TOX_VERSION}"
+    for attempt in 1 2 3; do \
+        python3 -m pip install --break-system-packages "tox==${TOX_VERSION}" && break; \
+        if [ "${attempt}" = "3" ]; then exit 1; fi; \
+        echo "pip install failed (attempt ${attempt}/3), retrying in 5s..." >&2; \
+        sleep 5; \
+    done
 
 RUN --mount=type=cache,target=/tmp/cargo/registry \
     --mount=type=cache,target=/tmp/cargo/git \
