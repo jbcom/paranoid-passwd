@@ -11,16 +11,18 @@ use paranoid_audit::{
 };
 use paranoid_core::{FrameworkId, ParanoidRequest};
 use paranoid_ops::{
-    FederalCryptoProviderEvidence, OpsCommand, OpsPolicyContext, OpsProfile, VaultOperationAccess,
-    evaluate_ops_command, evaluate_vault_operation,
+    CapabilityProbeStatus, CapabilityReport, FederalCryptoProviderEvidence, OpsCommand,
+    OpsPolicyContext, OpsProfile, VaultOperationAccess, evaluate_ops_command,
+    evaluate_vault_operation,
 };
 use paranoid_vault::{
     GenerateStoreLoginRecord, MnemonicRecoveryEnrollment, NativeSessionHardening, NewCardRecord,
     NewIdentityRecord, NewLoginRecord, NewSecureNoteRecord, SecretString, UnlockedVault,
     UpdateCardRecord, UpdateIdentityRecord, UpdateSecureNoteRecord, VaultAuth, VaultBackupSummary,
     VaultHeader, VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary,
-    VaultOpenOptions, VaultTransferSummary, inspect_certificate_pem, inspect_vault_backup,
-    inspect_vault_transfer, read_vault_header, restore_vault_backup, unlock_vault_for_options,
+    VaultOpenOptions, VaultTransferSummary, init_vault, inspect_certificate_pem,
+    inspect_vault_backup, inspect_vault_transfer, read_vault_header, restore_vault_backup,
+    unlock_vault_for_options,
 };
 #[cfg(test)]
 use ratatui::backend::TestBackend;
@@ -44,6 +46,7 @@ const RED: Color = Color::Rgb(248, 113, 113);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
+    EnvironmentApproval,
     Vault,
     Keyslots,
     UnlockBlocked,
@@ -406,6 +409,23 @@ enum UnlockField {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnvironmentApprovalChoice {
+    Accept,
+    Adjust,
+}
+
+impl EnvironmentApprovalChoice {
+    const ALL: [Self; 2] = [Self::Accept, Self::Adjust];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Accept => "Accept suggested configuration",
+            Self::Adjust => "Adjust manually",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExportBackupField {
     Path,
     Save,
@@ -743,6 +763,36 @@ struct UnlockForm {
     cert_path: String,
     key_path: String,
     key_passphrase: String,
+}
+
+#[derive(Debug, Clone)]
+struct EnvironmentApprovalState {
+    choice: EnvironmentApprovalChoice,
+    /// `true` once the user has accepted (or manually adjusted past) this
+    /// screen for the current app instance, so a subsequent init failure
+    /// that bounces back to `UnlockBlocked` does not re-show it.
+    resolved: bool,
+}
+
+impl Default for EnvironmentApprovalState {
+    fn default() -> Self {
+        Self {
+            choice: EnvironmentApprovalChoice::Accept,
+            resolved: false,
+        }
+    }
+}
+
+impl EnvironmentApprovalState {
+    fn adjust_focus(&mut self, delta: isize) {
+        let len = EnvironmentApprovalChoice::ALL.len() as isize;
+        let current = EnvironmentApprovalChoice::ALL
+            .iter()
+            .position(|choice| *choice == self.choice)
+            .unwrap_or(0) as isize;
+        let next = (current + delta).rem_euclid(len) as usize;
+        self.choice = EnvironmentApprovalChoice::ALL[next];
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1101,6 +1151,8 @@ struct App {
     detail: Option<VaultItem>,
     filters: VaultFilterState,
     search_mode: bool,
+    capability_report: Option<CapabilityReport>,
+    environment_approval: EnvironmentApprovalState,
     unlock_form: UnlockForm,
     add_login_form: AddLoginForm,
     note_form: NoteForm,
@@ -1148,6 +1200,8 @@ impl App {
             detail: None,
             filters: VaultFilterState::default(),
             search_mode: false,
+            capability_report: None,
+            environment_approval: EnvironmentApprovalState::default(),
             unlock_form: UnlockForm::default(),
             add_login_form: AddLoginForm::default(),
             note_form: NoteForm::default(),
@@ -1259,6 +1313,10 @@ impl App {
     fn refresh(&mut self) {
         self.pending_keyslot_removal_confirmation = None;
         self.header = read_vault_header(&self.options.path).ok();
+        if !self.environment_approval.resolved && !self.options.path.exists() {
+            self.open_environment_approval();
+            return;
+        }
         match self.reload_vault_state(None) {
             Ok(()) => {
                 self.screen = Screen::Vault;
@@ -1275,6 +1333,20 @@ impl App {
                 self.status = format!("Unlock blocked: {error}");
             }
         }
+    }
+
+    /// Shows the environment-approval screen: the first screen on a fresh
+    /// vault path, and reachable again from the vault main screen via the
+    /// `E` hotkey. Collects a fresh `CapabilityReport` each time it opens so
+    /// keychain/clipboard/display-server/seal-provider evidence reflects the
+    /// current process environment.
+    fn open_environment_approval(&mut self) {
+        self.environment_approval.choice = EnvironmentApprovalChoice::Accept;
+        self.capability_report = Some(crate::capability_detect::collect_capability_report(
+            &self.options.path,
+        ));
+        self.screen = Screen::EnvironmentApproval;
+        self.status = "Review detected capabilities before setting up the vault.".to_string();
     }
 
     fn reload_vault_state(&mut self, preferred_id: Option<&str>) -> anyhow::Result<()> {
@@ -1349,7 +1421,81 @@ impl App {
             }
         }
 
+        if !self.options.path.exists() && matches!(self.unlock_form.mode, UnlockMode::Password) {
+            self.submit_vault_init();
+            return;
+        }
+
         self.refresh();
+    }
+
+    /// Initializes a fresh vault at `self.options.path` using the recovery
+    /// secret entered on the unlock/init form, then applies the suggested
+    /// initial configuration from the environment-approval screen (a
+    /// device-bound keyslot, when accepted and the OS keychain is
+    /// available). Called from `submit_native_unlock` when the target path
+    /// has no vault yet, covering both the accept path (suggestion
+    /// prefilled) and the adjust path (manual entry, no auto-enrollment).
+    fn submit_vault_init(&mut self) {
+        let master_password = self.unlock_form.password.clone();
+        match init_vault(&self.options.path, &master_password) {
+            Ok(_) => {
+                self.options.auth = VaultAuth::Password(SecretString::new(master_password));
+                self.environment_approval.resolved = true;
+                let auto_enroll_device = matches!(
+                    self.environment_approval.choice,
+                    EnvironmentApprovalChoice::Accept
+                ) && self
+                    .capability_report
+                    .as_ref()
+                    .is_some_and(|report| report.os_keychain.status.is_available());
+                self.refresh();
+                if auto_enroll_device {
+                    self.auto_enroll_device_keyslot();
+                } else {
+                    self.status = format!(
+                        "Vault initialized at {}. {}",
+                        self.options.path.display(),
+                        self.status
+                    );
+                }
+            }
+            Err(error) => {
+                self.status = format!("Vault initialization failed: {error}");
+            }
+        }
+    }
+
+    /// Enrolls a device-bound keyslot right after init when the environment
+    /// approval screen was accepted and the OS keychain probe reported
+    /// available. Runs after `refresh()` has already unlocked the freshly
+    /// initialized vault, so it operates on the live vault state rather than
+    /// re-deriving auth.
+    fn auto_enroll_device_keyslot(&mut self) {
+        match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot) {
+            Ok(mut vault) => match vault.add_device_keyslot(None).map_err(anyhow::Error::from) {
+                Ok(slot) => {
+                    self.header = Some(vault.header().clone());
+                    self.status = format!(
+                        "Vault initialized at {}. Enrolled device-bound keyslot {} per the accepted environment suggestion.",
+                        self.options.path.display(),
+                        slot.id
+                    );
+                }
+                Err(error) => {
+                    self.status = format!(
+                        "Vault initialized at {}, but the suggested device-bound keyslot could not be enrolled: {error}",
+                        self.options.path.display()
+                    );
+                }
+            },
+            Err(error) => {
+                self.status = format!(
+                    "Vault initialized at {}, but the suggested device-bound keyslot could not be enrolled: {error}",
+                    self.options.path.display()
+                );
+            }
+        }
     }
 
     fn poll_hardening(&mut self) {
@@ -1399,6 +1545,7 @@ impl App {
 
     fn handle_key(&mut self, key: KeyEvent) -> bool {
         match self.screen {
+            Screen::EnvironmentApproval => self.handle_environment_approval_key(key),
             Screen::Vault | Screen::Keyslots => self.handle_vault_key(key),
             Screen::UnlockBlocked => self.handle_unlock_blocked_key(key),
             Screen::AddLogin | Screen::EditLogin => self.handle_add_login_key(key),
@@ -1420,6 +1567,56 @@ impl App {
             Screen::ImportTransfer => self.handle_import_transfer_key(key),
             Screen::DeleteConfirm => self.handle_delete_confirm_key(key),
         }
+    }
+
+    fn handle_environment_approval_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Esc if self.header.is_some() => {
+                self.screen = Screen::Vault;
+                self.status = "Returned to the vault item view.".to_string();
+                false
+            }
+            KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {
+                let delta = if matches!(key.code, KeyCode::Up | KeyCode::BackTab) {
+                    -1
+                } else {
+                    1
+                };
+                self.environment_approval.adjust_focus(delta);
+                false
+            }
+            KeyCode::Enter => {
+                self.submit_environment_approval();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn submit_environment_approval(&mut self) {
+        self.environment_approval.resolved = true;
+        self.unlock_form = UnlockForm {
+            mode: UnlockMode::Password,
+            ..UnlockForm::default()
+        };
+        self.screen = Screen::UnlockBlocked;
+        self.status = match self.environment_approval.choice {
+            EnvironmentApprovalChoice::Accept => {
+                let device_bound_suggested = self
+                    .capability_report
+                    .as_ref()
+                    .is_some_and(|report| report.os_keychain.status.is_available());
+                if device_bound_suggested {
+                    "Suggested configuration accepted: enter a recovery secret to initialize the vault; a device-bound keyslot will be enrolled automatically.".to_string()
+                } else {
+                    "Suggested configuration accepted: enter a recovery secret to initialize the vault.".to_string()
+                }
+            }
+            EnvironmentApprovalChoice::Adjust => {
+                "Manual setup: enter a recovery secret to initialize the vault, then adjust keyslots from the Keyslots view afterward.".to_string()
+            }
+        };
     }
 
     fn handle_unlock_blocked_key(&mut self, key: KeyEvent) -> bool {
@@ -1498,6 +1695,10 @@ impl App {
             KeyCode::Char('q') => true,
             KeyCode::Char('r') if matches!(self.screen, Screen::Vault) => {
                 self.refresh();
+                false
+            }
+            KeyCode::Char('E') if matches!(self.screen, Screen::Vault) => {
+                self.open_environment_approval();
                 false
             }
             KeyCode::Esc if matches!(self.screen, Screen::Keyslots) => {
@@ -3971,6 +4172,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str, subtitle: &str)
 
 fn header_title(screen: Screen) -> &'static str {
     match screen {
+        Screen::EnvironmentApproval => "Environment Approval",
         Screen::Vault => "Vault",
         Screen::Keyslots => "Keyslots",
         Screen::UnlockBlocked => "Vault",
@@ -4001,6 +4203,9 @@ fn header_title(screen: Screen) -> &'static str {
 
 fn header_subtitle(screen: Screen) -> &'static str {
     match screen {
+        Screen::EnvironmentApproval => {
+            "Detected keychain, clipboard, display server, and seal-provider capabilities before vault setup."
+        }
         Screen::Vault => "Native vault list/detail view with the same builder-owned trust model.",
         Screen::Keyslots => {
             "Inspect and enroll recovery or unlock keyslots without leaving the native TUI."
@@ -4067,11 +4272,14 @@ fn header_subtitle(screen: Screen) -> &'static str {
 
 fn footer_text(app: &App) -> &'static str {
     match app.screen {
+        Screen::EnvironmentApproval => {
+            "Controls: Up/Down or Tab cycles Accept/Adjust, Enter selects, Esc returns to the vault (once unlocked), q quits."
+        }
         Screen::Vault => {
             if app.search_mode {
                 "Controls: Type to filter the unlocked list, Backspace deletes, Ctrl+u clears, Enter or Esc exits filter mode, q quits."
             } else {
-                "Controls: Up/Down select items, / filters, a adds login, n adds secure note, v adds card, i adds identity, e edits, d deletes, g generates and stores one password, x exports backup, t exports transfer, u imports backup, p imports transfer, k opens keyslots, c copies the selected value, r refreshes, q quits."
+                "Controls: Up/Down select items, / filters, a adds login, n adds secure note, v adds card, i adds identity, e edits, d deletes, g generates and stores one password, x exports backup, t exports transfer, u imports backup, p imports transfer, k opens keyslots, E reviews environment approval, c copies the selected value, r refreshes, q quits."
             }
         }
         Screen::Keyslots => {
@@ -4296,6 +4504,7 @@ fn keyslot_list(app: &App) -> List<'static> {
 
 fn right_panel(app: &App) -> Paragraph<'static> {
     match app.screen {
+        Screen::EnvironmentApproval => environment_approval_panel(app),
         Screen::Vault => detail_panel(app),
         Screen::UnlockBlocked => unlock_blocked_panel(app),
         Screen::AddLogin | Screen::EditLogin => add_login_panel(app),
@@ -4318,6 +4527,138 @@ fn right_panel(app: &App) -> Paragraph<'static> {
         Screen::ImportTransfer => import_transfer_panel(app),
         Screen::DeleteConfirm => delete_confirm_panel(app),
     }
+}
+
+fn capability_status_label(status: CapabilityProbeStatus) -> &'static str {
+    match status {
+        CapabilityProbeStatus::Available => "available",
+        CapabilityProbeStatus::Unavailable => "unavailable",
+        CapabilityProbeStatus::NotChecked => "not checked",
+    }
+}
+
+fn capability_status_color(status: CapabilityProbeStatus) -> Color {
+    match status {
+        CapabilityProbeStatus::Available => GREEN,
+        CapabilityProbeStatus::Unavailable => RED,
+        CapabilityProbeStatus::NotChecked => AMBER,
+    }
+}
+
+fn environment_approval_panel(app: &App) -> Paragraph<'static> {
+    let mut lines = vec![Line::raw(format!(
+        "Vault path: {}",
+        app.options.path.display()
+    ))];
+
+    let Some(report) = app.capability_report.as_ref() else {
+        lines.push(Line::raw("Collecting capability evidence..."));
+        return Paragraph::new(Text::from(lines)).block(
+            Block::default()
+                .title("Environment Approval")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        );
+    };
+
+    lines.push(Line::raw(format!(
+        "Platform: {} / {}",
+        report.operating_system, report.architecture
+    )));
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        "Capabilities",
+        Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+    ));
+
+    lines.push(Line::styled(
+        format!(
+            "OS keychain ({}): {}",
+            report.os_keychain.backend,
+            capability_status_label(report.os_keychain.status)
+        ),
+        Style::default().fg(capability_status_color(report.os_keychain.status)),
+    ));
+    if let Some(detail) = &report.os_keychain.error_detail {
+        lines.push(Line::raw(format!("  {detail}")));
+    }
+
+    lines.push(Line::styled(
+        format!(
+            "Clipboard: {}",
+            capability_status_label(report.clipboard.status)
+        ),
+        Style::default().fg(capability_status_color(report.clipboard.status)),
+    ));
+    if let Some(detail) = &report.clipboard.error_detail {
+        lines.push(Line::raw(format!("  {detail}")));
+    }
+
+    let display_line = match &report.display_server.session_type {
+        Some(session_type) => format!(
+            "Display server: {} ({session_type})",
+            report.display_server.kind.as_str()
+        ),
+        None => format!("Display server: {}", report.display_server.kind.as_str()),
+    };
+    lines.push(Line::styled(display_line, Style::default().fg(TEXT)));
+
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        "Seal-provider posture",
+        Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+    ));
+    if report.seal_providers.is_empty() {
+        lines.push(Line::raw(
+            "No seal providers configured yet (expected before vault init).",
+        ));
+    } else {
+        for provider in &report.seal_providers {
+            lines.push(Line::raw(format!(
+                "{} ({}): {:?}",
+                provider.provider_id,
+                provider.kind.as_str(),
+                provider.status
+            )));
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        "Suggested initial configuration",
+        Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+    ));
+    lines.push(Line::raw(
+        "Password recovery keyslot (required; the only vault-init path).",
+    ));
+    if report.os_keychain.status.is_available() {
+        lines.push(Line::raw(
+            "+ Device-bound keyslot via the OS keychain, enrolled automatically on accept.",
+        ));
+    } else {
+        lines.push(Line::raw(
+            "Device-bound keyslot not suggested: OS keychain is unavailable.",
+        ));
+    }
+
+    lines.push(Line::raw(""));
+    for choice in EnvironmentApprovalChoice::ALL {
+        lines.push(form_action_line(
+            app.environment_approval.choice == choice,
+            choice.label(),
+        ));
+    }
+
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title("Environment Approval")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
 }
 
 fn unlock_blocked_panel(app: &App) -> Paragraph<'static> {
@@ -6279,6 +6620,8 @@ mod tests {
             detail: Some(item),
             filters: VaultFilterState::default(),
             search_mode: false,
+            capability_report: None,
+            environment_approval: EnvironmentApprovalState::default(),
             unlock_form: UnlockForm::default(),
             add_login_form: AddLoginForm::default(),
             note_form: NoteForm::default(),
@@ -7605,6 +7948,8 @@ mod tests {
             detail: None,
             filters: VaultFilterState::default(),
             search_mode: false,
+            capability_report: None,
+            environment_approval: EnvironmentApprovalState::default(),
             unlock_form: UnlockForm::default(),
             add_login_form: AddLoginForm::default(),
             note_form: NoteForm::default(),
@@ -7649,6 +7994,164 @@ mod tests {
 
         assert!(matches!(app.screen, Screen::Vault));
         assert!(app.status.contains("Vault unlocked"));
+    }
+
+    #[test]
+    fn missing_vault_opens_environment_approval_first() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+
+        let app = App::new(password_only_options(&path));
+
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
+        assert!(app.capability_report.is_some());
+        assert!(!app.environment_approval.resolved);
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("Environment Approval"));
+        assert!(rendered.contains("OS keychain"));
+        assert!(rendered.contains("Clipboard"));
+        assert!(rendered.contains("Display server"));
+        assert!(rendered.contains("Suggested initial configuration"));
+        assert!(rendered.contains("Accept suggested configuration"));
+        assert!(rendered.contains("Adjust manually"));
+    }
+
+    #[test]
+    fn environment_approval_focus_cycles_between_accept_and_adjust() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        let mut app = App::new(password_only_options(&path));
+        assert_eq!(
+            app.environment_approval.choice,
+            EnvironmentApprovalChoice::Accept
+        );
+
+        press_key(&mut app, KeyCode::Down);
+        assert_eq!(
+            app.environment_approval.choice,
+            EnvironmentApprovalChoice::Adjust
+        );
+
+        press_key(&mut app, KeyCode::Down);
+        assert_eq!(
+            app.environment_approval.choice,
+            EnvironmentApprovalChoice::Accept
+        );
+
+        press_key(&mut app, KeyCode::Up);
+        assert_eq!(
+            app.environment_approval.choice,
+            EnvironmentApprovalChoice::Adjust
+        );
+    }
+
+    #[test]
+    fn accepting_environment_approval_leads_to_init_form_prefilled_with_password_mode() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        let mut app = App::new(password_only_options(&path));
+
+        press_key(&mut app, KeyCode::Enter);
+
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert_eq!(app.unlock_form.mode, UnlockMode::Password);
+        assert!(app.environment_approval.resolved);
+        assert!(app.status.contains("Suggested configuration accepted"));
+    }
+
+    #[test]
+    fn accepting_environment_approval_initializes_vault_and_does_not_reshow_approval() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        let mut app = App::new(password_only_options(&path));
+
+        press_key(&mut app, KeyCode::Enter); // accept -> UnlockBlocked init form
+        app.unlock_form.password = "correct horse battery staple".to_string();
+        app.submit_native_unlock();
+
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(path.exists());
+        assert!(app.status.contains("Vault initialized"));
+
+        // A subsequent refresh (e.g. pressing `r`) must not bounce back to
+        // the approval screen now that a vault exists at this path.
+        app.refresh();
+        assert!(matches!(app.screen, Screen::Vault));
+    }
+
+    #[test]
+    fn adjusting_environment_approval_skips_device_keyslot_auto_enrollment() {
+        use_mock_keyring();
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        let mut app = App::new(password_only_options(&path));
+
+        press_key(&mut app, KeyCode::Down); // focus Adjust
+        press_key(&mut app, KeyCode::Enter); // select Adjust -> UnlockBlocked init form
+        assert!(app.status.contains("Manual setup"));
+
+        app.unlock_form.password = "correct horse battery staple".to_string();
+        app.submit_native_unlock();
+
+        assert!(matches!(app.screen, Screen::Vault));
+        let header = app.header.as_ref().expect("header");
+        assert!(
+            header
+                .keyslots
+                .iter()
+                .all(|slot| slot.kind != paranoid_vault::VaultKeyslotKind::DeviceBound)
+        );
+    }
+
+    #[test]
+    fn accepting_environment_approval_auto_enrolls_device_keyslot_when_keychain_available() {
+        use_mock_keyring();
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        let mut app = App::new(password_only_options(&path));
+        assert!(
+            app.capability_report
+                .as_ref()
+                .expect("report")
+                .os_keychain
+                .status
+                .is_available(),
+            "mock keyring must report the OS keychain as available for this scenario"
+        );
+
+        press_key(&mut app, KeyCode::Enter); // accept -> UnlockBlocked init form
+        app.unlock_form.password = "correct horse battery staple".to_string();
+        app.submit_native_unlock();
+
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(app.status.contains("device-bound keyslot"));
+        let header = app.header.as_ref().expect("header");
+        assert!(
+            header
+                .keyslots
+                .iter()
+                .any(|slot| slot.kind == paranoid_vault::VaultKeyslotKind::DeviceBound)
+        );
+    }
+
+    #[test]
+    fn environment_approval_reachable_from_vault_hotkey_and_esc_returns() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut app = App::new(password_only_options(&path));
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        app.unlock_form.password = "correct horse battery staple".to_string();
+        app.submit_native_unlock();
+        assert!(matches!(app.screen, Screen::Vault));
+
+        press_key(&mut app, KeyCode::Char('E'));
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
+        assert!(app.capability_report.is_some());
+
+        press_key(&mut app, KeyCode::Esc);
+        assert!(matches!(app.screen, Screen::Vault));
     }
 
     #[test]

@@ -112,7 +112,7 @@ completeness critic + dedicated architecture review.
   existing `FederalCryptoProviderEvidence::collect_from_environment()` pattern;
   expose via `--detect-environment` CLI flag (parallel to
   `--federal-evidence`). Evidence structs, serde-locked wire shape, KATs.
-- [ ] **P2.3 TUI environment-approval screen** — first screen when no vault
+- [x] **P2.3 TUI environment-approval screen** — first screen when no vault
   exists at `default_vault_path()` (`native_access.rs:201-222`) and reachable
   by hotkey: renders detected capabilities + suggested seal-provider
   configuration, user accepts/adjusts. Accept: PTY e2e drives the approval

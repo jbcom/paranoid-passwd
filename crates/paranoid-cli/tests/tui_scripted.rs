@@ -151,3 +151,134 @@ r
     // covered by tests/test_vault_cli.sh.
     let _ = vault_cli::run;
 }
+
+fn missing_vault_config(vault_path: &std::path::Path) -> VaultTuiConfig {
+    // Pointing at a path that does not exist yet is what triggers the
+    // first-run environment-approval screen (see `vault_tui::App::refresh`).
+    // The auth mode here is irrelevant until the approval screen is resolved
+    // and the init form is reached, since `App::with_config` never attempts
+    // an unlock against a missing vault.
+    let open_options = VaultOpenOptions {
+        path: vault_path.to_path_buf(),
+        auth: VaultAuth::PasswordEnv("PARANOID_TUI_SCRIPTED_MISSING".to_string()),
+        mnemonic_phrase_env: None,
+        mnemonic_phrase: None,
+        mnemonic_slot: None,
+        device_slot: None,
+        use_device_auto: false,
+    };
+    VaultTuiConfig {
+        open_options,
+        profile: paranoid_ops::OpsProfile::Default,
+        audit_jsonl: None,
+        require_audit_sink: false,
+    }
+}
+
+fn type_literal(script: &mut String, text: &str) {
+    for ch in text.chars() {
+        script.push(ch);
+        script.push('\n');
+    }
+}
+
+#[test]
+fn scripted_environment_approval_accept_flows_into_vault_init_and_add_login() {
+    let tempdir = tempdir().expect("tempdir");
+    let vault_path = tempdir.path().join("vault.sqlite");
+    // The scripted token grammar sends one literal character per line and
+    // trims each line before matching, so a space-bearing secret cannot
+    // round-trip through the keystream (see `scripted::parse_script`).
+    // `handle_unlock_blocked_key` also treats `p`/`m`/`b`/`c` as unconditional
+    // unlock-mode-switch shortcuts regardless of the focused field, so those
+    // letters cannot appear in a secret typed through this scripted path
+    // either (typing one would silently switch away from Password mode
+    // mid-entry). Use a secret avoiding both constraints for the scripted
+    // path specifically.
+    let master_password = "dragonsteelfortress9";
+    let config = missing_vault_config(&vault_path);
+
+    // <enter> on the environment-approval screen accepts the default
+    // (Accept) choice, landing on the reused unlock/init form pre-set to
+    // Password mode. Typing the recovery secret there and submitting
+    // initializes the vault (there is no vault yet at this path). From the
+    // resulting Vault screen, 'a' opens Add Login the same way the
+    // already-initialized-vault test above does.
+    let mut script =
+        String::from("# environment approval: accept -> init -> add login\n<enter>\n<tab>\n");
+    type_literal(&mut script, master_password);
+    script.push_str("<tab>\n<enter>\n");
+    script.push_str("a\n");
+    type_literal(&mut script, "GitHub");
+    script.push_str("<tab>\n");
+    type_literal(&mut script, "octocat");
+    script.push_str("<tab>\n");
+    type_literal(&mut script, "hunter2");
+    script.push_str("<tab>\n<tab>\n<tab>\n<tab>\n<tab>\n<enter>\n<wait-idle>\n");
+
+    let tokens = scripted::parse_script(&script).expect("parse script");
+    let mut terminal = scripted_terminal();
+    let final_frame =
+        vault_tui::run_scripted(&mut terminal, config, &tokens).expect("scripted run");
+
+    assert!(
+        final_frame.contains("GitHub") || final_frame.contains("octocat"),
+        "expected the newly added login to be visible in the final frame:\n{final_frame}"
+    );
+
+    assert!(
+        vault_path.exists(),
+        "vault should have been initialized on disk"
+    );
+    let unlocked = paranoid_vault::unlock_vault(&vault_path, master_password).expect("unlock");
+    let items = unlocked.list_items().expect("list items");
+    assert_eq!(items.len(), 1);
+    let item = unlocked.get_item(&items[0].id).expect("get item");
+    let paranoid_vault::VaultItemPayload::Login(login) = item.payload else {
+        panic!("expected a login item, got {:?}", item.payload);
+    };
+    assert_eq!(login.title, "GitHub");
+    assert_eq!(login.username, "octocat");
+    assert_eq!(login.password, "hunter2");
+}
+
+#[test]
+fn scripted_environment_approval_adjust_flows_into_manual_vault_init() {
+    let tempdir = tempdir().expect("tempdir");
+    let vault_path = tempdir.path().join("vault.sqlite");
+    let master_password = "dragonsteelfortress9";
+    let config = missing_vault_config(&vault_path);
+
+    // <down> moves focus from Accept to Adjust before <enter> selects it,
+    // reaching the same reused unlock/init form but without the
+    // accept-path's automatic device-bound keyslot suggestion applied. The
+    // following <tab> moves focus off Mode onto the Primary (password)
+    // field before the secret is typed, matching the accept-path script.
+    let mut script =
+        String::from("# environment approval: adjust -> manual init\n<down>\n<enter>\n<tab>\n");
+    type_literal(&mut script, master_password);
+    script.push_str("<tab>\n<enter>\n");
+
+    let tokens = scripted::parse_script(&script).expect("parse script");
+    let mut terminal = scripted_terminal();
+    let final_frame =
+        vault_tui::run_scripted(&mut terminal, config, &tokens).expect("scripted run");
+
+    assert!(
+        final_frame.contains("Vault") && !final_frame.contains("Unlock blocked"),
+        "expected the vault screen after manual init in the final frame:\n{final_frame}"
+    );
+
+    assert!(
+        vault_path.exists(),
+        "vault should have been initialized on disk"
+    );
+    let header = paranoid_vault::read_vault_header(&vault_path).expect("read header");
+    assert!(
+        header
+            .keyslots
+            .iter()
+            .all(|slot| slot.kind != paranoid_vault::VaultKeyslotKind::DeviceBound),
+        "manual adjust path must not auto-enroll a device-bound keyslot"
+    );
+}
