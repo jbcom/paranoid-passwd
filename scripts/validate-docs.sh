@@ -146,7 +146,7 @@ if [ "${#vault_subcommands[@]}" -eq 0 ]; then
 fi
 missing_vault_subcommands=()
 for subcommand in "${vault_subcommands[@]}"; do
-  if ! printf '%s' "$docs_md_corpus" | grep -qF -- "$subcommand"; then
+  if ! grep -qF -- "$subcommand" <<<"$docs_md_corpus"; then
     missing_vault_subcommands+=("$subcommand")
   fi
 done
@@ -167,7 +167,7 @@ if [ "${#gui_callbacks[@]}" -eq 0 ]; then
 fi
 missing_gui_callbacks=()
 for callback in "${gui_callbacks[@]}"; do
-  if ! printf '%s' "$docs_md_corpus" | grep -qF -- "$callback"; then
+  if ! grep -qF -- "$callback" <<<"$docs_md_corpus"; then
     missing_gui_callbacks+=("$callback")
   fi
 done
