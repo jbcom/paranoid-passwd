@@ -23,36 +23,36 @@ completeness critic + dedicated architecture review.
 
 ## P0 — Security correctness (branch: security-hardening)
 
-- [ ] **P0.1 Redact `Debug` for `UnlockedVault`** — manual `fmt::Debug` that
+- [x] **P0.1 Redact `Debug` for `UnlockedVault`** — manual `fmt::Debug` that
   redacts the `Zeroizing<Vec<u8>>` master key (`paranoid-vault/src/lib.rs:929`);
   sweep all crates for other secret-bearing `#[derive(Debug)]` structs.
   Accept: a test asserting `format!("{:?}", vault)` contains no key bytes.
-- [ ] **P0.2 Secret wrappers in TUI form state** — `vault_tui.rs:736-748` holds
+- [x] **P0.2 Secret wrappers in TUI form state** — `vault_tui.rs:736-748` holds
   master password, mnemonic phrase, and key passphrase as plain `String` in
   `#[derive(Debug)]` forms; wrap in the existing Zeroizing/redacting secret
   type. Accept: Debug output test + zeroize-on-drop preserved.
-- [ ] **P0.3 Delete duplicate `secure_preview`** — `paranoid-cli/src/main.rs:662`
+- [x] **P0.3 Delete duplicate `secure_preview`** — `paranoid-cli/src/main.rs:662`
   re-implements the byte-indexed (UTF-8-panicking) version fixed in PR #136;
   delete and import `paranoid_core::secure_preview` (as `tui.rs:12` already
   does). Accept: no local definition remains; CLI tests pass with multi-byte
   input.
-- [ ] **P0.4 Enforce audit redaction by construction** — `AuditRedactor`
+- [x] **P0.4 Enforce audit redaction by construction** — `AuditRedactor`
   (`paranoid-audit/src/lib.rs:1089`) is implemented + tested but never invoked
   from production paths; wire it into `AuditTrail::record` (or pre-sink
   dispatch) so redaction is not opt-in. Accept: test proving a secret-shaped
   attribute is redacted through the public record→sink path.
-- [ ] **P0.5 KDF known-answer lock** — assert Argon2id defaults
+- [x] **P0.5 KDF known-answer lock** — assert Argon2id defaults
   (`DEFAULT_MEMORY_COST_KIB == 65_536`, `DEFAULT_ITERATIONS == 3`,
   `DEFAULT_PARALLELISM == 1`, `paranoid-vault/src/lib.rs:46-48`) in a unit test
   so cost regressions can't land silently.
-- [ ] **P0.7 Evaluate Argon2id parameter strength** (review feedback, PR #140)
+- [x] **P0.7 Evaluate Argon2id parameter strength** (review feedback, PR #140)
   — assess defaults against current OWASP Argon2id guidance; for a "paranoid"
   posture the 64 MiB memory cost is likely low (libsodium MODERATE tier is
   256 MiB / 3 iter). If raised: new defaults apply to newly created vaults
   only (existing vaults unlock via header-stored `VaultKdfParams`), update the
   P0.5 KAT and `docs/reference/vault-format.md`, and add an unlock test for a
   vault created with the old params.
-- [ ] **P0.6 WASM surface vs rule #2 reconciliation** (premise corrected per
+- [x] **P0.6 WASM surface vs rule #2 reconciliation** (premise corrected per
   PR #140 review) — the GUI wasm32 cdylib entrypoint exists
   (`paranoid-gui/Cargo.toml:17,32-36`) but is deliberately runtime-gated
   ("disabled until … threat-modeled"), and `hallucination_check.sh:107-120`
@@ -143,14 +143,14 @@ completeness critic + dedicated architecture review.
 
 ## P3 — CI/release hardening (branch: ci-hardening)
 
-- [ ] **P3.1 PR-gated dependency/SAST job** — cargo-audit, osv-scanner (min
+- [x] **P3.1 PR-gated dependency/SAST job** — cargo-audit, osv-scanner (min
   set; ideally `PARANOID_RUN_LOCAL_SCANNERS=1 make verify-deep`) in the builder
   container on every PR; today scanners run only in local `make quality`.
-- [ ] **P3.2 Required checks** — add `Security Assurance` to branch-protection
+- [x] **P3.2 Required checks** — add `Security Assurance` to branch-protection
   required checks and to `verify_branch_protection.sh:18-23` expected list.
-- [ ] **P3.3 Android/WASM compile-checks in CI** — add to ci.yml (or record an
+- [x] **P3.3 Android/WASM compile-checks in CI** — add to ci.yml (or record an
   explicit risk disposition in AGENTS.md + testing.md if deliberately local).
-- [ ] **P3.4 Builder-image retry hardening** — wrap `apk add`/`pip install` in
+- [x] **P3.4 Builder-image retry hardening** — wrap `apk add`/`pip install` in
   bounded retry loops; the PR #136 Docs Build failure was a transient Wolfi
   CDN error requiring manual re-run.
 
@@ -162,10 +162,10 @@ completeness critic + dedicated architecture review.
   remove fabricated GUI coverage claims (keyslot inspection, rotation, rewrap,
   rebind coverage that doesn't exist). Re-check after P2.4 lands and update to
   the then-true surface.
-- [ ] **P4.2 Document the six undocumented vault subcommands** — `vault show`,
+- [x] **P4.2 Document the six undocumented vault subcommands** — `vault show`,
   `update`, `update-note`, `update-card`, `update-identity`, `delete` in
   `docs/getting-started/index.md`.
-- [ ] **P4.3 Version-pin drift** — `docs/public/install.sh:6` and
+- [x] **P4.3 Version-pin drift** — `docs/public/install.sh:6` and
   `docs/getting-started/index.md:48` still say v3.6.5; fix to current and add
   a validate-docs.sh assertion tying doc version strings to workspace
   Cargo.toml so the class is dead.
