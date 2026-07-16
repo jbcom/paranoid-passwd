@@ -1,7 +1,3 @@
-mod tui;
-mod vault_cli;
-mod vault_tui;
-
 use lexopt::prelude::*;
 use paranoid_audit::{
     AuditEvent, AuditSinkHealth, AuditTrail, assess_optional_jsonl_file_audit_sink,
@@ -93,14 +89,15 @@ fn main() {
 
 fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
     if matches!(raw_args.get(1).and_then(|arg| arg.to_str()), Some("vault")) {
-        return vault_cli::run(&raw_args[2..]);
+        return paranoid_cli::vault_cli::run(&raw_args[2..]);
     }
 
     let options = match parse_args(raw_args)? {
         ParseOutcome::Run(options) => options,
         ParseOutcome::Exit(code) => return Ok(code),
     };
-    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    let interactive = (io::stdin().is_terminal() && io::stdout().is_terminal())
+        || paranoid_cli::scripted::is_script_active();
     let launch_tui = should_launch_tui(&options, interactive);
     let audit_sink_health = assess_optional_jsonl_file_audit_sink(options.audit_jsonl.as_deref());
 
@@ -116,7 +113,7 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
     }
 
     if launch_tui {
-        return tui::run().map(|_| EX_OK);
+        return paranoid_cli::tui::run().map(|_| EX_OK);
     }
 
     let envelope = OpsCommandEnvelope::local(

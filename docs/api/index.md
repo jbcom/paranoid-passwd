@@ -13,6 +13,7 @@ crates/paranoid_core/lib
 crates/paranoid_audit/lib
 crates/paranoid_ops/lib
 crates/paranoid_seal/lib
+crates/paranoid_cli/lib
 crates/paranoid_cli/main
 crates/paranoid_gui/lib
 crates/paranoid_gui/main

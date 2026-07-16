@@ -99,7 +99,7 @@ completeness critic + dedicated architecture review.
 
 ## P2 — E2E & capability detection (branch: e2e-and-detection; ordered — later items depend on earlier)
 
-- [ ] **P2.1 Scriptable TUI driving surface** — extract the event-independent
+- [x] **P2.1 Scriptable TUI driving surface** — extract the event-independent
   step function (`App::handle_key`, `tui.rs:355`, plus worker polling) into a
   testable surface and add a deterministic scripted mode
   (`--script <path>` / `PARANOID_TUI_SCRIPT`, matching the existing

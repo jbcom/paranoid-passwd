@@ -3824,6 +3824,21 @@ fn edit_form_value(buffer: Option<&mut String>, key: KeyEvent) {
 }
 
 pub fn run(config: VaultTuiConfig) -> anyhow::Result<()> {
+    if let Some(mut prepared) = crate::scripted::prepare_scripted_terminal(
+        crate::scripted::DEFAULT_COLS,
+        crate::scripted::DEFAULT_ROWS,
+    )? {
+        let final_frame =
+            run_scripted(&mut prepared.terminal, config, &prepared.tokens).map_err(|error| {
+                anyhow::anyhow!(
+                    "scripted run of {} failed: {error}",
+                    prepared.path.display()
+                )
+            })?;
+        println!("{final_frame}");
+        return Ok(());
+    }
+
     enable_raw_mode().context("failed to enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("failed to enter alternate screen")?;
@@ -3835,6 +3850,32 @@ pub fn run(config: VaultTuiConfig) -> anyhow::Result<()> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     terminal.show_cursor().ok();
     result
+}
+
+/// Drives the vault manager `App` through a pre-parsed key script against an
+/// in-memory `TestBackend`, returning the final rendered frame as text.
+///
+/// The vault TUI has no background worker thread (all vault operations are
+/// synchronous), so `<wait-idle>` is a no-op single poll here; it is
+/// supported for script portability with the generator wizard's scripts.
+pub fn run_scripted(
+    terminal: &mut Terminal<ratatui::backend::TestBackend>,
+    config: VaultTuiConfig,
+    tokens: &[crate::scripted::ScriptToken],
+) -> anyhow::Result<String> {
+    let mut app = App::with_config(config);
+    crate::scripted::drive(terminal, tokens, |terminal, key| {
+        let quit = match key {
+            Some(key) => app.handle_key(key),
+            None => false,
+        };
+        app.poll_hardening();
+        terminal
+            .draw(|frame| render(frame, &app))
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        Ok(crate::scripted::StepOutcome { idle: true, quit })
+    })?;
+    Ok(crate::scripted::dump_buffer(terminal))
 }
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> anyhow::Result<()> {

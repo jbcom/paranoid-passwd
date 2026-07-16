@@ -9,6 +9,10 @@ homepage.workspace = true
 description.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "paranoid_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "paranoid-passwd"
 path = "src/main.rs"

@@ -33,7 +33,8 @@ const EX_POLICY_CHALLENGE: i32 = 7;
 
 pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
     let invocation = parse_vault_args(args)?;
-    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    let interactive = (io::stdin().is_terminal() && io::stdout().is_terminal())
+        || crate::scripted::is_script_active();
     if should_launch_tui(&invocation, interactive) {
         return vault_tui::run(vault_tui::VaultTuiConfig {
             open_options: invocation.open_options.clone(),
