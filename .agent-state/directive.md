@@ -92,7 +92,7 @@ P6.0 CI research + two-tier trust design.
   (`image: Dockerfile` until the digest-bump script flips it); no workflow
   here still triggers a redundant in-job image *build* beyond that
   documented bootstrap gap.
-- [ ] P6.3 Tier-A cargo target cache (save-if main-only; release restores
+- [x] P6.3 Tier-A cargo target cache (save-if main-only; release restores
   nothing).
 - [ ] P6.4 docs/tox toolchain cache (deploy-pages stays cache-free:
   id-token:write). Double docs build already killed by P6.2.

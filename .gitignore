@@ -4,6 +4,7 @@ build-*/
 artifact/
 dist/
 target/
+.cargo-target-ci/
 .config/
 *.apk
 *.tar
