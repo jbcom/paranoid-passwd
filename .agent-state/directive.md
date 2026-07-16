@@ -15,7 +15,9 @@ completeness critic + dedicated architecture review.
   push. Zero-exception rules in CLAUDE.md are non-negotiable.
 - Definition of done for the whole directive: nothing undone, untested, or
   undocumented; no outdated or extraneous docs; no AI design tropes; `make ci`,
-  `make quality`, and both e2e suites green.
+  `make quality`, and `make e2e-ci` green in all environments. `make e2e-local`
+  is required only on supported real-display platforms (this macOS dev machine
+  qualifies), with platform-specific exceptions documented in testing.md.
 
 ## P0 — Security correctness (branch: security-hardening)
 
@@ -41,26 +43,40 @@ completeness critic + dedicated architecture review.
   (`DEFAULT_MEMORY_COST_KIB == 65_536`, `DEFAULT_ITERATIONS == 3`,
   `DEFAULT_PARALLELISM == 1`, `paranoid-vault/src/lib.rs:46-48`) in a unit test
   so cost regressions can't land silently.
-- [ ] **P0.6 WASM surface vs rule #2 reconciliation** — the GUI wasm32 cdylib
-  entrypoint exists (`paranoid-gui/Cargo.toml:17,32-36`) but is deliberately
-  runtime-gated ("disabled until … threat-modeled"), while
-  `docs/reference/assurance-claims.md` claims the no-browser-runtime invariant
-  is *enforced* and `hallucination_check.sh` doesn't inspect wasm32 targets.
-  **Decision**: keep the gated compile-check; the violation is in claim
-  strength and gate coverage. Fix: (a) assurance gate mechanically asserts the
-  wasm entrypoint cannot reach vault/crypto paths (parse the wasm32 cfg branch
-  or assert on the gating message), (b) reword assurance-claims.md to state
-  the actual posture (compile-checked, runtime-disabled, threat-model pending),
-  (c) note the exception explicitly in CLAUDE.md rule #2 wording.
+- [ ] **P0.7 Evaluate Argon2id parameter strength** (review feedback, PR #140)
+  — assess defaults against current OWASP Argon2id guidance; for a "paranoid"
+  posture the 64 MiB memory cost is likely low (libsodium MODERATE tier is
+  256 MiB / 3 iter). If raised: new defaults apply to newly created vaults
+  only (existing vaults unlock via header-stored `VaultKdfParams`), update the
+  P0.5 KAT and `docs/reference/vault-format.md`, and add an unlock test for a
+  vault created with the old params.
+- [ ] **P0.6 WASM surface vs rule #2 reconciliation** (premise corrected per
+  PR #140 review) — the GUI wasm32 cdylib entrypoint exists
+  (`paranoid-gui/Cargo.toml:17,32-36`) but is deliberately runtime-gated
+  ("disabled until … threat-modeled"), and `hallucination_check.sh:107-120`
+  ALREADY structurally verifies the wasm32 dependency tree excludes
+  `paranoid-core`/`paranoid-vault`/`openssl-sys`/`rusqlite` (invoked via
+  `make verify-assurance`). **Decision**: keep the gated compile-check and the
+  existing dep-tree structural check as the primary enforcement. Remaining
+  fix: (a) verify `docs/reference/assurance-claims.md` wording matches the
+  actual posture (compile-checked, runtime-disabled, dep-tree-verified,
+  threat-model pending) and correct any overclaim; (b) add a supplementary
+  source-level assertion that the wasm32 `wire_callbacks` branch contains the
+  gating message and no vault/core symbol references (structural, not
+  message-only); (c) note the gated exception explicitly in CLAUDE.md rule #2
+  wording.
 
 ## P1 — Architecture refactors (branch: seal-and-crypto-boundaries)
 
-- [ ] **P1.1 Seal posture single source of truth** — `paranoid-vault` never
-  depends on `paranoid-seal`; posture derivation is duplicated in
-  `vault_cli.rs:610-685` and `paranoid-ops/lib.rs:1363-1663`. Add the
-  dependency, move derivation onto `UnlockedVault`/`VaultHeader`, make cli/ops
-  call through it (refactor, not shim — callers move in the same commit).
-  Accept: one derivation site; grep proves no duplicate posture construction.
+- [ ] **P1.1 Seal posture single source of truth** (citation corrected per
+  PR #140 review: `paranoid-ops/lib.rs:1363-1663` is `#[cfg(test)]` fixtures,
+  not a production path) — `paranoid-vault` never depends on `paranoid-seal`;
+  the production posture derivation lives in `vault_cli.rs:610-685`, outside
+  the crate that owns keyslot state. Add the vault→seal dependency, move
+  derivation onto `UnlockedVault`/`VaultHeader`, make the CLI call through it
+  (refactor, not shim — callers move in the same commit). Accept: exactly one
+  production derivation site, in `paranoid-vault`; test fixtures constructing
+  `VaultSealPosture` directly are exempt.
 - [ ] **P1.2 `mtls_transport` disposition** — 546-line public module in
   `paranoid-ops` with zero callers in cli/gui. **Decision**: not speculative
   infra we ship as dead pub API — gate behind a cargo feature consumed by its
@@ -119,8 +135,9 @@ completeness critic + dedicated architecture review.
   clicks and keyboard via the OS event system (e.g. `cliclick`/CGEvent
   harness) through password generation, vault unseal, and vault management.
   Document the split and per-platform requirements in
-  `docs/reference/testing.md`. Accept: both targets green on this machine;
-  `e2e-ci` wired into `make ci`.
+  `docs/reference/testing.md`. Accept: `e2e-ci` green in all environments and
+  wired into `make ci`; `e2e-local` green on supported real-display platforms
+  (this macOS dev machine), with platform exceptions documented.
 
 ## P3 — CI/release hardening (branch: ci-hardening)
 
@@ -159,9 +176,11 @@ completeness critic + dedicated architecture review.
 - [ ] **P4.6 Mechanical doc-coverage gates** — script asserting (a) every vault
   subcommand match-arm appears in docs/, (b) every GUI `on_*` callback name is
   documented; wire into `make docs-check`.
-- [ ] **P4.7 CLAUDE.md accuracy** — replace the "GUI scaffold" framing:
-  native desktop GUI is fully wired + tested; only the WASM path is
-  intentionally gated (align with P0.6 wording).
+- [ ] **P4.7 CLAUDE.md accuracy** (depends on P2.4) — replace the "GUI
+  scaffold" framing: native desktop GUI callbacks are implemented; real
+  widget-event coverage lands with P2.4 (state whichever is true when this
+  item executes). Only the WASM path is intentionally gated (align with P0.6
+  wording).
 
 ## P5 — Extensibility & contributor experience (branch: extensibility)
 
