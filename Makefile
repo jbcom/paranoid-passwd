@@ -175,6 +175,7 @@ ci: ## Run the local equivalent of the repository CI gates
 	$(MAKE) test-cli-contract
 	$(MAKE) test-tui-e2e
 	$(if $(CI_GUI_E2E_TARGET),$(MAKE) $(CI_GUI_E2E_TARGET))
+	$(MAKE) test-gui-host-check
 	$(MAKE) test-vault-e2e
 	$(MAKE) test-platform-signing-boundary
 	$(MAKE) verify-assurance
