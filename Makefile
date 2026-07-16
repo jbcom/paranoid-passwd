@@ -1,4 +1,4 @@
-.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e test-platform-signing-boundary verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality quality-emulate builder-image _builder-image ci-emulate _ci-emulate _quality-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
+.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e test-platform-signing-boundary test-ops-mtls-transport verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality quality-emulate builder-image _builder-image ci-emulate _ci-emulate _quality-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -69,6 +69,7 @@ build-gui: ## Build the GUI app in release mode
 
 test: ## Run the Rust test suites
 	bash scripts/cargo_test.sh --workspace --locked --frozen --offline
+	$(MAKE) test-ops-mtls-transport
 
 lint: ## Run formatting and clippy gates
 	cargo fmt --check
@@ -137,6 +138,9 @@ test-vault-e2e: ## Run the headless vault CLI end-to-end suite against the debug
 test-platform-signing-boundary: ## Run the release platform-signing verifier contract tests
 	bash tests/test_platform_signing_verify.sh
 
+test-ops-mtls-transport: ## Run the paranoid-ops mTLS transport integration tests behind the mtls-transport feature
+	bash scripts/cargo_test.sh -p paranoid-ops --locked --frozen --offline --features mtls-transport
+
 verify-security: ## Run repository security and supply-chain verification scripts
 	$(MAKE) verify-assurance
 
@@ -172,6 +176,7 @@ ci: ## Run the local equivalent of the repository CI gates
 	cargo fmt --check
 	cargo clippy --workspace --all-targets --locked --frozen --offline -- -D warnings
 	bash scripts/cargo_test.sh --workspace --locked --frozen --offline
+	$(MAKE) test-ops-mtls-transport
 	$(MAKE) test-cli-contract
 	$(MAKE) test-tui-e2e
 	$(if $(CI_GUI_E2E_TARGET),$(MAKE) $(CI_GUI_E2E_TARGET))

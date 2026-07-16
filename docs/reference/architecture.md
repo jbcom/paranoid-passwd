@@ -77,7 +77,20 @@ correlation identifiers, not authentication tokens or cryptographic nonces.
   non-secret peer identity, certificate fingerprint, channel-binding, and warning evidence
 - an OpenSSL-backed mTLS JSONL command transport that accepts typed command envelopes across a
   process boundary, replaces client-supplied transport claims with server-observed peer-certificate
-  evidence, and returns the same typed command trace used by local adapters
+  evidence, and returns the same typed command trace used by local adapters. This transport lives
+  behind the `mtls-transport` Cargo feature on `paranoid-ops` (default off): CLI, TUI, and GUI ship
+  without it because none of them cross a process boundary today, and it stays out of the default
+  dependency graph rather than shipping as dead public API. Its integration tests
+  (`crates/paranoid-ops/tests/mtls_transport.rs`) run under `make test`/`make ci` via
+  `make test-ops-mtls-transport`, which invokes `cargo test -p paranoid-ops --features mtls-transport`
+  so the transport keeps full coverage without adding runtime surface to a shipped binary. The
+  intended consumer is a future remote-ops surface: a headless agent or service endpoint that
+  accepts typed `OpsCommandEnvelope`s over mTLS from a separately authenticated operator or
+  automation client, for deployments where the vault or generator must be operated from outside the
+  local process (for example a federal-ready fleet-management or assessor tooling integration).
+  Wiring a concrete binary target onto `OpsMtlsServer`/`OpsMtlsClient` happens when that consumer
+  ships; until then the feature keeps the transport building, tested, and reviewable without
+  pretending it is already load-bearing production surface.
 - fail-closed profile validation so externally supplied envelopes cannot downgrade the
   authoritative `OpsPolicyContext`
 - an explicit `allow`, `challenge`, and `deny` policy decision model

@@ -16,7 +16,9 @@ use std::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "mtls-transport")]
 mod mtls_transport;
+#[cfg(feature = "mtls-transport")]
 pub use mtls_transport::*;
 
 static LOCAL_OPERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);

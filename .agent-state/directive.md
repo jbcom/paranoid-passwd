@@ -79,7 +79,7 @@ completeness critic + dedicated architecture review.
   (refactor, not shim — callers move in the same commit). Accept: exactly one
   production derivation site, in `paranoid-vault`; test fixtures constructing
   `VaultSealPosture` directly are exempt.
-- [ ] **P1.2 `mtls_transport` disposition** — 546-line public module in
+- [x] **P1.2 `mtls_transport` disposition** — 546-line public module in
   `paranoid-ops` with zero callers in cli/gui. **Decision**: not speculative
   infra we ship as dead pub API — gate behind a cargo feature consumed by its
   integration tests, and document the intended remote-ops consumer in
