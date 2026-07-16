@@ -655,6 +655,7 @@ pub trait AuditSink {
 
 pub struct JsonlFileAuditSink {
     writer: BufWriter<std::fs::File>,
+    redactor: AuditRedactor,
 }
 
 impl JsonlFileAuditSink {
@@ -662,13 +663,16 @@ impl JsonlFileAuditSink {
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         Ok(Self {
             writer: BufWriter::new(file),
+            redactor: AuditRedactor::strict(),
         })
     }
 }
 
 impl AuditSink for JsonlFileAuditSink {
     fn record_event(&mut self, event: &AuditEvent) -> Result<(), AuditError> {
-        serde_json::to_writer(&mut self.writer, event)?;
+        let mut event = event.clone();
+        event.redact_attributes(&self.redactor);
+        serde_json::to_writer(&mut self.writer, &event)?;
         self.writer.write_all(b"\n")?;
         Ok(())
     }
@@ -1323,6 +1327,35 @@ mod tests {
 
         assert!(written.contains("\"operation_id\":\"pp.operation.v1.sink-test\""));
         assert_eq!(written.lines().count(), 1);
+    }
+
+    #[test]
+    fn jsonl_sink_redacts_secret_shaped_attributes_before_persisting() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("audit.jsonl");
+        let mut trail = AuditTrail::for_operation("pp.operation.v1.redaction-test");
+        let event = trail.record(
+            AuditSurface::Cli,
+            AuditSubject::VaultOperation,
+            "unlock",
+            AuditOutcome::Success,
+            AuditSeverity::Notice,
+            "vault unlocked",
+        );
+        event.attributes.insert(
+            "master_key".to_string(),
+            "correct horse battery staple".to_string(),
+        );
+        event
+            .attributes
+            .insert("vault_path".to_string(), "/tmp/vault.db".to_string());
+
+        trail.write_jsonl(&path).expect("write audit jsonl");
+        let written = std::fs::read_to_string(path).expect("read audit jsonl");
+
+        assert!(written.contains("\"master_key\":\"[redacted]\""));
+        assert!(written.contains("\"vault_path\":\"/tmp/vault.db\""));
+        assert!(!written.contains("correct horse battery staple"));
     }
 
     #[test]
