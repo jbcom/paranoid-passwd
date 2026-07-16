@@ -64,9 +64,22 @@ P6.0 CI research + two-tier trust design.
   the header. make test-tui-e2e green 2x consecutively; cargo test -p
   paranoid-cli -p paranoid-vault clean (75 tests); fmt+clippy -D warnings
   clean on both crates.
-- [ ] P6.1 GHCR digest-pinned builder image (+ design doc committed to
+- [x] P6.1 GHCR digest-pinned builder image (+ design doc committed to
   docs/reference/) — biggest CI win, trust-improving; bootstrap ordering per
-  design.json.
+  design.json. docs/reference/ci-design.md versions the two-tier trust
+  design. `.github/workflows/builder-image.yml` builds + publishes
+  ghcr.io/jbcom/paranoid-passwd-builder (push paths-scoped to
+  .github/actions/builder/**, weekly schedule, workflow_dispatch;
+  packages:write scoped to that job only, unreachable from pull_request).
+  `.github/actions/builder/action.yml` stays on `image: Dockerfile`
+  (bootstrap-gated: the digest does not exist pre-merge) with the
+  `docker://...@sha256:<digest>` line present-but-commented, plus
+  `scripts/bump_builder_digest.sh` to flip it once the first GHCR image
+  exists post-merge. supply_chain_verify.sh checked against the new
+  workflow/action.yml — its builder-pin assertions read the Dockerfile
+  directly, not action.yml, so no allowlist change was needed; a follow-up
+  item to assert the eventual docker:// digest is noted in
+  ci-design.md's "Supply-Chain Gate Interaction" section.
 - [ ] P6.2 dedupe builder rebuilds + verify-assurance runs across workflows.
 - [ ] P6.3 Tier-A cargo target cache (save-if main-only; release restores
   nothing).

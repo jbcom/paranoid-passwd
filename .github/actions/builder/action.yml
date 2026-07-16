@@ -15,8 +15,17 @@
 # (which is also cwd), and runs the entrypoint with INPUT_RUN set to
 # the `run:` value above.
 #
-# No registry. No image push. The Dockerfile is the source of truth;
-# any change to it ships atomically with the PR that touches it.
+# The Dockerfile is the source of truth; any change to it ships atomically
+# with the PR that touches it, and `.github/workflows/builder-image.yml`
+# rebuilds + republishes ghcr.io/jbcom/paranoid-passwd-builder from it.
+#
+# BOOTSTRAP ORDERING (see docs/reference/ci-design.md "Bootstrap Ordering"):
+# `image: Dockerfile` stays active below until the first GHCR image exists.
+# Once builder-image.yml has published, run scripts/bump_builder_digest.sh
+# to resolve the published digest and flip this action onto the `docker://`
+# line below (commented out for now because the digest does not exist yet):
+#
+#   image: docker://ghcr.io/jbcom/paranoid-passwd-builder@sha256:<digest>
 # =================================================================
 
 name: 'paranoid-passwd Wolfi builder'
@@ -29,4 +38,7 @@ inputs:
 
 runs:
   using: docker
+  # BOOTSTRAP: replace with the docker:// digest reference above via
+  # scripts/bump_builder_digest.sh once ghcr.io/jbcom/paranoid-passwd-builder
+  # has been published at least once. Do not hand-edit the digest.
   image: Dockerfile
