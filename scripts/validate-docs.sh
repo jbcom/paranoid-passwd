@@ -124,3 +124,45 @@ if [ "${#missing_framework_ids[@]}" -gt 0 ]; then
   echo "docs/reference/compliance-frameworks.md is missing framework id(s): ${missing_framework_ids[*]}" >&2
   exit 1
 fi
+
+# Every vault subcommand match arm in crates/paranoid-cli/src/vault_cli.rs must appear somewhere
+# under docs/. Subcommand names are extracted mechanically from the `Some("name") => ...` arms of
+# the `let command = match command.as_deref() { ... };` block, not hardcoded here, so a renamed,
+# added, or removed subcommand in code fails this gate instead of silently passing.
+vault_cli_src="$REPO_ROOT/crates/paranoid-cli/src/vault_cli.rs"
+mapfile -t vault_subcommands < <(awk '/let command = match command\.as_deref\(\) \{/{flag=1} flag{print} flag && /^    \};$/{exit}' "$vault_cli_src" | grep -oE 'Some\("[a-z-]+"\)' | sed -E 's/Some\("([a-z-]+)"\)/\1/')
+if [ "${#vault_subcommands[@]}" -eq 0 ]; then
+  echo "failed to extract any vault subcommands from $vault_cli_src; extraction pattern is stale" >&2
+  exit 1
+fi
+missing_vault_subcommands=()
+for subcommand in "${vault_subcommands[@]}"; do
+  if ! grep -rq --include='*.md' -- "$subcommand" "$REPO_ROOT/docs"; then
+    missing_vault_subcommands+=("$subcommand")
+  fi
+done
+if [ "${#missing_vault_subcommands[@]}" -gt 0 ]; then
+  echo "docs/ is missing coverage for vault subcommand(s): ${missing_vault_subcommands[*]}" >&2
+  exit 1
+fi
+
+# Every GUI callback wired via `window.on_*(...)` in wire_callbacks() (crates/paranoid-gui/src/lib.rs,
+# both the desktop and WASM-gated variants) must appear somewhere under docs/. Callback names are
+# extracted mechanically from `window.on_<name>` call sites, not hardcoded here, so a renamed,
+# added, or removed callback in code fails this gate instead of silently passing.
+gui_lib_src="$REPO_ROOT/crates/paranoid-gui/src/lib.rs"
+mapfile -t gui_callbacks < <(grep -oE '\bwindow\.on_[a-zA-Z_]+' "$gui_lib_src" | sed -E 's/^window\.//' | sort -u)
+if [ "${#gui_callbacks[@]}" -eq 0 ]; then
+  echo "failed to extract any GUI callbacks from $gui_lib_src; extraction pattern is stale" >&2
+  exit 1
+fi
+missing_gui_callbacks=()
+for callback in "${gui_callbacks[@]}"; do
+  if ! grep -rq --include='*.md' -- "$callback" "$REPO_ROOT/docs"; then
+    missing_gui_callbacks+=("$callback")
+  fi
+done
+if [ "${#missing_gui_callbacks[@]}" -gt 0 ]; then
+  echo "docs/ is missing coverage for GUI callback(s): ${missing_gui_callbacks[*]}" >&2
+  exit 1
+fi

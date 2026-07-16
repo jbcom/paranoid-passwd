@@ -199,6 +199,21 @@ that lint internally. The handwritten GUI sources are still checked by
 `scripts/hallucination_check.sh`; only exact `#[unsafe(no_mangle)]` ABI attributes are allowed
 there, and all security-sensitive crates retain the workspace `forbid` policy.
 
+`wire_callbacks()` in `crates/paranoid-gui/src/lib.rs` binds the Slint UI's `callback` declarations
+to native Rust handlers. The desktop (`#[cfg(not(target_arch = "wasm32"))]`) build wires each
+callback to a real vault/generator operation; the WASM (`#[cfg(target_arch = "wasm32")]`) build
+wires the same callback names to gated no-op handlers that surface the compile-checked-only
+message instead of touching secrets. Both builds wire the same callback set:
+
+- `on_run_audit` — runs the compliance-framework audit for the current length/count/framework selection
+- `on_init_vault` — creates a new vault at the given path with the given recovery secret
+- `on_unlock_vault` — unlocks an existing vault for the session
+- `on_add_login` — adds a new `Login` item to the unlocked vault
+- `on_generate_rotate` — generates a password and either stores a new login or rotates an existing one in place
+- `on_enroll_mnemonic` — adds a mnemonic recovery keyslot to the unlocked vault
+- `on_export_backup` — writes an encrypted vault backup to the given output path
+- `on_copy_primary` — copies the primary generated/stored secret to the clipboard with auto-clear
+
 ## Local Vault
 
 `paranoid-vault` is the encrypted local vault crate boundary.

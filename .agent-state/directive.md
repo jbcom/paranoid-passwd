@@ -175,7 +175,7 @@ completeness critic + dedicated architecture review.
 - [ ] **P4.5 testing.md completeness** — name `make test-tui-e2e` and
   `make test-vault-e2e` (CI-load-bearing, currently undocumented); document
   the P2.6 e2e split.
-- [ ] **P4.6 Mechanical doc-coverage gates** — script asserting (a) every vault
+- [x] **P4.6 Mechanical doc-coverage gates** — script asserting (a) every vault
   subcommand match-arm appears in docs/, (b) every GUI `on_*` callback name is
   documented; wire into `make docs-check`.
 - [ ] **P4.7 CLAUDE.md accuracy** (depends on P2.4) — replace the "GUI
