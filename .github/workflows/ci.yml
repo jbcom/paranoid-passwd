@@ -21,6 +21,30 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  fmt:
+    name: Formatting
+    # P6.5 (see docs/reference/ci-design.md "P6.5 — Split fmt into a
+    # fastest-first Tier-A job"): fmt needs no compiled artifacts, so it is
+    # split out of the `rust` job (which keeps clippy+test and rust-cache)
+    # to fail within seconds instead of after a full compile. This job must
+    # not precede P6.1 landing (it would otherwise add a second full
+    # image rebuild) — P6.1 is already merged, so the builder image here is
+    # a cheap digest pull, not a rebuild.
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Check formatting inside the builder
+        uses: ./.github/actions/builder
+        with:
+          run: |
+            cargo fmt --check
+
   rust:
     name: Rust Build + Tests
     runs-on: ubuntu-24.04

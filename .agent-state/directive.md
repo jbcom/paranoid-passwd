@@ -96,7 +96,15 @@ P6.0 CI research + two-tier trust design.
   nothing).
 - [x] P6.4 docs/tox toolchain cache (deploy-pages stays cache-free:
   id-token:write). Double docs build already killed by P6.2.
-- [ ] P6.5 fmt fastest-first job split.
+- [x] P6.5 fmt fastest-first job split. New `fmt` job in ci.yml runs
+  `cargo fmt --check` (matching make's exact flag) standalone via the
+  builder action, ahead of and independent from the `rust` job (which keeps
+  clippy+test+rust-cache). Sequenced after P6.1 per ci-design.md's
+  "Sequencing Constraint" — P6.1 already landed, so this job pulls the
+  digest-pinned builder image rather than rebuilding it. `make ci`'s local
+  behavior is unchanged (still runs fmt as its first step). Not added to
+  `scripts/verify_branch_protection.sh`'s required-checks list — additive,
+  non-required until the orchestrator updates branch protection post-merge.
 - [ ] P6.6 least-privilege + trust-boundary audit of all workflows.
 - [ ] P2.4 vendored slint-testing + real widget-event GUI tests.
 - [ ] P2.6 make e2e-ci / e2e-local split (real mouse/keyboard local GUI
