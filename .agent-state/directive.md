@@ -176,13 +176,13 @@ completeness critic + dedicated architecture review.
   `docs/getting-started/index.md:48` still say v3.6.5; fix to current and add
   a validate-docs.sh assertion tying doc version strings to workspace
   Cargo.toml so the class is dead.
-- [ ] **P4.4 Document all six compliance frameworks** — hipaa/soc2/gdpr/
+- [ ] [WAIT] **P4.4 Document all six compliance frameworks** (executor workflow wf_50270fc6 running on docs-frameworks) — hipaa/soc2/gdpr/
   iso27001 appear nowhere in the Sphinx site despite `--help` listing them;
   add canonical list + aliases, and validate-docs.sh greps per framework id.
 - [ ] [WAIT] **P4.5 (blocked: P2.6 landing) testing.md completeness** — name `make test-tui-e2e` and
   `make test-vault-e2e` (CI-load-bearing, currently undocumented); document
   the P2.6 e2e split.
-- [ ] **P4.6 Mechanical doc-coverage gates** — script asserting (a) every vault
+- [ ] [WAIT] **P4.6 Mechanical doc-coverage gates** (same workflow) — script asserting (a) every vault
   subcommand match-arm appears in docs/, (b) every GUI `on_*` callback name is
   documented; wire into `make docs-check`.
 - [ ] [WAIT] **P4.7 (blocked: P2.4 landing) CLAUDE.md accuracy** (depends on P2.4) — replace the "GUI
