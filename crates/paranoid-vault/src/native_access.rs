@@ -40,7 +40,9 @@ impl SecretString {
 
 impl PartialEq for SecretString {
     fn eq(&self, other: &Self) -> bool {
-        self.0.as_str() == other.0.as_str()
+        let a = self.0.as_bytes();
+        let b = other.0.as_bytes();
+        a.len() == b.len() && openssl::memcmp::eq(a, b)
     }
 }
 
@@ -339,7 +341,20 @@ fn read_optional_env(env_name: &str) -> Result<Option<String>, VaultError> {
 
 #[cfg(test)]
 mod tests {
-    use super::NativeSessionHardening;
+    use super::{NativeSessionHardening, SecretString};
+
+    #[test]
+    fn secret_string_equality_matches_and_differs_correctly() {
+        let a = SecretString::new("hunter2".to_string());
+        let b = SecretString::new("hunter2".to_string());
+        let c = SecretString::new("hunter3".to_string());
+        let short = SecretString::new("hunter".to_string());
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, short);
+        assert_eq!(SecretString::default(), SecretString::default());
+    }
 
     #[test]
     fn clipboard_entry_becomes_due_after_expiration() {
