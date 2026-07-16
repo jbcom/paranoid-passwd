@@ -286,3 +286,99 @@ gate cannot be satisfied by a digest pointing at stale or hand-pushed image
 content. That assertion is out of scope for P6.1: it depends on the digest
 that only exists after this PR's bootstrap step runs (see Bootstrap
 Ordering), so the check would be untestable at PR-review time.
+
+## P6.6 — Least-Privilege and Trust-Boundary Audit
+
+Audited every workflow under `.github/workflows/` directly (`grep`/read, not
+sampling). Two gaps were found and fixed in the same commit that added this
+table; everything else already matched the design.
+
+### Top-level `permissions` and per-job least privilege
+
+| Workflow | Top-level `permissions` | Elevated job grants | Notes |
+|---|---|---|---|
+| `ci.yml` | `{}` | none beyond `contents: read`; `codeql` job adds `security-events: write` | all Tier A |
+| `cd.yml` | `{}` | `release-please`: `contents: write`, `pull-requests: write`; `deploy-pages`: `pages: write`, `id-token: write` | push/schedule/dispatch-only, no `pull_request` trigger |
+| `release.yml` | `{}` | `attest-and-publish`: `contents: write`, `id-token: write`, `attestations: write`; `release-surface-verify`/`release-download-verify`: `id-token: write` | Tier B; `release`/`workflow_dispatch` only |
+| `builder-image.yml` | `{}` | `publish`: `packages: write` | push(main, paths-scoped)/schedule/dispatch only — unreachable from `pull_request` |
+| `security-assurance.yml` | `{}` | none beyond `contents: read` | Tier A |
+| `codeql.yml` | none set (fleet-managed, do-not-edit-in-place — see file header) | `security-events: write`, `actions: read` | out of scope per design's Rejected Options |
+| `scorecard.yml` | **was `read-all`, fixed to `{}`** | `security-events: write`, `id-token: write` | isolated on purpose (Scorecard webapp rejects results if a co-workflow job holds `id-token:write`); left untouched otherwise per design |
+
+**Fix applied:** `scorecard.yml`'s top-level `permissions: read-all` was
+broader than needed — the `analysis` job already declares every scope it
+uses (`contents: read`, `security-events: write`, `id-token: write`).
+Tightened to `permissions: {}` at top level; job-level grants are
+unchanged and still sufficient.
+
+### `packages:write` and `id-token:write` reachability
+
+| Scope | Job(s) that hold it | Trigger(s) that can reach the job | Fork-`pull_request`-reachable? |
+|---|---|---|---|
+| `packages: write` | `builder-image.yml` → `publish` | `push` (main, paths-scoped), `schedule`, `workflow_dispatch` | No |
+| `id-token: write` | `cd.yml` → `deploy-pages` | `push` (main) | No |
+| `id-token: write` | `release.yml` → `attest-and-publish`, `release-surface-verify`, `release-download-verify` | `release: published`, `workflow_dispatch` | No |
+| `id-token: write` | `scorecard.yml` → `analysis` | `push` (main), `schedule` | No |
+
+No job carrying `packages: write` or `id-token: write` is reachable from
+`pull_request`, and none of them restores a cache (see below) — confirmed by
+`grep -n "id-token\|packages:" .github/workflows/*.yml` cross-referenced
+against each workflow's `on:` block.
+
+### Concurrency groups on `pull_request`-triggered workflows
+
+| Workflow | `pull_request` trigger? | `concurrency` group | `cancel-in-progress` |
+|---|---|---|---|
+| `ci.yml` | yes | `ci-${{ pr.number \|\| ref }}` | `true` |
+| `security-assurance.yml` | yes | `security-assurance-${{ pr.number \|\| ref }}` | `true` |
+| `codeql.yml` | yes | `codeql-${{ ref }}` | `true` |
+| `cd.yml` | no (push/schedule/dispatch) | `cd-${{ ref }}` | `true` (branch-scoped; latest push wins, not a trust issue) |
+| `release.yml` | no (release/dispatch) | none | n/a — cancelling a mid-publish attest/upload run is unsafe, correctly omitted |
+| `builder-image.yml` | no (push/schedule/dispatch) | `builder-image-${{ ref }}` | `false` (cancelling a mid-push GHCR publish could leave a partial tag; correctly non-cancelling) |
+| `scorecard.yml` | no (push/schedule) | none | n/a — low-frequency, non-blocking |
+
+All three `pull_request`-triggered workflows have a concurrency group with
+`cancel-in-progress: true`. No fix needed.
+
+### SHA-pinning of external actions
+
+`grep -rn "uses:" .github/workflows .github/actions | grep -v "uses: \./" |
+grep -vE '@[a-f0-9]{40}'` returns zero matches — every external `uses:` (not
+a local `./`-relative action) is pinned to a full 40-character commit SHA
+with a trailing `# vX.Y.Z` version comment, matching the repo's existing
+pinning style. No fix needed.
+
+### Cache inventory — write/read reachability
+
+| Cache | Written by | Write gate | Read by | Ever read by a Tier B job? |
+|---|---|---|---|---|
+| Docker layer cache (`type=gha`) for the builder image build | `builder-image.yml` → `publish` | push(main)/schedule/dispatch only | same job, same run | No — Tier B consumes the *published, digest-pinned image*, never this build-time layer cache |
+| `target/` via `Swatinem/rust-cache` | `ci.yml` → `rust` | `save-if: github.ref == 'refs/heads/main'` | `ci.yml` → `rust` (any ref, restore-only off main) | No |
+| `.tox` via `actions/cache` | `ci.yml` → `docs` | split into `actions/cache/restore` (every run) + `actions/cache/save` gated `github.ref == 'refs/heads/main'` (fixed by this item — previously a single ungated `actions/cache@v6` step) | `ci.yml` → `docs` (any ref, restore-only off main) | No |
+
+**Fix applied:** the `docs` job's `.tox` cache previously used the combined
+`actions/cache` action, which has no `save-if` equivalent — every run,
+including a same-repo PR branch, would attempt to write the cache key.
+Split into `actions/cache/restore` (unconditional) and `actions/cache/save`
+(gated to `github.ref == 'refs/heads/main'`, mirroring the `rust` job's
+`save-if`), so only a main-branch run can populate or refresh the entry.
+GitHub's own cache-scoping already prevented a *fork* PR from writing into
+the base repository's cache namespace; this closes the same-repo-branch gap
+explicitly rather than relying only on that platform backstop.
+
+`grep -rn "actions/cache\|rust-cache" .github/workflows/*.yml` confirms
+`release.yml` (Tier B) has zero cache references of any kind — it never
+restores `target/`, `.tox`, or any GHA cache. `cd.yml`'s `deploy-pages` job
+also has no `actions/cache` step (see its inline comment) and always builds
+docs fresh from the digest-pinned image.
+
+### Scope confirmations left untouched
+
+Per the design's Rejected Options, `codeql.yml` (fleet-managed, synced from
+`jbdevprimary/gh-fleet-sync`, do-not-edit-in-place) and `scorecard.yml`'s
+`id-token` isolation (required by `ossf/scorecard-action`'s own
+workflow-restriction: the Scorecard webapp refuses results if any
+co-workflow job holds `id-token:write`) are intentionally out of scope for
+restructuring. Only `scorecard.yml`'s redundant top-level `permissions:
+read-all` was tightened; its isolation from `cd.yml` and its job-level
+grants are unchanged.

@@ -105,7 +105,29 @@ P6.0 CI research + two-tier trust design.
   behavior is unchanged (still runs fmt as its first step). Not added to
   `scripts/verify_branch_protection.sh`'s required-checks list — additive,
   non-required until the orchestrator updates branch protection post-merge.
-- [ ] P6.6 least-privilege + trust-boundary audit of all workflows.
+- [x] P6.6 least-privilege + trust-boundary audit of all workflows. Audited
+  every workflow file directly (permissions, concurrency, SHA-pinning,
+  cache reachability). Found and fixed two gaps: (1) scorecard.yml's
+  top-level `permissions: read-all` was broader than its job needed
+  (tightened to `{}`; job-level grants unchanged and sufficient); (2)
+  ci.yml's docs job used a single ungated `actions/cache` step for the
+  `.tox` venv — unlike Swatinem/rust-cache, plain actions/cache has no
+  save-if, so a same-repo PR branch could write the cache; split into
+  `actions/cache/restore` (every run) + `actions/cache/save` (gated
+  `github.ref == 'refs/heads/main'`, mirroring the rust job's save-if).
+  Confirmed: all external actions SHA-pinned (grep, zero non-pinned
+  matches); packages:write only on builder-image.yml's publish job
+  (push/schedule/dispatch, unreachable from pull_request); id-token:write
+  only on cd.yml deploy-pages, release.yml's three Tier B jobs, and
+  scorecard.yml (isolated per OSSF requirement), none of which restore any
+  cache; all pull_request-triggered workflows (ci.yml, security-assurance.yml,
+  codeql.yml) have concurrency + cancel-in-progress:true; release.yml has
+  zero actions/cache or rust-cache references anywhere (Tier B stays cold).
+  codeql.yml (fleet-managed, do-not-edit-in-place) and scorecard.yml's
+  id-token isolation left untouched as designed. Full claim-backed audit
+  table written to docs/reference/ci-design.md's "P6.6" section. Verified:
+  actionlint clean, python3 yaml parse clean on all 7 workflow files,
+  scripts/validate-docs.sh clean.
 - [ ] P2.4 vendored slint-testing + real widget-event GUI tests.
 - [ ] P2.6 make e2e-ci / e2e-local split (real mouse/keyboard local GUI
   runs), wired into make ci; testing.md documents platform conditions.
