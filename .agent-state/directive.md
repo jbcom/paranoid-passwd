@@ -124,7 +124,7 @@ completeness critic + dedicated architecture review.
   tree (init-vault → add-login → generate-rotate → enroll-mnemonic →
   export-backup), asserting window property state. Closes the gap where GUI
   e2e bypasses callback wiring entirely.
-- [ ] **P2.5 Extend TUI PTY e2e** — wrong-password → `UnlockBlocked` seal
+- [x] **P2.5 Extend TUI PTY e2e** — wrong-password → `UnlockBlocked` seal
   screen → recover; recovery-secret rotation; and a second PTY session against
   the same vault proving restart persistence (items + keyslots visible,
   unlock works).

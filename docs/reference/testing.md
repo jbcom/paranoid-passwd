@@ -197,8 +197,16 @@ cargo test -p paranoid-core --locked --frozen --offline
 - TUI reducer / rendering smoke tests
 - real PTY-driven binary TUI workflow coverage in
   [`tests/test_tui_e2e.py`](../../../tests/test_tui_e2e.py), proving the
-  generator wizard and vault TUI can be driven end to end with actual terminal
-  keystrokes
+  generator wizard and vault TUI can be driven end to end with actual
+  terminal keystrokes: the base vault flow (add-login, mnemonic-keyslot
+  enrollment, backup export) plus a second PTY session against the same
+  vault path proving login items and keyslots survive a fresh-process
+  restart/unlock; a wrong-`PARANOID_MASTER_PASSWORD` unlock attempt that
+  renders the seal's `UnlockBlocked` posture screen and is then recovered
+  with the correct password in the same session; and a recovery-secret
+  rotation flow (through the P2.3 environment-approval screen for the fresh
+  vault it inits) that proves the rotated secret unlocks a fresh CLI-mode
+  process while the pre-rotation secret no longer does
 - a deterministic scripted TUI driving surface (`PARANOID_TUI_SCRIPT`, see
   [Scripted TUI mode](#scripted-tui-mode) below) exercising the real `App`
   reducers, including the generator wizard's background worker thread,

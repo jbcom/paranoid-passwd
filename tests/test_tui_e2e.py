@@ -233,6 +233,171 @@ def vault_flow(binary: Path):
         if not backup_path.exists():
             raise AssertionError(f"expected backup export at {backup_path}")
 
+        # Second PTY session against the same vault_path: proves the login
+        # and mnemonic keyslot added above survive a fresh process restart
+        # (a new unlock, not the same in-memory App instance).
+        with PtySession([str(binary), "vault", "--path", str(vault_path)], env=env) as restarted:
+            restarted.wait_for("Controls: Up/Down select items", timeout=10)
+            restarted.wait_for("GitHub", timeout=5)
+
+            restarted.send_text("k")
+            restarted.wait_for("Keyslots (2)", timeout=5)
+
+            restarted.send_text("q")
+            exit_code = restarted.wait_exit(timeout=5)
+            if exit_code != 0:
+                raise AssertionError(
+                    f"restarted vault TUI exited with {exit_code}"
+                )
+
+
+def add_login_item(session: PtySession, title: str, username: str, password: str):
+    session.send_text("a")
+    session.wait_for("Required:title,username,password.", timeout=10)
+    session.send_text(title)
+    session.send_tab()
+    session.send_text(username)
+    session.send_tab()
+    session.send_text(password)
+    session.send_tab(3)
+    session.send_text("Work")
+    session.send_tab()
+    session.send_text("work,code")
+    session.send_tab()
+    session.send_enter()
+    session.wait_for("Stored login item", timeout=10)
+    session.wait_for(title, timeout=5)
+
+
+def wrong_password_unlock_flow(binary: Path):
+    # `p`/`m`/`b`/`c` are unconditional unlock-mode-switch shortcuts on the
+    # UnlockBlocked screen (see `handle_unlock_blocked_key`), so a secret
+    # typed through this PTY layer must avoid those letters or it would
+    # silently switch away from Password mode mid-entry.
+    correct_password = "dragonsteelfortress9"
+
+    with tempfile.TemporaryDirectory() as tmpdir_root:
+        tmpdir = Path(tmpdir_root)
+        vault_path = tmpdir / "vault.sqlite"
+        env = os.environ.copy()
+        env["PARANOID_MASTER_PASSWORD"] = correct_password
+        env["PARANOID_TEST_DEVICE_STORE_DIR"] = str(tmpdir / "device-store")
+
+        run_checked(
+            [str(binary), "vault", "--cli", "--path", str(vault_path), "init"],
+            env,
+        )
+
+        wrong_env = env.copy()
+        wrong_env["PARANOID_MASTER_PASSWORD"] = "totally wrong password"
+
+        with PtySession(
+            [str(binary), "vault", "--path", str(vault_path)], env=wrong_env
+        ) as session:
+            # A wrong `PARANOID_MASTER_PASSWORD` fails the automatic unlock
+            # attempted on process start, landing the TUI on the seal's
+            # UnlockBlocked posture screen (read_vault_header still succeeds,
+            # so the on-disk format is confirmed intact, but the unlock
+            # itself is refused).
+            session.wait_for("Unlock blocked", timeout=10)
+            session.wait_for("Unlock Vault", timeout=5)
+
+            # Recover within the same session: Tab from the unlock-mode
+            # field to the password field, type the correct secret, and
+            # submit.
+            session.send_tab()
+            session.send_text(correct_password)
+            session.send_tab()
+            session.send_enter()
+            session.wait_for("Vault unlocked", timeout=10)
+            session.wait_for("No vault items yet", timeout=5)
+
+            add_login_item(session, "GitHub", "octocat", "hunter2")
+
+            session.send_text("q")
+            exit_code = session.wait_exit(timeout=5)
+            if exit_code != 0:
+                raise AssertionError(
+                    f"wrong-password recovery TUI exited with {exit_code}"
+                )
+
+
+def recovery_secret_rotation_flow(binary: Path):
+    initial_secret = "dragonsteelfortress9"
+    rotated_secret = "graniteharborsentinel7"
+
+    with tempfile.TemporaryDirectory() as tmpdir_root:
+        tmpdir = Path(tmpdir_root)
+        vault_path = tmpdir / "vault.sqlite"
+        env = os.environ.copy()
+        env["PARANOID_TEST_DEVICE_STORE_DIR"] = str(tmpdir / "device-store")
+
+        with PtySession(
+            [str(binary), "vault", "--path", str(vault_path)], env=env
+        ) as session:
+            # No vault exists yet at this path: the P2.3 environment-approval
+            # screen is the first thing shown. <enter> accepts the default
+            # (Accept) choice, landing on the reused unlock/init form
+            # pre-set to Password mode.
+            session.wait_for("Environment Approval", timeout=10)
+            session.send_enter()
+            session.wait_for("Unlock Vault", timeout=5)
+            session.send_tab()
+            session.send_text(initial_secret)
+            session.send_tab()
+            session.send_enter()
+            session.wait_for("Vault initialized", timeout=10)
+            session.wait_for("No vault items yet", timeout=5)
+
+            session.send_text("k")
+            session.wait_for("Keyslots", timeout=5)
+            session.checkpoint()
+
+            session.send_text("p")
+            session.wait_for("Rotate Recovery Secret", timeout=5)
+            # The new-secret field is already focused on entry, so no
+            # leading Tab (unlike the UnlockBlocked form, which starts on
+            # the mode selector).
+            session.send_text(rotated_secret)
+            session.send_tab()
+            session.send_text(rotated_secret)
+            session.send_tab()
+            session.checkpoint()
+            session.send_enter()
+            session.wait_for("Selected keyslot", timeout=10)
+
+            session.send_text("q")
+            exit_code = session.wait_exit(timeout=5)
+            if exit_code != 0:
+                raise AssertionError(
+                    f"recovery-secret rotation TUI exited with {exit_code}"
+                )
+
+        # Prove the rotated secret works by exec'ing a fresh CLI-mode
+        # process against the same vault path.
+        rotated_env = env.copy()
+        rotated_env["PARANOID_MASTER_PASSWORD"] = rotated_secret
+        run_checked(
+            [str(binary), "vault", "--cli", "--path", str(vault_path), "list"],
+            rotated_env,
+        )
+
+        # The pre-rotation secret must no longer unlock the vault.
+        stale_env = env.copy()
+        stale_env["PARANOID_MASTER_PASSWORD"] = initial_secret
+        completed = subprocess.run(
+            [str(binary), "vault", "--cli", "--path", str(vault_path), "list"],
+            env=stale_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if completed.returncode == 0:
+            raise AssertionError(
+                "pre-rotation recovery secret unexpectedly still unlocks the vault"
+            )
+
 
 def main():
     if len(sys.argv) != 2:
@@ -247,8 +412,12 @@ def main():
     generator_flow(binary)
     print("  PASS  generator TUI binary flow")
     vault_flow(binary)
-    print("  PASS  vault TUI binary flow")
-    print("\n2 passed, 0 failed")
+    print("  PASS  vault TUI binary flow (adds login + mnemonic, restart persistence)")
+    wrong_password_unlock_flow(binary)
+    print("  PASS  wrong-password unlock blocked, then recovered")
+    recovery_secret_rotation_flow(binary)
+    print("  PASS  recovery-secret rotation flow")
+    print("\n4 passed, 0 failed")
     return 0
 
 
