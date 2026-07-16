@@ -766,48 +766,23 @@ struct ImportBackupForm {
     overwrite: bool,
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 struct ExportTransferForm {
     focus_index: usize,
     path: String,
-    package_password: String,
+    package_password: SecretString,
     cert_path: String,
 }
 
-impl std::fmt::Debug for ExportTransferForm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ExportTransferForm")
-            .field("focus_index", &self.focus_index)
-            .field("path", &self.path)
-            .field("package_password", &"<redacted>")
-            .field("cert_path", &self.cert_path)
-            .finish()
-    }
-}
-
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 struct ImportTransferForm {
     focus_index: usize,
     path: String,
     replace_existing: bool,
-    package_password: String,
+    package_password: SecretString,
     cert_path: String,
     key_path: String,
-    key_passphrase: String,
-}
-
-impl std::fmt::Debug for ImportTransferForm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ImportTransferForm")
-            .field("focus_index", &self.focus_index)
-            .field("path", &self.path)
-            .field("replace_existing", &self.replace_existing)
-            .field("package_password", &"<redacted>")
-            .field("cert_path", &self.cert_path)
-            .field("key_path", &self.key_path)
-            .field("key_passphrase", &"<redacted>")
-            .finish()
-    }
+    key_passphrase: SecretString,
 }
 
 impl Default for UnlockForm {
@@ -884,9 +859,17 @@ impl ExportTransferForm {
     fn selected_value_mut(&mut self) -> Option<&mut String> {
         match self.selected_field() {
             ExportTransferField::Path => Some(&mut self.path),
-            ExportTransferField::PackagePassword => Some(&mut self.package_password),
             ExportTransferField::CertPath => Some(&mut self.cert_path),
-            ExportTransferField::Save => None,
+            ExportTransferField::PackagePassword | ExportTransferField::Save => None,
+        }
+    }
+
+    fn selected_secret_mut(&mut self) -> Option<&mut SecretString> {
+        match self.selected_field() {
+            ExportTransferField::PackagePassword => Some(&mut self.package_password),
+            ExportTransferField::Path
+            | ExportTransferField::CertPath
+            | ExportTransferField::Save => None,
         }
     }
 }
@@ -907,11 +890,24 @@ impl ImportTransferForm {
     fn selected_value_mut(&mut self) -> Option<&mut String> {
         match self.selected_field() {
             ImportTransferField::Path => Some(&mut self.path),
-            ImportTransferField::PackagePassword => Some(&mut self.package_password),
             ImportTransferField::CertPath => Some(&mut self.cert_path),
             ImportTransferField::KeyPath => Some(&mut self.key_path),
+            ImportTransferField::PackagePassword
+            | ImportTransferField::KeyPassphrase
+            | ImportTransferField::ReplaceExisting
+            | ImportTransferField::Save => None,
+        }
+    }
+
+    fn selected_secret_mut(&mut self) -> Option<&mut SecretString> {
+        match self.selected_field() {
+            ImportTransferField::PackagePassword => Some(&mut self.package_password),
             ImportTransferField::KeyPassphrase => Some(&mut self.key_passphrase),
-            ImportTransferField::ReplaceExisting | ImportTransferField::Save => None,
+            ImportTransferField::Path
+            | ImportTransferField::CertPath
+            | ImportTransferField::KeyPath
+            | ImportTransferField::ReplaceExisting
+            | ImportTransferField::Save => None,
         }
     }
 }
@@ -2262,6 +2258,7 @@ impl App {
             }
             _ => {
                 edit_form_value(self.export_transfer_form.selected_value_mut(), key);
+                edit_form_value(self.export_transfer_form.selected_secret_mut(), key);
                 false
             }
         }
@@ -2316,6 +2313,7 @@ impl App {
             }
             _ => {
                 edit_form_value(self.import_transfer_form.selected_value_mut(), key);
+                edit_form_value(self.import_transfer_form.selected_secret_mut(), key);
                 false
             }
         }
@@ -2712,7 +2710,7 @@ impl App {
         self.export_transfer_form = ExportTransferForm {
             focus_index: 0,
             path: default_transfer_export_path(&self.options.path),
-            package_password: String::new(),
+            package_password: SecretString::default(),
             cert_path: String::new(),
         };
         self.screen = Screen::ExportTransfer;
@@ -2738,10 +2736,10 @@ impl App {
             focus_index: 0,
             path: default_transfer_export_path(&self.options.path),
             replace_existing: false,
-            package_password: String::new(),
+            package_password: SecretString::default(),
             cert_path: String::new(),
             key_path: String::new(),
-            key_passphrase: String::new(),
+            key_passphrase: SecretString::default(),
         };
         self.screen = Screen::ImportTransfer;
         self.status =
@@ -3197,7 +3195,7 @@ impl App {
         }
 
         let package_password =
-            normalize_optional_field(&self.export_transfer_form.package_password);
+            normalize_optional_secret(&self.export_transfer_form.package_password);
         let cert_path = normalize_optional_field(&self.export_transfer_form.cert_path);
         if package_password.is_none() && cert_path.is_none() {
             self.status =
@@ -3222,7 +3220,7 @@ impl App {
                     .export_transfer_package(
                         output.as_str(),
                         &self.filters.as_filter(),
-                        package_password.as_deref(),
+                        package_password.as_ref().map(SecretString::as_str),
                         cert_pem.as_deref(),
                     )
                     .map_err(anyhow::Error::from)
@@ -3254,10 +3252,10 @@ impl App {
         }
 
         let package_password =
-            normalize_optional_field(&self.import_transfer_form.package_password);
+            normalize_optional_secret(&self.import_transfer_form.package_password);
         let cert_path = normalize_optional_field(&self.import_transfer_form.cert_path);
         let key_path = normalize_optional_field(&self.import_transfer_form.key_path);
-        let key_passphrase = normalize_optional_field(&self.import_transfer_form.key_passphrase);
+        let key_passphrase = normalize_optional_secret(&self.import_transfer_form.key_passphrase);
         let use_password = package_password.is_some();
         let use_certificate = cert_path.is_some() || key_path.is_some();
         if use_password && use_certificate {
@@ -3306,7 +3304,7 @@ impl App {
                         input.as_str(),
                         cert_pem.as_slice(),
                         key_pem.as_slice(),
-                        key_passphrase.as_deref(),
+                        key_passphrase.as_ref().map(SecretString::as_str),
                         self.import_transfer_form.replace_existing,
                     )
                 };
@@ -5560,7 +5558,7 @@ fn export_backup_panel(app: &App) -> Paragraph<'static> {
 
 fn export_transfer_panel(app: &App) -> Paragraph<'static> {
     let form = &app.export_transfer_form;
-    let package_password = if form.package_password.trim().is_empty() {
+    let package_password = if form.package_password.as_str().trim().is_empty() {
         "(unset)"
     } else {
         "(set)"
@@ -5658,7 +5656,7 @@ fn import_backup_panel(app: &App) -> Paragraph<'static> {
 fn import_transfer_panel(app: &App) -> Paragraph<'static> {
     let form = &app.import_transfer_form;
     let replace_existing = if form.replace_existing { "yes" } else { "no" };
-    let package_password = if form.package_password.trim().is_empty() {
+    let package_password = if form.package_password.as_str().trim().is_empty() {
         "(unset)"
     } else {
         "(set)"
@@ -5673,7 +5671,7 @@ fn import_transfer_panel(app: &App) -> Paragraph<'static> {
     } else {
         form.key_path.as_str()
     };
-    let key_passphrase = if form.key_passphrase.trim().is_empty() {
+    let key_passphrase = if form.key_passphrase.as_str().trim().is_empty() {
         "(unset)"
     } else {
         "(set)"
@@ -5845,7 +5843,7 @@ fn current_transfer_selection_lines(app: &App, form: &ExportTransferForm) -> Vec
         )),
         Line::raw(format!(
             "unwrap paths: recovery_secret={} certificate={}",
-            !form.package_password.trim().is_empty(),
+            !form.package_password.as_str().trim().is_empty(),
             !form.cert_path.trim().is_empty()
         )),
     ];
@@ -7492,7 +7490,8 @@ mod tests {
 
         source_app.open_export_transfer();
         source_app.export_transfer_form.path = transfer_path.display().to_string();
-        source_app.export_transfer_form.package_password = "transfer secret".to_string();
+        source_app.export_transfer_form.package_password =
+            SecretString::new("transfer secret".to_string());
         source_app.submit_export_transfer();
 
         assert!(matches!(source_app.screen, Screen::Vault));
@@ -7512,7 +7511,8 @@ mod tests {
         let mut dest_app = App::new(dest_options);
         dest_app.open_import_transfer();
         dest_app.import_transfer_form.path = transfer_path.display().to_string();
-        dest_app.import_transfer_form.package_password = "transfer secret".to_string();
+        dest_app.import_transfer_form.package_password =
+            SecretString::new("transfer secret".to_string());
         dest_app.submit_import_transfer();
 
         assert!(matches!(dest_app.screen, Screen::Vault));
@@ -7613,7 +7613,8 @@ mod tests {
         let original_id = app.detail.as_ref().expect("detail").id.clone();
         app.open_import_transfer();
         app.import_transfer_form.path = invalid_transfer.display().to_string();
-        app.import_transfer_form.package_password = "transfer secret".to_string();
+        app.import_transfer_form.package_password =
+            SecretString::new("transfer secret".to_string());
         app.submit_import_transfer();
 
         assert!(matches!(app.screen, Screen::ImportTransfer));
@@ -7748,6 +7749,24 @@ mod tests {
         let recovery_secret_debug = format!("{recovery_secret_form:?}");
         assert!(recovery_secret_debug.contains("<redacted>"));
         assert!(!recovery_secret_debug.contains("new battery horse staple"));
+
+        let export_transfer_form = ExportTransferForm {
+            package_password: SecretString::new("transfer package secret".to_string()),
+            ..ExportTransferForm::default()
+        };
+        let export_transfer_debug = format!("{export_transfer_form:?}");
+        assert!(export_transfer_debug.contains("<redacted>"));
+        assert!(!export_transfer_debug.contains("transfer package secret"));
+
+        let import_transfer_form = ImportTransferForm {
+            package_password: SecretString::new("import package secret".to_string()),
+            key_passphrase: SecretString::new("import key passphrase".to_string()),
+            ..ImportTransferForm::default()
+        };
+        let import_transfer_debug = format!("{import_transfer_form:?}");
+        assert!(import_transfer_debug.contains("<redacted>"));
+        assert!(!import_transfer_debug.contains("import package secret"));
+        assert!(!import_transfer_debug.contains("import key passphrase"));
     }
 
     #[test]
