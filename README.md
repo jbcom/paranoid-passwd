@@ -177,6 +177,10 @@ make release-emulate
 make verify-published-release TAG=paranoid-passwd-v3.7.0
 ```
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for environment setup, the full verification flow,
+where code belongs across the seven crates, the test-layer breakdown, current extension points,
+and PR conventions.
+
 ## Releases
 
 Release archives are published on [GitHub Releases](https://github.com/jbcom/paranoid-passwd/releases). The docs site also hosts:

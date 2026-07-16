@@ -198,11 +198,14 @@ completeness critic + dedicated architecture review.
   tests at each layer, PR conventions, and the three extension points
   (frameworks, charsets, seal providers) with worked examples; link from
   README and docs/index.md.
-- [ ] **P5.4 `.remember/` + `.ralph-tui/` disposition** — tracked agent-loop
+- [x] **P5.4 `.remember/` + `.ralph-tui/` disposition** — tracked agent-loop
   scaffolding (empty remember.md, ralph-tui setup-wizard config) with no
   documented purpose: either document in AGENTS.md tooling section or untrack
   + gitignore. **Decision**: untrack + gitignore unless the user's ralph
-  workflow actively reads them from this repo.
+  workflow actively reads them from this repo. Verified via repo-wide search
+  (`rg -l 'ralph-tui|\.remember'`, plus Makefile/scripts/.github checks):
+  nothing in the repo's build, CI, or scripts consumes these paths. Untracked
+  and gitignored; files kept on disk for local tooling.
 
 ## Review-refuted / explicitly not queued
 
