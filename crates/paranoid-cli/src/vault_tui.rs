@@ -6010,10 +6010,11 @@ fn normalize_optional_field(value: &str) -> Option<String> {
 }
 
 fn normalize_optional_secret(value: &SecretString) -> Option<SecretString> {
-    if value.as_str().trim().is_empty() {
+    let trimmed = value.as_str().trim();
+    if trimmed.is_empty() {
         None
     } else {
-        Some(value.clone())
+        Some(SecretString::new(trimmed.to_string()))
     }
 }
 
@@ -7767,6 +7768,16 @@ mod tests {
         assert!(import_transfer_debug.contains("<redacted>"));
         assert!(!import_transfer_debug.contains("import package secret"));
         assert!(!import_transfer_debug.contains("import key passphrase"));
+    }
+
+    #[test]
+    fn normalize_optional_secret_trims_surrounding_whitespace() {
+        let padded = SecretString::new("  hunter2  \t".to_string());
+        let normalized = normalize_optional_secret(&padded).expect("non-empty secret");
+        assert_eq!(normalized.as_str(), "hunter2");
+
+        let blank = SecretString::new("   ".to_string());
+        assert!(normalize_optional_secret(&blank).is_none());
     }
 
     #[test]
