@@ -17,7 +17,7 @@ use paranoid_vault::MnemonicRecoveryEnrollment;
 use paranoid_vault::{
     NativeSessionHardening, SecretString, UnlockedVault, VaultAuth, VaultBackupSummary,
     VaultHeader, VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary,
-    VaultOpenOptions, init_vault, inspect_certificate_pem, read_vault_header,
+    VaultOpenOptions, init_vault_unlocked, inspect_certificate_pem, read_vault_header,
     seal_posture_for_path, unlock_vault_for_options,
 };
 use std::{fs, path::PathBuf};
@@ -1364,6 +1364,19 @@ impl App {
 
     pub(crate) fn reload_vault_state(&mut self, preferred_id: Option<&str>) -> anyhow::Result<()> {
         let vault = self.unlock_for_operation("read_item", VaultOperationAccess::Decrypt)?;
+        self.load_vault_state_from(&vault, preferred_id)
+    }
+
+    /// Loads item/header state from an already-unlocked vault handle,
+    /// without deriving or re-deriving auth. Shared by `reload_vault_state`
+    /// (which unlocks fresh) and `submit_vault_init` (which already holds an
+    /// `UnlockedVault` from `init_vault_unlocked` and must not pay a second
+    /// Argon2id derivation just to load the same, still-empty item list).
+    pub(crate) fn load_vault_state_from(
+        &mut self,
+        vault: &UnlockedVault,
+        preferred_id: Option<&str>,
+    ) -> anyhow::Result<()> {
         self.header = Some(vault.header().clone());
         if self
             .pending_keyslot_removal_confirmation
@@ -1446,10 +1459,18 @@ impl App {
     /// available). Called from `submit_native_unlock` when the target path
     /// has no vault yet, covering both the accept path (suggestion
     /// prefilled) and the adjust path (manual entry, no auto-enrollment).
+    ///
+    /// Uses `init_vault_unlocked` and operates on the returned handle
+    /// directly rather than following up with a fresh `unlock_vault` call:
+    /// the Argon2id KEK derivation is deliberately expensive (paranoid
+    /// posture), so re-deriving it a second (or third, for the auto-enroll
+    /// path) time immediately after init would needlessly double or triple
+    /// the latency of every vault creation for no security benefit — the
+    /// master key from init is already in hand.
     pub(crate) fn submit_vault_init(&mut self) {
         let master_password = self.unlock_form.password.clone();
-        match init_vault(&self.options.path, master_password.as_str()) {
-            Ok(_) => {
+        match init_vault_unlocked(&self.options.path, master_password.as_str()) {
+            Ok(mut vault) => {
                 self.options.auth = VaultAuth::Password(master_password);
                 self.environment_approval.resolved = true;
                 let auto_enroll_device = matches!(
@@ -1459,16 +1480,18 @@ impl App {
                     .capability_report
                     .as_ref()
                     .is_some_and(|report| report.os_keychain.status.is_available());
-                self.refresh();
+
                 if auto_enroll_device {
-                    self.auto_enroll_device_keyslot();
-                } else {
+                    self.auto_enroll_device_keyslot(&mut vault);
+                } else if let Err(error) = self.load_vault_state_from(&vault, None) {
                     self.status = format!(
-                        "Vault initialized at {}. {}",
-                        self.options.path.display(),
-                        self.status
+                        "Vault initialized at {}, but loading vault state failed: {error}",
+                        self.options.path.display()
                     );
+                } else {
+                    self.status = format!("Vault initialized at {}.", self.options.path.display());
                 }
+                self.screen = Screen::Vault;
             }
             Err(error) => {
                 self.status = format!("Vault initialization failed: {error}");
@@ -1478,32 +1501,41 @@ impl App {
 
     /// Enrolls a device-bound keyslot right after init when the environment
     /// approval screen was accepted and the OS keychain probe reported
-    /// available. Runs after `refresh()` has already unlocked the freshly
-    /// initialized vault, so it operates on the live vault state rather than
-    /// re-deriving auth.
-    pub(crate) fn auto_enroll_device_keyslot(&mut self) {
-        match self.unlock_for_operation("keyslot_lifecycle", VaultOperationAccess::Keyslot) {
-            Ok(mut vault) => match vault.add_device_keyslot(None).map_err(anyhow::Error::from) {
-                Ok(slot) => {
-                    self.header = Some(vault.header().clone());
-                    self.status = format!(
-                        "Vault initialized at {}. Enrolled device-bound keyslot {} per the accepted environment suggestion.",
-                        self.options.path.display(),
-                        slot.id
-                    );
+    /// available. Operates on the freshly initialized `vault` handle passed
+    /// in by `submit_vault_init` rather than re-deriving auth.
+    pub(crate) fn auto_enroll_device_keyslot(&mut self, vault: &mut UnlockedVault) {
+        match vault.add_device_keyslot(None).map_err(anyhow::Error::from) {
+            Ok(slot) => {
+                let status_suffix = format!(
+                    "Enrolled device-bound keyslot {} per the accepted environment suggestion.",
+                    slot.id
+                );
+                match self.load_vault_state_from(vault, None) {
+                    Ok(()) => {
+                        self.status = format!(
+                            "Vault initialized at {}. {status_suffix}",
+                            self.options.path.display()
+                        );
+                    }
+                    Err(error) => {
+                        self.status = format!(
+                            "Vault initialized at {}. {status_suffix} (loading vault state failed: {error})",
+                            self.options.path.display()
+                        );
+                    }
                 }
-                Err(error) => {
-                    self.status = format!(
-                        "Vault initialized at {}, but the suggested device-bound keyslot could not be enrolled: {error}",
-                        self.options.path.display()
-                    );
-                }
-            },
+            }
             Err(error) => {
                 self.status = format!(
                     "Vault initialized at {}, but the suggested device-bound keyslot could not be enrolled: {error}",
                     self.options.path.display()
                 );
+                if let Err(load_error) = self.load_vault_state_from(vault, None) {
+                    self.status = format!(
+                        "{}; also failed to load vault state: {load_error}",
+                        self.status
+                    );
+                }
             }
         }
     }

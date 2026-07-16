@@ -582,6 +582,20 @@ pub fn init_vault(
     path: impl AsRef<Path>,
     master_password: &str,
 ) -> Result<VaultHeader, VaultError> {
+    Ok(init_vault_unlocked(path, master_password)?.header)
+}
+
+/// Creates a fresh vault at `path` and returns it already unlocked, reusing
+/// the master key derived during initialization instead of making the caller
+/// perform a second, separate Argon2id derivation via [`unlock_vault`] just
+/// to obtain a handle. Callers that only need the header (most tests, and
+/// any caller not about to operate on the vault immediately) should use
+/// [`init_vault`] instead; this variant exists for callers such as the TUI's
+/// init flow that unlock the vault as their very next step.
+pub fn init_vault_unlocked(
+    path: impl AsRef<Path>,
+    master_password: &str,
+) -> Result<UnlockedVault, VaultError> {
     let path = path.as_ref();
     if path.exists() {
         return Err(VaultError::VaultExists(path.display().to_string()));
@@ -646,7 +660,12 @@ pub fn init_vault(
         params!["header_json", serde_json::to_string(&header)?],
     )?;
 
-    Ok(header)
+    Ok(UnlockedVault {
+        path: path.to_path_buf(),
+        conn,
+        header,
+        master_key: Zeroizing::new(master_key),
+    })
 }
 
 pub fn read_vault_header(path: impl AsRef<Path>) -> Result<VaultHeader, VaultError> {

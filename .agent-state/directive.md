@@ -41,11 +41,29 @@ P6.0 CI research + two-tier trust design.
 
 - [x] P1.1-P1.5 architecture refactors — commits 0fe61bca, 47b5bd1a,
   d443e78a, 233c5ab7, 50452bc9. Gate green EXCEPT test-tui-e2e
-  recovery_secret_rotation_flow (regression introduced within P1, being
-  bisected — release-blocking).
-- [ ] P1.R Fix the P1-introduced TUI e2e regression (rotation flow init
-  step) — bisect 703d8db4..50452bc9, root-cause, fix forward. Related: the
-  CI-container vault_flow failure under debug on int-fix-wt.
+  recovery_secret_rotation_flow (regression bisected to predate P1 entirely
+  — see P1.R).
+- [x] P1.R Fix the TUI e2e regression (rotation flow init step). Bisection
+  via git-archive probe builds (703d8db4, cb4f9c6e, 3e89c5cc, 838fc939,
+  2760055f) proved the failure predates all five P1 commits: 703d8db4 (last
+  commit before the P1 window) already reproduces it, and 2760055f (where it
+  last passed 4/4) passes cleanly. First bad commit: the `7af19764` merge,
+  behaviorally caused by `91fd4f6f` (Argon2id memory cost 64->256 MiB)
+  combined with the pre-existing `submit_vault_init` -> `refresh()` pattern
+  that performed a *second* full Argon2id derivation immediately after
+  init's first one. In a debug build each derivation costs ~5-6s, so the
+  two sequential derivations blew the harness's 10s timeout (not an
+  infinite hang — verified by timing `vault init` + `vault list` via the
+  debug CLI directly: ~5-10s each). Fixed forward by adding
+  `init_vault_unlocked` (paranoid-vault/src/lifecycle.rs) returning the
+  already-unlocked vault from init instead of just the header, and
+  threading that handle through `submit_vault_init` /
+  `auto_enroll_device_keyslot` (paranoid-cli/src/vault_tui/screen_state.rs)
+  so vault creation never re-derives the KEK it just derived. `init_vault`
+  keeps its original signature for the ~90 existing callers that want only
+  the header. make test-tui-e2e green 2x consecutively; cargo test -p
+  paranoid-cli -p paranoid-vault clean (75 tests); fmt+clippy -D warnings
+  clean on both crates.
 - [ ] P6.1 GHCR digest-pinned builder image (+ design doc committed to
   docs/reference/) — biggest CI win, trust-improving; bootstrap ordering per
   design.json.
