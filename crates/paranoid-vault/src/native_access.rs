@@ -26,7 +26,12 @@ impl SecretString {
     }
 
     pub fn clear(&mut self) {
-        self.0.clear();
+        // `String::clear` only resets the length to zero; the buffer's
+        // capacity is left in place with the old secret bytes still resident
+        // until the allocation itself is dropped. Swap in a fresh, empty
+        // `Zeroizing<String>` so the old one drops (and zeroizes) its full
+        // capacity immediately instead of leaving stale plaintext behind.
+        self.0 = Zeroizing::new(String::new());
     }
 
     pub fn push(&mut self, ch: char) {
@@ -50,7 +55,22 @@ impl SecretString {
     }
 
     pub fn pop(&mut self) -> Option<char> {
-        self.0.pop()
+        // `String::pop` only shrinks the length; the removed character's
+        // bytes remain resident in the (unchanged) backing buffer beyond the
+        // new length until the allocation is dropped. Build the
+        // content-minus-last-char into a freshly allocated `Zeroizing<String>`
+        // sized to fit, then swap it in so the old buffer drops (and
+        // zeroizes) its full capacity — including the popped byte(s) — right
+        // away. O(n) per keystroke is fine for interactive TUI backspace.
+        let mut chars = self.0.chars();
+        let removed = chars.next_back();
+        if removed.is_some() {
+            let remainder = chars.as_str();
+            let mut replacement = Zeroizing::new(String::with_capacity(remainder.len()));
+            replacement.push_str(remainder);
+            self.0 = replacement;
+        }
+        removed
     }
 }
 
@@ -388,6 +408,61 @@ mod tests {
         secret.push('é');
         secret.push('🔒');
         assert!(secret.as_str().ends_with("é🔒"));
+    }
+
+    #[test]
+    fn secret_string_pop_drains_to_empty_correctly() {
+        let mut secret = SecretString::new("ab".to_string());
+
+        assert_eq!(secret.pop(), Some('b'));
+        assert_eq!(secret.as_str(), "a");
+
+        assert_eq!(secret.pop(), Some('a'));
+        assert_eq!(secret.as_str(), "");
+        assert!(secret.is_empty());
+
+        assert_eq!(secret.pop(), None);
+        assert_eq!(secret.as_str(), "");
+    }
+
+    #[test]
+    fn secret_string_pop_removes_whole_multibyte_char() {
+        let mut secret = SecretString::new("héllo🔒".to_string());
+
+        assert_eq!(secret.pop(), Some('🔒'));
+        assert_eq!(secret.as_str(), "héllo");
+
+        assert_eq!(secret.pop(), Some('o'));
+        assert_eq!(secret.as_str(), "héll");
+
+        // Pop through the remaining multi-byte character too.
+        assert_eq!(secret.pop(), Some('l'));
+        assert_eq!(secret.pop(), Some('l'));
+        assert_eq!(secret.pop(), Some('é'));
+        assert_eq!(secret.as_str(), "h");
+        assert_eq!(secret.pop(), Some('h'));
+        assert_eq!(secret.as_str(), "");
+    }
+
+    #[test]
+    fn secret_string_clear_then_push_reuses_instance_correctly() {
+        let mut secret = SecretString::new("hunter2".to_string());
+        assert!(!secret.is_empty());
+
+        secret.clear();
+        assert!(secret.is_empty());
+        assert_eq!(secret.as_str(), "");
+
+        secret.push('n');
+        secret.push('e');
+        secret.push('w');
+        assert_eq!(secret.as_str(), "new");
+
+        // Clearing again and reusing must still behave correctly.
+        secret.clear();
+        assert!(secret.is_empty());
+        secret.push('🔒');
+        assert_eq!(secret.as_str(), "🔒");
     }
 
     #[test]
