@@ -926,12 +926,25 @@ pub struct UpdateIdentityRecord {
     pub tags: Option<Vec<String>>,
 }
 
-#[derive(Debug)]
 pub struct UnlockedVault {
     path: PathBuf,
     conn: Connection,
     header: VaultHeader,
     master_key: Zeroizing<Vec<u8>>,
+}
+
+impl std::fmt::Debug for UnlockedVault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UnlockedVault")
+            .field("path", &self.path)
+            .field("conn", &self.conn)
+            .field("header", &self.header)
+            .field(
+                "master_key",
+                &format_args!("<redacted> ({} bytes)", self.master_key.len()),
+            )
+            .finish()
+    }
 }
 
 impl UnlockedVault {
@@ -4055,6 +4068,26 @@ mod tests {
 
         vault.delete_item(&item.id).expect("delete");
         assert!(vault.list_items().expect("list").is_empty());
+    }
+
+    #[test]
+    fn unlocked_vault_debug_redacts_master_key() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+
+        let debug_output = format!("{vault:?}");
+
+        assert!(debug_output.contains("<redacted>"));
+        let key_hex = hex_encode(&vault.master_key);
+        assert!(!debug_output.contains(&key_hex));
+        assert!(
+            !debug_output
+                .as_bytes()
+                .windows(vault.master_key.len())
+                .any(|window| window == vault.master_key.as_slice())
+        );
     }
 
     #[test]

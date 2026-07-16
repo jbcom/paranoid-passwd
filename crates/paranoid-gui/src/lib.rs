@@ -172,7 +172,7 @@ impl Default for GuiRuntimeConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct GuiState {
     #[cfg(not(target_arch = "wasm32"))]
     vault_path: PathBuf,
@@ -198,6 +198,35 @@ struct GuiState {
     keyslot_summary: String,
     selected_item: String,
     automation_status: String,
+}
+
+impl std::fmt::Debug for GuiState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug_struct = f.debug_struct("GuiState");
+        #[cfg(not(target_arch = "wasm32"))]
+        debug_struct
+            .field("vault_path", &self.vault_path)
+            .field(
+                "vault_secret",
+                &format_args!("<redacted> ({} bytes)", self.vault_secret.len()),
+            )
+            .field("selected_login_id", &self.selected_login_id)
+            .field("last_report", &self.last_report)
+            .field("ops_audit_events", &self.ops_audit_events)
+            .field("audit_jsonl", &self.audit_jsonl)
+            .field("require_audit_sink", &self.require_audit_sink)
+            .field("audit_sink_health", &self.audit_sink_health);
+        debug_struct
+            .field("status", &self.status)
+            .field("generated_passwords", &self.generated_passwords)
+            .field("audit_details", &self.audit_details)
+            .field("vault_items", &self.vault_items)
+            .field("vault_posture", &self.vault_posture)
+            .field("keyslot_summary", &self.keyslot_summary)
+            .field("selected_item", &self.selected_item)
+            .field("automation_status", &self.automation_status)
+            .finish()
+    }
 }
 
 impl Default for GuiState {

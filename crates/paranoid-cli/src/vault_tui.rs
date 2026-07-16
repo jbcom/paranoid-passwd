@@ -687,12 +687,23 @@ impl LabelOnlyForm {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 struct CertificateRewrapForm {
     focus_index: usize,
     cert_path: String,
     key_path: String,
     key_passphrase: String,
+}
+
+impl std::fmt::Debug for CertificateRewrapForm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CertificateRewrapForm")
+            .field("focus_index", &self.focus_index)
+            .field("cert_path", &self.cert_path)
+            .field("key_path", &self.key_path)
+            .field("key_passphrase", &"<redacted>")
+            .finish()
+    }
 }
 
 impl CertificateRewrapForm {
@@ -725,14 +736,24 @@ struct CertificateSlotForm {
     cert_path: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 struct RecoverySecretForm {
     focus_index: usize,
     new_secret: String,
     confirm_secret: String,
 }
 
-#[derive(Debug, Clone)]
+impl std::fmt::Debug for RecoverySecretForm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RecoverySecretForm")
+            .field("focus_index", &self.focus_index)
+            .field("new_secret", &"<redacted>")
+            .field("confirm_secret", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 struct UnlockForm {
     focus_index: usize,
     mode: UnlockMode,
@@ -743,6 +764,22 @@ struct UnlockForm {
     cert_path: String,
     key_path: String,
     key_passphrase: String,
+}
+
+impl std::fmt::Debug for UnlockForm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UnlockForm")
+            .field("focus_index", &self.focus_index)
+            .field("mode", &self.mode)
+            .field("password", &"<redacted>")
+            .field("mnemonic_phrase", &"<redacted>")
+            .field("mnemonic_slot", &self.mnemonic_slot)
+            .field("device_slot", &self.device_slot)
+            .field("cert_path", &self.cert_path)
+            .field("key_path", &self.key_path)
+            .field("key_passphrase", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -758,7 +795,7 @@ struct ImportBackupForm {
     overwrite: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 struct ExportTransferForm {
     focus_index: usize,
     path: String,
@@ -766,7 +803,18 @@ struct ExportTransferForm {
     cert_path: String,
 }
 
-#[derive(Debug, Clone, Default)]
+impl std::fmt::Debug for ExportTransferForm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExportTransferForm")
+            .field("focus_index", &self.focus_index)
+            .field("path", &self.path)
+            .field("package_password", &"<redacted>")
+            .field("cert_path", &self.cert_path)
+            .finish()
+    }
+}
+
+#[derive(Clone, Default)]
 struct ImportTransferForm {
     focus_index: usize,
     path: String,
@@ -775,6 +823,20 @@ struct ImportTransferForm {
     cert_path: String,
     key_path: String,
     key_passphrase: String,
+}
+
+impl std::fmt::Debug for ImportTransferForm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImportTransferForm")
+            .field("focus_index", &self.focus_index)
+            .field("path", &self.path)
+            .field("replace_existing", &self.replace_existing)
+            .field("package_password", &"<redacted>")
+            .field("cert_path", &self.cert_path)
+            .field("key_path", &self.key_path)
+            .field("key_passphrase", &"<redacted>")
+            .finish()
+    }
 }
 
 impl Default for UnlockForm {
