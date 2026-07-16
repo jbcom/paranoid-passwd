@@ -45,3 +45,4 @@ melange.rsa.pub
 
 # Ralph handoff session state
 .ralph-tui/session*.json
+__pycache__/
