@@ -4019,6 +4019,29 @@ mod tests {
     }
 
     #[test]
+    fn argon2id_derive_key_matches_known_answer() {
+        // Deliberately small (8 MiB) cost parameters so this test stays fast;
+        // production defaults are locked separately above. Fixed password,
+        // fixed salt, explicit params: pins algorithm identity (argon2id),
+        // version (0x13), salt handling, and output length end to end.
+        let params = VaultKdfParams {
+            algorithm: "argon2id".to_string(),
+            memory_cost_kib: 8192,
+            iterations: 3,
+            parallelism: 1,
+            derived_key_len: 32,
+        };
+        let salt = SaltString::encode_b64(&[7_u8; 16]).expect("salt");
+        let derived = derive_key("correct horse battery staple", &salt, &params)
+            .expect("argon2id derivation succeeds");
+        assert_eq!(derived.len(), 32);
+        assert_eq!(
+            hex_encode(derived.as_slice()),
+            "1fa5912167c7e28c5f8b3a77089ee2a64ba6a5672a142a11fb19523448d04bc3"
+        );
+    }
+
+    #[test]
     #[ignore]
     fn bench_argon2id_derive_cost_by_memory() {
         for (label, memory_cost_kib) in [
