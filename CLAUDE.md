@@ -36,7 +36,11 @@ python3 -m tox -e docs
 ## Zero-Exception Rules
 
 1. Keep security-sensitive logic in `crates/paranoid-core`.
-2. Do not reintroduce browser, WASM, or webview runtime surfaces.
+2. Do not reintroduce browser or webview runtime surfaces. The `paranoid-gui` wasm32 target is a
+   narrow, explicitly gated exception: compile-check only, its runtime branch never links
+   `paranoid-core`/`paranoid-vault`, and every callback stays disabled behind the runtime gate
+   message until wasm32 storage and crypto get a separate threat model (enforced by
+   `surface.wasm-gated-compile-check` in `scripts/security_assurance_gate.py`).
 3. Keep rejection sampling at `(256/N)*N - 1`.
 4. Keep chi-squared pass logic at `p > 0.01` and degrees of freedom at `N - 1`.
 5. Do not add `unsafe` Rust without explicit repository disposition and assurance-script coverage.
