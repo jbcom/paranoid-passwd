@@ -93,3 +93,11 @@ grep -q "export-transfer" "$REPO_ROOT/docs/guides/recovery-operations.md"
 grep -q "import-transfer" "$REPO_ROOT/docs/guides/recovery-operations.md"
 grep -q "daily passwordless unlock" "$REPO_ROOT/docs/guides/recovery-operations.md"
 grep -q "disaster recovery" "$REPO_ROOT/docs/guides/recovery-operations.md"
+
+workspace_version="$(grep -m1 '^version = ' "$REPO_ROOT/Cargo.toml" | sed -E 's/^version = "([^"]+)"$/\1/')"
+stale_pins="$(rg -no 'paranoid-passwd-v[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/docs" | rg -v "paranoid-passwd-v${workspace_version}\$" || true)"
+if [ -n "$stale_pins" ]; then
+  echo "docs/ contains version pins that do not match workspace version $workspace_version:" >&2
+  echo "$stale_pins" >&2
+  exit 1
+fi
