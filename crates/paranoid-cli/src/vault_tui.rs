@@ -8152,7 +8152,7 @@ mod tests {
         let mut app = App::new(password_only_options(&path));
 
         press_key(&mut app, KeyCode::Enter); // accept -> UnlockBlocked init form
-        app.unlock_form.password = "correct horse battery staple".to_string();
+        app.unlock_form.password = SecretString::new("correct horse battery staple".to_string());
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
@@ -8176,7 +8176,7 @@ mod tests {
         press_key(&mut app, KeyCode::Enter); // select Adjust -> UnlockBlocked init form
         assert!(app.status.contains("Manual setup"));
 
-        app.unlock_form.password = "correct horse battery staple".to_string();
+        app.unlock_form.password = SecretString::new("correct horse battery staple".to_string());
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
@@ -8206,7 +8206,7 @@ mod tests {
         );
 
         press_key(&mut app, KeyCode::Enter); // accept -> UnlockBlocked init form
-        app.unlock_form.password = "correct horse battery staple".to_string();
+        app.unlock_form.password = SecretString::new("correct horse battery staple".to_string());
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
@@ -8228,7 +8228,7 @@ mod tests {
 
         let mut app = App::new(password_only_options(&path));
         assert!(matches!(app.screen, Screen::UnlockBlocked));
-        app.unlock_form.password = "correct horse battery staple".to_string();
+        app.unlock_form.password = SecretString::new("correct horse battery staple".to_string());
         app.submit_native_unlock();
         assert!(matches!(app.screen, Screen::Vault));
 
