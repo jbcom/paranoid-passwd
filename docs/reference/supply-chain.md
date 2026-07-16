@@ -30,6 +30,14 @@ Linux release validation, published-release surface verification, and downloaded
 asset smoke verification also run through the same builder instead of installing
 ad hoc packages onto the Ubuntu runner.
 
+The `Dependency Scan` job in `.github/workflows/ci.yml` runs on pull requests and
+`workflow_dispatch` (not on `push`) and executes `cargo run -p xtask -- dependency-scan`
+inside the same builder image. That subcommand runs `cargo audit --no-fetch --stale`
+and the OSV lockfile actionable-findings check the local scanner subset also uses,
+so pull requests get dependency/advisory coverage in remote CI instead of only
+through the local-only `make quality` / `make quality-emulate` scanner gates.
+Semgrep, cargo-deny, Syft, and Trivy remain local/builder-emulate-only scanners.
+
 ## Historical CI Rigor Baseline
 
 The older C/WASM GitHub Pages line carried a stricter release discipline than the

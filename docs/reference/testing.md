@@ -67,6 +67,16 @@ make quality-emulate
 Python remains in the repo only where it already owns a specific workflow: Sphinx/tox docs and the
 PTY-driven TUI harness. It is not the project automation layer.
 
+## Remote Dependency Scan
+
+`.github/workflows/ci.yml` runs a `Dependency Scan` job on pull requests and `workflow_dispatch`
+(skipped on `push`) that executes `cargo run -p xtask -- dependency-scan` inside the same Wolfi
+builder image the `Rust Build + Tests` job uses. That subcommand runs `cargo audit --no-fetch
+--stale` and the same OSV lockfile actionable-findings check as `make quality` /
+`make quality-emulate`, and fails the job on any actionable advisory. It is a scanners-only job,
+not the full `verify-deep`/`quality` gate, so it stays fast on every pull request; Semgrep,
+cargo-deny, Syft, and Trivy remain local-only or `make quality-emulate`-only.
+
 ## Local Build Chain Configure
 
 The repository owns local toolchain discovery through:

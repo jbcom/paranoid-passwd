@@ -94,6 +94,7 @@ fn main() -> Result<()> {
     let command = env::args().nth(1).unwrap_or_else(|| "help".to_string());
     match command.as_str() {
         "verify-deep" => verify_deep(),
+        "dependency-scan" => dependency_scan(),
         "help" | "--help" | "-h" => {
             print_help();
             Ok(())
@@ -104,6 +105,7 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!("Usage: cargo run -p xtask -- verify-deep");
+    println!("       cargo run -p xtask -- dependency-scan");
 }
 
 fn verify_deep() -> Result<()> {
@@ -134,6 +136,45 @@ fn verify_deep() -> Result<()> {
         println!("- [{}] {}", finding.check, finding.message);
     }
     bail!("local quality gate failed")
+}
+
+fn dependency_scan() -> Result<()> {
+    println!("PR Dependency Scan");
+    println!();
+
+    let repo_root = repo_root()?;
+    let mut findings = Vec::new();
+
+    print_step("Running cargo-audit");
+    let status = Command::new("cargo")
+        .args(["audit", "--no-fetch", "--stale"])
+        .current_dir(&repo_root)
+        .status()
+        .context("failed to run cargo-audit")?;
+    if !status.success() {
+        findings.push(Finding::new(
+            "cargo-audit",
+            format!(
+                "cargo-audit failed with exit code {}",
+                status.code().unwrap_or(-1)
+            ),
+        ));
+    }
+
+    print_step("Running osv-scanner");
+    findings.extend(check_osv_actionable_findings(&repo_root)?);
+
+    println!();
+    if findings.is_empty() {
+        println!("PASS dependency scan");
+        return Ok(());
+    }
+
+    println!("FAIL dependency scan");
+    for finding in findings {
+        println!("- [{}] {}", finding.check, finding.message);
+    }
+    bail!("dependency scan failed")
 }
 
 fn repo_root() -> Result<PathBuf> {
