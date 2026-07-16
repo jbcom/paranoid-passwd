@@ -169,7 +169,7 @@ completeness critic + dedicated architecture review.
   `docs/getting-started/index.md:48` still say v3.6.5; fix to current and add
   a validate-docs.sh assertion tying doc version strings to workspace
   Cargo.toml so the class is dead.
-- [ ] **P4.4 Document all six compliance frameworks** — hipaa/soc2/gdpr/
+- [x] **P4.4 Document all six compliance frameworks** — hipaa/soc2/gdpr/
   iso27001 appear nowhere in the Sphinx site despite `--help` listing them;
   add canonical list + aliases, and validate-docs.sh greps per framework id.
 - [ ] **P4.5 testing.md completeness** — name `make test-tui-e2e` and

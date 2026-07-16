@@ -32,7 +32,8 @@ logging.
 - serial correlation
 - collision counting
 - pattern detection
-- compliance evaluation
+- compliance evaluation against the built-in `--framework` presets — see
+  [Supported Compliance Frameworks](./compliance-frameworks.md)
 
 The old raw-memory WASM result struct is gone. Application surfaces now pass typed Rust data structures between layers.
 Future Slint WASM/mobile targets must keep that typed Rust boundary and cannot revive the retired JavaScript browser app.

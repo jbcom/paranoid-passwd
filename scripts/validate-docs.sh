@@ -14,6 +14,7 @@ required=(
   "$REPO_ROOT/docs/guides/recovery-operations.md"
   "$REPO_ROOT/docs/reference/index.md"
   "$REPO_ROOT/docs/reference/architecture.md"
+  "$REPO_ROOT/docs/reference/compliance-frameworks.md"
   "$REPO_ROOT/docs/reference/messaging.md"
   "$REPO_ROOT/docs/reference/security-assurance.md"
   "$REPO_ROOT/docs/reference/assurance-claims.md"
@@ -49,6 +50,8 @@ grep -q "quality-emulate" "$REPO_ROOT/docs/reference/supply-chain.md"
 grep -q "cargo-audit" "$REPO_ROOT/docs/reference/supply-chain.md"
 grep -q "RustSec advisory DB" "$REPO_ROOT/docs/reference/supply-chain.md"
 grep -q "platform-installers" "$REPO_ROOT/docs/reference/index.md"
+grep -q "compliance-frameworks" "$REPO_ROOT/docs/reference/index.md"
+grep -q "reference/compliance-frameworks" "$REPO_ROOT/docs/getting-started/index.md"
 grep -q "checksummed and attested native archives" "$REPO_ROOT/docs/index.md"
 if grep -q "signed native archives" "$REPO_ROOT/docs/index.md"; then
   echo "docs/index.md must not claim signed native archives" >&2
@@ -103,5 +106,21 @@ stale_pins="$(grep -rnE "paranoid-passwd-v[0-9]+\.[0-9]+\.[0-9]+" "$REPO_ROOT/do
 if [ -n "$stale_pins" ]; then
   echo "docs/ contains version pins that do not match workspace version $workspace_version:" >&2
   echo "$stale_pins" >&2
+  exit 1
+fi
+
+# Every FrameworkId variant in crates/paranoid-core/src/lib.rs must appear in the canonical
+# compliance-frameworks doc. This list is intentionally hardcoded (not derived from the source)
+# so that adding, removing, or renaming a framework id in code without touching docs fails this
+# gate instead of silently passing because the check re-derived itself from the same drift.
+framework_ids=(nist pci_dss hipaa soc2 gdpr iso27001)
+missing_framework_ids=()
+for id in "${framework_ids[@]}"; do
+  if ! grep -q "\`$id\`" "$REPO_ROOT/docs/reference/compliance-frameworks.md"; then
+    missing_framework_ids+=("$id")
+  fi
+done
+if [ "${#missing_framework_ids[@]}" -gt 0 ]; then
+  echo "docs/reference/compliance-frameworks.md is missing framework id(s): ${missing_framework_ids[*]}" >&2
   exit 1
 fi
