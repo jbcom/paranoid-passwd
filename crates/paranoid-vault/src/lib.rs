@@ -4012,6 +4012,13 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn argon2id_default_kdf_parameters_known_answers_hold() {
+        assert_eq!(DEFAULT_MEMORY_COST_KIB, 65_536);
+        assert_eq!(DEFAULT_ITERATIONS, 3);
+        assert_eq!(DEFAULT_PARALLELISM, 1);
+    }
+
+    #[test]
     fn init_unlock_and_login_crud_round_trip() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("vault.sqlite");
