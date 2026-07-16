@@ -105,14 +105,14 @@ completeness critic + dedicated architecture review.
 
 ## P2 — E2E & capability detection (branch: e2e-and-detection; ordered — later items depend on earlier)
 
-- [ ] [WAIT] **P2.1 Scriptable TUI driving surface** (executor workflow wf_d2d6fd5a running on e2e-and-detection) — extract the event-independent
+- [ ] [WAIT] **P2.1 Scriptable TUI driving surface** (landed on e2e-and-detection c53e9214; flips with its PR) — extract the event-independent
   step function (`App::handle_key`, `tui.rs:355`, plus worker polling) into a
   testable surface and add a deterministic scripted mode
   (`--script <path>` / `PARANOID_TUI_SCRIPT`, matching the existing
   `PARANOID_TEST_DEVICE_STORE_DIR` pattern) feeding newline-delimited key
   sequences. This is the prerequisite for P2.3/P2.5 and for agentic control of
   the TUI. Accept: a scripted run completes the generator wizard headlessly.
-- [ ] [WAIT] **P2.2 Capability-detection evidence module** (same workflow, sequenced after P2.1) — first-run/install-time
+- [ ] [WAIT] **P2.2 Capability-detection evidence module** (landed on e2e-and-detection ef59a699; flips with its PR) — first-run/install-time
   probes for OS keychain (`keyring`), clipboard (`arboard`), display server
   (Quartz/X11/Wayland/none), and configured seal providers, modeled on the
   existing `FederalCryptoProviderEvidence::collect_from_environment()` pattern;
@@ -169,20 +169,20 @@ completeness critic + dedicated architecture review.
   remove fabricated GUI coverage claims (keyslot inspection, rotation, rewrap,
   rebind coverage that doesn't exist). Re-check after P2.4 lands and update to
   the then-true surface.
-- [ ] [WAIT] **P4.2 Document the six undocumented vault subcommands** (executor workflow wf_59422769 on docs-truth) — `vault show`,
+- [x] **P4.2 Document the six undocumented vault subcommands** — `vault show`,
   `update`, `update-note`, `update-card`, `update-identity`, `delete` in
   `docs/getting-started/index.md`.
-- [ ] [WAIT] **P4.3 Version-pin drift** (same workflow) — `docs/public/install.sh:6` and
+- [x] **P4.3 Version-pin drift** — `docs/public/install.sh:6` and
   `docs/getting-started/index.md:48` still say v3.6.5; fix to current and add
   a validate-docs.sh assertion tying doc version strings to workspace
   Cargo.toml so the class is dead.
-- [ ] [WAIT] **P4.4 (blocked: docs-truth merge (validate-docs.sh)) Document all six compliance frameworks** — hipaa/soc2/gdpr/
+- [ ] **P4.4 Document all six compliance frameworks** — hipaa/soc2/gdpr/
   iso27001 appear nowhere in the Sphinx site despite `--help` listing them;
   add canonical list + aliases, and validate-docs.sh greps per framework id.
 - [ ] [WAIT] **P4.5 (blocked: P2.6 landing) testing.md completeness** — name `make test-tui-e2e` and
   `make test-vault-e2e` (CI-load-bearing, currently undocumented); document
   the P2.6 e2e split.
-- [ ] [WAIT] **P4.6 (blocked: docs-truth merge) Mechanical doc-coverage gates** — script asserting (a) every vault
+- [ ] **P4.6 Mechanical doc-coverage gates** — script asserting (a) every vault
   subcommand match-arm appears in docs/, (b) every GUI `on_*` callback name is
   documented; wire into `make docs-check`.
 - [ ] [WAIT] **P4.7 (blocked: P2.4 landing) CLAUDE.md accuracy** (depends on P2.4) — replace the "GUI

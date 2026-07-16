@@ -45,7 +45,7 @@ That script verifies:
 
 Set `PARANOID_REQUIRE_WINDOWS_MSI=1` when validating a release that should ship
 the Windows GUI MSI. Older published baselines such as
-`paranoid-passwd-v3.7.0` did not include that artifact, so the verifier keeps
+`paranoid-passwd-v3.7.0` did not include that artifact, so the verifier keeps <!-- docs-version-history -->
 MSI strictness explicit while automatically validating an MSI if the release
 already includes one.
 
