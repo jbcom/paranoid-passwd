@@ -9,7 +9,7 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SecretString(Zeroizing<String>);
 
 impl SecretString {
@@ -20,7 +20,31 @@ impl SecretString {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    pub fn push(&mut self, ch: char) {
+        self.0.push(ch);
+    }
+
+    pub fn pop(&mut self) -> Option<char> {
+        self.0.pop()
+    }
 }
+
+impl PartialEq for SecretString {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_str() == other.0.as_str()
+    }
+}
+
+impl Eq for SecretString {}
 
 impl fmt::Debug for SecretString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
