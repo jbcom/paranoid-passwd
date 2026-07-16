@@ -131,8 +131,10 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             } else {
                 VaultKeyslotProviderProbe::MetadataOnly
             };
-            let (vault_exists, posture) =
-                paranoid_vault::seal_posture_for_path(&invocation.open_options.path, provider_probe);
+            let (vault_exists, posture) = paranoid_vault::seal_posture_for_path(
+                &invocation.open_options.path,
+                provider_probe,
+            );
             let report = serde_json::json!({
                 "schema_version": SEAL_SCHEMA_VERSION,
                 "operation": "vault_seal_status",

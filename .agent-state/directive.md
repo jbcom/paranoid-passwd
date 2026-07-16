@@ -93,7 +93,7 @@ completeness critic + dedicated architecture review.
   `certificate_time_to_epoch` / `inspect_certificate_pem`
   (`lib.rs:3453-3523`); move the primitives to `paranoid-core`, drop vault's
   direct `openssl` dependency if nothing else needs it.
-- [ ] **P1.5 Split the monoliths** — `paranoid-vault/src/lib.rs` (6,268 lines)
+- [x] **P1.5 Split the monoliths** — `paranoid-vault/src/lib.rs` (6,268 lines)
   and `vault_tui.rs` into responsibility modules (vault: keyslots /
   backup-transfer / recovery-posture / lifecycle; tui: screen state / panels /
   mutation handlers). Pure moves + visibility fixes, no behavior change;
