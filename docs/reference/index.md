@@ -8,6 +8,7 @@ title: Reference
 :maxdepth: 2
 
 architecture
+compliance-frameworks
 messaging
 license
 federal-readiness
