@@ -204,6 +204,14 @@ completeness critic + dedicated architecture review.
   + gitignore. **Decision**: untrack + gitignore unless the user's ralph
   workflow actively reads them from this repo.
 
+## In-flight waits (external)
+
+- [ ] [WAIT] Wait for PR #141 (P0 security-hardening) CI green, then squash-merge
+- [ ] [WAIT] Wait for ci-hardening PR CI green, then squash-merge; then apply live
+  branch-protection required checks (Dependency Scan, Security Assurance)
+- [ ] [WAIT] P0.7 executor (Argon2id defaults) running on security-hardening
+- [ ] [WAIT] P4.2/P4.3 executor workflow running on docs-truth worktree
+
 ## Review-refuted / explicitly not queued
 
 - Rejection sampling, chi-squared, OpenSSL delegation, workspace `forbid` on
