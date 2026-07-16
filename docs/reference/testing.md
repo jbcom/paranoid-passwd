@@ -121,6 +121,22 @@ Current GUI platform coverage is explicit:
 | Android Slint | `make test-gui-android-check` | Compile-checks the Rust-native Slint library against the configured Android NDK while preserving native core/vault linkage. Runtime emulator/Maestro coverage remains the next Android gate. |
 | WASM Slint | `make test-gui-wasm-check` | Compile-checks the gated non-secret Slint WASM surface. Secret-handling WASM is not supported until target storage, crypto, and runtime validation are threat-modeled. |
 
+### Android and WASM Checks Are Local-Only
+
+Neither `make test-gui-android-check` nor `make test-gui-wasm-check` runs in GitHub Actions. The
+`.github/actions/builder` Wolfi image installs a single pinned `rust-1.95` apk package that ships
+only the host `aarch64-unknown-linux-gnu` std rlib. It has no `rustup` (the only tool that installs
+additional target std components) and no Android NDK apk — the Wolfi package index does not carry
+one. `rustc` recognizes the `wasm32-unknown-unknown` target triple, but `cargo check --target
+wasm32-unknown-unknown` fails with `error[E0463]: can't find crate for core` there because that
+target's std is not installed, and linking the pinned system `rustc` into `rustup` cannot add
+components (`rustup` only manages components for toolchains it installed itself). Making either
+check pass in CI would require replacing the pinned-apk, offline-first builder trust model with a
+network-fetched, rustup-managed Rust toolchain, which is out of scope for a compile-check gate.
+Both checks stay local-only, gated on `make bootstrap-local` (installs `aarch64-linux-android` and
+`wasm32-unknown-unknown` through a locally installed `rustup`), until that trust-model trade-off is
+revisited.
+
 ## Ops, Audit, and Federal Profile Tests
 
 The ops/audit/seal layer now has dedicated `paranoid-ops`, `paranoid-audit`, and `paranoid-seal`
