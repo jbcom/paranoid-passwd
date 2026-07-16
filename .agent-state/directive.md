@@ -84,7 +84,7 @@ completeness critic + dedicated architecture review.
   infra we ship as dead pub API — gate behind a cargo feature consumed by its
   integration tests, and document the intended remote-ops consumer in
   `docs/reference/architecture.md`; wire-in happens when that feature ships.
-- [ ] **P1.3 Single mTLS construction path** — `paranoid-audit` hand-builds an
+- [x] **P1.3 Single mTLS construction path** — `paranoid-audit` hand-builds an
   `SslConnector` for the external-device probe, duplicating
   `OpsMtlsClientConfig` logic. Extract one shared helper (in `paranoid-core`,
   consistent with single-crypto-surface) used by both.

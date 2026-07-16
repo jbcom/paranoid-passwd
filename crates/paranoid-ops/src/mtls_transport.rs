@@ -314,17 +314,13 @@ fn build_mtls_connector(
     private_key_path: &Path,
     ca_certificate_path: &Path,
 ) -> Result<SslConnector, OpsMtlsTransportError> {
-    let connector: Result<SslConnector, ErrorStack> = (|| {
-        let mut builder = SslConnector::builder(SslMethod::tls_client())?;
-        builder.set_min_proto_version(Some(SslVersion::TLS1_3))?;
-        builder.set_verify(SslVerifyMode::PEER);
-        builder.set_certificate_file(certificate_path, SslFiletype::PEM)?;
-        builder.set_private_key_file(private_key_path, SslFiletype::PEM)?;
-        builder.set_ca_file(ca_certificate_path)?;
-        builder.check_private_key()?;
-        Ok(builder.build())
-    })();
-    connector.map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))
+    paranoid_core::build_mtls_client_connector(
+        certificate_path,
+        private_key_path,
+        ca_certificate_path,
+        Some(SslVersion::TLS1_3),
+    )
+    .map_err(|error| OpsMtlsTransportError::TlsConfig(error.to_string()))
 }
 
 fn build_mtls_acceptor(config: &OpsMtlsServerConfig) -> Result<SslAcceptor, OpsMtlsTransportError> {

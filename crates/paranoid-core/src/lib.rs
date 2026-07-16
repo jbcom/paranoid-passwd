@@ -1,8 +1,15 @@
-use openssl::{rand::rand_bytes, sha::sha256, version};
+use openssl::{
+    error::ErrorStack,
+    rand::rand_bytes,
+    sha::sha256,
+    ssl::{SslConnector, SslFiletype, SslMethod, SslVerifyMode, SslVersion},
+    version,
+};
 use serde::{Deserialize, Serialize};
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 use std::collections::HashSet;
 use std::fmt;
+use std::path::Path;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
@@ -612,6 +619,29 @@ pub fn openssl_version_text() -> &'static str {
 
 pub fn openssl_platform_text() -> &'static str {
     version::platform()
+}
+
+/// Shared client-side mTLS `SslConnector` construction: single crypto surface
+/// for every consumer that dials out with mutual TLS (`paranoid-audit`'s
+/// external-device probe, `paranoid-ops`'s `mtls-transport` client). Builds a
+/// TLS-client connector requiring peer verification, loads the client
+/// certificate/key and CA bundle, and confirms the key matches the
+/// certificate. `min_proto_version` is left to the caller so each consumer's
+/// existing floor is preserved byte-for-byte.
+pub fn build_mtls_client_connector(
+    certificate_path: impl AsRef<Path>,
+    private_key_path: impl AsRef<Path>,
+    ca_certificate_path: impl AsRef<Path>,
+    min_proto_version: Option<SslVersion>,
+) -> Result<SslConnector, ErrorStack> {
+    let mut builder = SslConnector::builder(SslMethod::tls_client())?;
+    builder.set_min_proto_version(min_proto_version)?;
+    builder.set_verify(SslVerifyMode::PEER);
+    builder.set_certificate_file(certificate_path, SslFiletype::PEM)?;
+    builder.set_private_key_file(private_key_path, SslFiletype::PEM)?;
+    builder.set_ca_file(ca_certificate_path)?;
+    builder.check_private_key()?;
+    Ok(builder.build())
 }
 
 pub fn generate_password(charset: &str, length: usize) -> Result<String, ParanoidError> {

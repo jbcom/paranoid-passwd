@@ -1,4 +1,4 @@
-use openssl::ssl::{SslConnector, SslFiletype, SslMethod, SslVerifyMode, SslVersion};
+use openssl::ssl::{SslConnector, SslVersion};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -1010,29 +1010,13 @@ fn validate_write_ack_response(
 }
 
 fn build_mtls_connector(config: &ExternalAuditDeviceConfig) -> Result<SslConnector, String> {
-    let mut builder =
-        SslConnector::builder(SslMethod::tls_client()).map_err(|error| error.to_string())?;
-    builder
-        .set_min_proto_version(Some(SslVersion::TLS1_2))
-        .map_err(|error| error.to_string())?;
-    builder.set_verify(SslVerifyMode::PEER);
-    builder
-        .set_certificate_file(config.mtls_certificate_evidence(), SslFiletype::PEM)
-        .map_err(|error| {
-            format!("failed to load external audit-device mTLS certificate: {error}")
-        })?;
-    builder
-        .set_private_key_file(config.mtls_private_key_evidence(), SslFiletype::PEM)
-        .map_err(|error| {
-            format!("failed to load external audit-device mTLS private key: {error}")
-        })?;
-    builder
-        .set_ca_file(config.mtls_ca_certificate_evidence())
-        .map_err(|error| format!("failed to load external audit-device CA certificate: {error}"))?;
-    builder
-        .check_private_key()
-        .map_err(|error| format!("external audit-device mTLS private key check failed: {error}"))?;
-    Ok(builder.build())
+    paranoid_core::build_mtls_client_connector(
+        config.mtls_certificate_evidence(),
+        config.mtls_private_key_evidence(),
+        config.mtls_ca_certificate_evidence(),
+        Some(SslVersion::TLS1_2),
+    )
+    .map_err(|error| format!("failed to construct external audit-device mTLS connector: {error}"))
 }
 
 fn endpoint_host(endpoint: &str) -> Result<String, String> {
