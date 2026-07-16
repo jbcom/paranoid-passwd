@@ -1470,9 +1470,9 @@ impl App {
     /// prefilled) and the adjust path (manual entry, no auto-enrollment).
     fn submit_vault_init(&mut self) {
         let master_password = self.unlock_form.password.clone();
-        match init_vault(&self.options.path, &master_password) {
+        match init_vault(&self.options.path, master_password.as_str()) {
             Ok(_) => {
-                self.options.auth = VaultAuth::Password(SecretString::new(master_password));
+                self.options.auth = VaultAuth::Password(master_password);
                 self.environment_approval.resolved = true;
                 let auto_enroll_device = matches!(
                     self.environment_approval.choice,
