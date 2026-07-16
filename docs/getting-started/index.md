@@ -45,7 +45,7 @@ curl -sSL https://paranoid-passwd.com/install.sh | sh
 You can pin a version or install into a custom directory:
 
 ```bash
-curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.6.5
+curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.7.0
 curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --install-dir "$HOME/.local/bin"
 ```
 
@@ -89,6 +89,12 @@ paranoid-passwd vault add-note --title 'Emergency contact' --content 'Call +1-55
 paranoid-passwd vault add-card --title 'Primary Visa' --cardholder 'Jon Bogaty' --number 4111111111111111 --expiry-month 08 --expiry-year 2031 --security-code 123 --folder Travel --tags finance,travel
 paranoid-passwd vault add-identity --title 'Personal Identity' --full-name 'Jon Bogaty' --email jon@example.com --phone +1-555-0100 --folder Identity --tags identity,travel
 paranoid-passwd vault add --title GitHub --username jon@example.com --password 'Sup3r$ecret!' --folder Work --tags work,code
+paranoid-passwd vault show --id login-0123456789abcdef
+paranoid-passwd vault update --id login-0123456789abcdef --username jon@newexample.com --password 'N3wSecret!' --tags work,code,rotated
+paranoid-passwd vault update-note --id note-0123456789abcdef --content 'Call +1-555-0199 after laptop rotation.' --tags recovery,ops,updated
+paranoid-passwd vault update-card --id card-0123456789abcdef --expiry-month 09 --expiry-year 2032 --security-code 456
+paranoid-passwd vault update-identity --id identity-0123456789abcdef --phone +1-555-0199 --address '123 Main St'
+paranoid-passwd vault delete --id note-0123456789abcdef
 paranoid-passwd vault generate-store --id login-0123456789abcdef --length 24 --framework nist
 paranoid-passwd vault inspect-keyslot --id device-0123456789abcdef
 paranoid-passwd vault inspect-certificate --cert recipient-cert-next.pem

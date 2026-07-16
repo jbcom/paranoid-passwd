@@ -162,10 +162,10 @@ completeness critic + dedicated architecture review.
   remove fabricated GUI coverage claims (keyslot inspection, rotation, rewrap,
   rebind coverage that doesn't exist). Re-check after P2.4 lands and update to
   the then-true surface.
-- [ ] **P4.2 Document the six undocumented vault subcommands** — `vault show`,
+- [x] **P4.2 Document the six undocumented vault subcommands** — `vault show`,
   `update`, `update-note`, `update-card`, `update-identity`, `delete` in
   `docs/getting-started/index.md`.
-- [ ] **P4.3 Version-pin drift** — `docs/public/install.sh:6` and
+- [x] **P4.3 Version-pin drift** — `docs/public/install.sh:6` and
   `docs/getting-started/index.md:48` still say v3.6.5; fix to current and add
   a validate-docs.sh assertion tying doc version strings to workspace
   Cargo.toml so the class is dead.
