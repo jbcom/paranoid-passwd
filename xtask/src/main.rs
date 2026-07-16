@@ -37,6 +37,44 @@ const BUILDER_OWNED_SCANNER_TOOLS: &[&str] =
 
 const SCANNER_TOOLCHAIN_MANIFEST: &str = "supply-chain/scanner-toolchain.env";
 
+/// Advisories that are actionable per osv-scanner (a fixed version exists upstream) but are
+/// pinned behind a transitive dependency's own manifest constraint that this workspace cannot
+/// loosen with `cargo update`. Each entry documents why the advisory cannot currently be
+/// resolved and the exact upstream condition that would let it be dropped from this list.
+/// Allowed findings are never silently swallowed: `check_osv_actionable_findings` still prints
+/// them as `WARN` lines so they stay visible in scan output.
+const ALLOWED_OSV_ADVISORIES: &[AllowedOsvAdvisory] = &[
+    AllowedOsvAdvisory {
+        crate_name: "quick-xml",
+        advisory_id: "RUSTSEC-2026-0194",
+        reason: "quick-xml is pinned to \"^0.39\" by wayland-scanner v0.31.10's own Cargo.toml \
+                 (the latest wayland-scanner published on crates.io), reached transitively via \
+                 paranoid-gui -> slint 1.16.1 -> i-slint-backend-winit -> softbuffer -> \
+                 wayland-client -> wayland-scanner. In this position quick-xml only parses the \
+                 repo-local Wayland protocol XML files bundled with wayland-scanner at build \
+                 time for code generation; it never parses attacker-controlled or \
+                 network-sourced input, so the quadratic-parsing DoS this advisory describes is \
+                 not reachable here.",
+        revisit_condition: "drop this entry once a wayland-scanner release raises its quick-xml \
+                             requirement to >= 0.41.0 and `cargo update -p quick-xml` can reach \
+                             the fixed version",
+    },
+    AllowedOsvAdvisory {
+        crate_name: "quick-xml",
+        advisory_id: "RUSTSEC-2026-0195",
+        reason: "Same pin as RUSTSEC-2026-0194: quick-xml is held at \"^0.39\" by \
+                 wayland-scanner v0.31.10's own Cargo.toml, reached transitively via \
+                 paranoid-gui -> slint 1.16.1 -> i-slint-backend-winit -> softbuffer -> \
+                 wayland-client -> wayland-scanner. quick-xml only parses the repo-local \
+                 Wayland protocol XML bundled with wayland-scanner at build time, never \
+                 attacker-controlled input, so the unbounded namespace-declaration allocation \
+                 this advisory describes is not reachable here.",
+        revisit_condition: "drop this entry once a wayland-scanner release raises its quick-xml \
+                             requirement to >= 0.41.0 and `cargo update -p quick-xml` can reach \
+                             the fixed version",
+    },
+];
+
 const HOST_LOCAL_SCANNER_VERSION_CHECKS: &[HostLocalScannerVersionCheck] = &[
     HostLocalScannerVersionCheck {
         tool: "shellcheck",
@@ -88,6 +126,23 @@ struct HostLocalScannerVersionCheck {
     manifest_key: &'static str,
     command: &'static str,
     args: &'static [&'static str],
+}
+
+#[derive(Debug)]
+struct AllowedOsvAdvisory {
+    crate_name: &'static str,
+    advisory_id: &'static str,
+    reason: &'static str,
+    revisit_condition: &'static str,
+}
+
+fn allowed_osv_advisory(
+    crate_name: &str,
+    advisory_id: &str,
+) -> Option<&'static AllowedOsvAdvisory> {
+    ALLOWED_OSV_ADVISORIES
+        .iter()
+        .find(|entry| entry.crate_name == crate_name && entry.advisory_id == advisory_id)
 }
 
 fn main() -> Result<()> {
@@ -783,7 +838,12 @@ fn check_osv_actionable_findings(repo_root: &Path) -> Result<Vec<Finding>> {
                 .get("id")
                 .and_then(Value::as_str)
                 .unwrap_or("<unknown>");
-            if osv_has_fixed_version(vulnerability) || !osv_is_unmaintained(vulnerability) {
+            if let Some(allowed) = allowed_osv_advisory(name, id) {
+                println!(
+                    "WARN osv-scanner: {name} {version} has allowed advisory {id} (pinned, not silenced) - {}; revisit: {}",
+                    allowed.reason, allowed.revisit_condition
+                );
+            } else if osv_has_fixed_version(vulnerability) || !osv_is_unmaintained(vulnerability) {
                 findings.push(Finding::new(
                     "osv-scanner",
                     format!("{name} {version} has actionable advisory {id}"),
@@ -881,7 +941,27 @@ impl SecretPattern {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_scanner_manifest;
+    use super::{allowed_osv_advisory, parse_scanner_manifest};
+
+    #[test]
+    fn allowed_osv_advisory_matches_pinned_quick_xml_findings() {
+        let rustsec_2026_0194 =
+            allowed_osv_advisory("quick-xml", "RUSTSEC-2026-0194").expect("entry must exist");
+        assert!(rustsec_2026_0194.reason.contains("wayland-scanner"));
+        assert!(
+            rustsec_2026_0194
+                .revisit_condition
+                .contains("quick-xml >= 0.41.0")
+                || rustsec_2026_0194.revisit_condition.contains(">= 0.41.0")
+        );
+
+        let rustsec_2026_0195 =
+            allowed_osv_advisory("quick-xml", "RUSTSEC-2026-0195").expect("entry must exist");
+        assert!(rustsec_2026_0195.reason.contains("wayland-scanner"));
+
+        assert!(allowed_osv_advisory("quick-xml", "RUSTSEC-2099-9999").is_none());
+        assert!(allowed_osv_advisory("anyhow", "RUSTSEC-2026-0194").is_none());
+    }
 
     #[test]
     fn scanner_manifest_parser_keeps_pinned_tool_versions() {
