@@ -92,12 +92,12 @@ impl DtdParser {
                             b'\'' | b'"' => {
                                 // SystemLiteral or PubidLiteral
                                 *self = Self::BeforeInternalSubset(b);
-                                cur = &cur[i + 1..];
+                                cur = &cur[i + 1..]; // +1 to skip `'` or `"`
                                 continue;
                             }
                             b'[' => {
                                 *self = Self::InsideOfInternalSubset;
-                                cur = &cur[i + 1..];
+                                cur = &cur[i + 1..]; // +1 to skip `[`
                                 continue;
                             }
                             b'>' => {
@@ -122,7 +122,7 @@ impl DtdParser {
                     break;
                 }
                 Self::InsideOfInternalSubset => {
-                    // Find the end of internal subset ([) or the start of the markup inside (<)
+                    // Find the end of internal subset (]) or the start of the markup inside (<)
                     if let Some(i) = memchr::memchr2(b']', b'<', cur) {
                         if cur[i] == b']' {
                             *self = Self::AfterInternalSubset;
@@ -135,8 +135,23 @@ impl DtdParser {
                             continue;
                         }
                         // Keep the number of already looked bytes (started from byte after `<`, so -1),
-                        // try to decide after feeding the new chunk
-                        *self = Self::UndecidedMarkup(cur.len() - i - 1);
+                        // try to decide after feeding the new chunk.
+                        let skipped = cur.len() - i - 1;
+                        // The 9-byte work buffer in `UndecidedMarkup` is sized
+                        // for `!NOTATION` (the longest keyword). If the chunk
+                        // already gave us 9+ bytes after `<` and `switch()`
+                        // returned `None`, the markup is definitively not one
+                        // of `<!--`, `<![CDATA[`, `<!ELEMENT`, `<!ATTLIST`,
+                        // `<!ENTITY`, `<!NOTATION`, so skip until `>` rather
+                        // than staging more bytes than the buffer can hold
+                        // (which would panic on the slice copy in
+                        // `UndecidedMarkup`).
+                        if skipped >= 9 {
+                            cur = &cur[i + 1..];
+                            *self = Self::InElementDecl;
+                            continue;
+                        }
+                        *self = Self::UndecidedMarkup(skipped);
                     }
                     break;
                 }
@@ -205,6 +220,17 @@ impl DtdParser {
                         cur = &cur[skip - skipped..];
                         continue;
                     }
+                    // No keyword matched. If we have a full 9-byte window the
+                    // markup is definitively not one of `<!--`, `<![CDATA[`,
+                    // `<!ELEMENT`, `<!ATTLIST`, `<!ENTITY`, `<!NOTATION`, so
+                    // fall back to skipping until the closing `>` instead of
+                    // accumulating `skipped` past `bytes.len()` (which would
+                    // panic on the slice-copy above on a later iteration).
+                    if end == bytes.len() {
+                        cur = &cur[end - skipped..];
+                        *self = Self::InElementDecl;
+                        continue;
+                    }
                     *self = Self::UndecidedMarkup(skipped + cur.len());
                     break;
                 }
@@ -252,16 +278,15 @@ impl DtdParser {
             // or markup is not known.
             // Undecided markup bytes will be written to `buf` to be available on
             // next iteration.
-            _ if markup.len() < 9 => None,
             _ => {
                 // FIXME: to correctly report error position in DTD we need to provide
                 // DTD events. For now our task just to skip (correct) DTD, so we postpone
                 // error reporting and go with ending the unknown markup with `>`.
                 if let Some(i) = memchr::memchr(b'>', markup) {
                     *self = Self::InsideOfInternalSubset;
-                    Some(i + 1)
+                    Some(i + 1) // +1 to skip `>`
                 } else {
-                    Some(markup.len())
+                    None
                 }
             }
         }
