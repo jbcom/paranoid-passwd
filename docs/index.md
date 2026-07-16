@@ -46,6 +46,12 @@ api/index
 - Platform installer, code-signing, and notarization decisions are tracked in
   [Platform Installers and Signing](./reference/platform-installers.md).
 
+## Contributing
+
+Human contributors: see [`CONTRIBUTING.md`](../CONTRIBUTING.md) in the repository root for
+environment setup, the verification flow (`make ci`, `make quality`), where code belongs across
+the seven crates, the test-layer breakdown, current extension points, and PR conventions.
+
 ## Why It Exists
 
 - Local secrets should not depend on a browser runtime.
