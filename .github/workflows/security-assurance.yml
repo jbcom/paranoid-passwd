@@ -24,13 +24,18 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Run security assurance gate inside the builder
+      # `make ci` (ci.yml's "Rust Build + Tests" job) already runs
+      # `make verify-assurance` (hallucination_check.sh, supply_chain_verify.sh,
+      # verify_ai_review_inventory.sh, and an un-scoped security_assurance_gate.py
+      # run) on the same PR. This job's unique value is ONLY the base-ref-diffed
+      # security_assurance_gate.py run plus its report artifact — do not
+      # re-run verify-assurance here.
+      - name: Run base-ref-diffed security assurance gate inside the builder
         uses: ./.github/actions/builder
         env:
           SECURITY_ASSURANCE_BASE_REF: origin/${{ github.base_ref || 'main' }}
         with:
           run: |
-            make verify-assurance
             python3 scripts/security_assurance_gate.py \
               --base-ref "$SECURITY_ASSURANCE_BASE_REF" \
               --json-out dist/security-assurance-report.json \

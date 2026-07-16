@@ -33,6 +33,12 @@ jobs:
 
   docs:
     name: Docs Build
+    # cd.yml's deploy-pages job already builds+deploys the docs site on
+    # push-to-main (Tier B-adjacent, id-token:write). Rebuilding here too
+    # would compile the same Sphinx site twice per push. Keep this job as
+    # the PR gate (including linkcheck, which deploy-pages does not run)
+    # and skip it on push, where cd.yml is the build of record.
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

@@ -80,11 +80,22 @@ P6.0 CI research + two-tier trust design.
   directly, not action.yml, so no allowlist change was needed; a follow-up
   item to assert the eventual docker:// digest is noted in
   ci-design.md's "Supply-Chain Gate Interaction" section.
-- [ ] P6.2 dedupe builder rebuilds + verify-assurance runs across workflows.
+- [x] P6.2 dedupe builder rebuilds + verify-assurance runs across workflows.
+  security-assurance.yml no longer runs `make verify-assurance` (already run
+  by ci.yml's `make ci` on the same PR); reduced to the base-ref-diffed
+  `security_assurance_gate.py` run + report-artifact upload only, same
+  "Security Assurance" check name, fetch-depth:0 preserved. ci.yml's `docs`
+  job now skips on push-to-main (`if: github.event_name != 'push'`) since
+  cd.yml's deploy-pages job builds the same Sphinx site fresh on every push;
+  docs job still runs (with linkcheck) on pull_request, where deploy-pages
+  never runs. Builder image rebuild dedup itself is P6.1's bootstrap
+  (`image: Dockerfile` until the digest-bump script flips it); no workflow
+  here still triggers a redundant in-job image *build* beyond that
+  documented bootstrap gap.
 - [ ] P6.3 Tier-A cargo target cache (save-if main-only; release restores
   nothing).
-- [ ] P6.4 docs/tox toolchain cache + kill double docs build (deploy-pages
-  stays cache-free: id-token:write).
+- [ ] P6.4 docs/tox toolchain cache (deploy-pages stays cache-free:
+  id-token:write). Double docs build already killed by P6.2.
 - [ ] P6.5 fmt fastest-first job split.
 - [ ] P6.6 least-privilege + trust-boundary audit of all workflows.
 - [ ] P2.4 vendored slint-testing + real widget-event GUI tests.
