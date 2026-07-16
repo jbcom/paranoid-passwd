@@ -147,14 +147,14 @@ completeness critic + dedicated architecture review.
 
 ## P3 — CI/release hardening (branch: ci-hardening)
 
-- [ ] **P3.1 PR-gated dependency/SAST job** — cargo-audit, osv-scanner (min
+- [ ] [WAIT] **P3.1 (implemented on ci-hardening branch, flips [x] arrive with its merge) PR-gated dependency/SAST job** — cargo-audit, osv-scanner (min
   set; ideally `PARANOID_RUN_LOCAL_SCANNERS=1 make verify-deep`) in the builder
   container on every PR; today scanners run only in local `make quality`.
-- [ ] **P3.2 Required checks** — add `Security Assurance` to branch-protection
+- [ ] [WAIT] **P3.2 (implemented on ci-hardening branch, flips [x] arrive with its merge) Required checks** — add `Security Assurance` to branch-protection
   required checks and to `verify_branch_protection.sh:18-23` expected list.
-- [ ] **P3.3 Android/WASM compile-checks in CI** — add to ci.yml (or record an
+- [ ] [WAIT] **P3.3 (implemented on ci-hardening branch, flips [x] arrive with its merge) Android/WASM compile-checks in CI** — add to ci.yml (or record an
   explicit risk disposition in AGENTS.md + testing.md if deliberately local).
-- [ ] **P3.4 Builder-image retry hardening** — wrap `apk add`/`pip install` in
+- [ ] [WAIT] **P3.4 (implemented on ci-hardening branch, flips [x] arrive with its merge) Builder-image retry hardening** — wrap `apk add`/`pip install` in
   bounded retry loops; the PR #136 Docs Build failure was a transient Wolfi
   CDN error requiring manual re-run.
 
