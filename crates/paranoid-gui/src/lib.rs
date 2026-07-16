@@ -211,14 +211,25 @@ impl std::fmt::Debug for GuiState {
                 &format_args!("<redacted> ({} bytes)", self.vault_secret.len()),
             )
             .field("selected_login_id", &self.selected_login_id)
-            .field("last_report", &self.last_report)
+            .field(
+                "last_report",
+                &self.last_report.as_ref().map(|_| "<redacted>"),
+            )
             .field("ops_audit_events", &self.ops_audit_events)
             .field("audit_jsonl", &self.audit_jsonl)
             .field("require_audit_sink", &self.require_audit_sink)
             .field("audit_sink_health", &self.audit_sink_health);
+        let generated_password_count = self
+            .generated_passwords
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count();
         debug_struct
             .field("status", &self.status)
-            .field("generated_passwords", &self.generated_passwords)
+            .field(
+                "generated_passwords",
+                &format_args!("<redacted> ({generated_password_count} passwords)"),
+            )
             .field("audit_details", &self.audit_details)
             .field("vault_items", &self.vault_items)
             .field("vault_posture", &self.vault_posture)
@@ -1430,6 +1441,29 @@ mod tests {
         assert!(state.audit_details.contains("8 vault operation(s)"));
         assert!(state.audit_details.contains("decision=allow"));
         assert!(!state.audit_details.contains("hunter2"));
+    }
+
+    #[test]
+    fn gui_state_debug_output_never_leaks_generated_password_material() {
+        let mut state = GuiState::default();
+        run_generator_audit(&mut state, "24", "3", true, false, false)
+            .expect("valid generator audit request");
+
+        assert!(!state.generated_passwords.trim().is_empty());
+        assert!(state.last_report.is_some());
+
+        let debug_output = format!("{state:?}");
+        assert!(debug_output.contains("<redacted>"));
+        assert!(debug_output.contains("3 passwords"));
+        for line in state.generated_passwords.lines() {
+            let Some((_, password)) = line.split_once(". ") else {
+                continue;
+            };
+            let Some((password, _)) = password.split_once("  sha256=") else {
+                continue;
+            };
+            assert!(!debug_output.contains(password));
+        }
     }
 
     #[test]
