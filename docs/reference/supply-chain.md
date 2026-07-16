@@ -30,6 +30,45 @@ Linux release validation, published-release surface verification, and downloaded
 asset smoke verification also run through the same builder instead of installing
 ad hoc packages onto the Ubuntu runner.
 
+The `Dependency Scan` job in `.github/workflows/ci.yml` runs on pull requests and
+`workflow_dispatch` (not on `push`) and executes `cargo run -p xtask -- dependency-scan`
+inside the same builder image. That subcommand runs `cargo audit --no-fetch --stale`
+and the OSV lockfile actionable-findings check the local scanner subset also uses,
+so pull requests get dependency/advisory coverage in remote CI instead of only
+through the local-only `make quality` / `make quality-emulate` scanner gates.
+Semgrep, cargo-deny, Syft, and Trivy remain local/builder-emulate-only scanners.
+
+### Allowed (Pinned-but-Visible) OSV Advisories
+
+`check_osv_actionable_findings` in `xtask/src/main.rs` treats an osv-scanner finding as
+actionable (scan failure) unless it matches an entry in the `ALLOWED_OSV_ADVISORIES` table.
+That table exists for advisories that have a fixed upstream release, but where this workspace
+cannot reach the fix because a *transitive* dependency's own `Cargo.toml` pins the affected
+crate below the fixed version, and no newer release of that transitive dependency exists yet.
+This is distinct from the existing unmaintained-with-no-fix path (advisories with
+`informational = "unmaintained"` and no `fixed` version anywhere in the OSV record), which are
+always printed as warnings and never need an allowlist entry.
+
+Each `ALLOWED_OSV_ADVISORIES` entry records:
+
+- the crate name and advisory id it applies to
+- `reason`: why the fix is unreachable via `cargo update -p`/`--precise` today, plus why the
+  vulnerable code path is not actually exercised in this repo's usage
+- `revisit_condition`: the exact upstream condition (e.g. "wayland-scanner releases with
+  quick-xml >= 0.41.0") that should prompt removing the entry and re-running
+  `cargo update -p <crate>`
+
+An allowed advisory is never silenced: `dependency-scan` still prints it as a `WARN
+osv-scanner: ... has allowed advisory ...` line carrying the reason and revisit condition, and
+it is excluded from the finding list that would otherwise fail the scan. Currently allowed:
+
+- `quick-xml` / `RUSTSEC-2026-0194` and `RUSTSEC-2026-0195`: pinned to `"^0.39"` by
+  `wayland-scanner` v0.31.10's own manifest (reached via
+  `paranoid-gui -> slint -> i-slint-backend-winit -> softbuffer -> wayland-client ->
+  wayland-scanner`), which only parses repo-local Wayland protocol XML at build time, never
+  attacker-controlled input. Revisit when a `wayland-scanner` release raises its `quick-xml`
+  requirement to `>= 0.41.0`.
+
 ## Historical CI Rigor Baseline
 
 The older C/WASM GitHub Pages line carried a stricter release discipline than the
