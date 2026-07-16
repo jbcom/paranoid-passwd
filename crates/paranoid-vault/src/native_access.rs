@@ -76,9 +76,7 @@ impl SecretString {
 
 impl PartialEq for SecretString {
     fn eq(&self, other: &Self) -> bool {
-        let a = self.0.as_bytes();
-        let b = other.0.as_bytes();
-        a.len() == b.len() && openssl::memcmp::eq(a, b)
+        paranoid_core::constant_time_eq(self.0.as_bytes(), other.0.as_bytes())
     }
 }
 

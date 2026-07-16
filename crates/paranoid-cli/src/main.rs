@@ -679,6 +679,7 @@ fn map_error_to_exit_code(error: &ParanoidError) -> i32 {
         ParanoidError::RandomFailure(_) => EX_CSPRNG,
         ParanoidError::HashFailure(_) => EX_INTERNAL,
         ParanoidError::ExhaustedAttempts => EX_CONSTRAINTS,
+        ParanoidError::CertificateFailure(_) => EX_INTERNAL,
     }
 }
 

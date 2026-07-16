@@ -8,16 +8,20 @@ pub use native_access::{
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::SaltString};
 use bip39::{Language, Mnemonic};
 use openssl::{
-    asn1::Asn1Time,
     cms::{CMSOptions, CmsContentInfo},
-    hash::MessageDigest,
     pkey::{PKey, Private},
     rand::rand_bytes,
     stack::Stack,
     symm::{Cipher, Crypter, Mode},
-    x509::{X509, X509NameRef},
+    x509::X509,
 };
-use paranoid_core::{GenerationReport, ParanoidRequest, execute_request};
+use paranoid_core::{
+    GenerationReport, ParanoidRequest, X509Preview,
+    certificate_fingerprint_hex as core_certificate_fingerprint_hex,
+    certificate_time_to_epoch as core_certificate_time_to_epoch, execute_request, format_x509_name,
+    inspect_certificate_pem as core_inspect_certificate_pem,
+    load_certificate as core_load_certificate,
+};
 use paranoid_seal::{
     VaultSealMachine, VaultSealPosture, VaultSealProviderEvidence, VaultSealProviderKind,
     VaultSealState,
@@ -176,16 +180,6 @@ pub struct VaultHeader {
     pub migration_state: String,
     pub kdf: VaultKdfParams,
     pub keyslots: Vec<VaultKeyslot>,
-}
-
-#[derive(Debug, Clone)]
-struct CertificateKeyslotMetadata {
-    fingerprint_sha256: String,
-    subject: String,
-    not_before: String,
-    not_after: String,
-    not_before_epoch: i64,
-    not_after_epoch: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -3570,11 +3564,6 @@ fn random_bytes(len: usize) -> Result<Vec<u8>, VaultError> {
     Ok(bytes)
 }
 
-fn load_certificate(certificate_pem: &[u8]) -> Result<X509, VaultError> {
-    X509::from_pem(certificate_pem)
-        .map_err(|error| VaultError::CertificateFailure(error.to_string()))
-}
-
 fn load_private_key(
     private_key_pem: &[u8],
     passphrase: Option<&str>,
@@ -3588,17 +3577,27 @@ fn load_private_key(
     result.map_err(|error| VaultError::CertificateFailure(error.to_string()))
 }
 
-fn certificate_fingerprint_hex(certificate: &X509) -> Result<String, VaultError> {
-    let digest = certificate
-        .digest(MessageDigest::sha256())
-        .map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
-    Ok(hex_encode(digest.as_ref()))
+/// Vault-error-mapped wrapper around `paranoid_core::load_certificate`. X.509
+/// parsing itself lives in core (shared with every other certificate
+/// consumer); this only translates `ParanoidError` to vault's own error type
+/// so existing call sites keep using `VaultError` via `?`.
+fn load_certificate(certificate_pem: &[u8]) -> Result<X509, VaultError> {
+    core_load_certificate(certificate_pem)
+        .map_err(|error| VaultError::CertificateFailure(error.to_string()))
 }
 
-fn certificate_keyslot_metadata(
-    certificate: &X509,
-) -> Result<CertificateKeyslotMetadata, VaultError> {
-    Ok(CertificateKeyslotMetadata {
+fn certificate_fingerprint_hex(certificate: &X509) -> Result<String, VaultError> {
+    core_certificate_fingerprint_hex(certificate)
+        .map_err(|error| VaultError::CertificateFailure(error.to_string()))
+}
+
+fn certificate_time_to_epoch(time: &openssl::asn1::Asn1TimeRef) -> Result<i64, VaultError> {
+    core_certificate_time_to_epoch(time)
+        .map_err(|error| VaultError::CertificateFailure(error.to_string()))
+}
+
+fn certificate_keyslot_metadata(certificate: &X509) -> Result<X509Preview, VaultError> {
+    Ok(X509Preview {
         fingerprint_sha256: certificate_fingerprint_hex(certificate)?,
         subject: format_x509_name(certificate.subject_name()),
         not_before: certificate.not_before().to_string(),
@@ -3608,48 +3607,16 @@ fn certificate_keyslot_metadata(
     })
 }
 
-fn certificate_time_to_epoch(time: &openssl::asn1::Asn1TimeRef) -> Result<i64, VaultError> {
-    let epoch = Asn1Time::from_unix(0)
-        .map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
-    let diff = epoch
-        .diff(time)
-        .map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
-    let days = i64::from(diff.days);
-    let secs = i64::from(diff.secs);
-    days.checked_mul(24 * 60 * 60)
-        .and_then(|base| base.checked_add(secs))
-        .ok_or_else(|| VaultError::CertificateFailure("certificate time overflow".to_string()))
-}
-
-fn format_x509_name(name: &X509NameRef) -> String {
-    let parts = name
-        .entries()
-        .map(|entry| {
-            let field = entry.object().nid().short_name().unwrap_or("UNKNOWN");
-            let value = entry
-                .data()
-                .to_string()
-                .unwrap_or_else(|_| hex_encode(entry.data().as_slice()));
-            format!("{field}={value}")
-        })
-        .collect::<Vec<_>>();
-    if parts.is_empty() {
-        "UNKNOWN".to_string()
-    } else {
-        parts.join(", ")
-    }
-}
-
 pub fn inspect_certificate_pem(
     certificate_pem: &[u8],
 ) -> Result<VaultCertificatePreview, VaultError> {
-    let certificate = load_certificate(certificate_pem)?;
-    let metadata = certificate_keyslot_metadata(&certificate)?;
+    let preview = core_inspect_certificate_pem(certificate_pem)
+        .map_err(|error| VaultError::CertificateFailure(error.to_string()))?;
     Ok(VaultCertificatePreview {
-        fingerprint_sha256: metadata.fingerprint_sha256,
-        subject: metadata.subject,
-        not_before: metadata.not_before,
-        not_after: metadata.not_after,
+        fingerprint_sha256: preview.fingerprint_sha256,
+        subject: preview.subject,
+        not_before: preview.not_before,
+        not_after: preview.not_after,
     })
 }
 
@@ -3690,7 +3657,7 @@ fn cms_encrypt_with_certificate(
 
 fn validate_certificate_keyslot_metadata(
     keyslot: &VaultKeyslot,
-    metadata: &CertificateKeyslotMetadata,
+    metadata: &X509Preview,
 ) -> Result<CertificateKeyslotWrapMode, VaultError> {
     if keyslot.kind != VaultKeyslotKind::CertificateWrapped
         || keyslot.wrapped_by_os_keystore

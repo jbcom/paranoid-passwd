@@ -88,7 +88,7 @@ completeness critic + dedicated architecture review.
   `SslConnector` for the external-device probe, duplicating
   `OpsMtlsClientConfig` logic. Extract one shared helper (in `paranoid-core`,
   consistent with single-crypto-surface) used by both.
-- [ ] **P1.4 X.509 primitives into core** — `paranoid-vault` imports `openssl`
+- [x] **P1.4 X.509 primitives into core** — `paranoid-vault` imports `openssl`
   directly for `load_certificate` / `certificate_fingerprint_hex` /
   `certificate_time_to_epoch` / `inspect_certificate_pem`
   (`lib.rs:3453-3523`); move the primitives to `paranoid-core`, drop vault's

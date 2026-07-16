@@ -1204,6 +1204,7 @@ fn paranoid_error_kind(error: &ParanoidError) -> &'static str {
         ParanoidError::RandomFailure(_) => "random_failure",
         ParanoidError::HashFailure(_) => "hash_failure",
         ParanoidError::ExhaustedAttempts => "exhausted_attempts",
+        ParanoidError::CertificateFailure(_) => "certificate_failure",
     }
 }
 
