@@ -70,7 +70,7 @@ completeness critic + dedicated architecture review.
 
 ## P1 — Architecture refactors (branch: seal-and-crypto-boundaries)
 
-- [ ] **P1.1 Seal posture single source of truth** (citation corrected per
+- [x] **P1.1 Seal posture single source of truth** (citation corrected per
   PR #140 review: `paranoid-ops/lib.rs:1363-1663` is `#[cfg(test)]` fixtures,
   not a production path) — `paranoid-vault` never depends on `paranoid-seal`;
   the production posture derivation lives in `vault_cli.rs:610-685`, outside

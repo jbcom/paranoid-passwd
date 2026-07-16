@@ -18,6 +18,10 @@ use openssl::{
     x509::{X509, X509NameRef},
 };
 use paranoid_core::{GenerationReport, ParanoidRequest, execute_request};
+use paranoid_seal::{
+    VaultSealMachine, VaultSealPosture, VaultSealProviderEvidence, VaultSealProviderKind,
+    VaultSealState,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
@@ -361,6 +365,50 @@ fn certificate_validity_warnings(not_before_epoch: i64, not_after_epoch: i64) ->
     warnings
 }
 
+fn seal_provider_evidence_for_health(
+    keyslot: &VaultKeyslot,
+    health: VaultKeyslotHealth,
+) -> VaultSealProviderEvidence {
+    let provider_kind = seal_provider_kind(&keyslot.kind);
+    let evidence_source = health
+        .provider_evidence_source
+        .unwrap_or_else(|| "vault_header".to_string());
+    match health.provider_availability {
+        VaultKeyslotProviderAvailability::Available => {
+            VaultSealProviderEvidence::available(keyslot.id.clone(), provider_kind, evidence_source)
+                .with_warnings(health.warnings)
+        }
+        VaultKeyslotProviderAvailability::Unavailable => {
+            let mut warnings = health.warnings;
+            if warnings.is_empty() {
+                warnings.push("Provider availability probe failed.".to_string());
+            }
+            VaultSealProviderEvidence::unavailable(
+                keyslot.id.clone(),
+                provider_kind,
+                evidence_source,
+                warnings[0].clone(),
+            )
+            .with_warnings(warnings)
+        }
+        VaultKeyslotProviderAvailability::NotChecked => VaultSealProviderEvidence::configured(
+            keyslot.id.clone(),
+            provider_kind,
+            evidence_source,
+        )
+        .with_warnings(health.warnings),
+    }
+}
+
+fn seal_provider_kind(kind: &VaultKeyslotKind) -> VaultSealProviderKind {
+    match kind {
+        VaultKeyslotKind::PasswordRecovery => VaultSealProviderKind::PasswordRecovery,
+        VaultKeyslotKind::MnemonicRecovery => VaultSealProviderKind::MnemonicRecovery,
+        VaultKeyslotKind::DeviceBound => VaultSealProviderKind::DeviceBound,
+        VaultKeyslotKind::CertificateWrapped => VaultSealProviderKind::CertificateWrapped,
+    }
+}
+
 impl VaultHeader {
     pub fn recovery_posture(&self) -> VaultRecoveryPosture {
         recovery_posture_for_keyslots(&self.keyslots)
@@ -420,6 +468,40 @@ impl VaultHeader {
             .iter()
             .map(|keyslot| keyslot_health_for_slot(keyslot, provider_probe))
             .collect()
+    }
+
+    /// Derives the vault's seal posture (`paranoid-seal` state plus per-keyslot
+    /// provider evidence) directly from header/keyslot data, usable without
+    /// unlocking the vault. This is the single production posture-derivation
+    /// site; all callers (CLI, TUI, capability detection) go through this or
+    /// through `seal_posture_for_path`.
+    pub fn seal_posture(&self, provider_probe: VaultKeyslotProviderProbe) -> VaultSealPosture {
+        let keyslot_health = self.keyslot_health_summaries_with_provider_probe(provider_probe);
+        let mut health_by_id: HashMap<String, VaultKeyslotHealth> = keyslot_health
+            .into_iter()
+            .map(|health| (health.keyslot_id.clone(), health))
+            .collect();
+        let providers = self
+            .keyslots
+            .iter()
+            .map(|keyslot| {
+                let health = health_by_id.remove(&keyslot.id).unwrap_or_else(|| {
+                    VaultKeyslotHealth {
+                        keyslot_id: keyslot.id.clone(),
+                        keyslot_kind: keyslot.kind.clone(),
+                        warnings: vec![
+                            "Vault keyslot health summary missing for provider.".to_string(),
+                        ],
+                        healthy: false,
+                        provider_availability: VaultKeyslotProviderAvailability::Unavailable,
+                        provider_evidence_source: Some("vault_header".to_string()),
+                    }
+                });
+                seal_provider_evidence_for_health(keyslot, health)
+            })
+            .collect();
+
+        VaultSealPosture::from_providers(VaultSealMachine::default().state(), providers)
     }
 
     pub fn assess_keyslot_removal(
@@ -2326,6 +2408,31 @@ pub fn read_vault_header(path: impl AsRef<Path>) -> Result<VaultHeader, VaultErr
     let conn = Connection::open(path)?;
     configure_connection(&conn)?;
     read_header(&conn)
+}
+
+/// Derives seal posture for the vault at `path` without unlocking it. Returns
+/// whether the vault file exists alongside the derived posture: a missing or
+/// unreadable vault reports `VaultSealState::RecoveryRequired` with no
+/// providers, matching the corrupted/absent-header failure mode callers must
+/// not distinguish from an operator's perspective.
+pub fn seal_posture_for_path(
+    path: &Path,
+    provider_probe: VaultKeyslotProviderProbe,
+) -> (bool, VaultSealPosture) {
+    if !path.exists() {
+        return (
+            false,
+            VaultSealPosture::from_providers(VaultSealState::RecoveryRequired, Vec::new()),
+        );
+    }
+
+    match read_vault_header(path) {
+        Ok(header) => (true, header.seal_posture(provider_probe)),
+        Err(_) => (
+            true,
+            VaultSealPosture::from_providers(VaultSealState::RecoveryRequired, Vec::new()),
+        ),
+    }
 }
 
 pub fn unlock_vault(
@@ -6160,6 +6267,182 @@ mod tests {
         assert!(
             complete.is_empty(),
             "recommendations should be empty when posture is complete, got {complete:?}"
+        );
+    }
+
+    #[test]
+    fn seal_posture_for_path_reports_recovery_required_for_missing_vault() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("missing.vault");
+
+        let (vault_exists, posture) =
+            seal_posture_for_path(&path, VaultKeyslotProviderProbe::MetadataOnly);
+
+        assert!(!vault_exists);
+        assert_eq!(posture.state, paranoid_seal::VaultSealState::RecoveryRequired);
+        assert!(posture.recovery_required);
+        assert_eq!(posture.provider_count, 0);
+    }
+
+    #[test]
+    fn seal_posture_for_path_reports_recovery_required_for_unreadable_vault() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("corrupt.vault");
+        fs::write(&path, b"not a sqlite vault").expect("write corrupt vault");
+
+        let (vault_exists, posture) =
+            seal_posture_for_path(&path, VaultKeyslotProviderProbe::MetadataOnly);
+
+        assert!(vault_exists);
+        assert_eq!(posture.state, paranoid_seal::VaultSealState::RecoveryRequired);
+        assert!(posture.recovery_required);
+        assert!(!posture.operator_recovery_configured);
+        assert_eq!(posture.provider_count, 0);
+    }
+
+    #[test]
+    fn seal_posture_for_path_reports_header_providers_for_initialized_vault() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        let header = init_vault(&path, "seal posture unit test password").expect("init vault");
+
+        let (vault_exists, posture) =
+            seal_posture_for_path(&path, VaultKeyslotProviderProbe::MetadataOnly);
+
+        assert!(vault_exists);
+        assert_eq!(posture.state, paranoid_seal::VaultSealState::Sealed);
+        assert_eq!(posture.provider_count, header.keyslots.len());
+        assert!(posture.operator_recovery_configured);
+        assert!(!posture.recovery_required);
+        assert!(posture.providers.iter().any(|provider| {
+            provider.kind == VaultSealProviderKind::PasswordRecovery
+                && provider.status == paranoid_seal::VaultSealProviderStatus::Configured
+        }));
+        let serialized = serde_json::to_string(&posture).expect("serialize posture");
+        assert!(!serialized.contains("seal posture unit test password"));
+    }
+
+    #[test]
+    fn header_seal_posture_matches_seal_posture_for_path() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init vault");
+        let header = read_vault_header(&path).expect("read header");
+
+        let direct = header.seal_posture(VaultKeyslotProviderProbe::MetadataOnly);
+        let (_, via_path) = seal_posture_for_path(&path, VaultKeyslotProviderProbe::MetadataOnly);
+
+        assert_eq!(direct.state, via_path.state);
+        assert_eq!(direct.provider_count, via_path.provider_count);
+    }
+
+    #[test]
+    fn seal_provider_evidence_maps_available_device_health() {
+        let keyslot = VaultKeyslot {
+            id: "device-test".to_string(),
+            kind: VaultKeyslotKind::DeviceBound,
+            label: Some("daily".to_string()),
+            wrapped_by_os_keystore: true,
+            wrap_algorithm: "os-keyring+aes-256-gcm-check".to_string(),
+            salt_hex: String::new(),
+            nonce_hex: "nonce".to_string(),
+            tag_hex: "tag".to_string(),
+            encrypted_master_key_hex: "ciphertext".to_string(),
+            certificate_fingerprint_sha256: None,
+            certificate_subject: None,
+            certificate_not_before: None,
+            certificate_not_after: None,
+            certificate_not_before_epoch: None,
+            certificate_not_after_epoch: None,
+            mnemonic_language: None,
+            mnemonic_words: None,
+            device_service: Some("service".to_string()),
+            device_account: Some("account".to_string()),
+        };
+        let health = VaultKeyslotHealth {
+            keyslot_id: keyslot.id.clone(),
+            keyslot_kind: VaultKeyslotKind::DeviceBound,
+            warnings: Vec::new(),
+            healthy: true,
+            provider_availability: VaultKeyslotProviderAvailability::Available,
+            provider_evidence_source: Some("device_provider_health_check".to_string()),
+        };
+
+        let evidence = seal_provider_evidence_for_health(&keyslot, health);
+
+        assert_eq!(evidence.provider_id, "device-test");
+        assert_eq!(evidence.kind, VaultSealProviderKind::DeviceBound);
+        assert_eq!(
+            evidence.status,
+            paranoid_seal::VaultSealProviderStatus::Available
+        );
+        assert_eq!(evidence.evidence_source, "device_provider_health_check");
+    }
+
+    #[test]
+    fn seal_provider_evidence_maps_unavailable_device_health() {
+        let keyslot = VaultKeyslot {
+            id: "device-test-unavailable".to_string(),
+            kind: VaultKeyslotKind::DeviceBound,
+            label: Some("daily".to_string()),
+            wrapped_by_os_keystore: true,
+            wrap_algorithm: "os-keyring+aes-256-gcm-check".to_string(),
+            salt_hex: String::new(),
+            nonce_hex: "nonce".to_string(),
+            tag_hex: "tag".to_string(),
+            encrypted_master_key_hex: "ciphertext".to_string(),
+            certificate_fingerprint_sha256: None,
+            certificate_subject: None,
+            certificate_not_before: None,
+            certificate_not_after: None,
+            certificate_not_before_epoch: None,
+            certificate_not_after_epoch: None,
+            mnemonic_language: None,
+            mnemonic_words: None,
+            device_service: Some("service".to_string()),
+            device_account: Some("account".to_string()),
+        };
+        let health = VaultKeyslotHealth {
+            keyslot_id: keyslot.id.clone(),
+            keyslot_kind: VaultKeyslotKind::DeviceBound,
+            warnings: Vec::new(),
+            healthy: false,
+            provider_availability: VaultKeyslotProviderAvailability::Unavailable,
+            provider_evidence_source: None,
+        };
+
+        let evidence = seal_provider_evidence_for_health(&keyslot, health);
+
+        assert_eq!(evidence.provider_id, "device-test-unavailable");
+        assert_eq!(evidence.kind, VaultSealProviderKind::DeviceBound);
+        assert_eq!(
+            evidence.status,
+            paranoid_seal::VaultSealProviderStatus::Unavailable
+        );
+        assert_eq!(evidence.evidence_source, "vault_header");
+        assert_eq!(
+            evidence.warnings,
+            vec!["Provider availability probe failed.".to_string()]
+        );
+    }
+
+    #[test]
+    fn seal_provider_kind_maps_vault_keyslot_kinds() {
+        assert_eq!(
+            seal_provider_kind(&VaultKeyslotKind::PasswordRecovery),
+            VaultSealProviderKind::PasswordRecovery
+        );
+        assert_eq!(
+            seal_provider_kind(&VaultKeyslotKind::MnemonicRecovery),
+            VaultSealProviderKind::MnemonicRecovery
+        );
+        assert_eq!(
+            seal_provider_kind(&VaultKeyslotKind::DeviceBound),
+            VaultSealProviderKind::DeviceBound
+        );
+        assert_eq!(
+            seal_provider_kind(&VaultKeyslotKind::CertificateWrapped),
+            VaultSealProviderKind::CertificateWrapped
         );
     }
 

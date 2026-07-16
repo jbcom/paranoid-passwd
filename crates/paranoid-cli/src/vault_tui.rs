@@ -22,7 +22,7 @@ use paranoid_vault::{
     VaultHeader, VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary,
     VaultOpenOptions, VaultTransferSummary, init_vault, inspect_certificate_pem,
     inspect_vault_backup, inspect_vault_transfer, read_vault_header, restore_vault_backup,
-    unlock_vault_for_options,
+    seal_posture_for_path, unlock_vault_for_options,
 };
 #[cfg(test)]
 use ratatui::backend::TestBackend;
@@ -1305,7 +1305,7 @@ impl App {
             return Ok(());
         }
         let method = crate::vault_cli::vault_unlock_method(&self.options);
-        let (_, seal_posture) = crate::vault_cli::seal_posture_for_path(
+        let (_, seal_posture) = seal_posture_for_path(
             &self.options.path,
             crate::vault_cli::vault_unlock_provider_probe(method),
         );

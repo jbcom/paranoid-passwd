@@ -5,11 +5,11 @@
 //!
 //! The probes live here (not in `paranoid-core` or `paranoid-ops`) because they
 //! are the only crates in the workspace with real `keyring`/`arboard`
-//! dependencies; the seal-provider evidence is reused from the existing
-//! `vault_cli::seal_posture_for_path()` helper rather than re-derived.
+//! dependencies; the seal-provider evidence is reused from
+//! `paranoid_vault::seal_posture_for_path()` rather than re-derived.
 
 use paranoid_ops::{CapabilityReport, ClipboardCapability, OsKeychainCapability};
-use paranoid_vault::VaultKeyslotProviderProbe;
+use paranoid_vault::{VaultKeyslotProviderProbe, seal_posture_for_path};
 use std::path::Path;
 
 const KEYCHAIN_PROBE_SERVICE: &str = "paranoid-passwd-capability-probe";
@@ -19,10 +19,8 @@ const KEYCHAIN_PROBE_ACCOUNT: &str = "environment-detection";
 /// OS keychain and clipboard live and reusing seal-provider evidence from the
 /// vault header at `vault_path` (if any).
 pub fn collect_capability_report(vault_path: &Path) -> CapabilityReport {
-    let (_, seal_posture) = crate::vault_cli::seal_posture_for_path(
-        vault_path,
-        VaultKeyslotProviderProbe::VerifyAvailability,
-    );
+    let (_, seal_posture) =
+        seal_posture_for_path(vault_path, VaultKeyslotProviderProbe::VerifyAvailability);
     CapabilityReport::assemble(
         probe_os_keychain(),
         probe_clipboard(),
