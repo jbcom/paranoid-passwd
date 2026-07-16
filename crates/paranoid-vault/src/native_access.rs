@@ -30,6 +30,22 @@ impl SecretString {
     }
 
     pub fn push(&mut self, ch: char) {
+        // `Zeroizing<String>` only scrubs the buffer it holds at drop time.
+        // If `String::push` were called directly and it needed to grow, the
+        // standard library reallocates internally and abandons the old heap
+        // buffer without zeroizing it, leaking prior secret bytes into
+        // freed-but-unscrubbed memory. So growth is handled here explicitly:
+        // whenever the push would exceed capacity, a fresh `Zeroizing<String>`
+        // is allocated up front, the existing contents are copied into it,
+        // and `mem::replace` swaps it in — dropping (and zeroizing) the old
+        // buffer intact instead of letting `String` realloc it internally.
+        let needs_growth = self.0.len() + ch.len_utf8() > self.0.capacity();
+        if needs_growth {
+            let new_capacity = (self.0.capacity() * 2).max(self.0.len() + 64);
+            let mut replacement = Zeroizing::new(String::with_capacity(new_capacity));
+            replacement.push_str(self.0.as_str());
+            self.0 = replacement;
+        }
         self.0.push(ch);
     }
 
@@ -354,6 +370,24 @@ mod tests {
         assert_ne!(a, c);
         assert_ne!(a, short);
         assert_eq!(SecretString::default(), SecretString::default());
+    }
+
+    #[test]
+    fn secret_string_push_stays_correct_across_capacity_growth() {
+        let mut secret = SecretString::new(String::with_capacity(1));
+        let expected: String = ('a'..='z').chain('A'..='Z').chain('0'..='9').collect();
+
+        for ch in expected.chars() {
+            secret.push(ch);
+        }
+
+        assert_eq!(secret.as_str(), expected.as_str());
+        assert_eq!(secret.as_str().len(), expected.len());
+
+        // Multi-byte characters must survive growth too.
+        secret.push('é');
+        secret.push('🔒');
+        assert!(secret.as_str().ends_with("é🔒"));
     }
 
     #[test]
