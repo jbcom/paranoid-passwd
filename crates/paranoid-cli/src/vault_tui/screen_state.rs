@@ -1605,7 +1605,6 @@ impl App {
         self.detail = None;
         self.search_mode = false;
         self.editing_item_id = None;
-        self.latest_mnemonic_enrollment = None;
         self.screen = Screen::UnlockBlocked;
         self.purge_secret_state_on_lock();
         clipboard_cleared
@@ -1654,6 +1653,10 @@ impl App {
         self.options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
         self.options.mnemonic_phrase = None;
         self.detail = None;
+        // Holds the 24-word vault master recovery phrase (SecretString). Cleared
+        // here so purge is a complete scrub on its own — a direct caller must not
+        // be able to leave the recovery phrase resident (P9 re-verify LEAK-C).
+        self.latest_mnemonic_enrollment = None;
         self.unlock_form = UnlockForm::default();
         self.add_login_form = AddLoginForm::default();
         self.note_form = NoteForm::default();

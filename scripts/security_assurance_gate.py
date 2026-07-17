@@ -813,6 +813,14 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_tui.rs",
+                "fn purge_secret_state_on_lock_directly_scrubs_the_master_recovery_mnemonic() {",
+                "test enforces the purge CONTRACT by calling "
+                "purge_secret_state_on_lock directly (not via the hotkey "
+                "wrapper), so a partial scrub of the master recovery mnemonic "
+                "cannot land green through a hotkey-only test path",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui.rs",
                 "fn panic_lock_hotkey_is_inert_before_unlock() {",
                 "test proves the TUI hotkey is a no-op before unlock",
             ),

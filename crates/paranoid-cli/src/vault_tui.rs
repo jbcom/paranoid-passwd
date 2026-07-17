@@ -2513,6 +2513,37 @@ mod tests {
         );
     }
 
+    /// `purge_secret_state_on_lock` must be a COMPLETE scrub on its own, called
+    /// DIRECTLY — not only correct when reached through the hotkey path (which
+    /// clears some fields in its wrapper). This enforces the function's contract
+    /// so a partial scrub cannot land green via a hotkey-only test (P9 re-verify
+    /// LEAK-C: the master recovery mnemonic was cleared by the caller, not here).
+    #[test]
+    fn purge_secret_state_on_lock_directly_scrubs_the_master_recovery_mnemonic() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        // Obtain a real enrollment (holds the 24-word master recovery phrase)
+        // through the vault API, then plant it in App state as the enroll flow does.
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let enrollment = vault
+            .add_mnemonic_keyslot(Some("paper-backup".to_string()))
+            .expect("add mnemonic keyslot");
+        let mut app = App::new(options);
+        app.latest_mnemonic_enrollment = Some(enrollment);
+
+        // Call the purge contract DIRECTLY, not through the hotkey wrapper.
+        app.purge_secret_state_on_lock();
+
+        assert!(
+            app.latest_mnemonic_enrollment.is_none(),
+            "purge_secret_state_on_lock must clear the master recovery mnemonic on its own"
+        );
+    }
+
     /// The panic-lock hotkey must be a no-op (not crash, not change screen)
     /// from pre-unlock screens that have no unlocked state to purge.
     #[test]
