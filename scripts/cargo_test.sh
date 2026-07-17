@@ -24,6 +24,16 @@ if [ -z "${PARANOID_TEST_DEVICE_STORE_DIR:-}" ]; then
   export PARANOID_TEST_DEVICE_STORE_DIR
 fi
 
+# NOTE on the S1 trust-gate marker (ia.md §3 short-circuit,
+# `vault_tui::screen_state::trust_marker_path`): deliberately NOT wired up
+# here. That function has no `$HOME` fallback in any build (see its doc
+# comment) — it only reads `PARANOID_TEST_TRUST_MARKER_DIR` /
+# `PARANOID_PASSWD_STATE_DIR`, both unset by default, so it is inert unless
+# an operator explicitly opts in. Setting either here would give every
+# concurrently-running test in the same binary process a single SHARED
+# marker file (unlike the per-job device-store subdirectory below), which
+# raced two trust-gate tests against each other the one time this was tried.
+
 cleanup_device_store() {
   if [ "$DEVICE_STORE_DIR_CREATED" -eq 1 ]; then
     rm -rf "$PARANOID_TEST_DEVICE_STORE_DIR"

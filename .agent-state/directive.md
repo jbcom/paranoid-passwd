@@ -438,37 +438,50 @@ P6.0 CI research + two-tier trust design.
   current build to screenshot (P8.2's S17 build item is what will add it);
   noted in evidence.md as follow-up scope for P8.5's re-baseline once P8.2
   ships S17.
-- [ ] P8.2 TUI polish — implements ia.md §1 (fixed layout skeleton: title /
-  primary pane / detail pane / status line / footer, unchanged across every
-  mode including decoy) and ia.md §3 (guided first-run spine S1→S2→S3→S4→S5→H
-  replacing the current drop-into-TUI-or-unlock-prompt with no orientation).
-  Concretely: (a) replace the single 40-key `Controls:` line with the
-  contextual footer from ia.md §5 — `H` shows `↑↓ move ⏎ open n new / find ?
-  all keys q quit`, `S7` shows `⏎ copy r reveal e edit ? all keys ⎋ back`,
-  `S10` shows `↑↓ move a add x remove ? all keys ⎋ back`, `S15` shows `⏎
-  unlock ? other ways in ⎋ back`, `S14` collapses to `⏎ unlock q quit` — each
-  footer re-renders on focus change, none is the global wall; (b) build the
-  `S12` `?` overlay (ia.md §5 "S12") that is context-scoped by heading (`Keys
-  · Vault list` vs `Keys · Item` vs `Keys · Ways in`) and holds every
-  capability not in the active footer — nothing from the old Controls line is
-  deleted, all of it is redistributed per ia.md §5 S12 spec; (c) implement
-  the S1–S5 first-run spine per ia.md §3's table (one job, one `▸` action per
-  screen, no capability-list menu) with the state-detection short-circuits
-  (already-verified copy, existing vault → skip to S15); (d) non-blocking
-  verify/derivation with a live progress affordance (system.md §4.6 `Gauge`
-  spec) and `⎋` always responsive during S2/S15/S19, per ia.md §0 rule 5 and
-  brand.md §5.5 "nothing blocks"; (e) status/error strings replaced verbatim
-  with the brand.md §3 rewrites (`Unlock blocked: no secret` →
-  `Nothing entered yet — type your passphrase, or press ? for other ways in.`;
-  `Unlock blocked: {error}` → `That didn't open the vault. Check your
-  passphrase and try again — remaining attempts: {n}.`; `Keyslots (3)` →
-  `Ways in (3)`; `Seal-provider posture` → `Hardware protection`; verbatim
-  brand.md §3 micro-examples for vault-open/panic-lock/copy/decoy-created
-  status lines); (f) confirmation tiering per ia.md §7 — panic-lock zero
-  friction, edit/add-way-in/hardware-protection standard confirm, delete
-  item/remove-a-way-in/delete-vault/delete-decoy require typing the item or
-  vault name (not y/N). Consumes P8.0's `theme.rs` exclusively — no literal
-  color/spacing/type value is introduced in this item.
+- [x] P8.2 TUI polish — implements ia.md §1 (fixed layout skeleton) and
+  ia.md §3 (guided first-run spine). Landed: (a) contextual per-screen
+  footers (new `vault_tui/footer.rs`) replacing the 40-key `Controls:` wall,
+  re-rendering on screen/mode change, `?` excluded from text-entry footers so
+  a literal `?` stays typeable; (b) the S12 `?` overlay as a transient
+  render-time layer (`help_overlay_open: bool`, not a new `Screen` variant)
+  context-scoped by heading, holding every capability the old footer had;
+  (c) new `Screen::TrustGate`/`Verifying`/`Verified` first-run spine fronting
+  `run`/`run_scripted` (never `refresh()`, so mid-session reloads don't
+  re-show it), with a real "already verified on this machine" short-circuit
+  backed by an opt-in marker file (`PARANOID_PASSWD_STATE_DIR`, no `$HOME`
+  guessing in ANY build — see `trust_marker_path` doc comment for the
+  concrete leak this closes); existing-vault → skip-to-S15 was already
+  correct behavior, confirmed not regressed; (e) brand.md §3 rewrites landed:
+  `Ways in (N)` (was `Keyslots (N)`), `Hardware protection` (was
+  `Seal-provider posture`), the unlock-blocked/empty/failed copy, panic-lock
+  S14 copy, and the verbatim `Copied. It clears from the clipboard in N
+  seconds.` micro-example; (f) severe-tier typed-name confirmation for
+  delete-item and remove-a-way-in (new `Screen::DeleteConfirm` typed flow,
+  `Screen::RemoveWayInConfirm`), plus S14/S15 footer distinction (`⏎ unlock
+  q quit` immediately post-lock vs `? other ways in` once interacted with).
+  All existing tests kept green (147 total across lib+integration+PTY,
+  `make test-tui-e2e` verified against the real binary); scripted-mode tests
+  updated to traverse the new trust gate; new tests cover the trust
+  short-circuit, the S12 overlay's text-field non-collision, the S14/S15
+  footer split, and both typed-confirmation flows through the real key
+  handler. Deferred, explicitly out of scope for this item (not silently
+  dropped): (d) `S3f` "not verified" HALT path and cryptographic release
+  verification — no attestation/signature backend exists anywhere in the
+  workspace; S1-S3 honestly reports "identity confirmed, cryptographic
+  verification not available yet" (brand.md §3 rule 4, never overpromise)
+  rather than fabricate a check. Threading Argon2id derivation off the UI
+  thread for a real `Gauge` progress affordance (system.md §4.6) — vault_tui
+  is currently fully synchronous by design; this is an architecture change
+  deserving its own item, not bundled into TUI copy/layout work.
+  `remaining attempts: {n}` in the failed-unlock copy — no attempt counter
+  exists in `paranoid-vault` yet; states the same fact honestly without a
+  number. S19 evidence-bundle, S17 decoy-vault creation, and S10d/S11d/S2d
+  drill-down leaf screens — none of these features exist in the codebase
+  today (no decoy-vault flow, no evidence-bundle command reachable from the
+  TUI); building them is new-feature work, not polish, and is P8.4/future
+  scope. The remaining brand.md §4 vocabulary-table sweep (form field labels
+  like "Recovery secret", `federal-evidence` CLI flags) is explicitly P8.4's
+  job per this doc's own scoping, not re-done here.
 - [ ] P8.3 GUI polish — implements ia.md §6 (fixed three-region frame: title
   region / content region / action bar, mirroring the TUI skeleton) and the
   ia.md §6 GUI screen table verbatim: S1 centered column with amber `!`

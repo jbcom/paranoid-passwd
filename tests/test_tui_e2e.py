@@ -146,6 +146,18 @@ class PtySession:
         )
 
 
+def cross_trust_gate(session: "PtySession"):
+    """Every TUI session now opens on the S1 trust gate (ia.md §2/§3:
+    "trust precedes everything... no path skips S1") before the screen the
+    old tests started on. `<enter>` runs the self-check and lands on
+    Verified; `<enter>` again is S3's "Continue", handing control to the
+    real destination screen."""
+    session.wait_for("Verify this copy", timeout=10)
+    session.send_enter()
+    session.wait_for("Verified", timeout=10)
+    session.send_enter()
+
+
 def run_checked(argv, env):
     completed = subprocess.run(
         argv,
@@ -184,6 +196,10 @@ def vault_flow(binary: Path):
         env = os.environ.copy()
         env["PARANOID_MASTER_PASSWORD"] = "correct horse battery staple"
         env["PARANOID_TEST_DEVICE_STORE_DIR"] = str(tmpdir / "device-store")
+        # The S1 trust-gate marker (ia.md §3 short-circuit) defaults to a
+        # file under $HOME; every PTY flow here must never touch the real
+        # invoking user's home directory as a side effect of running tests.
+        env["PARANOID_TEST_TRUST_MARKER_DIR"] = str(tmpdir / "trust-marker")
 
         run_checked(
             [str(binary), "vault", "--cli", "--path", str(vault_path), "init"],
@@ -191,7 +207,8 @@ def vault_flow(binary: Path):
         )
 
         with PtySession([str(binary), "vault", "--path", str(vault_path)], env=env) as session:
-            session.wait_for("Controls: Up/Down select items", timeout=10)
+            cross_trust_gate(session)
+            session.wait_for("Vault open", timeout=10)
 
             session.send_text("a")
             session.wait_for("Required:title,username,password.", timeout=10)
@@ -243,11 +260,12 @@ def vault_flow(binary: Path):
         # and mnemonic keyslot added above survive a fresh process restart
         # (a new unlock, not the same in-memory App instance).
         with PtySession([str(binary), "vault", "--path", str(vault_path)], env=env) as restarted:
-            restarted.wait_for("Controls: Up/Down select items", timeout=10)
+            cross_trust_gate(restarted)
+            restarted.wait_for("Vault open", timeout=10)
             restarted.wait_for("GitHub", timeout=5)
 
             restarted.send_text("k")
-            restarted.wait_for("Keyslots (2)", timeout=5)
+            restarted.wait_for("Ways in (2)", timeout=5)
 
             restarted.send_text("q")
             exit_code = restarted.wait_exit(timeout=5)
@@ -288,6 +306,10 @@ def wrong_password_unlock_flow(binary: Path):
         env = os.environ.copy()
         env["PARANOID_MASTER_PASSWORD"] = correct_password
         env["PARANOID_TEST_DEVICE_STORE_DIR"] = str(tmpdir / "device-store")
+        # The S1 trust-gate marker (ia.md §3 short-circuit) defaults to a
+        # file under $HOME; every PTY flow here must never touch the real
+        # invoking user's home directory as a side effect of running tests.
+        env["PARANOID_TEST_TRUST_MARKER_DIR"] = str(tmpdir / "trust-marker")
 
         run_checked(
             [str(binary), "vault", "--cli", "--path", str(vault_path), "init"],
@@ -300,12 +322,14 @@ def wrong_password_unlock_flow(binary: Path):
         with PtySession(
             [str(binary), "vault", "--path", str(vault_path)], env=wrong_env
         ) as session:
+            cross_trust_gate(session)
             # A wrong `PARANOID_MASTER_PASSWORD` fails the automatic unlock
             # attempted on process start, landing the TUI on the seal's
             # UnlockBlocked posture screen (read_vault_header still succeeds,
             # so the on-disk format is confirmed intact, but the unlock
-            # itself is refused).
-            session.wait_for("Unlock blocked", timeout=10)
+            # itself is refused). brand.md §3(d): the calm-conversation
+            # rewrite, not "Unlock blocked: ..." implementation vocabulary.
+            session.wait_for("That didn't open the vault", timeout=10)
             session.wait_for("Unlock Vault", timeout=5)
 
             # Recover within the same session: Tab from the unlock-mode
@@ -315,7 +339,7 @@ def wrong_password_unlock_flow(binary: Path):
             session.send_text(correct_password)
             session.send_tab()
             session.send_enter()
-            session.wait_for("Vault unlocked", timeout=10)
+            session.wait_for("Vault open", timeout=10)
             session.wait_for("No vault items yet", timeout=5)
 
             add_login_item(session, "GitHub", "octocat", "hunter2")
@@ -337,15 +361,21 @@ def recovery_secret_rotation_flow(binary: Path):
         vault_path = tmpdir / "vault.sqlite"
         env = os.environ.copy()
         env["PARANOID_TEST_DEVICE_STORE_DIR"] = str(tmpdir / "device-store")
+        # The S1 trust-gate marker (ia.md §3 short-circuit) defaults to a
+        # file under $HOME; every PTY flow here must never touch the real
+        # invoking user's home directory as a side effect of running tests.
+        env["PARANOID_TEST_TRUST_MARKER_DIR"] = str(tmpdir / "trust-marker")
 
         with PtySession(
             [str(binary), "vault", "--path", str(vault_path)], env=env
         ) as session:
+            cross_trust_gate(session)
             # No vault exists yet at this path: the P2.3 environment-approval
-            # screen is the first thing shown. <enter> accepts the default
-            # (Accept) choice, landing on the reused unlock/init form
-            # pre-set to Password mode.
-            session.wait_for("Environment Approval", timeout=10)
+            # screen (ia.md S4 "Create vault") is the first thing shown after
+            # the trust gate. <enter> accepts the default (Accept) choice,
+            # landing on the reused unlock/init form pre-set to Password
+            # mode.
+            session.wait_for("Create vault", timeout=10)
             session.send_enter()
             session.wait_for("Unlock Vault", timeout=5)
             session.send_tab()
@@ -356,7 +386,7 @@ def recovery_secret_rotation_flow(binary: Path):
             session.wait_for("No vault items yet", timeout=5)
 
             session.send_text("k")
-            session.wait_for("Keyslots", timeout=5)
+            session.wait_for("Ways in", timeout=5)
             session.checkpoint()
 
             session.send_text("p")

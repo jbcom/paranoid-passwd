@@ -1062,8 +1062,11 @@ impl App {
         {
             Ok(()) => {
                 self.session.arm_clipboard_clear(content);
+                // brand.md §3 micro-example, verbatim: "Copied. It clears
+                // from the clipboard in 30 seconds." — states the real
+                // consequence plainly (§3 rule 1), not "Copied!".
                 self.status = format!(
-                    "Copied the selected vault secret to the clipboard. It will be cleared in {} seconds if unchanged.",
+                    "Copied. It clears from the clipboard in {} seconds.",
                     self.session.clipboard_clear_after().as_secs()
                 );
             }

@@ -1,3 +1,4 @@
+use crate::theme::{self, ICON_ACTION, ICON_CAUTION, ICON_VERIFIED};
 use crate::vault_tui::*;
 use paranoid_ops::CapabilityProbeStatus;
 use paranoid_vault::{VaultBackupSummary, VaultItemKind, VaultItemPayload, VaultTransferSummary};
@@ -42,18 +43,29 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
         chunks[1],
     );
 
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-        .split(chunks[2]);
-    let left = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(8), Constraint::Min(8)])
-        .split(body[0]);
+    // Single-purpose first-run screens (ia.md §1 "the two panes may merge
+    // into one centered column, but the title/status/footer rows never
+    // move") render one full-width column instead of the list/detail split
+    // — there is no list to browse before trust is established.
+    if matches!(
+        app.screen,
+        Screen::TrustGate | Screen::Verifying | Screen::Verified
+    ) {
+        frame.render_widget(right_panel(app), chunks[2]);
+    } else {
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(chunks[2]);
+        let left = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(8), Constraint::Min(8)])
+            .split(body[0]);
 
-    frame.render_widget(keyslot_panel(app), left[0]);
-    frame.render_widget(item_list(app), left[1]);
-    frame.render_widget(right_panel(app), body[1]);
+        frame.render_widget(keyslot_panel(app), left[0]);
+        frame.render_widget(item_list(app), left[1]);
+        frame.render_widget(right_panel(app), body[1]);
+    }
 
     frame.render_widget(
         Paragraph::new(footer_text(app))
@@ -61,6 +73,58 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
             .wrap(Wrap { trim: false }),
         chunks[3],
     );
+
+    // S12 `?` overlay (ia.md §5): a transient layer drawn last, over the
+    // fixed skeleton — the skeleton geometry underneath is unchanged.
+    if app.help_overlay_open {
+        render_help_overlay(frame, area, app);
+    }
+}
+
+pub(crate) fn render_help_overlay(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    use ratatui::widgets::Clear;
+    let popup = centered_rect(70, 60, area);
+    frame.render_widget(Clear, popup);
+    let mut lines: Vec<Line<'static>> = footer::overlay_lines(app)
+        .into_iter()
+        .map(Line::raw)
+        .collect();
+    lines.push(Line::raw(""));
+    lines.push(Line::styled("⎋ close", theme::muted()));
+    frame.render_widget(
+        Paragraph::new(Text::from(lines))
+            .block(
+                Block::default()
+                    .title(footer::overlay_heading(app))
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(BLUE))
+                    .style(Style::default().bg(PANEL).fg(TEXT)),
+            )
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
+}
+
+/// A centered `Rect` covering `percent_x`% width and `percent_y`% height of
+/// `area` — used to place the `?` overlay as a floating panel over the fixed
+/// skeleton rather than replacing it.
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1])[1]
 }
 
 pub(crate) fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str, subtitle: &str) {
@@ -84,9 +148,12 @@ pub(crate) fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str, subt
 
 pub(crate) fn header_title(screen: Screen) -> &'static str {
     match screen {
-        Screen::EnvironmentApproval => "Environment Approval",
+        Screen::TrustGate => "Verify this copy",
+        Screen::Verifying => "Verifying…",
+        Screen::Verified => "Verified",
+        Screen::EnvironmentApproval => "Create vault",
         Screen::Vault => "Vault",
-        Screen::Keyslots => "Keyslots",
+        Screen::Keyslots => "Ways in",
         Screen::UnlockBlocked => "Vault",
         Screen::AddLogin => "Add Login",
         Screen::EditLogin => "Edit Login",
@@ -110,17 +177,25 @@ pub(crate) fn header_title(screen: Screen) -> &'static str {
         Screen::ImportBackup => "Import Backup",
         Screen::ImportTransfer => "Import Transfer",
         Screen::DeleteConfirm => "Delete Item",
+        Screen::RemoveWayInConfirm => "Remove a way in",
     }
 }
 
 pub(crate) fn header_subtitle(screen: Screen) -> &'static str {
     match screen {
+        Screen::TrustGate => {
+            "Before you trust this program with anything, confirm it is the genuine, unmodified release."
+        }
+        Screen::Verifying => "Watch the check without being trapped — Esc returns any time.",
+        Screen::Verified => {
+            "The self-check finished. Its fingerprint stays reachable one level down."
+        }
         Screen::EnvironmentApproval => {
-            "Detected keychain, clipboard, display server, and seal-provider capabilities before vault setup."
+            "Make the container and the way to open it. Ways in and hardware protection come later."
         }
         Screen::Vault => "Native vault list/detail view with the same builder-owned trust model.",
         Screen::Keyslots => {
-            "Inspect and enroll recovery or unlock keyslots without leaving the native TUI."
+            "The keys and phrases that can open this vault. Add a recovery phrase, bind a device, or remove a way in you no longer trust."
         }
         Screen::UnlockBlocked => {
             "Unlock uses the same password, mnemonic, device, and certificate paths as the CLI, now with direct native input."
@@ -176,61 +251,15 @@ pub(crate) fn header_subtitle(screen: Screen) -> &'static str {
         Screen::ImportTransfer => {
             "Import a selective encrypted transfer package into the unlocked local vault."
         }
-        Screen::DeleteConfirm => {
-            "Confirm removal of the selected vault item from the encrypted vault."
+        Screen::DeleteConfirm => "This deletes the item for good. Type its name to confirm.",
+        Screen::RemoveWayInConfirm => {
+            "This way in will no longer open the vault. Type its name to confirm."
         }
     }
 }
 
 pub(crate) fn footer_text(app: &App) -> &'static str {
-    match app.screen {
-        Screen::EnvironmentApproval => {
-            "Controls: Up/Down or Tab cycles Accept/Adjust, Enter selects, Esc returns to the vault (once unlocked), q quits."
-        }
-        Screen::Vault => {
-            if app.search_mode {
-                "Controls: Type to filter the unlocked list, Backspace deletes, Ctrl+u clears, Enter or Esc exits filter mode, q quits. Ctrl+L panic-locks the vault immediately."
-            } else {
-                "Controls: Up/Down select items, / filters, a adds login, n adds secure note, v adds card, i adds identity, e edits, d deletes, g generates and stores one password, x exports backup, t exports transfer, u imports backup, p imports transfer, k opens keyslots, E reviews environment approval, c copies the selected value, r refreshes, q quits. Ctrl+L panic-locks the vault immediately."
-            }
-        }
-        Screen::Keyslots => {
-            "Controls: Up/Down select keyslots, m adds mnemonic recovery, b adds device-bound, c adds certificate-wrapped, w rewraps the selected certificate slot, l relabels the selected keyslot, o rotates the selected mnemonic slot, p rotates the recovery secret, d removes the selected non-recovery slot, r rebinds the selected device slot, Esc returns to items, q quits. Ctrl+L panic-locks the vault immediately."
-        }
-        Screen::UnlockBlocked => {
-            "Controls: p/m/b/c pick password, mnemonic, device, or certificate mode; Up/Down or Tab move; Left/Right cycles the mode field; Enter advances or unlocks; r retries current policy; q quits."
-        }
-        Screen::AddLogin
-        | Screen::EditLogin
-        | Screen::AddNote
-        | Screen::EditNote
-        | Screen::AddCard
-        | Screen::EditCard
-        | Screen::AddIdentity
-        | Screen::EditIdentity
-        | Screen::AddMnemonicSlot
-        | Screen::AddDeviceSlot
-        | Screen::AddCertSlot
-        | Screen::RewrapCertSlot
-        | Screen::EditKeyslotLabel
-        | Screen::RotateMnemonicSlot
-        | Screen::RotateRecoverySecret
-        | Screen::GenerateStore => {
-            "Controls: Type into the focused field, Up/Down or Tab move, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits. Ctrl+L panic-locks the vault immediately."
-        }
-        Screen::ExportBackup
-        | Screen::ExportTransfer
-        | Screen::ImportBackup
-        | Screen::ImportTransfer => {
-            "Controls: Type into the focused path field, Up/Down or Tab move, Space/Left/Right toggle overwrite when selected, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits. Ctrl+L panic-locks the vault immediately."
-        }
-        Screen::MnemonicReveal => {
-            "Controls: c copies the phrase, Enter or Esc returns to keyslots, q quits. Ctrl+L panic-locks the vault immediately."
-        }
-        Screen::DeleteConfirm => {
-            "Controls: y or Enter confirms deletion, n or Esc cancels, q quits. Ctrl+L panic-locks the vault immediately."
-        }
-    }
+    footer::contextual_footer(app)
 }
 
 pub(crate) fn keyslot_panel(app: &App) -> Paragraph<'static> {
@@ -242,7 +271,7 @@ pub(crate) fn keyslot_panel(app: &App) -> Paragraph<'static> {
     if let Some(header) = &app.header {
         let posture = header.recovery_posture();
         lines.push(Line::styled(
-            format!("Keyslots ({})", header.keyslots.len()),
+            format!("Ways in ({})", header.keyslots.len()),
             Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
         ));
         lines.push(Line::raw(format!(
@@ -276,7 +305,7 @@ pub(crate) fn keyslot_panel(app: &App) -> Paragraph<'static> {
         }
     } else {
         lines.push(Line::raw(
-            "Keyslots unavailable until the vault header can be read.",
+            "Ways in unavailable until the vault header can be read.",
         ));
     }
     Paragraph::new(Text::from(lines))
@@ -400,14 +429,14 @@ pub(crate) fn keyslot_list(app: &App) -> List<'static> {
             })
             .collect::<Vec<_>>(),
         _ => vec![ListItem::new(Line::styled(
-            "No keyslots available yet beyond the required recovery slot.",
+            "No ways in available yet beyond the required recovery phrase.",
             Style::default().fg(AMBER),
         ))],
     };
 
     List::new(items).block(
         Block::default()
-            .title("Keyslots")
+            .title("Ways in")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(GREEN))
             .style(Style::default().bg(PANEL).fg(TEXT)),
@@ -416,6 +445,9 @@ pub(crate) fn keyslot_list(app: &App) -> List<'static> {
 
 pub(crate) fn right_panel(app: &App) -> Paragraph<'static> {
     match app.screen {
+        Screen::TrustGate => trust_gate_panel(app),
+        Screen::Verifying => verifying_panel(app),
+        Screen::Verified => verified_panel(app),
         Screen::EnvironmentApproval => environment_approval_panel(app),
         Screen::Vault => detail_panel(app),
         Screen::UnlockBlocked => unlock_blocked_panel(app),
@@ -438,7 +470,116 @@ pub(crate) fn right_panel(app: &App) -> Paragraph<'static> {
         Screen::ImportBackup => import_backup_panel(app),
         Screen::ImportTransfer => import_transfer_panel(app),
         Screen::DeleteConfirm => delete_confirm_panel(app),
+        Screen::RemoveWayInConfirm => remove_way_in_confirm_panel(app),
     }
+}
+
+pub(crate) fn trust_gate_panel(app: &App) -> Paragraph<'static> {
+    let already_checked = matches!(app.trust_state, TrustState::Checked);
+    let mut lines = vec![Line::raw(
+        "Before you trust this program with anything, confirm it is the genuine, unmodified release.",
+    )];
+    lines.push(Line::raw(""));
+    if already_checked {
+        lines.push(Line::styled(
+            format!("{ICON_VERIFIED} This copy was checked on this machine."),
+            theme::verified(),
+        ));
+    } else {
+        lines.push(Line::styled(
+            format!("{ICON_CAUTION} This copy has not been checked on this machine yet."),
+            theme::caution(),
+        ));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        format!("{ICON_ACTION} Verify this copy"),
+        theme::accent_action(),
+    ));
+    lines.push(Line::raw("  Skip for now"));
+
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title("Trust")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
+}
+
+pub(crate) fn verifying_panel(_app: &App) -> Paragraph<'static> {
+    Paragraph::new(Text::from(vec![
+        Line::raw("Checking this copy's build identity…"),
+        Line::raw(""),
+        Line::styled(
+            "Esc returns any time — nothing here blocks you.",
+            theme::muted(),
+        ),
+    ]))
+    .block(
+        Block::default()
+            .title("Verifying")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(BLUE))
+            .style(Style::default().bg(PANEL).fg(TEXT)),
+    )
+    .wrap(Wrap { trim: false })
+}
+
+pub(crate) fn verified_panel(app: &App) -> Paragraph<'static> {
+    let mut lines = vec![Line::styled(
+        format!("{ICON_VERIFIED} This build's identity is confirmed."),
+        theme::verified(),
+    )];
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        "Cryptographic release verification against a signed publisher record is not available in this build yet — that is a real limit, stated plainly rather than papered over.",
+        theme::caution(),
+    ));
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        format!("{ICON_ACTION} Continue"),
+        theme::accent_action(),
+    ));
+    let _ = app;
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title("Verified")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(GREEN))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
+}
+
+pub(crate) fn remove_way_in_confirm_panel(app: &App) -> Paragraph<'static> {
+    let lines = vec![
+        Line::styled(
+            format!(
+                "Removing \"{}\" means it can no longer open this vault.",
+                app.confirm_target_name
+            ),
+            theme::caution(),
+        ),
+        Line::raw(""),
+        Line::raw(format!("Type \"{}\" to confirm:", app.confirm_target_name)),
+        Line::styled(
+            format!("{}_", app.confirm_input),
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
+    ];
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title("Remove a way in")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(RED))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
 }
 
 pub(crate) fn capability_status_label(status: CapabilityProbeStatus) -> &'static str {
@@ -518,12 +659,15 @@ pub(crate) fn environment_approval_panel(app: &App) -> Paragraph<'static> {
 
     lines.push(Line::raw(""));
     lines.push(Line::styled(
-        "Seal-provider posture",
+        "Hardware protection",
         Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
     ));
     if report.seal_providers.is_empty() {
+        // brand.md §3(b) verbatim: names the actual guarantee (can my vault
+        // be opened on a machine that isn't mine) rather than "seal
+        // provider" engineer vocabulary.
         lines.push(Line::raw(
-            "No seal providers configured yet (expected before vault init).",
+            "This vault is not yet tied to this device's secure hardware. Once it is set up, an attacker who copies the vault file to another machine cannot open it there.",
         ));
     } else {
         for provider in &report.seal_providers {
@@ -1579,68 +1723,35 @@ pub(crate) fn mnemonic_reveal_panel(app: &App) -> Paragraph<'static> {
 }
 
 pub(crate) fn delete_confirm_panel(app: &App) -> Paragraph<'static> {
-    let lines = match &app.detail {
+    // Severe-tier confirm (ia.md §7): the persona types the item's own name
+    // rather than a bare y/N — "make it hard to confirm by accident."
+    let detail_line = match &app.detail {
         Some(item) => match &item.payload {
-            VaultItemPayload::Login(login) => vec![
-                Line::styled(
-                    "Confirm delete",
-                    Style::default().fg(RED).add_modifier(Modifier::BOLD),
-                ),
-                Line::raw(""),
-                Line::raw(format!("id: {}", item.id)),
-                Line::raw(format!("title: {}", login.title)),
-                Line::raw(format!("username: {}", login.username)),
-                Line::raw(""),
-                Line::raw("This removes the encrypted vault record permanently."),
-                Line::raw("Press y or Enter to delete, or n / Esc to cancel."),
-            ],
-            VaultItemPayload::SecureNote(note) => vec![
-                Line::styled(
-                    "Confirm delete",
-                    Style::default().fg(RED).add_modifier(Modifier::BOLD),
-                ),
-                Line::raw(""),
-                Line::raw(format!("id: {}", item.id)),
-                Line::raw(format!("title: {}", note.title)),
-                Line::raw(""),
-                Line::raw("This removes the encrypted vault record permanently."),
-                Line::raw("Press y or Enter to delete, or n / Esc to cancel."),
-            ],
-            VaultItemPayload::Card(card) => vec![
-                Line::styled(
-                    "Confirm delete",
-                    Style::default().fg(RED).add_modifier(Modifier::BOLD),
-                ),
-                Line::raw(""),
-                Line::raw(format!("id: {}", item.id)),
-                Line::raw(format!("title: {}", card.title)),
-                Line::raw(format!("cardholder: {}", card.cardholder_name)),
-                Line::raw(""),
-                Line::raw("This removes the encrypted vault record permanently."),
-                Line::raw("Press y or Enter to delete, or n / Esc to cancel."),
-            ],
-            VaultItemPayload::Identity(identity) => vec![
-                Line::styled(
-                    "Confirm delete",
-                    Style::default().fg(RED).add_modifier(Modifier::BOLD),
-                ),
-                Line::raw(""),
-                Line::raw(format!("id: {}", item.id)),
-                Line::raw(format!("title: {}", identity.title)),
-                Line::raw(format!("full name: {}", identity.full_name)),
-                Line::raw(""),
-                Line::raw("This removes the encrypted vault record permanently."),
-                Line::raw("Press y or Enter to delete, or n / Esc to cancel."),
-            ],
+            VaultItemPayload::Login(login) => {
+                format!("{} · {}", login.title, login.username)
+            }
+            VaultItemPayload::SecureNote(note) => note.title.clone(),
+            VaultItemPayload::Card(card) => format!("{} · {}", card.title, card.cardholder_name),
+            VaultItemPayload::Identity(identity) => {
+                format!("{} · {}", identity.title, identity.full_name)
+            }
         },
-        None => vec![
-            Line::styled(
-                "No selection",
-                Style::default().fg(RED).add_modifier(Modifier::BOLD),
-            ),
-            Line::raw("No vault item is currently selected for deletion."),
-        ],
+        None => "No selection".to_string(),
     };
+
+    let lines = vec![
+        Line::styled(
+            format!("This deletes \"{}\" for good.", app.confirm_target_name),
+            theme::caution(),
+        ),
+        Line::raw(detail_line),
+        Line::raw(""),
+        Line::raw(format!("Type \"{}\" to confirm:", app.confirm_target_name)),
+        Line::styled(
+            format!("{}_", app.confirm_input),
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
+    ];
 
     Paragraph::new(Text::from(lines))
         .block(

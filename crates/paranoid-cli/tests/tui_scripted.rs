@@ -20,6 +20,16 @@ fn scripted_terminal() -> Terminal<TestBackend> {
     Terminal::new(TestBackend::new(DEFAULT_COLS, DEFAULT_ROWS)).expect("test backend terminal")
 }
 
+/// `vault_tui::run_scripted` fronts every session with the S1->S2->S3 trust
+/// gate (ia.md §2/§3: "trust precedes everything... no path skips S1").
+/// `<enter>` on `TrustGate` runs the self-check and lands on `Verified`;
+/// `<enter>` again is S3's "Continue", handing control to the
+/// already-computed destination screen (`Vault` / `UnlockBlocked` /
+/// `EnvironmentApproval`) that `App::with_config`'s `refresh()` picked.
+/// Every `vault_tui` scripted test prepends this so its own script can start
+/// exactly where it did before the trust gate existed.
+const TRUST_GATE_TRAVERSAL: &str = "<enter>\n<enter>\n";
+
 #[test]
 fn scripted_generator_wizard_completes_end_to_end() {
     // Reach the Launch field the same way the in-crate reducer test
@@ -89,7 +99,8 @@ fn scripted_vault_init_and_add_login_flow_persists_item() {
     // unlocks synchronously during App construction). Field order is Title,
     // Username, Password, Url, Notes, Folder, Tags, Save; focus clamps at
     // Save so extra Tabs are harmless.
-    let script = "\
+    let script = TRUST_GATE_TRAVERSAL.to_string()
+        + "\
 a
 G
 i
@@ -122,7 +133,7 @@ r
 <wait-idle>
 ";
 
-    let tokens = scripted::parse_script(script).expect("parse script");
+    let tokens = scripted::parse_script(&script).expect("parse script");
     let mut terminal = scripted_terminal();
     let final_frame =
         vault_tui::run_scripted(&mut terminal, config, &tokens).expect("scripted run");
@@ -182,7 +193,8 @@ fn scripted_panic_lock_hotkey_clears_screen_from_unlocked_vault() {
 
     // Add a login (same script as the flow above) so there is decrypted
     // secret material on screen, then fire the panic-lock hotkey.
-    let script = "\
+    let script = TRUST_GATE_TRAVERSAL.to_string()
+        + "\
 a
 G
 i
@@ -216,7 +228,7 @@ r
 <ctrl-l>
 ";
 
-    let tokens = scripted::parse_script(script).expect("parse script");
+    let tokens = scripted::parse_script(&script).expect("parse script");
     let mut terminal = scripted_terminal();
     let final_frame =
         vault_tui::run_scripted(&mut terminal, config, &tokens).expect("scripted run");
@@ -289,8 +301,9 @@ fn scripted_environment_approval_accept_flows_into_vault_init_and_add_login() {
     // initializes the vault (there is no vault yet at this path). From the
     // resulting Vault screen, 'a' opens Add Login the same way the
     // already-initialized-vault test above does.
-    let mut script =
-        String::from("# environment approval: accept -> init -> add login\n<enter>\n<tab>\n");
+    let mut script = String::from("# environment approval: accept -> init -> add login\n")
+        + TRUST_GATE_TRAVERSAL
+        + "<enter>\n<tab>\n";
     type_literal(&mut script, master_password);
     script.push_str("<tab>\n<enter>\n");
     script.push_str("a\n");
@@ -339,8 +352,9 @@ fn scripted_environment_approval_adjust_flows_into_manual_vault_init() {
     // accept-path's automatic device-bound keyslot suggestion applied. The
     // following <tab> moves focus off Mode onto the Primary (password)
     // field before the secret is typed, matching the accept-path script.
-    let mut script =
-        String::from("# environment approval: adjust -> manual init\n<down>\n<enter>\n<tab>\n");
+    let mut script = String::from("# environment approval: adjust -> manual init\n")
+        + TRUST_GATE_TRAVERSAL
+        + "<down>\n<enter>\n<tab>\n";
     type_literal(&mut script, master_password);
     script.push_str("<tab>\n<enter>\n");
 

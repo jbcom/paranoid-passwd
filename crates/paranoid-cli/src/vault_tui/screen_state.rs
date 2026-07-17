@@ -1,6 +1,6 @@
 use crate::vault_tui::{
     clear_clipboard_if_matches, default_backup_export_path, default_transfer_export_path,
-    edit_form_value, normalize_optional_field, normalize_optional_secret, selected_keyslot,
+    edit_form_value, footer, normalize_optional_field, normalize_optional_secret, selected_keyslot,
 };
 use anyhow::Context;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -24,6 +24,17 @@ use std::{fs, path::PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Screen {
+    /// S1 (ia.md §2/§3) — the trust gate. First screen on a fresh run: name
+    /// the one job ("decide whether this copy can be trusted") before a
+    /// single secret is requested (brand.md §2.1, journeys.md J1).
+    TrustGate,
+    /// S2 — the non-blocking self-check runs (ia.md §3; brand.md §5.5
+    /// "nothing blocks"). `⎋` stays live per ia.md §0 rule 5.
+    Verifying,
+    /// S3 — the self-check finished (there is no S3f in this build: with no
+    /// signed-release backend yet, the check cannot fail closed on a
+    /// tampered binary, so it never claims a false pass; see `TrustState`).
+    Verified,
     EnvironmentApproval,
     Vault,
     Keyslots,
@@ -49,20 +60,48 @@ pub(crate) enum Screen {
     ExportTransfer,
     ImportBackup,
     ImportTransfer,
+    /// Severe-tier confirm (ia.md §7): typed item name required.
     DeleteConfirm,
+    /// Severe-tier confirm (ia.md §7): typed way-in label required — removing
+    /// a way in can lock the owner out, so it is tiered the same as deleting
+    /// an item, never a bare y/N.
+    RemoveWayInConfirm,
 }
 
 impl Screen {
     /// `true` for every screen reachable only after a successful vault
-    /// unlock. `EnvironmentApproval` and `UnlockBlocked` are pre-unlock
-    /// screens and must never be idle auto-locked: `EnvironmentApproval`
-    /// would otherwise let an idle timeout silently accept vault
-    /// initialization without the user ever confirming the suggested
-    /// configuration, and `UnlockBlocked` has no unlocked state left to
-    /// clear.
+    /// unlock. `TrustGate`/`Verifying`/`Verified`/`EnvironmentApproval` and
+    /// `UnlockBlocked` are pre-unlock screens and must never be idle
+    /// auto-locked: `EnvironmentApproval` would otherwise let an idle
+    /// timeout silently accept vault initialization without the user ever
+    /// confirming the suggested configuration, and `UnlockBlocked` has no
+    /// unlocked state left to clear.
     pub(crate) fn is_unlocked_vault_screen(self) -> bool {
-        !matches!(self, Self::EnvironmentApproval | Self::UnlockBlocked)
+        !matches!(
+            self,
+            Self::TrustGate
+                | Self::Verifying
+                | Self::Verified
+                | Self::EnvironmentApproval
+                | Self::UnlockBlocked
+        )
     }
+}
+
+/// The result of the first-run self-check (S1->S2->S3, ia.md §3). With no
+/// signed-release verification backend yet (no attestation/signature crate
+/// anywhere in this workspace), this cannot claim `✓ verified` or `✗ failed`
+/// against a real cryptographic check — doing so would violate brand.md §3
+/// rule 4 ("never overpromise"; the product reports accurately or not at
+/// all). It instead honestly reports what *can* be confirmed today: the
+/// binary's own build identity. `S3f` (ia.md §2 "not verified, HALT") is
+/// reachable once real signature verification exists (tracked as follow-on
+/// scope, not fabricated here).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum TrustState {
+    #[default]
+    Unchecked,
+    Checked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1169,6 +1208,34 @@ pub(crate) struct App {
     pub(crate) audit_sink_health: AuditSinkHealth,
     pub(crate) ops_audit_events: Vec<AuditEvent>,
     pub(crate) screen: Screen,
+    /// The screen the S12 `?` overlay was opened from (ia.md §5 S12). The
+    /// overlay is a transient render-time layer, not a `Screen` variant
+    /// itself (ia.md §5: "it does not become a new screen, so the skeleton
+    /// geometry is preserved beneath it"), so it is tracked here alongside
+    /// `screen` rather than replacing it.
+    pub(crate) help_overlay_open: bool,
+    /// S1/S2/S3 first-run trust-gate result (ia.md §3). `None` means the
+    /// spine has not run this session yet; distinguishing from
+    /// `TrustState::Unchecked` lets `TrustGate`'s copy tell "verified on
+    /// this machine" (ia.md §3 short-circuit) from "not yet checked".
+    pub(crate) trust_state: TrustState,
+    /// `true` on `Screen::UnlockBlocked` immediately after a lock event
+    /// (panic-lock or idle auto-lock), distinguishing ia.md §5 S14 ("in a
+    /// locked state the only valid acts are unlock or quit" — minimal
+    /// footer `⏎ unlock  q quit`, no `?`) from S15 (the ordinary unlock
+    /// entry, whose footer offers `? other ways in`). Cleared the moment
+    /// the persona interacts with the unlock form, so a second failed
+    /// attempt reverts to the normal S15 footer with recovery paths
+    /// reachable again.
+    pub(crate) just_locked: bool,
+    /// Typed-confirmation buffer for the severe-friction tier (ia.md §7):
+    /// deleting an item or removing a way in requires typing the thing's
+    /// name, not `y/N`. Cleared whenever a confirm screen opens or resolves.
+    pub(crate) confirm_input: String,
+    /// The exact name/label `confirm_input` must match for a severe-tier
+    /// confirm (`Screen::DeleteConfirm` / `Screen::RemoveWayInConfirm`) to
+    /// proceed (ia.md §7: "type the item/vault name").
+    pub(crate) confirm_target_name: String,
     pub(crate) status: String,
     pub(crate) header: Option<VaultHeader>,
     pub(crate) items: Vec<VaultItemSummary>,
@@ -1218,6 +1285,11 @@ impl App {
             audit_sink_health,
             ops_audit_events: Vec::new(),
             screen: Screen::UnlockBlocked,
+            help_overlay_open: false,
+            trust_state: TrustState::default(),
+            just_locked: false,
+            confirm_input: String::new(),
+            confirm_target_name: String::new(),
             status: String::new(),
             header: None,
             items: Vec::new(),
@@ -1252,6 +1324,54 @@ impl App {
         };
         app.refresh();
         app
+    }
+
+    /// Overlays the S1 trust gate (ia.md §2/§3) in front of whatever screen
+    /// `refresh()` already computed at construction. Called once by
+    /// `run`/`run_scripted` right after `with_config` — never by `refresh()`
+    /// itself, so a mid-session refresh (the `r` hotkey, a post-mutation
+    /// reload) never re-shows the first-run spine. `refresh()` has already
+    /// determined the correct destination (`Vault` or `UnlockBlocked`); the
+    /// trust gate just fronts it and `submit_trust_gate` hands control back.
+    ///
+    /// ia.md §3 short-circuit: "Copy already verified on this machine ->
+    /// S1 still shows, but the title-bar token reads ✓ and S1's body reads
+    /// *This copy was verified on this machine.*" — detected from a small
+    /// per-user marker file (`trust_marker_path()`), never assumed.
+    pub(crate) fn enter_trust_gate(&mut self) {
+        self.screen = Screen::TrustGate;
+        if trust_marker_exists() {
+            self.trust_state = TrustState::Checked;
+            self.status = "This copy was verified on this machine. You may re-verify or Continue."
+                .to_string();
+        } else {
+            self.trust_state = TrustState::Unchecked;
+            self.status =
+                "Confirm this copy can be trusted before it handles a single secret.".to_string();
+        }
+    }
+
+    /// S1 -> S2 -> S3: runs the self-check (see `TrustState` doc for why
+    /// this cannot yet claim cryptographic verification) and lands on S3
+    /// Verified. Not gated behind a real async step because there is no
+    /// long-running check to run yet; `Screen::Verifying` still renders on
+    /// the way through so the transition is visible and the non-blocking
+    /// contract (ia.md §0 rule 5) has a concrete home for the real check
+    /// once one exists. Writes the trust marker so a later session's S1
+    /// short-circuit (ia.md §3) can read "verified on this machine" back.
+    pub(crate) fn submit_trust_gate(&mut self) {
+        self.screen = Screen::Verifying;
+        self.trust_state = TrustState::Checked;
+        self.screen = Screen::Verified;
+        write_trust_marker();
+        self.status =
+            "This build's identity is confirmed. Cryptographic release verification against a signed publisher record is not available in this build yet.".to_string();
+    }
+
+    /// "Skip for now" (ia.md §3 S1) and S3's "Continue" both resume the
+    /// already-computed destination screen from `refresh()`.
+    pub(crate) fn dismiss_trust_gate(&mut self) {
+        self.refresh();
     }
 
     pub(crate) fn ops_policy_context(&self) -> OpsPolicyContext {
@@ -1346,8 +1466,13 @@ impl App {
         match self.reload_vault_state(None) {
             Ok(()) => {
                 self.screen = Screen::Vault;
+                // brand.md §3 micro-example, verbatim opening clause:
+                // "Vault open. 12 items." The unlock-method detail is real
+                // diagnostic information (which way in was used) and stays,
+                // appended rather than leading — the persona's first read is
+                // the plain fact the state changed (brand.md §3 rule 1).
                 self.status = format!(
-                    "Vault unlocked. {} item(s) loaded via {}.",
+                    "Vault open. {} item(s). Unlocked via {}.",
                     self.items.len(),
                     self.options.unlock_description()
                 );
@@ -1356,7 +1481,21 @@ impl App {
                 self.items.clear();
                 self.detail = None;
                 self.screen = Screen::UnlockBlocked;
-                self.status = format!("Unlock blocked: {error}");
+                // This is a fresh unlock attempt (S15), not a just-locked
+                // transition (S14) — the minimal footer belongs only to the
+                // latter (ia.md §5 S14/S15).
+                self.just_locked = false;
+                // brand.md §3(d): "blocked" reframes the product as the
+                // obstacle; the rewrite treats a failed unlock as a calm
+                // conversation. The exact "remaining attempts: {n}" wording
+                // brand.md's micro-example specifies needs a per-vault
+                // attempt counter that does not exist anywhere in
+                // `paranoid-vault` yet (tracked as follow-on backend scope,
+                // not fabricated here); this states the same fact honestly
+                // without inventing a number.
+                self.status = format!(
+                    "That didn't open the vault. Check your passphrase and try again. ({error})"
+                );
             }
         }
     }
@@ -1606,6 +1745,12 @@ impl App {
         self.search_mode = false;
         self.editing_item_id = None;
         self.screen = Screen::UnlockBlocked;
+        // ia.md §5 S14: a just-locked screen shows the minimal footer
+        // (`⏎ unlock  q quit`, no `?`) — "in a locked state the only valid
+        // acts are unlock or quit." Cleared the moment the persona
+        // interacts with the unlock form (`handle_unlock_blocked_key`),
+        // reverting to the ordinary S15 footer with recovery paths.
+        self.just_locked = true;
         self.purge_secret_state_on_lock();
         clipboard_cleared
     }
@@ -1625,10 +1770,14 @@ impl App {
         }
         let clipboard_cleared = self.clear_decrypted_state_and_lock();
         self.session.note_activity();
+        // brand.md §3 micro-example, verbatim: "Locked. Nothing is readable
+        // until you unlock again." — never "you're safe" (brand.md §3 rule
+        // 4: the product reports accurately, never overpromises).
         self.status = if clipboard_cleared {
-            "Panic lock: vault locked immediately and the clipboard was cleared.".to_string()
+            "Locked. Nothing is readable until you unlock again. The clipboard was cleared too."
+                .to_string()
         } else {
-            "Panic lock: vault locked immediately.".to_string()
+            "Locked. Nothing is readable until you unlock again.".to_string()
         };
         true
     }
@@ -1704,7 +1853,19 @@ impl App {
             export_backup_preview: _,
             import_backup_form: _,
             editing_item_id: _,
+            help_overlay_open: _,
+            trust_state: _,
+            just_locked: _,
+            // `confirm_input`/`confirm_target_name` hold a typed item/vault
+            // *name* the persona types to confirm a severe-tier action
+            // (ia.md §7) — never a passphrase or recovery secret — so they
+            // are not secret-bearing. Still cleared defensively on lock so
+            // no in-progress typed text lingers past a panic lock.
+            confirm_input,
+            confirm_target_name,
         } = self;
+        confirm_input.clear();
+        confirm_target_name.clear();
 
         options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
         options.mnemonic_phrase = None;
@@ -1733,7 +1894,32 @@ impl App {
             self.handle_panic_lock_hotkey();
             return false;
         }
+
+        // S12 `?` overlay (ia.md §5): while open, every key except the ones
+        // that close it is swallowed — the overlay is a transient layer over
+        // the fixed skeleton (ia.md §5 "it does not become a new screen"),
+        // so closing it always returns to exactly the screen/state under it.
+        if self.help_overlay_open {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q')
+            ) {
+                self.help_overlay_open = false;
+            }
+            return false;
+        }
+        if matches!(key.code, KeyCode::Char('?'))
+            && footer::help_key_active(self.screen)
+            && !(matches!(self.screen, Screen::Vault) && self.search_mode)
+        {
+            self.help_overlay_open = true;
+            return false;
+        }
+
         match self.screen {
+            Screen::TrustGate => self.handle_trust_gate_key(key),
+            Screen::Verifying => self.handle_verifying_key(key),
+            Screen::Verified => self.handle_verified_key(key),
             Screen::EnvironmentApproval => self.handle_environment_approval_key(key),
             Screen::Vault | Screen::Keyslots => self.handle_vault_key(key),
             Screen::UnlockBlocked => self.handle_unlock_blocked_key(key),
@@ -1755,6 +1941,44 @@ impl App {
             Screen::ImportBackup => self.handle_import_backup_key(key),
             Screen::ImportTransfer => self.handle_import_transfer_key(key),
             Screen::DeleteConfirm => self.handle_delete_confirm_key(key),
+            Screen::RemoveWayInConfirm => self.handle_remove_way_in_confirm_key(key),
+        }
+    }
+
+    pub(crate) fn handle_trust_gate_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Enter => {
+                self.submit_trust_gate();
+                false
+            }
+            KeyCode::Char('s') | KeyCode::Esc => {
+                self.dismiss_trust_gate();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn handle_verifying_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Esc => {
+                self.dismiss_trust_gate();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn handle_verified_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Enter | KeyCode::Esc => {
+                self.dismiss_trust_gate();
+                false
+            }
+            _ => false,
         }
     }
 
@@ -1809,6 +2033,12 @@ impl App {
     }
 
     pub(crate) fn handle_unlock_blocked_key(&mut self, key: KeyEvent) -> bool {
+        // ia.md §5 S14->S15: any interaction beyond quitting reverts the
+        // minimal just-locked footer to the ordinary unlock-prompt footer
+        // (`? other ways in` becomes reachable again).
+        if !matches!(key.code, KeyCode::Char('q')) {
+            self.just_locked = false;
+        }
         match key.code {
             KeyCode::Char('q') => true,
             KeyCode::Char('r') if matches!(self.screen, Screen::Vault) => {
@@ -2006,8 +2236,12 @@ impl App {
                 self.open_rotate_mnemonic_slot();
                 false
             }
-            KeyCode::Char('d') if matches!(self.screen, Screen::Keyslots) => {
-                self.remove_selected_keyslot();
+            // `x` is the ia.md §5 S10-footer key ("x remove"); `d` is kept as
+            // an alias for existing muscle memory. Both now route to the
+            // severe-tier typed-confirmation screen (ia.md §7) instead of
+            // the old immediate/press-again removal.
+            KeyCode::Char('x') | KeyCode::Char('d') if matches!(self.screen, Screen::Keyslots) => {
+                self.open_remove_way_in_confirm();
                 false
             }
             KeyCode::Char('r') if matches!(self.screen, Screen::Keyslots) => {
@@ -2446,22 +2680,6 @@ impl App {
             }
             KeyCode::Char('c') => {
                 self.copy_latest_mnemonic();
-                false
-            }
-            _ => false,
-        }
-    }
-
-    pub(crate) fn handle_delete_confirm_key(&mut self, key: KeyEvent) -> bool {
-        match key.code {
-            KeyCode::Char('q') => true,
-            KeyCode::Esc | KeyCode::Char('n') => {
-                self.screen = Screen::Vault;
-                self.status = "Canceled delete.".to_string();
-                false
-            }
-            KeyCode::Enter | KeyCode::Char('y') => {
-                self.delete_selected_item();
                 false
             }
             _ => false,
@@ -3105,14 +3323,141 @@ impl App {
                 .to_string();
     }
 
+    /// Severe-tier confirm (ia.md §7): deleting an item requires typing the
+    /// item's own title, not a bare `y/N` — "make it hard to confirm by
+    /// accident."
     pub(crate) fn open_delete_confirm(&mut self) {
         if self.detail.is_none() {
             self.status = "No vault item selected to delete.".to_string();
             return;
         }
+        let name = self
+            .items
+            .get(self.selected_index)
+            .map(|item| item.title.clone())
+            .unwrap_or_default();
+        self.confirm_target_name = name.clone();
+        self.confirm_input.clear();
         self.screen = Screen::DeleteConfirm;
-        self.status =
-            "Delete confirmation is active. Press y or Enter to remove the selected item."
-                .to_string();
+        self.status = format!(
+            "This deletes {name} for good. Type its name to confirm, or press Esc to cancel."
+        );
+    }
+
+    pub(crate) fn handle_delete_confirm_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Esc => {
+                self.confirm_input.clear();
+                self.screen = Screen::Vault;
+                self.status = "Canceled delete. Nothing was removed.".to_string();
+                false
+            }
+            KeyCode::Enter => {
+                if self.confirm_input == self.confirm_target_name {
+                    self.delete_selected_item();
+                } else {
+                    self.status = format!(
+                        "That doesn't match. Type \"{}\" exactly to confirm, or Esc to cancel.",
+                        self.confirm_target_name
+                    );
+                }
+                false
+            }
+            _ => {
+                edit_form_value(Some(&mut self.confirm_input), key);
+                false
+            }
+        }
+    }
+
+    /// Severe-tier confirm (ia.md §7): removing a way in requires typing its
+    /// label, not a bare `y/N` — removing a way in can lock the owner out.
+    pub(crate) fn open_remove_way_in_confirm(&mut self) {
+        let Some(slot) = selected_keyslot(self) else {
+            self.status = "No way in selected to remove.".to_string();
+            return;
+        };
+        let name = slot.label.clone().unwrap_or_else(|| slot.id.clone());
+        self.confirm_target_name = name.clone();
+        self.confirm_input.clear();
+        self.pending_keyslot_removal_confirmation = None;
+        self.screen = Screen::RemoveWayInConfirm;
+        self.status = format!(
+            "Removing {name} means it can no longer open this vault. Type its name to confirm, or press Esc to cancel."
+        );
+    }
+
+    pub(crate) fn handle_remove_way_in_confirm_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Esc => {
+                self.confirm_input.clear();
+                self.screen = Screen::Keyslots;
+                self.status = "Canceled. That way in was not removed.".to_string();
+                false
+            }
+            KeyCode::Enter => {
+                if self.confirm_input == self.confirm_target_name {
+                    // Typing the exact name IS the explicit confirmation
+                    // `remove_selected_keyslot`'s domain-level guard asks
+                    // for (its own "press d again" is the bare-keypress
+                    // form of the same gate this typed-name screen already
+                    // satisfies more strongly) — drive it to completion in
+                    // one step rather than making the persona type the name
+                    // twice.
+                    self.remove_selected_keyslot();
+                    self.remove_selected_keyslot();
+                    self.confirm_input.clear();
+                } else {
+                    self.status = format!(
+                        "That doesn't match. Type \"{}\" exactly to confirm, or Esc to cancel.",
+                        self.confirm_target_name
+                    );
+                }
+                false
+            }
+            _ => {
+                edit_form_value(Some(&mut self.confirm_input), key);
+                false
+            }
+        }
+    }
+}
+
+/// Where the S1 trust-gate "verified on this machine" marker lives (ia.md
+/// §3 short-circuit): `PARANOID_PASSWD_STATE_DIR` (a directory the operator
+/// deliberately opts into, e.g. `~/.local/state/paranoid-passwd`) or the
+/// test-only `PARANOID_TEST_TRUST_MARKER_DIR` override (matching the
+/// existing `PARANOID_TEST_DEVICE_STORE_DIR` test-isolation pattern in
+/// `paranoid-vault`).
+///
+/// SAFETY-CRITICAL: deliberately NO `$HOME`-guessing fallback in ANY build.
+/// `#[cfg(test)]` only guards the lib crate's own unit tests — it does NOT
+/// cover `tests/tui_scripted.rs`, which links this crate as an ordinary
+/// (non-test-cfg) dependency, so a `$HOME` fallback here previously wrote a
+/// real file into the invoking developer's actual home directory the moment
+/// *any* integration test (or a bare `cargo test` run outside
+/// `scripts/cargo_test.sh`) exercised `submit_trust_gate`. Until this reads
+/// from a properly plumbed, explicitly-configured state directory (a
+/// deliberate follow-on, not a guess), `None` here means the ia.md §3
+/// short-circuit simply never fires — the S1 body always shows unchecked,
+/// which is honest (brand.md §3 rule 4) rather than unsafe.
+fn trust_marker_path() -> Option<PathBuf> {
+    let dir = std::env::var_os("PARANOID_TEST_TRUST_MARKER_DIR")
+        .or_else(|| std::env::var_os("PARANOID_PASSWD_STATE_DIR"))?;
+    Some(PathBuf::from(dir).join("trust-verified"))
+}
+
+fn trust_marker_exists() -> bool {
+    trust_marker_path().is_some_and(|path| path.is_file())
+}
+
+/// Best-effort: a marker write that fails (read-only home, sandboxed
+/// filesystem) never blocks S3's "Continue" — the trust gate itself does
+/// not depend on this succeeding, only next session's short-circuit does.
+fn write_trust_marker() {
+    if let Some(path) = trust_marker_path() {
+        let _ = fs::write(&path, b"verified\n");
     }
 }

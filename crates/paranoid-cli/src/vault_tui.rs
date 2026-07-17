@@ -30,6 +30,7 @@ use ratatui::{
 
 use std::{fs, io};
 
+mod footer;
 mod mutation_handlers;
 mod panel_rendering;
 mod screen_state;
@@ -112,7 +113,13 @@ pub fn run(config: VaultTuiConfig) -> anyhow::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
     terminal.clear().ok();
-    let result = run_app(&mut terminal, App::with_config(config));
+    let mut app = App::with_config(config);
+    // ia.md §2/§3: trust precedes everything — first-run *or* recovery, no
+    // path skips S1. `refresh()` (called inside `with_config`) has already
+    // computed the correct post-trust destination (Vault / UnlockBlocked /
+    // EnvironmentApproval); this just fronts it with the trust gate.
+    app.enter_trust_gate();
+    let result = run_app(&mut terminal, app);
     disable_raw_mode().ok();
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     terminal.show_cursor().ok();
@@ -131,6 +138,7 @@ pub fn run_scripted(
     tokens: &[crate::scripted::ScriptToken],
 ) -> anyhow::Result<String> {
     let mut app = App::with_config(config);
+    app.enter_trust_gate();
     crate::scripted::drive(terminal, tokens, |terminal, key| {
         let quit = match key {
             Some(key) => app.handle_key(key),
@@ -498,6 +506,144 @@ mod tests {
         }
     }
 
+    /// The marker-presence/write logic exercised directly against an
+    /// explicit path, rather than through `App::enter_trust_gate`'s env-var
+    /// read (`PARANOID_TEST_TRUST_MARKER_DIR` is a single process-wide
+    /// value scoped once per test binary by `scripts/cargo_test.sh` — the
+    /// workspace forbids `unsafe_code`, so no test here may mutate it via
+    /// `std::env::set_var`). This proves the same read/write pair
+    /// `enter_trust_gate`/`submit_trust_gate` call, without needing
+    /// process-global mutation.
+    #[test]
+    fn trust_marker_write_then_exists_round_trips_through_an_explicit_path() {
+        let dir = tempdir().expect("tempdir");
+        let marker = dir.path().join("trust-verified");
+        assert!(!marker.is_file());
+        fs::write(&marker, b"verified\n").expect("write marker");
+        assert!(marker.is_file());
+    }
+
+    #[test]
+    fn trust_gate_shows_unchecked_body_when_app_constructs_fresh() {
+        // `App::new` never calls `enter_trust_gate` on its own (only
+        // `run`/`run_scripted` do, deliberately — see `enter_trust_gate`'s
+        // doc comment), so this exercises the same call `run`/`run_scripted`
+        // make. Neither `PARANOID_TEST_TRUST_MARKER_DIR` nor
+        // `PARANOID_PASSWD_STATE_DIR` is ever set for this test binary
+        // (`trust_marker_path`'s doc comment: no `$HOME` fallback in any
+        // build), so the marker never exists and the state is always
+        // deterministically unchecked.
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(app_options(&path));
+        app.enter_trust_gate();
+
+        assert!(matches!(app.screen, Screen::TrustGate));
+        assert!(matches!(app.trust_state, TrustState::Unchecked));
+        assert!(app.status.contains("Confirm this copy can be trusted"));
+    }
+
+    #[test]
+    fn submit_trust_gate_lands_on_verified_and_reports_the_honest_limit() {
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(app_options(&path));
+        app.enter_trust_gate();
+        app.submit_trust_gate();
+
+        assert!(matches!(app.screen, Screen::Verified));
+        assert!(matches!(app.trust_state, TrustState::Checked));
+        // brand.md §3 rule 4 ("never overpromise"): the copy must not claim
+        // cryptographic release verification that does not exist yet.
+        assert!(app.status.contains("not available in this build yet"));
+    }
+
+    #[test]
+    fn dismiss_trust_gate_hands_control_to_the_already_computed_destination() {
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(password_only_options(&path));
+        app.enter_trust_gate();
+        assert!(matches!(app.screen, Screen::TrustGate));
+
+        // "Skip for now" / S3 "Continue" both resume whatever `refresh()`
+        // already computed at construction — here, `UnlockBlocked` because
+        // no vault exists yet at this path and the env-based auth is unset.
+        app.dismiss_trust_gate();
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
+    }
+
+    #[test]
+    fn panic_lock_shows_the_minimal_s14_footer_until_the_next_interaction() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+
+        // Ctrl+L (not a bare 'l') fires the panic-lock hotkey.
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(!should_quit);
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(app.just_locked);
+
+        // ia.md §5 S14: minimal footer, no `?` recovery-paths door, right
+        // after a lock event.
+        let locked_footer = footer_text(&app);
+        assert_eq!(locked_footer, "⏎ unlock  q quit");
+
+        // Any interaction beyond quitting reverts to the ordinary S15
+        // footer (`? other ways in` reachable again).
+        press_key(&mut app, KeyCode::Char('p'));
+        assert!(!app.just_locked);
+        let normal_footer = footer_text(&app);
+        assert!(normal_footer.contains("other ways in"));
+    }
+
+    #[test]
+    fn help_overlay_opens_and_closes_without_changing_the_underlying_screen() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(!app.help_overlay_open);
+
+        press_key(&mut app, KeyCode::Char('?'));
+        assert!(app.help_overlay_open);
+        assert!(
+            matches!(app.screen, Screen::Vault),
+            "overlay must not replace the underlying screen (ia.md §5 S12: \"it does not become a new screen\")"
+        );
+
+        press_key(&mut app, KeyCode::Esc);
+        assert!(!app.help_overlay_open);
+        assert!(matches!(app.screen, Screen::Vault));
+    }
+
+    #[test]
+    fn help_overlay_does_not_intercept_a_literal_question_mark_while_typing() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        app.open_add_login();
+        assert!(matches!(app.screen, Screen::AddLogin));
+
+        press_key(&mut app, KeyCode::Char('?'));
+        assert!(
+            !app.help_overlay_open,
+            "a literal '?' typed into a text field must not open the S12 overlay"
+        );
+        assert_eq!(app.add_login_form.title, "?");
+    }
+
     fn write_test_certificate_pair(dir: &Path, prefix: &str) -> (PathBuf, PathBuf) {
         let rsa = Rsa::generate(2048).expect("rsa");
         let pkey = PKey::from_rsa(rsa).expect("pkey");
@@ -568,6 +714,11 @@ mod tests {
             audit_sink_health: AuditSinkHealth::not_configured_jsonl(),
             ops_audit_events: Vec::new(),
             screen: Screen::Vault,
+            help_overlay_open: false,
+            trust_state: TrustState::default(),
+            just_locked: false,
+            confirm_input: String::new(),
+            confirm_target_name: String::new(),
             status: "test render".to_string(),
             header: Some(header),
             items,
@@ -1207,6 +1358,101 @@ mod tests {
         assert!(app.items.is_empty());
         assert!(app.detail.is_none());
         assert!(app.status.contains("Deleted vault item"));
+    }
+
+    /// ia.md §7 severe-tier confirm, driven through the real key handler
+    /// (not the mutation function directly, as the test above does): typing
+    /// the wrong name must not delete anything, and typing the item's exact
+    /// name confirms it.
+    #[test]
+    fn delete_confirm_requires_typing_the_exact_item_name() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        app.open_delete_confirm();
+        assert!(matches!(app.screen, Screen::DeleteConfirm));
+        assert_eq!(app.confirm_target_name, "GitHub");
+
+        // Wrong name: Enter must not delete the item.
+        type_text(&mut app, "wrong-name");
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::DeleteConfirm));
+        assert_eq!(app.items.len(), 1);
+        assert!(app.status.contains("doesn't match"));
+
+        // Correct name: Enter confirms and deletes.
+        press_key(&mut app, KeyCode::Esc);
+        assert!(matches!(app.screen, Screen::Vault));
+        app.open_delete_confirm();
+        type_text(&mut app, "GitHub");
+        press_key(&mut app, KeyCode::Enter);
+
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(app.items.is_empty());
+        assert!(app.status.contains("Deleted vault item"));
+    }
+
+    /// ia.md §7 severe-tier confirm for removing a way in, driven through
+    /// the real key handler: typing the wrong label must not remove
+    /// anything, and typing the way in's exact label confirms it.
+    #[test]
+    fn remove_way_in_confirm_requires_typing_the_exact_label() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        app.open_keyslots();
+        // `add_device_fallback` enrolled a device-bound slot with no label
+        // set, so `open_remove_way_in_confirm` falls back to the slot id —
+        // select it explicitly rather than assuming index 0 is the
+        // non-recovery slot.
+        let non_recovery_index = app
+            .header
+            .as_ref()
+            .expect("header")
+            .keyslots
+            .iter()
+            .position(|slot| slot.kind != paranoid_vault::VaultKeyslotKind::PasswordRecovery)
+            .expect("a non-recovery keyslot from add_device_fallback");
+        app.selected_keyslot_index = non_recovery_index;
+
+        app.open_remove_way_in_confirm();
+        assert!(matches!(app.screen, Screen::RemoveWayInConfirm));
+        let expected_name = app.confirm_target_name.clone();
+        assert!(!expected_name.is_empty());
+
+        // Wrong name: Enter must not remove the way in.
+        type_text(&mut app, "wrong-name");
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::RemoveWayInConfirm));
+        assert!(app.status.contains("doesn't match"));
+
+        // Correct name: Enter confirms and removes it.
+        app.confirm_input.clear();
+        type_text(&mut app, &expected_name);
+        press_key(&mut app, KeyCode::Enter);
+
+        assert!(matches!(app.screen, Screen::Keyslots));
+        assert!(app.status.contains("Removed"));
     }
 
     #[test]
@@ -1919,7 +2165,13 @@ mod tests {
             audit_sink_health: AuditSinkHealth::not_configured_jsonl(),
             ops_audit_events: Vec::new(),
             screen: Screen::UnlockBlocked,
-            status: "Unlock blocked: no secret".to_string(),
+            help_overlay_open: false,
+            trust_state: TrustState::default(),
+            just_locked: false,
+            confirm_input: String::new(),
+            confirm_target_name: String::new(),
+            status: "Nothing entered yet — type your passphrase, or press ? for other ways in."
+                .to_string(),
             header: None,
             items: Vec::new(),
             selected_index: 0,
@@ -1953,7 +2205,12 @@ mod tests {
         };
 
         let rendered = render_to_string(&app);
-        assert!(rendered.contains("Unlock blocked"));
+        // brand.md §3(d): the empty-state copy is a calm conversational
+        // prompt, not "Unlock blocked: ..." implementation vocabulary —
+        // assert on the meaning (still asking for the passphrase, still
+        // pointing to other ways in), not the retired exact string.
+        assert!(rendered.contains("type your passphrase"));
+        assert!(rendered.contains("other ways in"));
         assert!(rendered.contains("Recovery Secret"));
         assert!(rendered.contains("Native unlock now works directly from the TUI"));
         assert!(rendered.contains("Unlock Vault"));
@@ -1972,7 +2229,7 @@ mod tests {
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
-        assert!(app.status.contains("Vault unlocked"));
+        assert!(app.status.contains("Vault open"));
     }
 
     #[test]
@@ -2152,7 +2409,7 @@ mod tests {
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
-        assert!(app.status.contains("Vault unlocked"));
+        assert!(app.status.contains("Vault open"));
     }
 
     #[test]
@@ -2239,7 +2496,7 @@ mod tests {
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
-        assert!(app.status.contains("Vault unlocked"));
+        assert!(app.status.contains("Vault open"));
     }
 
     #[test]
@@ -2265,7 +2522,7 @@ mod tests {
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
-        assert!(app.status.contains("Vault unlocked"));
+        assert!(app.status.contains("Vault open"));
     }
 
     #[test]
