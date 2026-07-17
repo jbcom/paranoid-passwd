@@ -417,7 +417,7 @@ P6.0 CI research + two-tier trust design.
   §1–§3; a grep for raw hex literals / `Color::Rgb(` outside `theme.rs` in
   `crates/paranoid-cli/src`, and outside `paranoid-tokens.slint` in
   `crates/paranoid-gui/ui`, returns zero; `PURPLE` is gone from the codebase.
-- [ ] P8.1 Evidence pass — run the REAL TUI and GUI on this machine, capture
+- [x] P8.1 Evidence pass — run the REAL TUI and GUI on this machine, capture
   screenshots of every screen in the ia.md §2 screen graph (S1/S2/S2d/S3/S3f,
   S4/S5, H/S7, S8/S9, S10/S10d, S11/S11d, S12, S13/S14, S15/S16, S17, S18/
   S19) in both real- and decoy-vault framing, and LOOK at them against: (a)
@@ -426,7 +426,18 @@ P6.0 CI research + two-tier trust design.
   ia.md §6 region contracts for the GUI. Output: a defect list keyed to the
   specific ia.md screen ID each screenshot fails to match, ranked by which
   cross-journey invariant (journeys.md "Cross-journey invariants," 7 items)
-  it violates.
+  it violates. DONE 2026-07-17: docs/design/evidence.md, 17 screenshots
+  (docs/design/evidence/*.png) from the real TUI (tmux true-color capture,
+  not the scripted-mode text dump) and the real GUI (make
+  test-gui-e2e-emulate). Several ia.md nodes (S1-S3f trust gate, S13/S14
+  dedicated Locked screen, per-screen GUI states) do not exist as distinct
+  screens in the current build at all — that non-existence is itself
+  captured as the evidence pass's top-ranked findings (see evidence.md
+  Findings 1 and 5), not a gap in the capture. Decoy-vault framing was not
+  separately captured — no decoy-vault creation path exists yet in the
+  current build to screenshot (P8.2's S17 build item is what will add it);
+  noted in evidence.md as follow-up scope for P8.5's re-baseline once P8.2
+  ships S17.
 - [ ] P8.2 TUI polish — implements ia.md §1 (fixed layout skeleton: title /
   primary pane / detail pane / status line / footer, unchanged across every
   mode including decoy) and ia.md §3 (guided first-run spine S1→S2→S3→S4→S5→H
