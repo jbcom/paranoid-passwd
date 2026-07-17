@@ -359,35 +359,148 @@ P6.0 CI research + two-tier trust design.
   (color/space/type/component specs) consumable by ratatui theme + .slint
   styles + Sphinx theme, so all three surfaces read as one product.
   Deliverable: crates-level theme module + docs/design/system.md.
-- [ ] PUX.5 Spec handoff — fold PUX.1-4 into P8's build items: rewrite P8.2/
+- [x] PUX.5 Spec handoff — fold PUX.1-4 into P8's build items: rewrite P8.2/
   P8.3/P8.4 acceptance criteria to implement the storyboards and system, not
   ad-hoc polish. P8 then executes the design rather than guessing at it.
 
-## P8 — UX maturity (user signal 2026-07-16: "feels like a prototype"; runs after P5, before FINAL)
+## P8 — UX maturity (user signal 2026-07-16: "feels like a prototype"; runs after P5, before FINAL). PUX.5 turned this from ad-hoc polish into "build the designed product" — every item below implements a specific storyboard step in docs/design/journeys.md, a specific screen in docs/design/ia.md, and specific tokens in docs/design/system.md. No P8 item re-decides brand/journey/IA/token choices; a P8 string, color, spacing, or key that contradicts those docs is a defect against them, not a new decision to make locally.
 
+- [ ] P8.0 Shared theme/token module — stand up the token consumption
+  mechanism system.md §6 specifies, BEFORE P8.2/P8.3 touch a single screen,
+  so both surfaces consume it rather than re-deriving values:
+  - **ratatui**: new `crates/paranoid-cli/src/theme.rs` exposing the 9 color
+    tokens (system.md §1) as `Color::Rgb` consts + `Style` helpers named by
+    token (`theme::accent_action()`, `theme::verified()`, `theme::caution()`,
+    `theme::danger()`, `theme::muted()`), the 16-ANSI fallback map (system.md
+    §1.1), the 4-step spacing scale in cells (§2), and `Modifier` mappings for
+    the 4-step type scale (§3: BOLD=title, normal=body, DIM=label, mono
+    cell=type.mono). De-duplicates the `const BG/PANEL/TEXT/GREEN/BLUE/AMBER/
+    RED` currently forked across `tui.rs` and `vault_tui.rs`; **removes**
+    `PURPLE = #a78bfa` (system.md §7 — off-palette, maps to no brand.md
+    meaning). Both TUI entry points import from `theme.rs`; no file under
+    `crates/paranoid-cli` defines its own `Color::Rgb` literal after this
+    lands.
+  - **Slint**: new `crates/paranoid-gui/ui/paranoid-tokens.slint` `global`
+    block exporting `brush`/`length` properties named by token
+    (`Tokens.bg-base`, `Tokens.accent-action`, `Tokens.space-base`,
+    `Tokens.type-title`, …, full set system.md §1/§2/§3). `paranoid.slint`
+    components are retuned to reference `Tokens.*` per the system.md §7 drift
+    table (panel bg `#171d26`→`#0d1119`, border `#314154/#405368/#4c6178`→one
+    `#17304b` token, `SectionTitle #f2f5ff`→`#e4e7f2`, accent `#9fd4c9`/
+    `#f5d76e`/`#1f2a37`/`#1b2a26`→canonical verified/caution/bg.panel, hero
+    `34px`→`type.title` 20px) — no literal hex or px size remains in
+    `paranoid.slint` after this lands.
+  - **Sphinx**: `docs/_static/custom.css` `--pp-*` custom properties are
+    already canonical (system.md §7 — keep as-is); extend with the missing
+    space/type tokens (`--pp-space-tight/snug/base/loose`,
+    `--pp-type-title/body/label/mono`) so docs components can read tokens
+    instead of ad-hoc CSS values, per system.md §6 third bullet.
+  ACCEPT: all three token surfaces exist and export the full set in system.md
+  §1–§3; a grep for raw hex literals / `Color::Rgb(` outside `theme.rs` in
+  `crates/paranoid-cli/src`, and outside `paranoid-tokens.slint` in
+  `crates/paranoid-gui/ui`, returns zero; `PURPLE` is gone from the codebase.
 - [ ] P8.1 Evidence pass — run the REAL TUI and GUI on this machine, capture
-  screenshots of every screen/state (generator wizard, results panels, vault
-  list/detail, every form, approval screen, lockout, keyslots; GUI: all
-  callback flows), and LOOK at them against named references (TUI: lazygit/
-  k9s-class conventions — focused density, visual hierarchy, purposeful
-  color; GUI: native desktop password-manager conventions — 1Password/
-  Bitwarden-class layout, spacing, empty states, progress feedback).
-  Output: a defect list with per-screen screenshots, ranked.
-- [ ] P8.2 TUI polish — likely defects to confirm from evidence: the
-  controls-legend wall (40+ hotkeys in one wrapped line) needs a contextual
-  footer + help overlay (?); form screens need visual grouping/focus
-  affordances; status/error strings read engineering-grade not user-grade;
-  empty states and progress (KDF derivation ~0.3s release) need explicit
-  feedback instead of frozen frames.
-- [ ] P8.3 GUI polish — confirm from evidence: default-widget look, layout
-  spacing/alignment, empty states, operation feedback (derivation/backup
-  progress), window sizing/title, error presentation; align .slint styling
-  into a coherent design (spacing scale, type scale, consistent buttons).
-- [ ] P8.4 Copy pass — every user-facing string (TUI + GUI + CLI errors)
-  reviewed for human tone; keep security precision, drop internals-speak.
-- [ ] P8.5 Re-verify e2e — harness assertions updated with the UI changes
-  (assert-on-meaning not exact pixel strings where possible); screenshots
-  re-captured as the new visual baseline for test-gui-visual-regression.
+  screenshots of every screen in the ia.md §2 screen graph (S1/S2/S2d/S3/S3f,
+  S4/S5, H/S7, S8/S9, S10/S10d, S11/S11d, S12, S13/S14, S15/S16, S17, S18/
+  S19) in both real- and decoy-vault framing, and LOOK at them against: (a)
+  the ia.md §5 annotated wireframes for the TUI (does the rendered screen
+  match the fixed skeleton in ia.md §1 and the per-screen spec?), (b) the
+  ia.md §6 region contracts for the GUI. Output: a defect list keyed to the
+  specific ia.md screen ID each screenshot fails to match, ranked by which
+  cross-journey invariant (journeys.md "Cross-journey invariants," 7 items)
+  it violates.
+- [ ] P8.2 TUI polish — implements ia.md §1 (fixed layout skeleton: title /
+  primary pane / detail pane / status line / footer, unchanged across every
+  mode including decoy) and ia.md §3 (guided first-run spine S1→S2→S3→S4→S5→H
+  replacing the current drop-into-TUI-or-unlock-prompt with no orientation).
+  Concretely: (a) replace the single 40-key `Controls:` line with the
+  contextual footer from ia.md §5 — `H` shows `↑↓ move ⏎ open n new / find ?
+  all keys q quit`, `S7` shows `⏎ copy r reveal e edit ? all keys ⎋ back`,
+  `S10` shows `↑↓ move a add x remove ? all keys ⎋ back`, `S15` shows `⏎
+  unlock ? other ways in ⎋ back`, `S14` collapses to `⏎ unlock q quit` — each
+  footer re-renders on focus change, none is the global wall; (b) build the
+  `S12` `?` overlay (ia.md §5 "S12") that is context-scoped by heading (`Keys
+  · Vault list` vs `Keys · Item` vs `Keys · Ways in`) and holds every
+  capability not in the active footer — nothing from the old Controls line is
+  deleted, all of it is redistributed per ia.md §5 S12 spec; (c) implement
+  the S1–S5 first-run spine per ia.md §3's table (one job, one `▸` action per
+  screen, no capability-list menu) with the state-detection short-circuits
+  (already-verified copy, existing vault → skip to S15); (d) non-blocking
+  verify/derivation with a live progress affordance (system.md §4.6 `Gauge`
+  spec) and `⎋` always responsive during S2/S15/S19, per ia.md §0 rule 5 and
+  brand.md §5.5 "nothing blocks"; (e) status/error strings replaced verbatim
+  with the brand.md §3 rewrites (`Unlock blocked: no secret` →
+  `Nothing entered yet — type your passphrase, or press ? for other ways in.`;
+  `Unlock blocked: {error}` → `That didn't open the vault. Check your
+  passphrase and try again — remaining attempts: {n}.`; `Keyslots (3)` →
+  `Ways in (3)`; `Seal-provider posture` → `Hardware protection`; verbatim
+  brand.md §3 micro-examples for vault-open/panic-lock/copy/decoy-created
+  status lines); (f) confirmation tiering per ia.md §7 — panic-lock zero
+  friction, edit/add-way-in/hardware-protection standard confirm, delete
+  item/remove-a-way-in/delete-vault/delete-decoy require typing the item or
+  vault name (not y/N). Consumes P8.0's `theme.rs` exclusively — no literal
+  color/spacing/type value is introduced in this item.
+- [ ] P8.3 GUI polish — implements ia.md §6 (fixed three-region frame: title
+  region / content region / action bar, mirroring the TUI skeleton) and the
+  ia.md §6 GUI screen table verbatim: S1 centered column with amber `!`
+  banner + **Verify this copy** button; S3 centered column, green `✓` line,
+  **Continue** button; H left list rail / right detail pane; S7 detail pane
+  with masked field, **Copy password** primary button, Reveal/Edit
+  secondary; S11 result panel in `type.mono`, **Copy** button, collapsible
+  "Show the evidence" disclosure (S11d) closed by default; S10 relationship
+  list, **Add a way in** button, per-row "Show the mechanics" disclosure
+  (S10d); S14 centered `⊘` + one line, **Unlock** button only, no other
+  action. Technical evidence (S2d/S10d/S11d/S18/S19-equivalent panels) is a
+  **collapsible disclosure region, collapsed by default** — never a
+  permanently visible side panel (ia.md §6 "GUI disclosure rule"); this is
+  the concrete fix for the current `paranoid.slint` scaffold that "stacks
+  evidence panels visibly and drifts from the palette" (system.md §7).
+  Verify/derivation/evidence-bundle production run off the UI thread with a
+  visible progress affordance and live cancel/Esc (ia.md §6 "Non-blocking is
+  a GUI contract too"). Consumes P8.0's `paranoid-tokens.slint` exclusively
+  — every `paranoid.slint` component references `Tokens.*`, and the system.md
+  §7 drift table is fully retuned (no `#171d26`/`#314154`/`#f5d76e`/`34px`
+  etc. remain).
+- [ ] P8.4 Copy pass — every user-facing string across TUI + GUI + CLI
+  errors is checked against brand.md §3's five voice rules and replaced with
+  the exact rewrites brand.md §3 and the vocabulary table in §4 specify —
+  this is verbatim reconciliation, not fresh copywriting. Minimum checklist
+  (cite the source of each string): the 5 named rewrites in brand.md §3(a-e)
+  (`Keyslots`→`Ways in`, `Seal-provider posture`→`Hardware protection`,
+  `federal-evidence`/`federal-ready`→`Evidence bundle`/`--assurance strict`,
+  `Unlock blocked: …`→the two conversational rewrites, the 40-hotkey line→
+  contextual footers); the full §4 vocabulary table (12 rows: `keyslot`→"way
+  in", `recovery keyslot`→"recovery phrase", `device-bound keyslot`→"this
+  device", `certificate-wrapped keyslot`→"trusted contact"/"held key", `seal
+  provider`→"hardware protection", `ops profile`→"assurance level",
+  `chi-squared pass`/`p > 0.01`→"randomness check: passed", `duress vault`→
+  "decoy vault", `attestation`→"verify this copy", `master key`→not
+  surfaced, `rejection sampling`→not surfaced); the 5 micro-examples table
+  (§3, vault-opened/panic-lock/verification-failed/decoy-created/copied);
+  the journeys.md verbatim copy blocks per screen (J1 step 3a/3b, J2 step 2,
+  J3 step 2/4, J4 step 3a/3b, J5 step 2/4, J6 honest-limits note — all three
+  limitation statements, J7 step 3/4a/4b). Hard gate carried from brand.md
+  §3/CLIG (ia.md §4.3, journeys.md invariant 4): no code path accepts a
+  passphrase or recovery secret as a CLI arg — stdin/prompt/file only; this
+  is a code-review gate on this item, not a copy-only check.
+- [ ] P8.5 Visual regression — re-baseline `test-gui-visual-regression` (and
+  the TUI snapshot harness) against the P8.0–P8.4 output, asserting on
+  meaning tied to ia.md/system.md rather than exact pixel strings where
+  possible: (a) skeleton geometry assertions — title/primary/detail/status/
+  footer regions occupy the same fixed positions (ia.md §1) across every
+  captured mode, INCLUDING a decoy vault opened side-by-side with a real
+  vault — the harness asserts zero pixel/string difference in framing
+  between the two beyond the content the owner's passphrase unlocked
+  (journeys.md invariant 5; brand.md §4 hard rule 1); (b) monochrome-pass
+  assertion — re-run the capture with color stripped/forced-ANSI-off and
+  assert every status (`✓`/`✗`/`!`/`⊘`) is still distinguishable by symbol +
+  word alone (system.md §1.1 "the test"; brand.md §5.1); (c) footer
+  assertions per screen match the ia.md §5 per-pane footer strings exactly
+  (H/S7/S10/S15/S14 as enumerated in P8.2); (d) token-drift regression — a
+  static check (grep or lint) that fails the build if a raw hex/px value is
+  reintroduced outside `theme.rs`/`paranoid-tokens.slint`, preventing the
+  system.md §7 drift from recurring. Screenshots captured under this item
+  become the new baseline referenced by future e2e runs.
 
 - [ ] FINAL: full gate (make ci + quality + e2e-ci + e2e-local on this
   machine), docs both-directions sweep, open the single PR, babysit to
