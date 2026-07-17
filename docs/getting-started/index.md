@@ -72,6 +72,10 @@ paranoid-passwd --cli --length 20 --count 3 --framework nist,pci_dss
 paranoid-passwd --cli --charset hex --length 64 --no-audit --quiet
 ```
 
+`--framework` accepts `nist`, `pci_dss`, `hipaa`, `soc2`, `gdpr`, and `iso27001` (repeat the flag
+or comma-separate). See [Reference → Supported Compliance Frameworks](../reference/compliance-frameworks.md)
+for each framework's aliases and requirements.
+
 Dedicated GUI surface:
 
 ```bash

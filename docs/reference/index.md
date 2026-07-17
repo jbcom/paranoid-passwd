@@ -8,6 +8,8 @@ title: Reference
 :maxdepth: 2
 
 architecture
+ci-design
+compliance-frameworks
 messaging
 license
 federal-readiness

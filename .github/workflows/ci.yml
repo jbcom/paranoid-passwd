@@ -13,9 +13,34 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  # P6.3: disable incremental compilation for CI builds. Incremental
+  # artifacts are larger, slower to restore than they save on a
+  # cache-hit-or-cold-build CI job, and Swatinem/rust-cache recommends
+  # disabling them explicitly rather than caching them.
+  CARGO_INCREMENTAL: "0"
+  # No debuginfo in CI gate builds: nothing consumes it (no debugger attaches,
+  # panics still carry line info via debug-assertions), compile+link drop
+  # substantially, the rust-cache payload shrinks, and the debug binaries the
+  # PTY harness drives run measurably faster on shared runners.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  # Shared 2-core hosted runners stretch debug-binary latencies (256 MiB
+  # Argon2id derivations, SQLite fsyncs under contention) well past the PTY
+  # harness budgets tuned on developer machines; scale every wait uniformly
+  # instead of loosening individual assertions.
+  PARANOID_E2E_TIMEOUT_SCALE: "4"
+
 jobs:
-  rust:
-    name: Rust Build + Tests
+  fmt:
+    name: Formatting
+    # P6.5 (see docs/reference/ci-design.md "P6.5 — Split fmt into a
+    # fastest-first Tier-A job"): fmt needs no compiled artifacts, so it is
+    # split out of the `rust` job (which keeps clippy+test and rust-cache)
+    # to fail within seconds instead of after a full compile. This job must
+    # not precede P6.1 landing (it would otherwise add a second full
+    # image rebuild) — P6.1 is already merged, so the builder image here is
+    # a cheap digest pull, not a rebuild.
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -24,6 +49,47 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+
+      - name: Check formatting inside the builder
+        uses: ./.github/actions/builder
+        with:
+          run: |
+            cargo fmt --check
+
+  rust:
+    name: Rust Build + Tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      # Tier A only (see docs/reference/ci-design.md). Overrides the
+      # Dockerfile's ephemeral /tmp/cargo-target (inside the container,
+      # discarded when the container exits) with a path under
+      # $GITHUB_WORKSPACE, which GitHub Actions bind-mounts into the
+      # builder container at /github/workspace. Writing here means both
+      # the containerized `cargo` invocation and the host-side
+      # Swatinem/rust-cache step (which runs as a normal, non-containerized
+      # step and only sees the host filesystem) observe the same files.
+      # The Dockerfile's `builder` user is UID/GID 1001 to match the
+      # GitHub-hosted ubuntu-24.04 runner's default `runner` account, so
+      # files the container writes here stay readable/writable by the
+      # host-side cache step without an extra chown.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target-ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Cache the cargo target directory (Tier A, main-only writes)
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        with:
+          workspaces: ". -> .cargo-target-ci"
+          # save-if restricts cache WRITES to main; fork/PR runs restore
+          # only. release.yml's build-native legs never reference this
+          # action or this cache at all (verified by grep in
+          # docs/reference/ci-design.md's P6.3 entry) — Tier B stays cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Run the Rust CI gates inside the builder
         uses: ./.github/actions/builder
@@ -33,6 +99,12 @@ jobs:
 
   docs:
     name: Docs Build
+    # cd.yml's deploy-pages job already builds+deploys the docs site on
+    # push-to-main (Tier B-adjacent, id-token:write). Rebuilding here too
+    # would compile the same Sphinx site twice per push. Keep this job as
+    # the PR gate (including linkcheck, which deploy-pages does not run)
+    # and skip it on push, where cd.yml is the build of record.
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -42,11 +114,47 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the tox/Sphinx virtualenvs (Tier A, restore-only on PRs)
+        # Unlike Swatinem/rust-cache, actions/cache has no built-in save-if
+        # gate — restore-and-save is one action. Split restore (every run)
+        # from save (main-only) with actions/cache/restore +
+        # actions/cache/save so a same-repo PR branch can never overwrite
+        # the shared main-keyed entry, matching the rust-cache posture in
+        # the job above. GitHub's own cache-scope rules already stop
+        # fork PRs from writing into the base repo's cache namespace at
+        # all; this restore/save split is the explicit, in-repo-verifiable
+        # mirror of that backstop for same-repo branches.
+        id: docs-tox-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # tox has no toxworkdir override in tox.ini, so it defaults to
+          # .tox/ under cwd, which is $GITHUB_WORKSPACE bind-mounted into
+          # the builder container at /github/workspace — the same
+          # host-visible-bind-mount trick the rust job uses for
+          # CARGO_TARGET_DIR. No env var override is needed here.
+          path: .tox
+          # tox.ini pins every docs dependency version inline (no separate
+          # requirements file), so hashing it alone is a complete cache key.
+          key: docs-tox-${{ runner.os }}-${{ hashFiles('tox.ini') }}
+          restore-keys: |
+            docs-tox-${{ runner.os }}-
+
       - name: Build the Sphinx docs site inside the builder
         uses: ./.github/actions/builder
         with:
           run: |
             python3 -m tox -e docs,docs-linkcheck
+
+      - name: Save the tox/Sphinx virtualenvs (Tier A, main-only writes)
+        # Mirrors the rust job's save-if: ${{ github.ref ==
+        # 'refs/heads/main' }} gate — a same-repo PR branch restores this
+        # cache but never writes it back, so only a main-branch run can
+        # ever populate or refresh the entry docs-tox-${{ runner.os }}-*.
+        if: github.ref == 'refs/heads/main' && steps.docs-tox-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tox
+          key: ${{ steps.docs-tox-cache.outputs.cache-primary-key }}
 
   dependency-scan:
     name: Dependency Scan

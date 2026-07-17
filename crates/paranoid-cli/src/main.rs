@@ -1,7 +1,3 @@
-mod tui;
-mod vault_cli;
-mod vault_tui;
-
 use lexopt::prelude::*;
 use paranoid_audit::{
     AuditEvent, AuditSinkHealth, AuditTrail, assess_optional_jsonl_file_audit_sink,
@@ -9,6 +5,7 @@ use paranoid_audit::{
 };
 use paranoid_core::{
     CharsetSpec, FrameworkId, GenerationReport, ParanoidError, ParanoidRequest, VERSION,
+    secure_preview,
 };
 use paranoid_ops::{
     GeneratePasswordError, GeneratePasswordOperation, GeneratePasswordOutcome, OpsCommand,
@@ -54,6 +51,7 @@ struct CliOptions {
     audit_jsonl: Option<PathBuf>,
     require_audit_sink: bool,
     federal_evidence: bool,
+    detect_environment: bool,
     explicit_operational_flag: bool,
 }
 
@@ -74,6 +72,7 @@ impl Default for CliOptions {
             audit_jsonl: None,
             require_audit_sink: false,
             federal_evidence: false,
+            detect_environment: false,
             explicit_operational_flag: false,
         }
     }
@@ -93,14 +92,15 @@ fn main() {
 
 fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
     if matches!(raw_args.get(1).and_then(|arg| arg.to_str()), Some("vault")) {
-        return vault_cli::run(&raw_args[2..]);
+        return paranoid_cli::vault_cli::run(&raw_args[2..]);
     }
 
     let options = match parse_args(raw_args)? {
         ParseOutcome::Run(options) => options,
         ParseOutcome::Exit(code) => return Ok(code),
     };
-    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    let interactive = (io::stdin().is_terminal() && io::stdout().is_terminal())
+        || paranoid_cli::scripted::is_script_active();
     let launch_tui = should_launch_tui(&options, interactive);
     let audit_sink_health = assess_optional_jsonl_file_audit_sink(options.audit_jsonl.as_deref());
 
@@ -115,8 +115,16 @@ fn try_main(raw_args: Vec<OsString>) -> anyhow::Result<i32> {
         return Ok(EX_OK);
     }
 
+    if options.detect_environment {
+        let report = paranoid_cli::capability_detect::collect_capability_report(
+            &paranoid_vault::default_vault_path(),
+        );
+        print_capability_report_json(&report)?;
+        return Ok(EX_OK);
+    }
+
     if launch_tui {
-        return tui::run().map(|_| EX_OK);
+        return paranoid_cli::tui::run().map(|_| EX_OK);
     }
 
     let envelope = OpsCommandEnvelope::local(
@@ -308,6 +316,11 @@ fn parse_args(args: Vec<OsString>) -> anyhow::Result<ParseOutcome> {
                 options.require_audit_sink = true;
                 options.explicit_operational_flag = true;
             }
+            Long("detect-environment") => {
+                options.detect_environment = true;
+                options.output = OutputFormat::Json;
+                options.explicit_operational_flag = true;
+            }
             Long("tui") => options.mode = LaunchMode::Tui,
             Long("cli") => options.mode = LaunchMode::Cli,
             Short('V') | Long("version") => {
@@ -375,6 +388,8 @@ Output:
       --profile PROFILE    Policy profile: default | federal-ready
       --federal-ready      Alias for --profile federal-ready --require-audit-sink
       --federal-evidence   Emit federal-ready startup evidence as JSON
+      --detect-environment Emit OS keychain, clipboard, display server, and
+                           seal-provider capability evidence as JSON
       --no-audit           Skip the statistical audit
       --quiet              Suppress audit stage output on stderr
   -V, --version            Print version info and exit
@@ -434,6 +449,14 @@ fn print_federal_evidence_json(evidence: &paranoid_ops::FederalStartupEvidence) 
     let stdout = io::stdout();
     let mut handle = stdout.lock();
     serde_json::to_writer_pretty(&mut handle, evidence).map_err(io::Error::other)?;
+    writeln!(handle)?;
+    handle.flush()
+}
+
+fn print_capability_report_json(report: &paranoid_ops::CapabilityReport) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer_pretty(&mut handle, report).map_err(io::Error::other)?;
     writeln!(handle)?;
     handle.flush()
 }
@@ -656,20 +679,19 @@ fn map_error_to_exit_code(error: &ParanoidError) -> i32 {
         ParanoidError::RandomFailure(_) => EX_CSPRNG,
         ParanoidError::HashFailure(_) => EX_INTERNAL,
         ParanoidError::ExhaustedAttempts => EX_CONSTRAINTS,
+        ParanoidError::CertificateFailure(_) => EX_INTERNAL,
     }
-}
-
-fn secure_preview(password: &str) -> String {
-    if password.len() <= 4 {
-        return password.to_string();
-    }
-    let suffix = &password[password.len() - 4..];
-    format!("{}{}", "•".repeat(password.len() - 4), suffix)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secure_preview_masks_multi_byte_passwords_without_panicking() {
+        assert_eq!(secure_preview("密码123"), "•码123");
+        assert_eq!(secure_preview("パスワード7890"), "•••••7890");
+    }
 
     #[test]
     fn auto_mode_launches_tui_on_interactive_terminal_without_operational_flags() {
@@ -755,6 +777,22 @@ mod tests {
         assert_eq!(options.profile, OpsProfile::FederalReady);
         assert_eq!(options.output, OutputFormat::Json);
         assert!(options.require_audit_sink);
+        assert!(!should_launch_tui(&options, true));
+    }
+
+    #[test]
+    fn detect_environment_forces_json_mode() {
+        let ParseOutcome::Run(options) = parse_args(vec![
+            OsString::from("paranoid-passwd"),
+            OsString::from("--detect-environment"),
+        ])
+        .expect("parse") else {
+            panic!("expected run options");
+        };
+
+        assert!(options.detect_environment);
+        assert_eq!(options.output, OutputFormat::Json);
+        assert!(options.explicit_operational_flag);
         assert!(!should_launch_tui(&options, true));
     }
 }

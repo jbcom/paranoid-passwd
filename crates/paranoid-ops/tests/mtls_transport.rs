@@ -1,3 +1,5 @@
+#![cfg(feature = "mtls-transport")]
+
 use openssl::{
     asn1::Asn1Time,
     bn::{BigNum, MsbOption},

@@ -5,25 +5,22 @@ use paranoid_audit::{
 use paranoid_core::{CharsetSpec, FrameworkId, GenerationReport, ParanoidRequest, VERSION};
 use paranoid_ops::{
     OpsCommand, OpsPolicyContext, OpsPolicyDecision, OpsProfile, SEAL_SCHEMA_VERSION,
-    VaultOperationAccess, VaultSealMachine, VaultSealPosture, VaultSealProviderEvidence,
-    VaultSealProviderKind, VaultSealState, VaultUnlockMethod,
+    VaultOperationAccess, VaultSealPosture, VaultUnlockMethod,
     collect_federal_startup_evidence_with_audit_sink, evaluate_ops_command,
 };
 use paranoid_vault::{
     GenerateStoreLoginRecord, NewCardRecord, NewIdentityRecord, NewLoginRecord,
     NewSecureNoteRecord, UpdateCardRecord, UpdateIdentityRecord, UpdateLoginRecord,
-    UpdateSecureNoteRecord, VaultAuth, VaultHeader, VaultItemFilter, VaultItemKind,
-    VaultKeyslotKind, VaultKeyslotProviderAvailability, VaultKeyslotProviderProbe,
+    UpdateSecureNoteRecord, VaultAuth, VaultItemFilter, VaultItemKind, VaultKeyslotProviderProbe,
     VaultOpenOptions, default_vault_path, init_vault, inspect_certificate_pem,
     inspect_vault_backup, inspect_vault_transfer, read_master_password, read_vault_header,
     restore_vault_backup, unlock_vault_for_options,
 };
 use std::{
-    collections::HashMap,
     ffi::OsString,
     fs,
     io::{self, IsTerminal, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 use crate::vault_tui;
@@ -33,7 +30,8 @@ const EX_POLICY_CHALLENGE: i32 = 7;
 
 pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
     let invocation = parse_vault_args(args)?;
-    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    let interactive = (io::stdin().is_terminal() && io::stdout().is_terminal())
+        || crate::scripted::is_script_active();
     if should_launch_tui(&invocation, interactive) {
         return vault_tui::run(vault_tui::VaultTuiConfig {
             open_options: invocation.open_options.clone(),
@@ -133,8 +131,10 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             } else {
                 VaultKeyslotProviderProbe::MetadataOnly
             };
-            let (vault_exists, posture) =
-                seal_posture_for_path(&invocation.open_options.path, provider_probe);
+            let (vault_exists, posture) = paranoid_vault::seal_posture_for_path(
+                &invocation.open_options.path,
+                provider_probe,
+            );
             let report = serde_json::json!({
                 "schema_version": SEAL_SCHEMA_VERSION,
                 "operation": "vault_seal_status",
@@ -478,7 +478,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             let enrollment = vault.add_mnemonic_keyslot(label.clone())?;
             println!("slot_id\t{}", enrollment.keyslot.id);
             println!("wrap_algorithm\t{}", enrollment.keyslot.wrap_algorithm);
-            println!("mnemonic\t{}", enrollment.mnemonic);
+            println!("mnemonic\t{}", enrollment.mnemonic.as_str());
             Ok(0)
         }
         VaultCommand::RotateMnemonicSlot { id } => {
@@ -490,7 +490,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
                 "label\t{}",
                 enrollment.keyslot.label.as_deref().unwrap_or_default()
             );
-            println!("mnemonic\t{}", enrollment.mnemonic);
+            println!("mnemonic\t{}", enrollment.mnemonic.as_str());
             Ok(0)
         }
         VaultCommand::AddDeviceSlot { label } => {
@@ -601,102 +601,6 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             }
             Ok(0)
         }
-    }
-}
-
-pub(crate) fn seal_posture_for_path(
-    path: &Path,
-    provider_probe: VaultKeyslotProviderProbe,
-) -> (bool, VaultSealPosture) {
-    if !path.exists() {
-        return (
-            false,
-            VaultSealPosture::from_providers(VaultSealState::RecoveryRequired, Vec::new()),
-        );
-    }
-
-    match read_vault_header(path) {
-        Ok(header) => (true, seal_posture_for_header(&header, provider_probe)),
-        Err(_) => (
-            true,
-            VaultSealPosture::from_providers(VaultSealState::RecoveryRequired, Vec::new()),
-        ),
-    }
-}
-
-fn seal_posture_for_header(
-    header: &VaultHeader,
-    provider_probe: VaultKeyslotProviderProbe,
-) -> VaultSealPosture {
-    let keyslot_health = header.keyslot_health_summaries_with_provider_probe(provider_probe);
-    let mut health_by_id: HashMap<String, paranoid_vault::VaultKeyslotHealth> = keyslot_health
-        .into_iter()
-        .map(|health| (health.keyslot_id.clone(), health))
-        .collect();
-    let providers = header
-        .keyslots
-        .iter()
-        .map(|keyslot| {
-            let health = health_by_id.remove(&keyslot.id).unwrap_or_else(|| {
-                paranoid_vault::VaultKeyslotHealth {
-                    keyslot_id: keyslot.id.clone(),
-                    keyslot_kind: keyslot.kind.clone(),
-                    warnings: vec![
-                        "Vault keyslot health summary missing for provider.".to_string(),
-                    ],
-                    healthy: false,
-                    provider_availability: VaultKeyslotProviderAvailability::Unavailable,
-                    provider_evidence_source: Some("vault_header".to_string()),
-                }
-            });
-            seal_provider_evidence_for_health(keyslot, health)
-        })
-        .collect();
-
-    VaultSealPosture::from_providers(VaultSealMachine::default().state(), providers)
-}
-
-fn seal_provider_evidence_for_health(
-    keyslot: &paranoid_vault::VaultKeyslot,
-    health: paranoid_vault::VaultKeyslotHealth,
-) -> VaultSealProviderEvidence {
-    let provider_kind = seal_provider_kind(&keyslot.kind);
-    let evidence_source = health
-        .provider_evidence_source
-        .unwrap_or_else(|| "vault_header".to_string());
-    match health.provider_availability {
-        VaultKeyslotProviderAvailability::Available => {
-            VaultSealProviderEvidence::available(keyslot.id.clone(), provider_kind, evidence_source)
-                .with_warnings(health.warnings)
-        }
-        VaultKeyslotProviderAvailability::Unavailable => {
-            let mut warnings = health.warnings;
-            if warnings.is_empty() {
-                warnings.push("Provider availability probe failed.".to_string());
-            }
-            VaultSealProviderEvidence::unavailable(
-                keyslot.id.clone(),
-                provider_kind,
-                evidence_source,
-                warnings[0].clone(),
-            )
-            .with_warnings(warnings)
-        }
-        VaultKeyslotProviderAvailability::NotChecked => VaultSealProviderEvidence::configured(
-            keyslot.id.clone(),
-            provider_kind,
-            evidence_source,
-        )
-        .with_warnings(health.warnings),
-    }
-}
-
-fn seal_provider_kind(kind: &VaultKeyslotKind) -> VaultSealProviderKind {
-    match kind {
-        VaultKeyslotKind::PasswordRecovery => VaultSealProviderKind::PasswordRecovery,
-        VaultKeyslotKind::MnemonicRecovery => VaultSealProviderKind::MnemonicRecovery,
-        VaultKeyslotKind::DeviceBound => VaultSealProviderKind::DeviceBound,
-        VaultKeyslotKind::CertificateWrapped => VaultSealProviderKind::CertificateWrapped,
     }
 }
 
@@ -1170,7 +1074,7 @@ fn evaluate_vault_command_policy(
         if invocation.profile == OpsProfile::FederalReady
             && let Some(method) = command.federal_unlock_method(&invocation.open_options)
         {
-            let (_, seal_posture) = seal_posture_for_path(
+            let (_, seal_posture) = paranoid_vault::seal_posture_for_path(
                 &invocation.open_options.path,
                 vault_unlock_provider_probe(method),
             );
@@ -3018,7 +2922,7 @@ fn print_generated_passwords(report: &GenerationReport) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use paranoid_ops::VaultSealProviderStatus;
+    use paranoid_ops::{VaultSealProviderKind, VaultSealProviderStatus, VaultSealState};
 
     #[test]
     fn parse_vault_args_supports_certificate_auth() {
@@ -3147,7 +3051,7 @@ mod tests {
         let path = temp_dir.path().join("missing.vault");
 
         let (vault_exists, posture) =
-            seal_posture_for_path(&path, VaultKeyslotProviderProbe::MetadataOnly);
+            paranoid_vault::seal_posture_for_path(&path, VaultKeyslotProviderProbe::MetadataOnly);
 
         assert!(!vault_exists);
         assert_eq!(posture.state, VaultSealState::RecoveryRequired);
@@ -3162,7 +3066,7 @@ mod tests {
         fs::write(&path, b"not a sqlite vault").expect("write corrupt vault");
 
         let (vault_exists, posture) =
-            seal_posture_for_path(&path, VaultKeyslotProviderProbe::MetadataOnly);
+            paranoid_vault::seal_posture_for_path(&path, VaultKeyslotProviderProbe::MetadataOnly);
 
         assert!(vault_exists);
         assert_eq!(posture.state, VaultSealState::RecoveryRequired);
@@ -3178,7 +3082,7 @@ mod tests {
         let header = init_vault(&path, "seal posture unit test password").expect("init vault");
 
         let (vault_exists, posture) =
-            seal_posture_for_path(&path, VaultKeyslotProviderProbe::MetadataOnly);
+            paranoid_vault::seal_posture_for_path(&path, VaultKeyslotProviderProbe::MetadataOnly);
 
         assert!(vault_exists);
         assert_eq!(posture.state, VaultSealState::Sealed);
@@ -3191,110 +3095,6 @@ mod tests {
         }));
         let serialized = serde_json::to_string(&posture).expect("serialize posture");
         assert!(!serialized.contains("seal posture unit test password"));
-    }
-
-    #[test]
-    fn seal_provider_evidence_maps_available_device_health() {
-        let keyslot = paranoid_vault::VaultKeyslot {
-            id: "device-test".to_string(),
-            kind: VaultKeyslotKind::DeviceBound,
-            label: Some("daily".to_string()),
-            wrapped_by_os_keystore: true,
-            wrap_algorithm: "os-keyring+aes-256-gcm-check".to_string(),
-            salt_hex: String::new(),
-            nonce_hex: "nonce".to_string(),
-            tag_hex: "tag".to_string(),
-            encrypted_master_key_hex: "ciphertext".to_string(),
-            certificate_fingerprint_sha256: None,
-            certificate_subject: None,
-            certificate_not_before: None,
-            certificate_not_after: None,
-            certificate_not_before_epoch: None,
-            certificate_not_after_epoch: None,
-            mnemonic_language: None,
-            mnemonic_words: None,
-            device_service: Some("service".to_string()),
-            device_account: Some("account".to_string()),
-        };
-        let health = paranoid_vault::VaultKeyslotHealth {
-            keyslot_id: keyslot.id.clone(),
-            keyslot_kind: VaultKeyslotKind::DeviceBound,
-            warnings: Vec::new(),
-            healthy: true,
-            provider_availability: VaultKeyslotProviderAvailability::Available,
-            provider_evidence_source: Some("device_provider_health_check".to_string()),
-        };
-
-        let evidence = seal_provider_evidence_for_health(&keyslot, health);
-
-        assert_eq!(evidence.provider_id, "device-test");
-        assert_eq!(evidence.kind, VaultSealProviderKind::DeviceBound);
-        assert_eq!(evidence.status, VaultSealProviderStatus::Available);
-        assert_eq!(evidence.evidence_source, "device_provider_health_check");
-    }
-
-    #[test]
-    fn seal_provider_evidence_maps_unavailable_device_health() {
-        let keyslot = paranoid_vault::VaultKeyslot {
-            id: "device-test-unavailable".to_string(),
-            kind: VaultKeyslotKind::DeviceBound,
-            label: Some("daily".to_string()),
-            wrapped_by_os_keystore: true,
-            wrap_algorithm: "os-keyring+aes-256-gcm-check".to_string(),
-            salt_hex: String::new(),
-            nonce_hex: "nonce".to_string(),
-            tag_hex: "tag".to_string(),
-            encrypted_master_key_hex: "ciphertext".to_string(),
-            certificate_fingerprint_sha256: None,
-            certificate_subject: None,
-            certificate_not_before: None,
-            certificate_not_after: None,
-            certificate_not_before_epoch: None,
-            certificate_not_after_epoch: None,
-            mnemonic_language: None,
-            mnemonic_words: None,
-            device_service: Some("service".to_string()),
-            device_account: Some("account".to_string()),
-        };
-        let health = paranoid_vault::VaultKeyslotHealth {
-            keyslot_id: keyslot.id.clone(),
-            keyslot_kind: VaultKeyslotKind::DeviceBound,
-            warnings: Vec::new(),
-            healthy: false,
-            provider_availability: VaultKeyslotProviderAvailability::Unavailable,
-            provider_evidence_source: None,
-        };
-
-        let evidence = seal_provider_evidence_for_health(&keyslot, health);
-
-        assert_eq!(evidence.provider_id, "device-test-unavailable");
-        assert_eq!(evidence.kind, VaultSealProviderKind::DeviceBound);
-        assert_eq!(evidence.status, VaultSealProviderStatus::Unavailable);
-        assert_eq!(evidence.evidence_source, "vault_header");
-        assert_eq!(
-            evidence.warnings,
-            vec!["Provider availability probe failed.".to_string()]
-        );
-    }
-
-    #[test]
-    fn seal_provider_kind_maps_vault_keyslot_kinds() {
-        assert_eq!(
-            seal_provider_kind(&VaultKeyslotKind::PasswordRecovery),
-            VaultSealProviderKind::PasswordRecovery
-        );
-        assert_eq!(
-            seal_provider_kind(&VaultKeyslotKind::MnemonicRecovery),
-            VaultSealProviderKind::MnemonicRecovery
-        );
-        assert_eq!(
-            seal_provider_kind(&VaultKeyslotKind::DeviceBound),
-            VaultSealProviderKind::DeviceBound
-        );
-        assert_eq!(
-            seal_provider_kind(&VaultKeyslotKind::CertificateWrapped),
-            VaultSealProviderKind::CertificateWrapped
-        );
     }
 
     #[test]

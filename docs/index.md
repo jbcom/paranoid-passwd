@@ -33,6 +33,7 @@ guides/tui
 guides/recovery-operations
 reference/index
 api/index
+contributing
 ```
 
 ## Download Channels
@@ -45,6 +46,12 @@ api/index
 - `install.sh` and package-manager flows remain focused on the CLI/TUI binary; the GUI uses direct-download artifacts and native desktop packages.
 - Platform installer, code-signing, and notarization decisions are tracked in
   [Platform Installers and Signing](./reference/platform-installers.md).
+
+## Contributing
+
+Human contributors: see [Contributing](./contributing.md) for environment setup, the
+verification flow (`make ci`, `make quality`), where code belongs across the seven crates,
+the test-layer breakdown, current extension points, and PR conventions.
 
 ## Why It Exists
 

@@ -16,7 +16,9 @@ use std::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "mtls-transport")]
 mod mtls_transport;
+#[cfg(feature = "mtls-transport")]
 pub use mtls_transport::*;
 
 static LOCAL_OPERATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1202,6 +1204,220 @@ fn paranoid_error_kind(error: &ParanoidError) -> &'static str {
         ParanoidError::RandomFailure(_) => "random_failure",
         ParanoidError::HashFailure(_) => "hash_failure",
         ParanoidError::ExhaustedAttempts => "exhausted_attempts",
+        ParanoidError::CertificateFailure(_) => "certificate_failure",
+    }
+}
+
+pub const CAPABILITY_REPORT_SCHEMA_VERSION: u16 = 1;
+
+const PARANOID_DISPLAY_SESSION_TYPE: &str = "XDG_SESSION_TYPE";
+const PARANOID_WAYLAND_DISPLAY: &str = "WAYLAND_DISPLAY";
+const PARANOID_X11_DISPLAY: &str = "DISPLAY";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityProbeStatus {
+    Available,
+    Unavailable,
+    NotChecked,
+}
+
+impl CapabilityProbeStatus {
+    pub fn is_available(self) -> bool {
+        matches!(self, Self::Available)
+    }
+}
+
+/// Evidence for the platform OS keychain / secure-storage backend probed via the
+/// `keyring` crate. Modeled on `FederalCryptoProviderEvidence`: the caller supplies
+/// already-collected evidence rather than this crate reaching into `keyring`
+/// directly, because `paranoid-ops` intentionally carries no keyring dependency.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OsKeychainCapability {
+    pub status: CapabilityProbeStatus,
+    pub backend: String,
+    pub evidence_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_detail: Option<String>,
+}
+
+impl OsKeychainCapability {
+    pub fn available(backend: impl Into<String>, evidence_source: impl Into<String>) -> Self {
+        Self {
+            status: CapabilityProbeStatus::Available,
+            backend: backend.into(),
+            evidence_source: evidence_source.into(),
+            error_detail: None,
+        }
+    }
+
+    pub fn unavailable(
+        backend: impl Into<String>,
+        evidence_source: impl Into<String>,
+        error_detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            status: CapabilityProbeStatus::Unavailable,
+            backend: backend.into(),
+            evidence_source: evidence_source.into(),
+            error_detail: Some(error_detail.into()),
+        }
+    }
+}
+
+/// Evidence for the system clipboard probed via the `arboard` crate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClipboardCapability {
+    pub status: CapabilityProbeStatus,
+    pub evidence_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_detail: Option<String>,
+}
+
+impl ClipboardCapability {
+    pub fn available(evidence_source: impl Into<String>) -> Self {
+        Self {
+            status: CapabilityProbeStatus::Available,
+            evidence_source: evidence_source.into(),
+            error_detail: None,
+        }
+    }
+
+    pub fn unavailable(
+        evidence_source: impl Into<String>,
+        error_detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            status: CapabilityProbeStatus::Unavailable,
+            evidence_source: evidence_source.into(),
+            error_detail: Some(error_detail.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplayServerKind {
+    Quartz,
+    Wayland,
+    X11,
+    Windows,
+    Headless,
+}
+
+impl DisplayServerKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Quartz => "quartz",
+            Self::Wayland => "wayland",
+            Self::X11 => "x11",
+            Self::Windows => "windows",
+            Self::Headless => "headless",
+        }
+    }
+}
+
+/// Evidence for the local display server: compile-target-known on macOS/Windows
+/// (a windowing session is assumed present), runtime-detected on Linux via
+/// `WAYLAND_DISPLAY`/`DISPLAY`/`XDG_SESSION_TYPE`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisplayServerCapability {
+    pub kind: DisplayServerKind,
+    pub evidence_source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_type: Option<String>,
+}
+
+impl DisplayServerCapability {
+    pub fn detect_for_target(operating_system: &str) -> Self {
+        Self::detect_for_target_from_lookup(operating_system, |name| env::var(name).ok())
+    }
+
+    fn detect_for_target_from_lookup(
+        operating_system: &str,
+        mut value_for: impl FnMut(&str) -> Option<String>,
+    ) -> Self {
+        match operating_system {
+            "macos" => Self {
+                kind: DisplayServerKind::Quartz,
+                evidence_source: "compile_target_assumed".to_string(),
+                session_type: None,
+            },
+            "windows" => Self {
+                kind: DisplayServerKind::Windows,
+                evidence_source: "compile_target_assumed".to_string(),
+                session_type: None,
+            },
+            "linux" => {
+                let session_type = non_empty_env_value(value_for(PARANOID_DISPLAY_SESSION_TYPE));
+                if non_empty_env_value(value_for(PARANOID_WAYLAND_DISPLAY)).is_some() {
+                    Self {
+                        kind: DisplayServerKind::Wayland,
+                        evidence_source: "env:WAYLAND_DISPLAY".to_string(),
+                        session_type,
+                    }
+                } else if non_empty_env_value(value_for(PARANOID_X11_DISPLAY)).is_some() {
+                    Self {
+                        kind: DisplayServerKind::X11,
+                        evidence_source: "env:DISPLAY".to_string(),
+                        session_type,
+                    }
+                } else {
+                    Self {
+                        kind: DisplayServerKind::Headless,
+                        evidence_source: "env:WAYLAND_DISPLAY,DISPLAY".to_string(),
+                        session_type,
+                    }
+                }
+            }
+            other => Self {
+                kind: DisplayServerKind::Headless,
+                evidence_source: format!("unrecognized_target:{other}"),
+                session_type: None,
+            },
+        }
+    }
+}
+
+fn non_empty_env_value(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.is_empty())
+}
+
+/// First-run/install-time capability evidence: OS keychain, clipboard, display
+/// server, and configured seal providers. Modeled on
+/// `FederalCryptoProviderEvidence::collect_from_environment()` — the report type
+/// is pure data assembled here from evidence collected by callers that hold the
+/// `keyring`/`arboard` probes (`paranoid-cli`), and by the existing seal posture
+/// evidence (`paranoid-seal` via `VaultSealPosture`) rather than re-deriving
+/// provider availability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityReport {
+    pub schema_version: u16,
+    pub operating_system: String,
+    pub architecture: String,
+    pub os_keychain: OsKeychainCapability,
+    pub clipboard: ClipboardCapability,
+    pub display_server: DisplayServerCapability,
+    pub seal_providers: Vec<VaultSealProviderEvidence>,
+}
+
+impl CapabilityReport {
+    pub fn assemble(
+        os_keychain: OsKeychainCapability,
+        clipboard: ClipboardCapability,
+        seal_providers: Vec<VaultSealProviderEvidence>,
+    ) -> Self {
+        let operating_system = env::consts::OS.to_string();
+        let display_server = DisplayServerCapability::detect_for_target(operating_system.as_str());
+        Self {
+            schema_version: CAPABILITY_REPORT_SCHEMA_VERSION,
+            operating_system,
+            architecture: env::consts::ARCH.to_string(),
+            os_keychain,
+            clipboard,
+            display_server,
+            seal_providers,
+        }
     }
 }
 
@@ -2290,5 +2506,196 @@ mod tests {
             evidence.policy_decision,
             OpsPolicyDecision::Allow { .. }
         ));
+    }
+
+    #[test]
+    fn capability_probe_status_round_trips_through_exact_wire_json() {
+        for (status, expected_json) in [
+            (CapabilityProbeStatus::Available, "\"available\""),
+            (CapabilityProbeStatus::Unavailable, "\"unavailable\""),
+            (CapabilityProbeStatus::NotChecked, "\"not_checked\""),
+        ] {
+            let json = serde_json::to_string(&status).expect("serialize status");
+            assert_eq!(json, expected_json);
+            let deserialized: CapabilityProbeStatus =
+                serde_json::from_str(&json).expect("deserialize status");
+            assert_eq!(deserialized, status);
+        }
+    }
+
+    #[test]
+    fn display_server_kind_round_trips_through_exact_wire_json() {
+        for (kind, expected_json) in [
+            (DisplayServerKind::Quartz, "\"quartz\""),
+            (DisplayServerKind::Wayland, "\"wayland\""),
+            (DisplayServerKind::X11, "\"x11\""),
+            (DisplayServerKind::Windows, "\"windows\""),
+            (DisplayServerKind::Headless, "\"headless\""),
+        ] {
+            let json = serde_json::to_string(&kind).expect("serialize kind");
+            assert_eq!(json, expected_json);
+            let deserialized: DisplayServerKind =
+                serde_json::from_str(&json).expect("deserialize kind");
+            assert_eq!(deserialized, kind);
+        }
+    }
+
+    #[test]
+    fn capability_report_wire_shape_is_stable() {
+        let report = CapabilityReport {
+            schema_version: CAPABILITY_REPORT_SCHEMA_VERSION,
+            operating_system: "linux".to_string(),
+            architecture: "amd64".to_string(),
+            os_keychain: OsKeychainCapability::unavailable(
+                "secret-service",
+                "keyring_probe",
+                "no secret service daemon reachable",
+            ),
+            clipboard: ClipboardCapability::available("arboard_probe"),
+            display_server: DisplayServerCapability {
+                kind: DisplayServerKind::Wayland,
+                evidence_source: "env:WAYLAND_DISPLAY".to_string(),
+                session_type: Some("wayland".to_string()),
+            },
+            seal_providers: vec![VaultSealProviderEvidence::configured(
+                "password",
+                VaultSealProviderKind::PasswordRecovery,
+                "vault_header",
+            )],
+        };
+
+        let actual = serde_json::to_value(&report).expect("serialize report");
+        let expected = serde_json::json!({
+            "schema_version": 1,
+            "operating_system": "linux",
+            "architecture": "amd64",
+            "os_keychain": {
+                "status": "unavailable",
+                "backend": "secret-service",
+                "evidence_source": "keyring_probe",
+                "error_detail": "no secret service daemon reachable"
+            },
+            "clipboard": {
+                "status": "available",
+                "evidence_source": "arboard_probe"
+            },
+            "display_server": {
+                "kind": "wayland",
+                "evidence_source": "env:WAYLAND_DISPLAY",
+                "session_type": "wayland"
+            },
+            "seal_providers": [
+                {
+                    "schema_version": 1,
+                    "provider_id": "password",
+                    "kind": "password_recovery",
+                    "status": "configured",
+                    "evidence_source": "vault_header"
+                }
+            ]
+        });
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn os_keychain_capability_available_has_no_error_detail() {
+        let capability = OsKeychainCapability::available("secret-service", "keyring_probe");
+        assert_eq!(capability.status, CapabilityProbeStatus::Available);
+        assert_eq!(capability.error_detail, None);
+        let json = serde_json::to_value(&capability).expect("serialize capability");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "status": "available",
+                "backend": "secret-service",
+                "evidence_source": "keyring_probe"
+            })
+        );
+    }
+
+    #[test]
+    fn display_server_detects_macos_as_quartz_without_env_lookup() {
+        let display = DisplayServerCapability::detect_for_target_from_lookup("macos", |_| {
+            panic!("macOS detection must not consult environment variables")
+        });
+        assert_eq!(display.kind, DisplayServerKind::Quartz);
+        assert_eq!(display.evidence_source, "compile_target_assumed");
+        assert_eq!(display.session_type, None);
+    }
+
+    #[test]
+    fn display_server_detects_windows_as_windows_without_env_lookup() {
+        let display = DisplayServerCapability::detect_for_target_from_lookup("windows", |_| {
+            panic!("Windows detection must not consult environment variables")
+        });
+        assert_eq!(display.kind, DisplayServerKind::Windows);
+        assert_eq!(display.evidence_source, "compile_target_assumed");
+    }
+
+    #[test]
+    fn display_server_detects_linux_wayland_from_wayland_display_env() {
+        let display =
+            DisplayServerCapability::detect_for_target_from_lookup("linux", |name| match name {
+                "WAYLAND_DISPLAY" => Some("wayland-0".to_string()),
+                "DISPLAY" => Some(":0".to_string()),
+                "XDG_SESSION_TYPE" => Some("wayland".to_string()),
+                _ => None,
+            });
+        assert_eq!(display.kind, DisplayServerKind::Wayland);
+        assert_eq!(display.evidence_source, "env:WAYLAND_DISPLAY");
+        assert_eq!(display.session_type.as_deref(), Some("wayland"));
+    }
+
+    #[test]
+    fn display_server_detects_linux_x11_when_wayland_display_absent() {
+        let display =
+            DisplayServerCapability::detect_for_target_from_lookup("linux", |name| match name {
+                "DISPLAY" => Some(":0".to_string()),
+                "XDG_SESSION_TYPE" => Some("x11".to_string()),
+                _ => None,
+            });
+        assert_eq!(display.kind, DisplayServerKind::X11);
+        assert_eq!(display.evidence_source, "env:DISPLAY");
+        assert_eq!(display.session_type.as_deref(), Some("x11"));
+    }
+
+    #[test]
+    fn display_server_detects_linux_headless_when_no_display_env_present() {
+        let display = DisplayServerCapability::detect_for_target_from_lookup("linux", |_| None);
+        assert_eq!(display.kind, DisplayServerKind::Headless);
+        assert_eq!(display.evidence_source, "env:WAYLAND_DISPLAY,DISPLAY");
+        assert_eq!(display.session_type, None);
+    }
+
+    #[test]
+    fn display_server_treats_empty_env_values_as_absent() {
+        let display =
+            DisplayServerCapability::detect_for_target_from_lookup("linux", |name| match name {
+                "WAYLAND_DISPLAY" => Some(String::new()),
+                "DISPLAY" => Some(String::new()),
+                _ => None,
+            });
+        assert_eq!(display.kind, DisplayServerKind::Headless);
+    }
+
+    #[test]
+    fn display_server_falls_back_to_headless_for_unrecognized_target() {
+        let display = DisplayServerCapability::detect_for_target_from_lookup("freebsd", |_| None);
+        assert_eq!(display.kind, DisplayServerKind::Headless);
+        assert_eq!(display.evidence_source, "unrecognized_target:freebsd");
+    }
+
+    #[test]
+    fn capability_report_assemble_populates_display_server_for_current_target() {
+        let report = CapabilityReport::assemble(
+            OsKeychainCapability::available("secret-service", "keyring_probe"),
+            ClipboardCapability::available("arboard_probe"),
+            Vec::new(),
+        );
+        assert_eq!(report.schema_version, CAPABILITY_REPORT_SCHEMA_VERSION);
+        assert_eq!(report.operating_system, env::consts::OS);
+        assert_eq!(report.architecture, env::consts::ARCH);
+        assert!(report.seal_providers.is_empty());
     }
 }

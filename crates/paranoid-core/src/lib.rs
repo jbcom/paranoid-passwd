@@ -1,8 +1,19 @@
-use openssl::{rand::rand_bytes, sha::sha256, version};
+use openssl::{
+    asn1::{Asn1Time, Asn1TimeRef},
+    error::ErrorStack,
+    hash::MessageDigest,
+    memcmp,
+    rand::rand_bytes,
+    sha::sha256,
+    ssl::{SslConnector, SslFiletype, SslMethod, SslVerifyMode, SslVersion},
+    version,
+    x509::X509,
+};
 use serde::{Deserialize, Serialize};
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 use std::collections::HashSet;
 use std::fmt;
+use std::path::Path;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
@@ -484,6 +495,8 @@ pub enum ParanoidError {
     HashFailure(String),
     #[error("constrained generation exhausted attempts")]
     ExhaustedAttempts,
+    #[error("certificate failure: {0}")]
+    CertificateFailure(String),
 }
 
 pub fn validate_charset(input: &str) -> Result<String, ParanoidError> {
@@ -612,6 +625,120 @@ pub fn openssl_version_text() -> &'static str {
 
 pub fn openssl_platform_text() -> &'static str {
     version::platform()
+}
+
+/// Constant-time byte-slice comparison. Length is checked up front (leaking
+/// only whether lengths match, never which bytes differ) before delegating
+/// to OpenSSL's constant-time `CRYPTO_memcmp` for the equal-length compare.
+/// Callers doing secret-vs-secret comparisons (e.g. `SecretString::eq`) must
+/// use this instead of `==` to avoid timing side channels.
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && memcmp::eq(a, b)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct X509Preview {
+    pub fingerprint_sha256: String,
+    pub subject: String,
+    pub not_before: String,
+    pub not_after: String,
+    pub not_before_epoch: i64,
+    pub not_after_epoch: i64,
+}
+
+/// Parse a PEM-encoded X.509 certificate. Generic X.509 loading surface
+/// shared by every consumer that accepts a certificate (vault certificate
+/// keyslots, mTLS transport, future callers) so certificate parsing is
+/// audited in one place.
+pub fn load_certificate(certificate_pem: &[u8]) -> Result<X509, ParanoidError> {
+    X509::from_pem(certificate_pem)
+        .map_err(|error| ParanoidError::CertificateFailure(error.to_string()))
+}
+
+/// SHA-256 fingerprint of a parsed certificate, hex-encoded.
+pub fn certificate_fingerprint_hex(certificate: &X509) -> Result<String, ParanoidError> {
+    let digest = certificate
+        .digest(MessageDigest::sha256())
+        .map_err(|error| ParanoidError::CertificateFailure(error.to_string()))?;
+    Ok(hex_encode(digest.as_ref()))
+}
+
+/// Convert an ASN.1 certificate timestamp (`not_before`/`not_after`) to a
+/// Unix epoch second count.
+pub fn certificate_time_to_epoch(time: &Asn1TimeRef) -> Result<i64, ParanoidError> {
+    let epoch = Asn1Time::from_unix(0)
+        .map_err(|error| ParanoidError::CertificateFailure(error.to_string()))?;
+    let diff = epoch
+        .diff(time)
+        .map_err(|error| ParanoidError::CertificateFailure(error.to_string()))?;
+    let days = i64::from(diff.days);
+    let secs = i64::from(diff.secs);
+    days.checked_mul(24 * 60 * 60)
+        .and_then(|base| base.checked_add(secs))
+        .ok_or_else(|| ParanoidError::CertificateFailure("certificate time overflow".to_string()))
+}
+
+/// Parse a PEM-encoded certificate and summarize its identity fields
+/// (fingerprint, subject, validity window) for display or storage.
+pub fn inspect_certificate_pem(certificate_pem: &[u8]) -> Result<X509Preview, ParanoidError> {
+    let certificate = load_certificate(certificate_pem)?;
+    let fingerprint_sha256 = certificate_fingerprint_hex(&certificate)?;
+    let subject = format_x509_name(certificate.subject_name());
+    let not_before = certificate.not_before().to_string();
+    let not_after = certificate.not_after().to_string();
+    let not_before_epoch = certificate_time_to_epoch(certificate.not_before())?;
+    let not_after_epoch = certificate_time_to_epoch(certificate.not_after())?;
+    Ok(X509Preview {
+        fingerprint_sha256,
+        subject,
+        not_before,
+        not_after,
+        not_before_epoch,
+        not_after_epoch,
+    })
+}
+
+/// Format an X.509 distinguished name as `field=value, field=value, ...`.
+pub fn format_x509_name(name: &openssl::x509::X509NameRef) -> String {
+    let parts = name
+        .entries()
+        .map(|entry| {
+            let field = entry.object().nid().short_name().unwrap_or("UNKNOWN");
+            let value = entry
+                .data()
+                .to_string()
+                .unwrap_or_else(|_| hex_encode(entry.data().as_slice()));
+            format!("{field}={value}")
+        })
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        "UNKNOWN".to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
+/// Shared client-side mTLS `SslConnector` construction: single crypto surface
+/// for every consumer that dials out with mutual TLS (`paranoid-audit`'s
+/// external-device probe, `paranoid-ops`'s `mtls-transport` client). Builds a
+/// TLS-client connector requiring peer verification, loads the client
+/// certificate/key and CA bundle, and confirms the key matches the
+/// certificate. `min_proto_version` is left to the caller so each consumer's
+/// existing floor is preserved byte-for-byte.
+pub fn build_mtls_client_connector(
+    certificate_path: impl AsRef<Path>,
+    private_key_path: impl AsRef<Path>,
+    ca_certificate_path: impl AsRef<Path>,
+    min_proto_version: Option<SslVersion>,
+) -> Result<SslConnector, ErrorStack> {
+    let mut builder = SslConnector::builder(SslMethod::tls_client())?;
+    builder.set_min_proto_version(min_proto_version)?;
+    builder.set_verify(SslVerifyMode::PEER);
+    builder.set_certificate_file(certificate_path, SslFiletype::PEM)?;
+    builder.set_private_key_file(private_key_path, SslFiletype::PEM)?;
+    builder.set_ca_file(ca_certificate_path)?;
+    builder.check_private_key()?;
+    Ok(builder.build())
 }
 
 pub fn generate_password(charset: &str, length: usize) -> Result<String, ParanoidError> {

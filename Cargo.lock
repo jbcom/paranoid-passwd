@@ -4046,6 +4046,7 @@ dependencies = [
  "keyring",
  "openssl",
  "paranoid-core",
+ "paranoid-seal",
  "rusqlite",
  "serde",
  "serde_json",

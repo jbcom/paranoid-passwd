@@ -9,7 +9,7 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SecretString(Zeroizing<String>);
 
 impl SecretString {
@@ -20,7 +20,67 @@ impl SecretString {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        // `String::clear` only resets the length to zero; the buffer's
+        // capacity is left in place with the old secret bytes still resident
+        // until the allocation itself is dropped. Swap in a fresh, empty
+        // `Zeroizing<String>` so the old one drops (and zeroizes) its full
+        // capacity immediately instead of leaving stale plaintext behind.
+        self.0 = Zeroizing::new(String::new());
+    }
+
+    pub fn push(&mut self, ch: char) {
+        // `Zeroizing<String>` only scrubs the buffer it holds at drop time.
+        // If `String::push` were called directly and it needed to grow, the
+        // standard library reallocates internally and abandons the old heap
+        // buffer without zeroizing it, leaking prior secret bytes into
+        // freed-but-unscrubbed memory. So growth is handled here explicitly:
+        // whenever the push would exceed capacity, a fresh `Zeroizing<String>`
+        // is allocated up front, the existing contents are copied into it,
+        // and `mem::replace` swaps it in — dropping (and zeroizing) the old
+        // buffer intact instead of letting `String` realloc it internally.
+        let needs_growth = self.0.len() + ch.len_utf8() > self.0.capacity();
+        if needs_growth {
+            let new_capacity = (self.0.capacity() * 2).max(self.0.len() + 64);
+            let mut replacement = Zeroizing::new(String::with_capacity(new_capacity));
+            replacement.push_str(self.0.as_str());
+            self.0 = replacement;
+        }
+        self.0.push(ch);
+    }
+
+    pub fn pop(&mut self) -> Option<char> {
+        // `String::pop` only shrinks the length; the removed character's
+        // bytes remain resident in the (unchanged) backing buffer beyond the
+        // new length until the allocation is dropped. Build the
+        // content-minus-last-char into a freshly allocated `Zeroizing<String>`
+        // sized to fit, then swap it in so the old buffer drops (and
+        // zeroizes) its full capacity — including the popped byte(s) — right
+        // away. O(n) per keystroke is fine for interactive TUI backspace.
+        let mut chars = self.0.chars();
+        let removed = chars.next_back();
+        if removed.is_some() {
+            let remainder = chars.as_str();
+            let mut replacement = Zeroizing::new(String::with_capacity(remainder.len()));
+            replacement.push_str(remainder);
+            self.0 = replacement;
+        }
+        removed
+    }
 }
+
+impl PartialEq for SecretString {
+    fn eq(&self, other: &Self) -> bool {
+        paranoid_core::constant_time_eq(self.0.as_bytes(), other.0.as_bytes())
+    }
+}
+
+impl Eq for SecretString {}
 
 impl fmt::Debug for SecretString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -315,7 +375,93 @@ fn read_optional_env(env_name: &str) -> Result<Option<String>, VaultError> {
 
 #[cfg(test)]
 mod tests {
-    use super::NativeSessionHardening;
+    use super::{NativeSessionHardening, SecretString};
+
+    #[test]
+    fn secret_string_equality_matches_and_differs_correctly() {
+        let a = SecretString::new("hunter2".to_string());
+        let b = SecretString::new("hunter2".to_string());
+        let c = SecretString::new("hunter3".to_string());
+        let short = SecretString::new("hunter".to_string());
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, short);
+        assert_eq!(SecretString::default(), SecretString::default());
+    }
+
+    #[test]
+    fn secret_string_push_stays_correct_across_capacity_growth() {
+        let mut secret = SecretString::new(String::with_capacity(1));
+        let expected: String = ('a'..='z').chain('A'..='Z').chain('0'..='9').collect();
+
+        for ch in expected.chars() {
+            secret.push(ch);
+        }
+
+        assert_eq!(secret.as_str(), expected.as_str());
+        assert_eq!(secret.as_str().len(), expected.len());
+
+        // Multi-byte characters must survive growth too.
+        secret.push('é');
+        secret.push('🔒');
+        assert!(secret.as_str().ends_with("é🔒"));
+    }
+
+    #[test]
+    fn secret_string_pop_drains_to_empty_correctly() {
+        let mut secret = SecretString::new("ab".to_string());
+
+        assert_eq!(secret.pop(), Some('b'));
+        assert_eq!(secret.as_str(), "a");
+
+        assert_eq!(secret.pop(), Some('a'));
+        assert_eq!(secret.as_str(), "");
+        assert!(secret.is_empty());
+
+        assert_eq!(secret.pop(), None);
+        assert_eq!(secret.as_str(), "");
+    }
+
+    #[test]
+    fn secret_string_pop_removes_whole_multibyte_char() {
+        let mut secret = SecretString::new("héllo🔒".to_string());
+
+        assert_eq!(secret.pop(), Some('🔒'));
+        assert_eq!(secret.as_str(), "héllo");
+
+        assert_eq!(secret.pop(), Some('o'));
+        assert_eq!(secret.as_str(), "héll");
+
+        // Pop through the remaining multi-byte character too.
+        assert_eq!(secret.pop(), Some('l'));
+        assert_eq!(secret.pop(), Some('l'));
+        assert_eq!(secret.pop(), Some('é'));
+        assert_eq!(secret.as_str(), "h");
+        assert_eq!(secret.pop(), Some('h'));
+        assert_eq!(secret.as_str(), "");
+    }
+
+    #[test]
+    fn secret_string_clear_then_push_reuses_instance_correctly() {
+        let mut secret = SecretString::new("hunter2".to_string());
+        assert!(!secret.is_empty());
+
+        secret.clear();
+        assert!(secret.is_empty());
+        assert_eq!(secret.as_str(), "");
+
+        secret.push('n');
+        secret.push('e');
+        secret.push('w');
+        assert_eq!(secret.as_str(), "new");
+
+        // Clearing again and reusing must still behave correctly.
+        secret.clear();
+        assert!(secret.is_empty());
+        secret.push('🔒');
+        assert_eq!(secret.as_str(), "🔒");
+    }
 
     #[test]
     fn clipboard_entry_becomes_due_after_expiration() {

@@ -9,8 +9,12 @@ homepage.workspace = true
 description.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+mtls-transport = ["dep:openssl"]
+
 [dependencies]
-openssl.workspace = true
+openssl = { workspace = true, optional = true }
 paranoid-audit.workspace = true
 paranoid-core.workspace = true
 paranoid-seal.workspace = true
@@ -19,6 +23,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+openssl.workspace = true
 tempfile.workspace = true
 
 [lints]

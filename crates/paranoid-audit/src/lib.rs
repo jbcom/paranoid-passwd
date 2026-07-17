@@ -1,4 +1,4 @@
-use openssl::ssl::{SslConnector, SslFiletype, SslMethod, SslVerifyMode, SslVersion};
+use openssl::ssl::{SslConnector, SslVersion};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -655,6 +655,7 @@ pub trait AuditSink {
 
 pub struct JsonlFileAuditSink {
     writer: BufWriter<std::fs::File>,
+    redactor: AuditRedactor,
 }
 
 impl JsonlFileAuditSink {
@@ -662,13 +663,16 @@ impl JsonlFileAuditSink {
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         Ok(Self {
             writer: BufWriter::new(file),
+            redactor: AuditRedactor::strict(),
         })
     }
 }
 
 impl AuditSink for JsonlFileAuditSink {
     fn record_event(&mut self, event: &AuditEvent) -> Result<(), AuditError> {
-        serde_json::to_writer(&mut self.writer, event)?;
+        let mut event = event.clone();
+        event.redact_attributes(&self.redactor);
+        serde_json::to_writer(&mut self.writer, &event)?;
         self.writer.write_all(b"\n")?;
         Ok(())
     }
@@ -1006,29 +1010,13 @@ fn validate_write_ack_response(
 }
 
 fn build_mtls_connector(config: &ExternalAuditDeviceConfig) -> Result<SslConnector, String> {
-    let mut builder =
-        SslConnector::builder(SslMethod::tls_client()).map_err(|error| error.to_string())?;
-    builder
-        .set_min_proto_version(Some(SslVersion::TLS1_2))
-        .map_err(|error| error.to_string())?;
-    builder.set_verify(SslVerifyMode::PEER);
-    builder
-        .set_certificate_file(config.mtls_certificate_evidence(), SslFiletype::PEM)
-        .map_err(|error| {
-            format!("failed to load external audit-device mTLS certificate: {error}")
-        })?;
-    builder
-        .set_private_key_file(config.mtls_private_key_evidence(), SslFiletype::PEM)
-        .map_err(|error| {
-            format!("failed to load external audit-device mTLS private key: {error}")
-        })?;
-    builder
-        .set_ca_file(config.mtls_ca_certificate_evidence())
-        .map_err(|error| format!("failed to load external audit-device CA certificate: {error}"))?;
-    builder
-        .check_private_key()
-        .map_err(|error| format!("external audit-device mTLS private key check failed: {error}"))?;
-    Ok(builder.build())
+    paranoid_core::build_mtls_client_connector(
+        config.mtls_certificate_evidence(),
+        config.mtls_private_key_evidence(),
+        config.mtls_ca_certificate_evidence(),
+        Some(SslVersion::TLS1_2),
+    )
+    .map_err(|error| format!("failed to construct external audit-device mTLS connector: {error}"))
 }
 
 fn endpoint_host(endpoint: &str) -> Result<String, String> {
@@ -1323,6 +1311,35 @@ mod tests {
 
         assert!(written.contains("\"operation_id\":\"pp.operation.v1.sink-test\""));
         assert_eq!(written.lines().count(), 1);
+    }
+
+    #[test]
+    fn jsonl_sink_redacts_secret_shaped_attributes_before_persisting() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("audit.jsonl");
+        let mut trail = AuditTrail::for_operation("pp.operation.v1.redaction-test");
+        let event = trail.record(
+            AuditSurface::Cli,
+            AuditSubject::VaultOperation,
+            "unlock",
+            AuditOutcome::Success,
+            AuditSeverity::Notice,
+            "vault unlocked",
+        );
+        event.attributes.insert(
+            "master_key".to_string(),
+            "correct horse battery staple".to_string(),
+        );
+        event
+            .attributes
+            .insert("vault_path".to_string(), "/tmp/vault.db".to_string());
+
+        trail.write_jsonl(&path).expect("write audit jsonl");
+        let written = std::fs::read_to_string(path).expect("read audit jsonl");
+
+        assert!(written.contains("\"master_key\":\"[redacted]\""));
+        assert!(written.contains("\"vault_path\":\"/tmp/vault.db\""));
+        assert!(!written.contains("correct horse battery staple"));
     }
 
     #[test]

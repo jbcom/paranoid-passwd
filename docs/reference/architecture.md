@@ -32,7 +32,8 @@ logging.
 - serial correlation
 - collision counting
 - pattern detection
-- compliance evaluation
+- compliance evaluation against the built-in `--framework` presets — see
+  [Supported Compliance Frameworks](./compliance-frameworks.md)
 
 The old raw-memory WASM result struct is gone. Application surfaces now pass typed Rust data structures between layers.
 Future Slint WASM/mobile targets must keep that typed Rust boundary and cannot revive the retired JavaScript browser app.
@@ -76,7 +77,21 @@ correlation identifiers, not authentication tokens or cryptographic nonces.
   non-secret peer identity, certificate fingerprint, channel-binding, and warning evidence
 - an OpenSSL-backed mTLS JSONL command transport that accepts typed command envelopes across a
   process boundary, replaces client-supplied transport claims with server-observed peer-certificate
-  evidence, and returns the same typed command trace used by local adapters
+  evidence, and returns the same typed command trace used by local adapters. This transport lives
+  behind the `mtls-transport` Cargo feature on `paranoid-ops` (default off): CLI, TUI, and GUI ship
+  without it because none of them cross a process boundary today, and it stays out of the default
+  dependency graph rather than shipping as dead public API. Its integration tests
+  (`crates/paranoid-ops/tests/mtls_transport.rs`) run under `make test`/`make ci` via
+  `make test-ops-mtls-transport`, which invokes
+  `bash scripts/cargo_test.sh -p paranoid-ops --locked --frozen --offline --features mtls-transport`
+  so the transport keeps full coverage without adding runtime surface to a shipped binary. The
+  intended consumer is a future remote-ops surface: a headless agent or service endpoint that
+  accepts typed `OpsCommandEnvelope`s over mTLS from a separately authenticated operator or
+  automation client, for deployments where the vault or generator must be operated from outside the
+  local process (for example a federal-ready fleet-management or assessor tooling integration).
+  Wiring a concrete binary target onto `OpsMtlsServer`/`OpsMtlsClient` happens when that consumer
+  ships; until then the feature keeps the transport building, tested, and reviewable without
+  pretending it is already load-bearing production surface.
 - fail-closed profile validation so externally supplied envelopes cannot downgrade the
   authoritative `OpsPolicyContext`
 - an explicit `allow`, `challenge`, and `deny` policy decision model
@@ -124,6 +139,9 @@ The CLI exposes the first automation surface:
 - `--require-audit-sink` fails closed unless the sink is writable
 - `--profile federal-ready` and `--federal-ready` enforce the federal-ready startup policy
 - `--federal-evidence` emits assessor-readable startup evidence as JSON
+- `--detect-environment` emits first-run capability evidence as JSON: OS keychain (`keyring`) and
+  clipboard (`arboard`) availability, display server detection, and configured seal-provider
+  evidence reused from `vault seal-status`
 - `vault --audit-jsonl PATH <subcommand>` wraps headless vault subcommands in typed ops
   request/response audit events
 - `vault seal-status` reports the local vault seal posture without decrypting item payloads
@@ -197,6 +215,21 @@ revive JavaScript secret-handling logic or the retired DOM app.
 that lint internally. The handwritten GUI sources are still checked by
 `scripts/hallucination_check.sh`; only exact `#[unsafe(no_mangle)]` ABI attributes are allowed
 there, and all security-sensitive crates retain the workspace `forbid` policy.
+
+`wire_callbacks()` in `crates/paranoid-gui/src/lib.rs` binds the Slint UI's `callback` declarations
+to native Rust handlers. The desktop (`#[cfg(not(target_arch = "wasm32"))]`) build wires each
+callback to a real vault/generator operation; the WASM (`#[cfg(target_arch = "wasm32")]`) build
+wires the same callback names to gated no-op handlers that surface the compile-checked-only
+message instead of touching secrets. Both builds wire the same callback set:
+
+- `on_run_audit` — runs the compliance-framework audit for the current length/count/framework selection
+- `on_init_vault` — creates a new vault at the given path with the given recovery secret
+- `on_unlock_vault` — unlocks an existing vault for the session
+- `on_add_login` — adds a new `Login` item to the unlocked vault
+- `on_generate_rotate` — generates a password and either stores a new login or rotates an existing one in place
+- `on_enroll_mnemonic` — adds a mnemonic recovery keyslot to the unlocked vault
+- `on_export_backup` — writes an encrypted vault backup to the given output path
+- `on_copy_primary` — copies the primary generated/stored secret to the clipboard with auto-clear
 
 ## Local Vault
 

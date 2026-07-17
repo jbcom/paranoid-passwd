@@ -4,6 +4,7 @@ build-*/
 artifact/
 dist/
 target/
+.cargo-target-ci/
 .config/
 *.apk
 *.tar
@@ -43,6 +44,7 @@ docs/api/crates/
 melange.rsa
 melange.rsa.pub
 
-# Ralph handoff session state
-.ralph-tui/session*.json
+# Local agent-loop scaffolding (unconsumed by this repo's build/CI/scripts)
+.ralph-tui/
+.remember/
 __pycache__/

@@ -109,6 +109,25 @@ On an interactive terminal, that opens a native vault CRUD view backed by the sa
 
 If those shell-level inputs are unavailable, the blocked screen now includes a native unlock form for the same recovery-secret, mnemonic, device-slot, and certificate-backed paths.
 
+### First-run environment approval
+
+When no vault exists yet at the configured path, the vault TUI's first screen is an environment approval view instead of the unlock form. It collects the same `CapabilityReport` evidence exposed by `--detect-environment` and renders it before any secret is entered:
+
+- OS keychain status (backend name, available/unavailable, error detail when unavailable)
+- clipboard status (available/unavailable, error detail when unavailable)
+- display server kind (Quartz, Wayland, X11, Windows, or headless)
+- configured seal-provider posture (empty on a fresh path, since nothing is configured yet)
+- the suggested initial configuration this evidence implies — a password recovery keyslot always (the only vault-init path), plus a device-bound keyslot offered only when the OS keychain probe reports available
+
+Two choices are offered:
+
+- **Accept suggested configuration** — proceeds to the recovery-secret entry form with Password mode preselected. Submitting initializes the vault, and when the keychain was available and accepted, a device-bound keyslot is enrolled automatically right after init.
+- **Adjust manually** — proceeds to the same recovery-secret entry form, but skips the automatic device-bound keyslot enrollment; add keyslots afterward from the Keyslots view (`k`) instead.
+
+Since the only way to create a vault is through this password-recovery init path, both choices end up entering a recovery secret; the difference is only whether the suggested device-bound keyslot gets enrolled automatically.
+
+This screen is first-run-only: "already approved" is derived from vault existence itself (no separate state file), so it only appears again while the configured path still has no vault. It also stays reachable at any time from the vault main screen via `E`, to re-review the current environment's capabilities; `Esc` returns to the vault view from there.
+
 The current vault TUI supports the first native vault workflows:
 
 - item list navigation
@@ -130,9 +149,10 @@ The current vault TUI supports the first native vault workflows:
 - selected-card detail shows masked payment-card metadata and billing notes
 - selected-identity detail shows preferred contact metadata and profile notes
 - dedicated keyslot view via `k`
-- mnemonic recovery-slot enrollment with one-time phrase reveal
-- device-bound keyslot enrollment
-- certificate-wrapped keyslot enrollment from a PEM path
+- first-run environment approval screen with capability evidence and a suggested initial configuration, reachable again anytime via `E`
+- mnemonic recovery-slot enrollment via `m`, with one-time phrase reveal
+- device-bound keyslot enrollment via `b`
+- certificate-wrapped keyslot enrollment via `c` (keyslot view only) from a PEM path
 - selected certificate-slot rewrap to a replacement PEM via `w`, with optional replacement key path and passphrase fields to keep an active certificate-authenticated session aligned after rotation
 - certificate-slot detail now includes subject and validity so cert rotation pressure is visible without leaving the native UI
 - the add/rewrap certificate forms now preview the PEM path before mutation so a wrong recipient certificate can be caught before enrollment or rewrap
@@ -166,6 +186,6 @@ The backup flows follow the same pattern as the rest of the vault TUI: `x` opens
 
 Selective transfer flows now live beside backup/restore in the same native vault surface: `t` opens an export form that writes only the currently filtered decrypted item payloads into a separate encrypted transfer package, and `p` opens an import form that brings one of those packages into the unlocked local vault using either the package recovery secret or a certificate keypair.
 
-When the vault is unlocked in either native interactive surface, inactivity now triggers an automatic lock after 5 minutes and clears the cached decrypted list/detail state before returning to the unlock view.
+When the vault is unlocked in either native interactive surface, inactivity now triggers an automatic lock after 5 minutes: it clears the cached decrypted list/detail state, resets vault auth to a non-secret placeholder that forces re-entry on the next unlock attempt, clears any loaded mnemonic phrase, and resets the unlock, recovery-secret rotation, certificate rewrap, export-transfer, and import-transfer forms to their zeroizing defaults, before returning to the unlock view.
 
 The GUI now mirrors the same native keyslot inspection, recovery-posture reporting, shared keyslot recommendations, enrollment, mnemonic rotation, certificate rewrap, relabel, recovery-secret rotation, posture-aware removal confirmation, and rebind flows, direct unlock model, folder-plus-tag organization model, backup and transfer export/import flows, clipboard auto-clear, and idle auto-lock behavior, so mnemonic, device-bound, certificate-wrapped recovery, and encrypted vault exchange no longer depend on CLI-only administration.

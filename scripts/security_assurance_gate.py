@@ -41,7 +41,9 @@ CLAIMS: tuple[Claim, ...] = (
         (
             Requirement(
                 "crates/paranoid-core/src/lib.rs",
-                r"^use openssl::\{(?=[^}]*" + "rand" + r"::rand_bytes)(?=[^}]*sha::sha256)[^}]*\};",
+                r"^use openssl::\{(?=(?:(?!\};)[\s\S])*"
+                + "rand"
+                + r"::rand_bytes)(?=(?:(?!\};)[\s\S])*sha::sha256)",
                 "paranoid-core imports OpenSSL RNG and SHA-256",
                 True,
             ),
@@ -187,17 +189,53 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
+        "surface.wasm-gated-compile-check",
+        "GUI WASM surface is compile-checked and runtime-gated",
+        "product-surface",
+        (
+            Requirement(
+                "crates/paranoid-gui/src/lib.rs",
+                r'#\[cfg\(target_arch = "wasm32"\)\]\n'
+                r"fn wire_callbacks\([^\n]*\n"
+                r'(?:(?!\nfn )(?!paranoid_core::|paranoid_vault::|paranoid_audit::|paranoid_ops::)[\s\S])*?'
+                r"WASM Slint surface is compile-checked only\. Secret generation, vault unlock, "
+                r"storage, recovery, backup, and clipboard operations are disabled until target "
+                r"storage and crypto are threat-modeled\."
+                r'(?:(?!\nfn )(?!paranoid_core::|paranoid_vault::|paranoid_audit::|paranoid_ops::)[\s\S])*?'
+                r"\n}\n",
+                "wasm32 wire_callbacks branch carries the runtime gate message and makes no "
+                "paranoid_core/paranoid_vault/paranoid_audit/paranoid_ops calls",
+                True,
+            ),
+            Requirement(
+                "crates/paranoid-gui/Cargo.toml",
+                "Compile-only support for the gated non-secret Slint WASM surface",
+                "GUI manifest documents the wasm32 target as compile-only and gated",
+            ),
+            Requirement(
+                "scripts/hallucination_check.sh",
+                "WASM GUI target remains a gated non-secret Slint surface without native vault/core linkage",
+                "hallucination check verifies the wasm32 dependency tree stays free of native secret-handling crates",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`surface.wasm-gated-compile-check` | `enforced`",
+                "assurance claim enforces the wasm32 gated compile-check posture",
+            ),
+        ),
+    ),
+    Claim(
         "vault.device-bound-keyslot",
         "Device-bound keyslot disposition",
         "vault-security",
         (
             Requirement(
-                "crates/paranoid-vault/src/lib.rs",
+                "crates/paranoid-vault/src/keyslots.rs",
                 "Dispositioned in docs/reference/ai-review.md: device-bound slots are",
                 "device-bound source points to the closed disposition",
             ),
             Requirement(
-                "crates/paranoid-vault/src/lib.rs",
+                "crates/paranoid-vault/src/lifecycle.rs",
                 "master_key.len() != MASTER_KEY_LEN",
                 "device-bound unlock rejects malformed secure-storage secret lengths",
             ),
@@ -249,12 +287,12 @@ CLAIMS: tuple[Claim, ...] = (
                 "AI review surface closes the mnemonic recovery disposition",
             ),
             Requirement(
-                "crates/paranoid-vault/src/lib.rs",
+                "crates/paranoid-vault/src/keyslots.rs",
                 "Dispositioned in docs/reference/ai-review.md: generated 24-word BIP39",
                 "source records the mnemonic recovery disposition",
             ),
             Requirement(
-                "crates/paranoid-vault/src/lib.rs",
+                "crates/paranoid-vault/src/lifecycle.rs",
                 "validate_mnemonic_keyslot_metadata",
                 "vault unlock validates mnemonic keyslot metadata before unwrap",
             ),
@@ -286,17 +324,17 @@ CLAIMS: tuple[Claim, ...] = (
                 "AI review surface closes the certificate-wrapped keyslot disposition",
             ),
             Requirement(
-                "crates/paranoid-vault/src/lib.rs",
+                "crates/paranoid-vault/src/keyslots.rs",
                 "Dispositioned in docs/reference/ai-review.md: CMS envelopes only a random",
                 "source records the certificate-wrapped keyslot disposition",
             ),
             Requirement(
-                "crates/paranoid-vault/src/lib.rs",
+                "crates/paranoid-vault/src/keyslots.rs",
                 "validate_certificate_keyslot_metadata",
                 "certificate unlock validates metadata and field shape before unwrap",
             ),
             Requirement(
-                "crates/paranoid-vault/src/lib.rs",
+                "crates/paranoid-vault/src/keyslots.rs",
                 "CertificateKeyslotWrapMode::Current",
                 "certificate unlock distinguishes current and legacy keyslot shapes",
             ),
@@ -358,7 +396,7 @@ CLAIMS: tuple[Claim, ...] = (
                 "ops request/response events preserve adapter session surface metadata",
             ),
             Requirement(
-                "crates/paranoid-cli/src/vault_tui.rs",
+                "crates/paranoid-cli/src/vault_tui/screen_state.rs",
                 "evaluate_vault_operation(AuditSurface::Tui",
                 "TUI vault adapter routes covered operations through the shared ops evaluator",
             ),
@@ -781,7 +819,7 @@ CLAIMS: tuple[Claim, ...] = (
                 "vault CLI evaluates the selected unlock method under federal-ready policy",
             ),
             Requirement(
-                "crates/paranoid-cli/src/vault_tui.rs",
+                "crates/paranoid-cli/src/vault_tui/screen_state.rs",
                 "record_vault_unlock_policy",
                 "vault TUI evaluates the selected unlock method under federal-ready policy",
             ),
@@ -862,8 +900,10 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_cli.rs",
-                "seal_posture_for_path(&invocation.open_options.path, provider_probe);",
+                r"seal_posture_for_path\((?:(?!\);)[\s\S])*&invocation\.open_options\.path"
+                r"(?:(?!\);)[\s\S])*provider_probe(?:(?!\);)[\s\S])*\);",
                 "vault seal-status command evaluates seal posture with explicit provider-probe mode",
+                True,
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_cli.rs",
@@ -921,7 +961,7 @@ CLAIMS: tuple[Claim, ...] = (
                 "federal readiness docs document provider availability evidence semantics",
             ),
             Requirement(
-                "crates/paranoid-cli/src/vault_cli.rs",
+                "crates/paranoid-vault/src/recovery_posture.rs",
                 "VaultSealPosture::from_providers(VaultSealState::RecoveryRequired, Vec::new())",
                 "unreadable vault headers do not synthesize recovery providers",
             ),

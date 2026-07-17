@@ -116,10 +116,31 @@ Current GUI platform coverage is explicit:
 
 | GUI surface | Current gate | What it proves |
 | --- | --- | --- |
-| Desktop Slint | `make test-gui-e2e` or `make test-gui-e2e-emulate` | Runs the real GUI binary through the operator workflow, validates durable audit evidence, and captures a rendered screenshot. |
+| Desktop Slint | `make test-gui-e2e` or `make test-gui-e2e-emulate` | Runs the real GUI binary through the operator workflow (see below), validates durable audit evidence, and captures a rendered screenshot. |
 | Desktop viewport classes | `make test-gui-visual-regression` or `make test-gui-visual-regression-emulate` | Replays the real GUI workflow at desktop, tablet, and narrow/mobile-class viewport sizes and rejects blank or low-information screenshots. |
 | Android Slint | `make test-gui-android-check` | Compile-checks the Rust-native Slint library against the configured Android NDK while preserving native core/vault linkage. Runtime emulator/Maestro coverage remains the next Android gate. |
 | WASM Slint | `make test-gui-wasm-check` | Compile-checks the gated non-secret Slint WASM surface. Secret-handling WASM is not supported until target storage, crypto, and runtime validation are threat-modeled. |
+
+### GUI Automation Environment Variables
+
+The desktop GUI e2e and visual-regression gates drive the real `paranoid-passwd-gui` binary
+headlessly through four environment variables, read once at startup on non-WASM builds:
+
+- `PARANOID_GUI_AUTOMATION_SCENARIO` — the scenario to run. Only `operator` and
+  `operator-workflow` are accepted (both select the same operator-workflow scenario); any other
+  value fails startup with an "unknown GUI automation scenario" error.
+- `PARANOID_GUI_AUTOMATION_VAULT_PATH` — path to the vault the scenario operates against. Required
+  whenever the scenario variable is set.
+- `PARANOID_GUI_AUTOMATION_BACKUP_PATH` — path the scenario exports an encrypted backup to.
+  Required whenever the scenario variable is set.
+- `PARANOID_GUI_AUTOMATION_OUTPUT_PATH` — path the scenario writes its outcome file to. Required
+  whenever the scenario variable is set.
+
+`PARANOID_GUI_AUTOMATION_SCENARIO` unset means the GUI runs normally with no automation. When set,
+the scenario runs and writes a plain-text outcome file to `PARANOID_GUI_AUTOMATION_OUTPUT_PATH`
+with one `key=value` line per field: `status` (`pass` or `fail`), `scenario`, `vault`, `backup`,
+and `message`. The GUI e2e and visual-regression harnesses parse this file to assert the operator
+workflow actually completed rather than just checking the process exit code.
 
 ### Android and WASM Checks Are Local-Only
 
@@ -223,8 +244,20 @@ cargo test -p paranoid-core --locked --frozen --offline
 - TUI reducer / rendering smoke tests
 - real PTY-driven binary TUI workflow coverage in
   [`tests/test_tui_e2e.py`](../../../tests/test_tui_e2e.py), proving the
-  generator wizard and vault TUI can be driven end to end with actual terminal
-  keystrokes
+  generator wizard and vault TUI can be driven end to end with actual
+  terminal keystrokes: the base vault flow (add-login, mnemonic-keyslot
+  enrollment, backup export) plus a second PTY session against the same
+  vault path proving login items and keyslots survive a fresh-process
+  restart/unlock; a wrong-`PARANOID_MASTER_PASSWORD` unlock attempt that
+  renders the seal's `UnlockBlocked` posture screen and is then recovered
+  with the correct password in the same session; and a recovery-secret
+  rotation flow (through the P2.3 environment-approval screen for the fresh
+  vault it inits) that proves the rotated secret unlocks a fresh CLI-mode
+  process while the pre-rotation secret no longer does
+- a deterministic scripted TUI driving surface (`PARANOID_TUI_SCRIPT`, see
+  [Scripted TUI mode](#scripted-tui-mode) below) exercising the real `App`
+  reducers, including the generator wizard's background worker thread,
+  against an in-memory backend instead of a PTY
 - a Linux GUI-binary workflow harness in
   [`tests/test_gui_e2e.sh`](../../../tests/test_gui_e2e.sh), proving the native
   Slint desktop app can run an operator workflow end to end under `xvfb-run`
@@ -268,6 +301,53 @@ bash scripts/supply_chain_verify.sh
 The headless vault e2e suite uses a debug-only file-backed device-store override
 when `PARANOID_TEST_DEVICE_STORE_DIR` is set. Release builds do not include that
 test backend.
+
+### Scripted TUI mode
+
+`tests/test_tui_e2e.py` forks a real PTY to prove the compiled binary works
+with actual terminal I/O, but that layer is comparatively slow and its
+assertions have to tolerate ANSI/terminal-emulation noise. `paranoid-cli` also
+ships as a library crate (`paranoid_cli`, `crates/paranoid-cli/src/lib.rs`) so
+tests — and, longer term, agentic control surfaces — can drive the real
+generator wizard and vault manager `App` reducers directly against an
+in-memory `ratatui::backend::TestBackend`, with no PTY and no ANSI parsing.
+
+Setting `PARANOID_TUI_SCRIPT=<path>` before launching either TUI (the
+generator wizard's `tui::run()` or the vault manager's `vault_tui::run()`,
+including through `paranoid-passwd` and `paranoid-passwd vault`) activates
+scripted mode: the app runs against a `TestBackend`, reads newline-delimited
+key tokens from the script file, feeds them through the same `App::handle_key`
+step function the real event loop uses, and on exit prints the final rendered
+frame as plain text to stdout. Setting the variable also forces TUI launch
+regardless of TTY auto-detection, since a script is by definition a
+deliberate non-interactive drive.
+
+Token grammar (one token per line, whitespace-trimmed):
+
+- a single printable character — sent as its own literal `KeyCode::Char` key
+  event (multi-character text is one character per line; there is no inline
+  string literal)
+- `<enter>`, `<esc>`, `<tab>`, `<backspace>`, `<up>`, `<down>` — the matching
+  `KeyCode` variant
+- `<ctrl-u>` — `KeyCode::Char('u')` with `KeyModifiers::CONTROL` (the
+  custom-charset / form "clear field" shortcut)
+- `<wait-idle>` — sends no key event; polls the app (worker and hardening
+  polling) until any background worker thread has drained, up to a 10-second
+  timeout, before continuing. Use it after an action that spawns a worker
+  thread (for example launching the generator audit) before scripting further
+  keys or ending the run.
+- blank lines and lines starting with `#` are ignored
+
+`crates/paranoid-cli/tests/tui_scripted.rs` covers both applications end to
+end: a full generator wizard run from `Configure` through a completed audit to
+the `Results` screen, and a vault init + add-login flow that unlocks a
+tempdir-backed vault, drives the `Add Login` form by key events, and confirms
+the item was actually persisted (not just reflected in-memory) by reopening
+the vault afterward. Run them with:
+
+```bash
+cargo test -p paranoid-cli --locked --frozen --offline --test tui_scripted
+```
 
 `paranoid-vault` includes:
 

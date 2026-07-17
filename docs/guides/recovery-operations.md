@@ -143,6 +143,10 @@ paranoid-passwd vault --cli --path "$VAULT" export-backup --output vault.backup.
 paranoid-passwd vault --cli --path "$VAULT" inspect-backup --input vault.backup.json
 ```
 
+`--output` must not resolve to the same file as `--path`: export fails closed with a typed error rather
+than overwriting the source vault, and the write itself is atomic (temp file in the destination
+directory, then renamed into place), so an interrupted export never leaves a partial file behind.
+
 Restore into a new path first when you are testing a backup:
 
 ```bash
@@ -153,8 +157,12 @@ PARANOID_MASTER_PASSWORD="current recovery secret" \
 ```
 
 Use `import-backup --force` only when you have intentionally chosen to overwrite the target vault
-path. Treat a same-device device-bound unlock after restore as a convenience check, not as proof that
-the backup is portable.
+path. Restore is atomic: the replacement vault is built and validated in a same-directory temp file
+first, and only a fully validated build is renamed over the destination, so a malformed backup or a
+mid-restore failure leaves a pre-existing vault at that path untouched and unlockable instead of
+partially overwritten. The TUI's import-backup screen defaults to overwrite off even when the target
+vault already exists; enable it explicitly when you intend to replace that path. Treat a same-device
+device-bound unlock after restore as a convenience check, not as proof that the backup is portable.
 
 ## Transfer Packages
 
@@ -194,6 +202,12 @@ paranoid-passwd vault --cli --path "$DEST_VAULT" import-transfer \
 
 By default, conflicting item ids are remapped instead of silently replacing destination records. Use
 `--replace-existing` only when the transfer is intended to update existing records.
+
+Import is transactional: every item in the package is imported inside a single database
+transaction, and a malformed or invalid item anywhere in the list — including the last one —
+rolls back the entire import. The destination vault ends with either all items from the package
+imported or none of them; it never ends up with only the items that happened to validate before
+a later one failed.
 
 ## Disaster Recovery Drill
 

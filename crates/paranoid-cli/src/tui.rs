@@ -465,6 +465,21 @@ impl App {
 }
 
 pub fn run() -> anyhow::Result<()> {
+    if let Some(mut prepared) = crate::scripted::prepare_scripted_terminal(
+        crate::scripted::DEFAULT_COLS,
+        crate::scripted::DEFAULT_ROWS,
+    )? {
+        let final_frame =
+            run_scripted(&mut prepared.terminal, &prepared.tokens).map_err(|error| {
+                anyhow::anyhow!(
+                    "scripted run of {} failed: {error}",
+                    prepared.path.display()
+                )
+            })?;
+        println!("{final_frame}");
+        return Ok(());
+    }
+
     enable_raw_mode().context("failed to enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("failed to enter alternate screen")?;
@@ -476,6 +491,38 @@ pub fn run() -> anyhow::Result<()> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     terminal.show_cursor().ok();
     result
+}
+
+/// Drives a fresh generator wizard `App` through a pre-parsed key script
+/// against an in-memory `TestBackend`, returning the final rendered frame as
+/// text.
+///
+/// This is the entry point both `run()` (via `PARANOID_TUI_SCRIPT`) and
+/// integration tests use to exercise the real `App`, including its
+/// background audit worker thread, without a PTY. The wizard always starts
+/// from `App::default()`, matching the real `run()` entry point, so scripts
+/// drive the whole flow from the initial `Configure` screen.
+pub fn run_scripted(
+    terminal: &mut Terminal<ratatui::backend::TestBackend>,
+    tokens: &[crate::scripted::ScriptToken],
+) -> anyhow::Result<String> {
+    let mut app = App::default();
+    crate::scripted::drive(terminal, tokens, |terminal, key| {
+        let quit = match key {
+            Some(key) => app.handle_key(key),
+            None => false,
+        };
+        app.poll_worker();
+        app.poll_hardening();
+        terminal
+            .draw(|frame| render(frame, &app))
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        Ok(crate::scripted::StepOutcome {
+            idle: app.worker.is_none(),
+            quit,
+        })
+    })?;
+    Ok(crate::scripted::dump_buffer(terminal))
 }
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> anyhow::Result<()> {

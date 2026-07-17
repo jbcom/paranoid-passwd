@@ -1,0 +1,73 @@
+name: Builder Image
+
+# Builds the Wolfi builder image ONCE and publishes it to GHCR by digest.
+# Every other workflow's `.github/actions/builder` consumes the published
+# digest instead of rebuilding the Dockerfile per job. See
+# docs/reference/ci-design.md for the two-tier trust boundary this exists
+# to serve, and the bootstrap-ordering steps that flip
+# `.github/actions/builder/action.yml` onto the digest once this workflow
+# has published a first image.
+#
+# This workflow is Tier A infrastructure (it produces a cached build input,
+# not a signed/attested release artifact) but its publish step is scoped
+# so a pull_request trigger can never reach it: packages:write only exists
+# here, and only on push-to-main, schedule, or workflow_dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/actions/builder/**'
+      - '.github/workflows/builder-image.yml'
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: builder-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build + Publish Builder Image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push builder image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .github/actions/builder
+          file: .github/actions/builder/Dockerfile
+          push: true
+          tags: ghcr.io/jbcom/paranoid-passwd-builder:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report published digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          echo "Published ghcr.io/jbcom/paranoid-passwd-builder@${IMAGE_DIGEST}"
+          echo "Run scripts/bump_builder_digest.sh to pin .github/actions/builder/action.yml to this digest."
+          echo "### Builder image published" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`ghcr.io/jbcom/paranoid-passwd-builder@${IMAGE_DIGEST}\`" >> "$GITHUB_STEP_SUMMARY"

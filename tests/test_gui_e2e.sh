@@ -68,6 +68,12 @@ screenshot_for_viewport() {
     timeout 5s import -window root "${screenshot_path}"
   }
 
+  # Slow shared CI runners stretch the automation scenario (Argon2id vault
+  # derivations in a debug binary under Xvfb) past budgets tuned on dev
+  # machines; scale the marker wait uniformly, matching the PTY harness.
+  timeout_scale="${PARANOID_E2E_TIMEOUT_SCALE:-1}"
+  marker_iterations=$((300 * timeout_scale))
+
   PARANOID_GUI_AUTOMATION_SCENARIO=operator-workflow \
   PARANOID_GUI_AUTOMATION_VAULT_PATH="${vault_path}" \
   PARANOID_GUI_AUTOMATION_BACKUP_PATH="${backup_path}" \
@@ -75,7 +81,7 @@ screenshot_for_viewport() {
   "${gui_binary}" --audit-jsonl "${audit_path}" --require-audit-sink >"${log_path}" 2>&1 &
   gui_pid=$!
 
-  for _ in $(seq 1 300); do
+  for _ in $(seq 1 "${marker_iterations}"); do
     if [ -f "${outcome_path}" ]; then
       break
     fi
