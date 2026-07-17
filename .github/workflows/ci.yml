@@ -19,6 +19,12 @@ env:
   # cache-hit-or-cold-build CI job, and Swatinem/rust-cache recommends
   # disabling them explicitly rather than caching them.
   CARGO_INCREMENTAL: "0"
+  # No debuginfo in CI gate builds: nothing consumes it (no debugger attaches,
+  # panics still carry line info via debug-assertions), compile+link drop
+  # substantially, the rust-cache payload shrinks, and the debug binaries the
+  # PTY harness drives run measurably faster on shared runners.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
   # Shared 2-core hosted runners stretch debug-binary latencies (256 MiB
   # Argon2id derivations, SQLite fsyncs under contention) well past the PTY
   # harness budgets tuned on developer machines; scale every wait uniformly
