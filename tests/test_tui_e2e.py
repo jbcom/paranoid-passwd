@@ -66,8 +66,60 @@ class TerminalGrid:
         self.grid = [[" "] * cols for _ in range(rows)]
         self.cursor_row = 0
         self.cursor_col = 0
+        # `feed()` is called once per `read_available()` batch, and the PTY
+        # gives no guarantee that a single escape sequence (or a multi-byte
+        # UTF-8 glyph — every box-drawing/arrow char this UI renders is
+        # 3 bytes) lands wholly within one `os.read()` chunk. A sequence
+        # split across two `feed()` calls used to lose its leading `\x1b`
+        # in the second call's decode, so `CSI_RE` never matched it and the
+        # raw `[38;20H`-style params fell through to `_write()` as literal
+        # on-screen text (observed corrupting the vault-list footer this
+        # existed to protect — the exact class of false-negative P8.5 (b)/
+        # (c) assertions depend on this grid replay to catch). `_pending`
+        # carries forward any bytes that might be the start of such a split
+        # sequence so the next `feed()` call sees it complete.
+        self._pending = b""
 
     def feed(self, raw: bytes):
+        raw = self._pending + raw
+        self._pending = b""
+        # If `raw` ends mid-escape-sequence (an ESC with no terminating
+        # letter yet found) or mid-UTF-8-codepoint, hold the incomplete
+        # tail back rather than decoding it lossily.
+        esc_start = raw.rfind(b"\x1b")
+        if esc_start != -1 and not re.search(
+            rb"\x1b\[\??[0-9;]*[A-Za-z]", raw[esc_start:]
+        ):
+            # An ESC near the end with no complete CSI terminator yet —
+            # could still be arriving. Hold back from the ESC onward.
+            self._pending = raw[esc_start:]
+            raw = raw[:esc_start]
+        else:
+            # No dangling ESC; check for a truncated trailing UTF-8
+            # sequence (a lead byte whose continuation bytes haven't
+            # arrived yet) and hold that back too.
+            trim = 0
+            for back in range(1, min(4, len(raw)) + 1):
+                lead = raw[-back]
+                if lead & 0b1100_0000 == 0b1000_0000:
+                    continue  # continuation byte, keep scanning backward
+                needed = (
+                    1
+                    if lead < 0x80
+                    else 2
+                    if lead & 0b1110_0000 == 0b1100_0000
+                    else 3
+                    if lead & 0b1111_0000 == 0b1110_0000
+                    else 4
+                    if lead & 0b1111_1000 == 0b1111_0000
+                    else 1
+                )
+                if needed > back:
+                    trim = back
+                break
+            if trim:
+                self._pending = raw[len(raw) - trim :]
+                raw = raw[: len(raw) - trim]
         text = raw.decode("utf-8", errors="ignore").replace("\r", "")
         pos = 0
         for match in CSI_RE.finditer(text):
@@ -317,7 +369,12 @@ def run_checked(argv, env):
 
 def generator_flow(binary: Path):
     with PtySession([str(binary), "--tui"]) as session:
-        session.wait_for("Generate + Run 7-Layer Audit", timeout=10)
+        # Wizard redesign (evidence.md finding #6): the launch row is now a
+        # single "▸ Generate" accent action (theme::accent_action,
+        # ICON_ACTION) rather than the old "Generate + Run 7-Layer Audit"
+        # label. The underlying FocusField order/count is unchanged, so the
+        # same tab count still lands on Launch.
+        session.wait_for("▸ Generate", timeout=10)
         session.send_tab(64)
         session.send_enter()
         session.wait_for("Primary Password", timeout=20)
@@ -374,8 +431,23 @@ def vault_flow(binary: Path):
             session.wait_for("Stored login item", timeout=10)
             session.wait_for("GitHub", timeout=5)
 
-            session.send_text("k")
-            session.wait_for("Selected keyslot", timeout=5)
+            # P8.V.5: the working "ways in" (keyslots) navigation key was
+            # rebound from `k` to `w` so it matches what the footer/`?`
+            # overlay have always advertised (crates/paranoid-cli/src/
+            # vault_tui/screen_state.rs `handle_vault_key`).
+            session.send_text("w")
+            # "Keyslot Detail" is the real panel title on `Screen::Keyslots`
+            # (crates/paranoid-cli/src/vault_tui/panel_rendering.rs
+            # `keyslots_panel`); "Selected keyslot" only ever appears as a
+            # wrong-keyslot-type error status ("Selected keyslot is not
+            # mnemonic recovery."/"...not certificate-wrapped.") that this
+            # flow never triggers, so it can never actually match here.
+            # The title's cells are unchanged from the frame before this
+            # transition landed (P8.5 (b): ratatui's diff renderer only
+            # re-emits changed cells), so `wait_for`'s raw-byte-concat
+            # (`clean_screen`) can false-negative on it even though it is
+            # genuinely on screen — use the grid-replay assertion instead.
+            session.wait_for_screen_text("Keyslot Detail", timeout=5)
             session.send_text("m")
             session.wait_for("Enroll Mnemonic Slot", timeout=5)
             session.send_text("paper-backup")
@@ -383,10 +455,16 @@ def vault_flow(binary: Path):
             session.send_enter()
             session.wait_for("Mnemonic Recovery Phrase", timeout=10)
             session.send_enter()
-            session.wait_for("Selected keyslot", timeout=5)
+            session.wait_for_screen_text("Keyslot Detail", timeout=5)
             session.checkpoint()
             session.send(b"\x1b")
-            session.wait_for("Selected login", timeout=5)
+            # Back on `Screen::Vault`'s side detail panel with the GitHub
+            # item still selected (`detail_panel` in panel_rendering.rs) —
+            # "Selected login" was a real heading in the pre-P8 monolithic
+            # vault_tui.rs, removed by the redesign; the current panel shows
+            # the item's own title instead. Grid-replay for the same P8.5
+            # (b) unchanged-cell reason as above.
+            session.wait_for_screen_text("GitHub", timeout=5)
             session.checkpoint()
 
             session.send_text("x")
@@ -394,7 +472,7 @@ def vault_flow(binary: Path):
             session.send_tab()
             session.checkpoint()
             session.send_enter()
-            session.wait_for("Selected login", timeout=10)
+            session.wait_for_screen_text("GitHub", timeout=10)
 
             session.send_text("q")
             exit_code = session.wait_exit(timeout=5)
@@ -412,7 +490,7 @@ def vault_flow(binary: Path):
             restarted.wait_for("Vault open", timeout=10)
             restarted.wait_for("GitHub", timeout=5)
 
-            restarted.send_text("k")
+            restarted.send_text("w")
             restarted.wait_for("Ways in (2)", timeout=5)
 
             restarted.send_text("q")
@@ -533,11 +611,18 @@ def recovery_secret_rotation_flow(binary: Path):
             session.wait_for("Vault initialized", timeout=10)
             session.wait_for("No vault items yet", timeout=5)
 
-            session.send_text("k")
+            # P8.V.5: navigate to keyslots ("ways in") with `w`, not the
+            # stale `k` binding — see the note on the earlier occurrence.
+            session.send_text("w")
             session.wait_for("Ways in", timeout=5)
 
-            # P8.5 (c): S10 (ia.md "Ways in") footer, exact string.
-            assert_footer(session, "↑↓ move  a add  x remove  ? all keys  ⎋ back")
+            # P8.5 (c) / P8.V.4: S10 (ia.md "Ways in") footer, exact string
+            # (crates/paranoid-cli/src/vault_tui/footer.rs
+            # `contextual_footer` for `Screen::Keyslots`) — `k mechanics`
+            # toggles the S10d drill-down; adding a way in has its own
+            # `m`/`b`/`c` keys documented behind `? all keys`, not a base
+            # `a add` binding.
+            assert_footer(session, "↑↓ move  k mechanics  x remove  ? all keys  ⎋ back")
             session.checkpoint()
 
             session.send_text("p")
@@ -551,7 +636,13 @@ def recovery_secret_rotation_flow(binary: Path):
             session.send_tab()
             session.checkpoint()
             session.send_enter()
-            session.wait_for("Selected keyslot", timeout=10)
+            # `submit_rotate_recovery_secret` returns to `Screen::Keyslots`
+            # on success — same "Keyslot Detail" panel title as above, not
+            # the "Selected keyslot" error-status substring. Grid-replay
+            # assertion for the same P8.5 (b) unchanged-cell reason noted
+            # above (the preceding `checkpoint()` only resets what this
+            # harness has consumed, not what ratatui considers "changed").
+            session.wait_for_screen_text("Keyslot Detail", timeout=10)
 
             session.send_text("q")
             exit_code = session.wait_exit(timeout=5)

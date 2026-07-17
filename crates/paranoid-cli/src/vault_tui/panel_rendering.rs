@@ -840,10 +840,7 @@ pub(crate) fn locked_panel(_app: &App) -> Paragraph<'static> {
             theme::locked().add_modifier(Modifier::BOLD),
         ),
         Line::raw(""),
-        Line::styled(
-            format!("{ICON_ACTION} Unlock"),
-            theme::accent_action(),
-        ),
+        Line::styled(format!("{ICON_ACTION} Unlock"), theme::accent_action()),
     ];
     Paragraph::new(Text::from(lines))
         .alignment(Alignment::Center)
