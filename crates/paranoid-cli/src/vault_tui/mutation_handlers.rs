@@ -1074,11 +1074,11 @@ impl App {
             return;
         };
         match Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(enrollment.mnemonic.clone()))
+            .and_then(|mut clipboard| clipboard.set_text(enrollment.mnemonic.as_str().to_string()))
         {
             Ok(()) => {
                 self.session
-                    .arm_clipboard_clear(enrollment.mnemonic.clone());
+                    .arm_clipboard_clear(enrollment.mnemonic.as_str().to_string());
                 self.status = format!(
                     "Copied the current mnemonic recovery phrase to the clipboard. It will be cleared in {} seconds if unchanged.",
                     self.session.clipboard_clear_after().as_secs()

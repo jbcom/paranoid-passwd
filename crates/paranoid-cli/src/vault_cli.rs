@@ -478,7 +478,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
             let enrollment = vault.add_mnemonic_keyslot(label.clone())?;
             println!("slot_id\t{}", enrollment.keyslot.id);
             println!("wrap_algorithm\t{}", enrollment.keyslot.wrap_algorithm);
-            println!("mnemonic\t{}", enrollment.mnemonic);
+            println!("mnemonic\t{}", enrollment.mnemonic.as_str());
             Ok(0)
         }
         VaultCommand::RotateMnemonicSlot { id } => {
@@ -490,7 +490,7 @@ pub fn run(args: &[OsString]) -> anyhow::Result<i32> {
                 "label\t{}",
                 enrollment.keyslot.label.as_deref().unwrap_or_default()
             );
-            println!("mnemonic\t{}", enrollment.mnemonic);
+            println!("mnemonic\t{}", enrollment.mnemonic.as_str());
             Ok(0)
         }
         VaultCommand::AddDeviceSlot { label } => {

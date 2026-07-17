@@ -145,7 +145,7 @@ P6.0 CI research + two-tier trust design.
 - [ ] P7.3 Export safety — reject source==destination; temp-file atomic
   rename (backup_transfer.rs:210).
 - [ ] P7.4 Transactional imports; temp-DB restores (backup_transfer.rs:440).
-- [ ] P7.5 Zeroize MnemonicRecoveryEnrollment (SecretString + redacted
+- [x] P7.5 Zeroize MnemonicRecoveryEnrollment (SecretString + redacted
   Debug, keyslots.rs:98) — completes the P0 sweep.
 - [ ] P2.4 vendored slint-testing + real widget-event GUI tests.
 - [ ] P2.6 make e2e-ci / e2e-local split (real mouse/keyboard local GUI

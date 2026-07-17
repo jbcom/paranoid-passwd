@@ -1037,7 +1037,7 @@ fn enroll_mnemonic_from_ui(
     );
     state.selected_item = format!(
         "New recovery phrase: {}\nThis GUI keeps the phrase in memory only long enough to show the operator.",
-        enrollment.mnemonic
+        enrollment.mnemonic.as_str()
     );
     Ok(())
 }

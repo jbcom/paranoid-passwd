@@ -2594,7 +2594,7 @@ impl App {
 
     pub(crate) fn sync_rotated_mnemonic_unlock(&mut self, enrollment: &MnemonicRecoveryEnrollment) {
         if self.options.mnemonic_phrase.is_some() || self.options.mnemonic_phrase_env.is_some() {
-            self.options.mnemonic_phrase = Some(SecretString::new(enrollment.mnemonic.clone()));
+            self.options.mnemonic_phrase = Some(enrollment.mnemonic.clone());
             self.options.mnemonic_phrase_env = None;
             self.options.mnemonic_slot = Some(enrollment.keyslot.id.clone());
         }

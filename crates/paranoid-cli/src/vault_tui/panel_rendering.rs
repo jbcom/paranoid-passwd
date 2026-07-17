@@ -1548,7 +1548,7 @@ pub(crate) fn mnemonic_reveal_panel(app: &App) -> Paragraph<'static> {
                 enrollment.keyslot.label.as_deref().unwrap_or("")
             )),
             Line::raw(""),
-            Line::raw(enrollment.mnemonic.clone()),
+            Line::raw(enrollment.mnemonic.as_str().to_string()),
             Line::raw(""),
             Line::raw("Write this phrase down and store it offline."),
             Line::raw("Press c to copy it temporarily, then Enter or Esc to return to keyslots."),

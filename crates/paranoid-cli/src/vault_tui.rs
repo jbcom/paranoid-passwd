@@ -1241,7 +1241,7 @@ mod tests {
             .as_ref()
             .expect("mnemonic enrollment");
         assert_eq!(enrollment.keyslot.label.as_deref(), Some("paper-backup"));
-        assert_eq!(enrollment.mnemonic.split_whitespace().count(), 24);
+        assert_eq!(enrollment.mnemonic.as_str().split_whitespace().count(), 24);
         assert!(
             app.header
                 .as_ref()
@@ -1313,7 +1313,7 @@ mod tests {
             path: path.clone(),
             auth: VaultAuth::PasswordEnv("PARANOID_TUI_TEST_PASSWORD".to_string()),
             mnemonic_phrase_env: None,
-            mnemonic_phrase: Some(SecretString::new(enrollment.mnemonic.clone())),
+            mnemonic_phrase: Some(enrollment.mnemonic.clone()),
             mnemonic_slot: Some(enrollment.keyslot.id.clone()),
             device_slot: None,
             use_device_auto: false,
@@ -2141,7 +2141,7 @@ mod tests {
         assert!(matches!(app.screen, Screen::UnlockBlocked));
 
         app.unlock_form.mode = UnlockMode::Mnemonic;
-        app.unlock_form.mnemonic_phrase = SecretString::new(enrollment.mnemonic);
+        app.unlock_form.mnemonic_phrase = enrollment.mnemonic;
         app.unlock_form.mnemonic_slot = enrollment.keyslot.id;
         app.submit_native_unlock();
 

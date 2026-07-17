@@ -2,10 +2,10 @@ use crate::{
     AES_GCM_NONCE_LEN, AES_GCM_TAG_LEN, CERTIFICATE_MASTER_KEY_AAD, CERTIFICATE_WRAP_ALGORITHM,
     DEVICE_CHECK_PLAINTEXT, DEVICE_KEYRING_SERVICE, DEVICE_WRAP_ALGORITHM, EncryptedBlob,
     LEGACY_CERTIFICATE_WRAP_ALGORITHM, MASTER_KEY_AAD, MASTER_KEY_LEN, MNEMONIC_LANGUAGE,
-    MNEMONIC_WORD_COUNT, MNEMONIC_WRAP_ALGORITHM, PASSWORD_WRAP_ALGORITHM, UnlockedVault,
-    VaultCertificatePreview, VaultError, VaultHeader, decrypt_blob, derive_key, device_slot_aad,
-    device_store_delete_secret, device_store_set_secret, encrypt_blob, hex_decode, hex_encode,
-    mnemonic_slot_aad, random_bytes, random_hex_id,
+    MNEMONIC_WORD_COUNT, MNEMONIC_WRAP_ALGORITHM, PASSWORD_WRAP_ALGORITHM, SecretString,
+    UnlockedVault, VaultCertificatePreview, VaultError, VaultHeader, decrypt_blob, derive_key,
+    device_slot_aad, device_store_delete_secret, device_store_set_secret, encrypt_blob, hex_decode,
+    hex_encode, mnemonic_slot_aad, random_bytes, random_hex_id,
 };
 use argon2::password_hash::SaltString;
 use bip39::{Language, Mnemonic};
@@ -91,10 +91,19 @@ pub struct VaultKeyslot {
     pub device_account: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MnemonicRecoveryEnrollment {
     pub keyslot: VaultKeyslot,
-    pub mnemonic: String,
+    pub mnemonic: SecretString,
+}
+
+impl std::fmt::Debug for MnemonicRecoveryEnrollment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MnemonicRecoveryEnrollment")
+            .field("keyslot", &self.keyslot)
+            .field("mnemonic", &self.mnemonic)
+            .finish()
+    }
 }
 
 impl UnlockedVault {
@@ -334,7 +343,7 @@ impl UnlockedVault {
 
         Ok(MnemonicRecoveryEnrollment {
             keyslot,
-            mnemonic: mnemonic.to_string(),
+            mnemonic: SecretString::new(mnemonic.to_string()),
         })
     }
 

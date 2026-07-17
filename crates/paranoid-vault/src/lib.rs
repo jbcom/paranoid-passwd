@@ -1949,7 +1949,7 @@ mod tests {
         assert_eq!(enrollment.keyslot.mnemonic_words, Some(MNEMONIC_WORD_COUNT));
         assert_eq!(enrollment.keyslot.wrap_algorithm, MNEMONIC_WRAP_ALGORITHM);
         assert_eq!(
-            enrollment.mnemonic.split_whitespace().count(),
+            enrollment.mnemonic.as_str().split_whitespace().count(),
             usize::from(MNEMONIC_WORD_COUNT)
         );
         let parsed_mnemonic = Mnemonic::parse_in(Language::English, enrollment.mnemonic.as_str())
@@ -1974,6 +1974,35 @@ mod tests {
             })
             .expect("add login");
         assert_eq!(unlocked.get_item(&item.id).expect("get item").id, item.id);
+    }
+
+    #[test]
+    fn mnemonic_enrollment_debug_never_contains_the_phrase() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let enrollment = vault
+            .add_mnemonic_keyslot(Some("paper".to_string()))
+            .expect("add mnemonic keyslot");
+        let phrase = enrollment.mnemonic.as_str().to_string();
+
+        let enrollment_debug = format!("{enrollment:?}");
+        let field_debug = format!("{:?}", enrollment.mnemonic);
+
+        assert!(
+            !enrollment_debug.contains(phrase.as_str()),
+            "Debug output for MnemonicRecoveryEnrollment must not contain the phrase"
+        );
+        for word in phrase.split_whitespace() {
+            assert!(
+                !enrollment_debug.contains(word),
+                "Debug output leaked mnemonic word {word:?}"
+            );
+        }
+        assert!(!field_debug.contains(phrase.as_str()));
+        assert!(field_debug.contains("redacted"));
     }
 
     #[test]
@@ -2047,6 +2076,7 @@ mod tests {
             .expect("add mnemonic keyslot");
         let invalid_phrase = enrollment
             .mnemonic
+            .as_str()
             .split_whitespace()
             .take(usize::from(MNEMONIC_WORD_COUNT) - 1)
             .collect::<Vec<_>>()
@@ -2103,6 +2133,7 @@ mod tests {
             .expect("add mnemonic keyslot");
         let mut words = enrollment
             .mnemonic
+            .as_str()
             .split_whitespace()
             .map(str::to_string)
             .collect::<Vec<_>>();
