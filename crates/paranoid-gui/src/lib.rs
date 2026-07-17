@@ -295,12 +295,12 @@ impl GuiState {
             audit_jsonl: config.audit_jsonl,
             require_audit_sink: config.require_audit_sink,
             audit_sink_health: config.audit_sink_health,
-            status: "Ready. Core owns RNG, rejection sampling, audit math, and vault crypto."
-                .to_string(),
+            // brand.md §4: `rejection sampling` is not surfaced on the
+            // primary flow; the launch status leads with what the persona
+            // can do, not implementation nouns.
+            status: "Ready.".to_string(),
             generated_passwords: "No passwords generated yet.".to_string(),
-            audit_details:
-                "Run an audit to produce entropy, compliance, and rejection-sampling evidence."
-                    .to_string(),
+            audit_details: "Run an audit to produce evidence.".to_string(),
             vault_items: "Vault is locked or not loaded.".to_string(),
             vault_posture: "Vault posture unavailable.".to_string(),
             keyslot_summary: "No keyslots loaded.".to_string(),
@@ -330,9 +330,16 @@ impl GuiState {
         window.set_vault_unlocked(false);
     }
 
+    /// brand.md §3 rule 2: "Errors are guidance, not crash dumps... never
+    /// surface a raw crypto error code, an enum name, or a stack detail in
+    /// the primary flow." `message` is the calm, plain-language sentence
+    /// that leads; the underlying error renders in parentheses afterward as
+    /// reachable detail — the same pattern the vault TUI's unlock-failure
+    /// status uses (`screen_state.rs::refresh`) — never as the whole
+    /// message on its own.
     #[cfg(not(target_arch = "wasm32"))]
-    fn set_error(&mut self, context: &str, error: impl ToString) {
-        self.status = format!("{context}: {}", error.to_string());
+    fn set_error(&mut self, message: &str, error: impl ToString) {
+        self.status = format!("{message} ({})", error.to_string());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -528,7 +535,12 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_audit.borrow_mut();
         let result = run_generator_audit(&mut state, &length, &count, nist, pci, soc2);
         if let Err(error) = result {
-            state.set_error("Generator audit failed", error);
+            // brand.md §3 rule 2: calm sentence leads; the underlying cause
+            // is reachable in parentheses, never the whole message.
+            state.set_error(
+                "Couldn't generate a password with these settings. Adjust them and try again.",
+                error,
+            );
         }
         state.apply_to(&window);
     });
@@ -542,7 +554,10 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_init.borrow_mut();
         match init_vault_from_ui(&mut state, &path, &secret) {
             Ok(()) => {}
-            Err(error) => state.set_error("Vault initialization failed", error),
+            Err(error) => state.set_error(
+                "Couldn't create the vault. Check the path is writable and try again.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -556,7 +571,12 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_unlock.borrow_mut();
         match load_vault_from_ui(&mut state, &path, &secret) {
             Ok(()) => {}
-            Err(error) => state.set_error("Vault unlock failed", error),
+            // journeys.md J4 step 3b, verbatim opening clause: "That didn't
+            // open the vault. Check your passphrase and try again."
+            Err(error) => state.set_error(
+                "That didn't open the vault. Check your passphrase and try again.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -578,7 +598,10 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
             };
             match add_login_from_ui(&mut state, &path, &secret, input) {
                 Ok(()) => {}
-                Err(error) => state.set_error("Vault add login failed", error),
+                Err(error) => state.set_error(
+                    "Couldn't save this item. Nothing was added — check the fields and try again.",
+                    error,
+                ),
             }
             state.apply_to(&window);
         },
@@ -593,7 +616,10 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_rotate.borrow_mut();
         match rotate_selected_login_from_ui(&mut state, &path, &secret, &length) {
             Ok(()) => {}
-            Err(error) => state.set_error("Generate and rotate failed", error),
+            Err(error) => state.set_error(
+                "Couldn't generate a new password for this item. The old one is unchanged.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -607,7 +633,12 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_mnemonic.borrow_mut();
         match enroll_mnemonic_from_ui(&mut state, &path, &secret, &label) {
             Ok(()) => {}
-            Err(error) => state.set_error("Mnemonic enrollment failed", error),
+            // brand.md §4: `keyslot`/`mnemonic keyslot` → "way in" /
+            // "recovery phrase" on the primary flow.
+            Err(error) => state.set_error(
+                "Couldn't add a recovery phrase. This vault's ways in are unchanged.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -621,7 +652,10 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_backup.borrow_mut();
         match export_backup_from_ui(&mut state, &path, &secret, &output) {
             Ok(()) => {}
-            Err(error) => state.set_error("Backup export failed", error),
+            Err(error) => state.set_error(
+                "Couldn't export the backup. Nothing was written — check the output path and try again.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -634,8 +668,16 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         };
         let mut state = state_for_copy.borrow_mut();
         match copy_primary_password(&state) {
-            Ok(()) => state.status = "Primary generated password copied to clipboard.".to_string(),
-            Err(error) => state.set_error("Clipboard copy failed", error),
+            // brand.md §3 rule 4 ("never overpromise"): this GUI path has
+            // no timed clipboard-clear yet (unlike the TUI's
+            // `NativeSessionHardening::arm_clipboard_clear`), so it must
+            // not claim the "clears in 30 seconds" guarantee it cannot
+            // keep — state only what actually happened.
+            Ok(()) => state.status = "Copied.".to_string(),
+            Err(error) => state.set_error(
+                "Couldn't reach the system clipboard. Copy the password by hand instead.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -1028,7 +1070,10 @@ fn run_generator_audit(
         .collect::<Vec<_>>()
         .join("\n");
     state.audit_details = summarize_report(&report, stages.as_slice());
-    state.status = "Generator audit complete through paranoid-core.".to_string();
+    // brand.md §3 rule 6 ("one voice across every surface"): the status
+    // bar drops the internal crate name; the verdict itself renders as the
+    // `Randomness check: passed` label on the results panel (S11).
+    state.status = "Generated. Randomness check: passed.".to_string();
     state.last_report = Some(report);
     Ok(())
 }
@@ -1132,7 +1177,10 @@ fn lock_vault(state: &mut GuiState) {
     state.vault_posture = "Vault posture unavailable".to_string();
     state.keyslot_summary = "No keyslots loaded.".to_string();
     state.generated_passwords = "No passwords generated yet.".to_string();
-    state.status = "Vault locked. Re-enter the recovery secret to unlock.".to_string();
+    // brand.md §3 micro-example, verbatim: "Locked. Nothing is readable
+    // until you unlock again." (same wording as the vault TUI's
+    // panic-lock status; brand.md §3 rule 4, no "you're safe" overclaim.)
+    state.status = "Locked. Nothing is readable until you unlock again.".to_string();
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1193,8 +1241,10 @@ fn enroll_mnemonic_from_ui(
         .add_mnemonic_keyslot(normalize_optional_field(label.as_str()))
         .map_err(|error| error.to_string())?;
     state.keyslot_summary = summarize_keyslots(vault.header());
+    // brand.md §4: `keyslot` → "way in" on the primary flow; the id stays
+    // for the operator who needs it to find the row again.
     state.status = format!(
-        "Mnemonic recovery slot {} enrolled. Capture the phrase offline before closing this screen.",
+        "Recovery phrase added as way in {}. Write it down now — this vault won't show it again.",
         enrollment.keyslot.id
     );
     state.selected_item = format!(
@@ -1249,8 +1299,11 @@ fn load_vault(state: &mut GuiState, path: &Path, secret: &str) -> Result<(), Str
     state.keyslot_summary = keyslot_summary;
     state.selected_login_id = selected.0;
     state.selected_item = selected.1;
+    // journeys.md J4 step 3a, verbatim opening clause: "Vault open. 12
+    // items." — the path is real, reachable detail that follows rather
+    // than leads.
     state.status = format!(
-        "Vault unlocked. {} item(s) loaded from {}.",
+        "Vault open. {} item(s). Loaded from {}.",
         items.len(),
         path.display()
     );
@@ -1393,10 +1446,9 @@ fn rotate_selected_login(
     state.selected_login_id = Some(item.id.clone());
     load_vault(state, path, secret)?;
     state.selected_login_id = Some(item.id.clone());
-    state.status = format!(
-        "Generated one password and rotated item {}. Generator verdict: PASS.",
-        item.id
-    );
+    // brand.md §4: chi-squared/p-value verdict → "randomness check:
+    // passed" on the primary flow (journeys.md J2 step 1).
+    state.status = format!("Rotated. ✓ Randomness check: passed. ({})", item.id);
     Ok(())
 }
 

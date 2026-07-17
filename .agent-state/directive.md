@@ -571,7 +571,7 @@ P6.0 CI research + two-tier trust design.
   Slint/winit/Xvfb-without-WM layout-property propagation gap directly — a
   new, narrower follow-up than this item's actual scope (implementing the
   design system), not a defect in the design-system work itself.
-- [ ] P8.4 Copy pass — every user-facing string across TUI + GUI + CLI
+- [x] P8.4 Copy pass — every user-facing string across TUI + GUI + CLI
   errors is checked against brand.md §3's five voice rules and replaced with
   the exact rewrites brand.md §3 and the vocabulary table in §4 specify —
   this is verbatim reconciliation, not fresh copywriting. Minimum checklist

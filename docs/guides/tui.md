@@ -43,20 +43,24 @@ Wizard                                  Audit Preview
   Uppercase [A-Z]: ON                  Frameworks: nist, pci_dss
   Digits [0-9]: ON
   Symbols: ON                          Ready: 72 chars, 1 passwords, 197.18 bits of entropy...
-  ...                                  Controls: Up/Down move, Left/Right adjust, Enter run
+  ...                                  (footer) Controls  Up/Down: move  Left/Right: adjust  Space: toggle  Enter: edit/run  q: quit
 ```
 
-The results screen keeps the generator-wide audit separate from per-password verdicts:
+The results screen leads with the password and its verdict, in the voice
+`docs/design/journeys.md` J2 specifies — the SHA-256 hash and framework
+detail live one drill-level down in the tabs below, not on the primary
+screen:
 
 ```text
-paranoid-passwd · Results
-Native generation complete. Review the verdict and derived details.
+paranoid-passwd · Your new password
+Review the verdict, then copy it. The full evidence is one tab away.
 
 Primary Password
+primary
 ••••••••••••••••••••••••q7$A
-SHA-256: <hex>
+✓ Randomness check: passed
+Selected frameworks: nist
 Additional passwords: 2
-Verdict: PASS
 ```
 
 ## Controls
@@ -126,13 +130,13 @@ When no vault exists yet at the configured path, the vault TUI's first screen is
 - OS keychain status (backend name, available/unavailable, error detail when unavailable)
 - clipboard status (available/unavailable, error detail when unavailable)
 - display server kind (Quartz, Wayland, X11, Windows, or headless)
-- configured seal-provider posture (empty on a fresh path, since nothing is configured yet)
+- hardware protection status, shown on-screen as "Hardware protection" (brand.md §4; empty on a fresh path, since nothing is configured yet)
 - the suggested initial configuration this evidence implies — a password recovery keyslot always (the only vault-init path), plus a device-bound keyslot offered only when the OS keychain probe reports available
 
 Two choices are offered:
 
 - **Accept suggested configuration** — proceeds to the recovery-secret entry form with Password mode preselected. Submitting initializes the vault, and when the keychain was available and accepted, a device-bound keyslot is enrolled automatically right after init.
-- **Adjust manually** — proceeds to the same recovery-secret entry form, but skips the automatic device-bound keyslot enrollment; add keyslots afterward from the Keyslots view (`k`) instead.
+- **Adjust manually** — proceeds to the same recovery-secret entry form, but skips the automatic device-bound keyslot enrollment; add ways in afterward from the Ways in view (`k`) instead.
 
 Since the only way to create a vault is through this password-recovery init path, both choices end up entering a recovery secret; the difference is only whether the suggested device-bound keyslot gets enrolled automatically.
 

@@ -124,9 +124,11 @@ fn init_vault_via_real_widgets_creates_and_unlocks_vault() {
         "clicking Init should create the vault file at the typed path"
     );
     let status = window.get_status().to_string();
+    // brand.md §3 micro-example, verbatim: "Vault open. 12 items." — the
+    // same framing journeys.md J4 gives every successful unlock/init.
     assert!(
-        status.contains("Vault unlocked"),
-        "status should report the vault as unlocked after Init, got: {status}"
+        status.contains("Vault open"),
+        "status should report the vault as open after Init, got: {status}"
     );
     assert!(
         status.contains("0 item(s)"),
@@ -231,8 +233,10 @@ fn generate_and_rotate_via_real_widgets_rotates_selected_login() {
     click(&window, "rotate-button");
 
     let status = window.get_status().to_string();
+    // brand.md §4: chi-squared/p-value verdict → "randomness check:
+    // passed" on the primary flow.
     assert!(
-        status.contains("Generated one password and rotated item"),
+        status.contains("Rotated") && status.contains("Randomness check: passed"),
         "status should confirm the rotation, got: {status}"
     );
     let selected_item = window.get_selected_item().to_string();
@@ -269,9 +273,10 @@ fn enroll_mnemonic_via_real_widgets_adds_keyslot() {
     click(&window, "add-way-in-button");
 
     let status = window.get_status().to_string();
+    // brand.md §4: `keyslot` → "way in" on the primary flow.
     assert!(
-        status.contains("Mnemonic recovery slot") && status.contains("enrolled"),
-        "status should confirm the mnemonic enrollment, got: {status}"
+        status.contains("Recovery phrase added as way in"),
+        "status should confirm the recovery phrase was added, got: {status}"
     );
     let keyslot_summary = window.get_keyslot_summary().to_string();
     assert!(
@@ -343,8 +348,10 @@ fn run_audit_via_real_widgets_populates_generator_state() {
     click(&window, "run-audit-button");
 
     let status = window.get_status().to_string();
+    // brand.md §4: chi-squared/p-value verdict → "randomness check:
+    // passed" on the primary flow.
     assert!(
-        status.contains("Generator audit complete"),
+        status.contains("Randomness check: passed"),
         "status should reflect a completed audit, got: {status}"
     );
     let generated = window.get_generated_passwords().to_string();

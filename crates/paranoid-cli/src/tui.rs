@@ -239,7 +239,13 @@ impl App {
 
     fn start_audit(&mut self) {
         if let Err(error) = self.request.resolve() {
-            self.status = format!("Blocked: {error}");
+            // brand.md §3 rule 2: rewrite the failure as one calm sentence
+            // that tells the person what to do next, with the exact cause
+            // as reachable detail rather than the leading clause (same
+            // pattern as vault_tui.rs's unlock-failure status).
+            self.status = format!(
+                "These settings can't produce a password yet. Adjust them and try again. ({error})"
+            );
             self.screen = Screen::Configure;
             return;
         }
@@ -273,13 +279,17 @@ impl App {
             }) {
                 Ok(()) => {
                     self.session.arm_clipboard_clear(password.value.clone());
+                    // brand.md §3 micro-example, verbatim: "Copied. It
+                    // clears from the clipboard in 30 seconds."
                     self.status = format!(
-                        "Copied password to the system clipboard. It will be cleared in {} seconds if unchanged.",
+                        "Copied. It clears from the clipboard in {} seconds.",
                         self.session.clipboard_clear_after().as_secs()
                     );
                 }
                 Err(error) => {
-                    self.status = format!("Clipboard unavailable: {error}");
+                    self.status = format!(
+                        "Couldn't reach the system clipboard. Copy the password by hand instead. ({error})"
+                    );
                 }
             }
         }
@@ -290,13 +300,15 @@ impl App {
             match clear_clipboard_if_matches(expected.as_str()) {
                 Ok(true) => {
                     self.status = format!(
-                        "Clipboard auto-cleared after {} seconds.",
+                        "Clipboard cleared after {} seconds.",
                         self.session.clipboard_clear_after().as_secs()
                     );
                 }
                 Ok(false) => {}
                 Err(error) => {
-                    self.status = format!("Clipboard auto-clear failed: {error}");
+                    self.status = format!(
+                        "Couldn't clear the clipboard automatically. Clear it by hand. ({error})"
+                    );
                 }
             }
         }
@@ -331,7 +343,9 @@ impl App {
                             self.screen = Screen::Results;
                         }
                         Err(error) => {
-                            self.status = format!("Audit failed: {error}");
+                            self.status = format!(
+                                "Generation didn't complete. Nothing was produced — adjust the settings and try again. ({error})"
+                            );
                             self.current_stage = None;
                             self.completed_stages.clear();
                             self.screen = Screen::Configure;
@@ -861,7 +875,7 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Length(5),
+            Constraint::Length(7),
             Constraint::Length(3),
             Constraint::Min(10),
             Constraint::Length(3),
@@ -870,10 +884,14 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
     render_header(
         frame,
         chunks[0],
-        "Results",
-        "Native generation complete. Review the verdict and derived details.",
+        "Your new password",
+        "Review the verdict, then copy it. The full evidence is one tab away.",
     );
 
+    // journeys.md J2 step 1: the password and the verdict render together,
+    // leading — SHA-256/frameworks/per-password detail moves to the
+    // Summary/Compliance detail tabs below (§4 "Depth is reachable, never
+    // deleted"; brand.md §4 chi-squared/p-value → "randomness check: passed").
     let password_block = Paragraph::new(Text::from(vec![
         Line::styled(
             "primary",
@@ -883,7 +901,16 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
             primary.value.as_str(),
             Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
         ),
-        Line::raw(format!("SHA-256: {}", primary.sha256_hex)),
+        Line::styled(
+            if audit.overall_pass {
+                "✓ Randomness check: passed"
+            } else {
+                "! Randomness check: review the evidence tab"
+            },
+            Style::default()
+                .fg(if audit.overall_pass { GREEN } else { AMBER })
+                .add_modifier(Modifier::BOLD),
+        ),
         Line::raw(format!(
             "Selected frameworks: {}",
             selected_framework_summary(primary)
@@ -891,10 +918,6 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Line::raw(format!(
             "Additional passwords: {}",
             report.passwords.len().saturating_sub(1)
-        )),
-        Line::raw(format!(
-            "Verdict: {}",
-            if audit.overall_pass { "PASS" } else { "REVIEW" }
         )),
     ]))
     .block(
@@ -942,9 +965,11 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
         chunks[3],
     );
 
+    // brand.md §3e: the footer shows only the keys valid on this screen, in
+    // the `key label` glyph format (not a flattened "Controls:" sentence).
     frame.render_widget(
         Paragraph::new(format!(
-            "{}  Controls: Left/Right switch detail tabs, c copies the password, r returns to configuration, q quits.",
+            "{}  ←→ tabs   c copy   r reconfigure   q quit",
             app.status
         ))
         .style(Style::default().fg(TEXT).bg(BG))
@@ -1305,7 +1330,12 @@ mod tests {
         app.start_audit();
 
         assert_eq!(app.screen, Screen::Configure);
-        assert!(app.status.contains("Blocked:"));
+        // brand.md §3 rule 2: the calm sentence leads; the raw cause is
+        // reachable in parentheses, not the primary message.
+        assert!(
+            app.status
+                .contains("These settings can't produce a password yet")
+        );
         assert!(app.worker.is_none());
     }
 

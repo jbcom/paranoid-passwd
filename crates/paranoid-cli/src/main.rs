@@ -302,6 +302,21 @@ fn parse_args(args: Vec<OsString>) -> anyhow::Result<ParseOutcome> {
                 options.profile = parse_ops_profile(&parser.value()?.string()?)?;
                 options.explicit_operational_flag = true;
             }
+            // brand.md §3c: the user-facing surface names this
+            // `--assurance strict` ("apply the strictest audit and evidence
+            // rules") rather than the internal `federal-ready` profile name.
+            // `--federal-ready` keeps working unchanged for existing scripts.
+            Long("assurance") => {
+                let value = parser.value()?.string()?;
+                if value != "strict" {
+                    return Err(anyhow::anyhow!(
+                        "unknown assurance level: {value} (expected: strict)"
+                    ));
+                }
+                options.profile = OpsProfile::FederalReady;
+                options.require_audit_sink = true;
+                options.explicit_operational_flag = true;
+            }
             Long("federal-ready") => {
                 options.profile = OpsProfile::FederalReady;
                 options.require_audit_sink = true;
@@ -315,7 +330,10 @@ fn parse_args(args: Vec<OsString>) -> anyhow::Result<ParseOutcome> {
                 options.require_audit_sink = true;
                 options.explicit_operational_flag = true;
             }
-            Long("federal-evidence") => {
+            // brand.md §3c/§4: user-facing name for `--federal-evidence` is
+            // "Evidence bundle" — `--evidence` is the documented spelling;
+            // `--federal-evidence` keeps working unchanged.
+            Long("evidence") | Long("federal-evidence") => {
                 options.federal_evidence = true;
                 options.output = OutputFormat::Json;
                 options.profile = OpsProfile::FederalReady;
@@ -391,11 +409,13 @@ Output:
       --json               Emit a structured JSON operation report on stdout
       --audit-jsonl PATH   Append redacted audit events to a JSONL sink
       --require-audit-sink Fail closed unless --audit-jsonl is writable
-      --profile PROFILE    Policy profile: default | federal-ready
-      --federal-ready      Alias for --profile federal-ready --require-audit-sink
-      --federal-evidence   Emit federal-ready startup evidence as JSON
+      --assurance strict   Apply the strictest audit and evidence rules
+                           (alias: --federal-ready; --profile federal-ready)
+      --evidence           Produce a signed, timestamped evidence bundle as JSON
+                           you can hand to a lawyer, auditor, or court
+                           (alias: --federal-evidence)
       --detect-environment Emit OS keychain, clipboard, display server, and
-                           seal-provider capability evidence as JSON
+                           hardware-protection capability evidence as JSON
       --no-audit           Skip the statistical audit
       --quiet              Suppress audit stage output on stderr
   -V, --version            Print version info and exit
@@ -784,6 +804,58 @@ mod tests {
         assert_eq!(options.output, OutputFormat::Json);
         assert!(options.require_audit_sink);
         assert!(!should_launch_tui(&options, true));
+    }
+
+    #[test]
+    fn evidence_flag_is_the_documented_federal_evidence_alias() {
+        // brand.md §3c/§4: `--evidence` is the user-facing spelling for the
+        // "Evidence bundle" action; it must behave identically to
+        // `--federal-evidence`.
+        let ParseOutcome::Run(options) = parse_args(vec![
+            OsString::from("paranoid-passwd"),
+            OsString::from("--evidence"),
+        ])
+        .expect("parse") else {
+            panic!("expected run options");
+        };
+
+        assert!(options.federal_evidence);
+        assert_eq!(options.profile, OpsProfile::FederalReady);
+        assert_eq!(options.output, OutputFormat::Json);
+        assert!(options.require_audit_sink);
+    }
+
+    #[test]
+    fn assurance_strict_is_the_documented_federal_ready_alias() {
+        // brand.md §3c: `--assurance strict` is the user-facing spelling
+        // for the `federal-ready` profile ("apply the strictest audit and
+        // evidence rules").
+        let ParseOutcome::Run(options) = parse_args(vec![
+            OsString::from("paranoid-passwd"),
+            OsString::from("--assurance"),
+            OsString::from("strict"),
+        ])
+        .expect("parse") else {
+            panic!("expected run options");
+        };
+
+        assert_eq!(options.profile, OpsProfile::FederalReady);
+        assert!(options.require_audit_sink);
+        assert!(options.explicit_operational_flag);
+    }
+
+    #[test]
+    fn assurance_rejects_unknown_levels() {
+        let result = parse_args(vec![
+            OsString::from("paranoid-passwd"),
+            OsString::from("--assurance"),
+            OsString::from("loose"),
+        ]);
+
+        match result {
+            Ok(_) => panic!("unknown assurance level must be rejected"),
+            Err(error) => assert!(error.to_string().contains("strict")),
+        }
     }
 
     #[test]
