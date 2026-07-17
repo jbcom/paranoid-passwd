@@ -1618,8 +1618,8 @@ impl App {
     /// no-op on pre-unlock screens (`EnvironmentApproval`/`UnlockBlocked`),
     /// which have no unlocked state to purge.
     ///
-    /// Documented as the TUI panic key in `docs/` (see
-    /// `docs/reference/panic-lock-hotkey.md`).
+    /// Documented as the TUI panic key in `docs/guides/tui.md` (see
+    /// "Panic / quick-lock hotkey").
     pub(crate) fn handle_panic_lock_hotkey(&mut self) -> bool {
         if !self.screen.is_unlocked_vault_screen() {
             return false;
@@ -1658,8 +1658,7 @@ impl App {
         // handler happens to leave 'l' unbound. `handle_panic_lock_hotkey`
         // itself no-ops on pre-unlock screens, so this is safe to check
         // unconditionally on every keypress.
-        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('l'))
-        {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('l')) {
             self.handle_panic_lock_hotkey();
             return false;
         }

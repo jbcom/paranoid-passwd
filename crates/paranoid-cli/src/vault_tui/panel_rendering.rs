@@ -189,13 +189,13 @@ pub(crate) fn footer_text(app: &App) -> &'static str {
         }
         Screen::Vault => {
             if app.search_mode {
-                "Controls: Type to filter the unlocked list, Backspace deletes, Ctrl+u clears, Enter or Esc exits filter mode, q quits."
+                "Controls: Type to filter the unlocked list, Backspace deletes, Ctrl+u clears, Enter or Esc exits filter mode, q quits. Ctrl+L panic-locks the vault immediately."
             } else {
-                "Controls: Up/Down select items, / filters, a adds login, n adds secure note, v adds card, i adds identity, e edits, d deletes, g generates and stores one password, x exports backup, t exports transfer, u imports backup, p imports transfer, k opens keyslots, E reviews environment approval, c copies the selected value, r refreshes, q quits."
+                "Controls: Up/Down select items, / filters, a adds login, n adds secure note, v adds card, i adds identity, e edits, d deletes, g generates and stores one password, x exports backup, t exports transfer, u imports backup, p imports transfer, k opens keyslots, E reviews environment approval, c copies the selected value, r refreshes, q quits. Ctrl+L panic-locks the vault immediately."
             }
         }
         Screen::Keyslots => {
-            "Controls: Up/Down select keyslots, m adds mnemonic recovery, b adds device-bound, c adds certificate-wrapped, w rewraps the selected certificate slot, l relabels the selected keyslot, o rotates the selected mnemonic slot, p rotates the recovery secret, d removes the selected non-recovery slot, r rebinds the selected device slot, Esc returns to items, q quits."
+            "Controls: Up/Down select keyslots, m adds mnemonic recovery, b adds device-bound, c adds certificate-wrapped, w rewraps the selected certificate slot, l relabels the selected keyslot, o rotates the selected mnemonic slot, p rotates the recovery secret, d removes the selected non-recovery slot, r rebinds the selected device slot, Esc returns to items, q quits. Ctrl+L panic-locks the vault immediately."
         }
         Screen::UnlockBlocked => {
             "Controls: p/m/b/c pick password, mnemonic, device, or certificate mode; Up/Down or Tab move; Left/Right cycles the mode field; Enter advances or unlocks; r retries current policy; q quits."
@@ -216,19 +216,19 @@ pub(crate) fn footer_text(app: &App) -> &'static str {
         | Screen::RotateMnemonicSlot
         | Screen::RotateRecoverySecret
         | Screen::GenerateStore => {
-            "Controls: Type into the focused field, Up/Down or Tab move, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits."
+            "Controls: Type into the focused field, Up/Down or Tab move, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits. Ctrl+L panic-locks the vault immediately."
         }
         Screen::ExportBackup
         | Screen::ExportTransfer
         | Screen::ImportBackup
         | Screen::ImportTransfer => {
-            "Controls: Type into the focused path field, Up/Down or Tab move, Space/Left/Right toggle overwrite when selected, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits."
+            "Controls: Type into the focused path field, Up/Down or Tab move, Space/Left/Right toggle overwrite when selected, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits. Ctrl+L panic-locks the vault immediately."
         }
         Screen::MnemonicReveal => {
-            "Controls: c copies the phrase, Enter or Esc returns to keyslots, q quits."
+            "Controls: c copies the phrase, Enter or Esc returns to keyslots, q quits. Ctrl+L panic-locks the vault immediately."
         }
         Screen::DeleteConfirm => {
-            "Controls: y or Enter confirms deletion, n or Esc cancels, q quits."
+            "Controls: y or Enter confirms deletion, n or Esc cancels, q quits. Ctrl+L panic-locks the vault immediately."
         }
     }
 }

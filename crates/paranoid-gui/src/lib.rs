@@ -1677,8 +1677,8 @@ mod tests {
         assert!(state.status.to_lowercase().contains("locked"));
 
         // The vault item persisted to disk survives the in-memory lock.
-        let unlocked =
-            paranoid_vault::unlock_vault(&vault_path, "correct horse battery staple").expect("unlock");
+        let unlocked = paranoid_vault::unlock_vault(&vault_path, "correct horse battery staple")
+            .expect("unlock");
         assert_eq!(unlocked.list_items().expect("list items").len(), 1);
     }
 
