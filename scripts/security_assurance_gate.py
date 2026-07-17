@@ -820,10 +820,12 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_tui/screen_state.rs",
-                "} = self;",
+                "FAIL-CLOSED EXHAUSTIVENESS (P9 re-verify)",
                 "purge_secret_state_on_lock destructures App with an exhaustive "
                 "(no `..`) field list, so adding a new field fails the build "
-                "until it is triaged as secret-to-scrub or acknowledged non-secret",
+                "until it is triaged as secret-to-scrub or acknowledged non-secret. "
+                "Pinning this marker means reverting the destructure to `..` (which "
+                "would silently lose the compile-time guarantee) also fails the gate.",
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_tui.rs",
