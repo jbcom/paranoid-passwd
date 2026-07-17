@@ -314,6 +314,21 @@ P6.0 CI research + two-tier trust design.
   ships the redesigned product (PUX.1-5 then P8.1-5 all execute this pass).
 
 
+
+## P8.V — Visual-verify mustFix (opus verdict matchesDesign=false; must clear before P8 done). Ordered: security first.
+
+- [ ] P8.V.1 TUI item detail shows the password in CLEARTEXT by default ('password: S3cr3t-mail-pw'). Mask it ('Pass ••••••••') with an explicit Reveal action per ia.md S7 — this is a coercion/shoulder-surfer threat-model failure, not just a visual gap. The GUI already does this correctly; the TUI must match.
+- [ ] P8.V.2 TUI has no distinct item-detail (S7) screen: ⏎ on the vault list does not navigate anywhere, yet the footer promises '⏎ open'. Build the S7 screen (masked user/pass + '▸ Copy password' accent + Reveal/Edit + '⏎ copy r reveal e edit ? all keys ⎋ back' footer) and wire ⏎ to it.
+- [ ] P8.V.3 Kill the raw data dumps in the TUI vault detail pane: 'id:', 'updated_at_epoch:', 'duplicate passwords elsewhere:', 'password history entries:' are the 'box of data' the redesign exists to eliminate (ia.md rule 5, journeys.md invariant 1). Lead with intent + one '▸' accent; move mechanics behind a drill-down.
+- [ ] P8.V.4 TUI Ways-in (S10): rename rows by relationship ('recovery phrase'/'this device'/'trusted contact'), not by internal enum ('password_recovery'/'mnemonic_recovery'), and move keyslot mechanics ('wrap: argon2id+aes-256-gcm', kind, device-bound) behind the ia.md S10d 'Show the mechanics' drill-down instead of the intent-first surface. Add the 'Ways in (n)' count and brand.md §3a body copy.
+- [ ] P8.V.5 Fix the hotkey drift: the vault-list ? overlay and ways-in footer say 'w ways in' but the working key on Screen::Vault is 'k'. Rebind ways-in to 'w' on the vault screen (or fix every footer/overlay to say 'k') so the advertised key actually works.
+- [ ] P8.V.6 Wire the TUI S2d fingerprint drill-down: the trust-gate ? overlay advertises 'd show the fingerprint' but handle_trust_gate_key has no 'd' handler — either implement the fingerprint leaf or stop advertising the key.
+- [ ] P8.V.7 Replace the prose hotkey walls relocated into TUI detail panes ('Press a to add login, n to add secure note, v to add card…' on Home, S7, and Ways-in) — this is the 40-key Controls wall in a new location. The contextual footer + ? overlay already carry these; remove them from the panels.
+- [ ] P8.V.8 Redesign the standalone generator wizard (paranoid-passwd --tui / tui.rs) — it was not touched by the brand/ia/journeys work. It is still the 21-field scrolling wizard with a 'Controls' hotkey block, no contextual footer ('Selected field: 1 of 21' at the bottom), no '▸' accent, and six evidence tabs thrust forward on the results screen instead of a verdict-first + 'Show the evidence' drill-down (journeys.md J2).
+- [ ] P8.V.9 Remove the third 'Access' panel (full vault filesystem path + unlock method) from the TUI home/steady-state screens — it violates the one-job / fixed two-pane (primary + detail) skeleton in ia.md §1 and leaks the vault path onto every screen.
+- [ ] P8.V.10 Set up a GUI render-to-image path (SoftwareRenderer to PNG under xvfb, or equivalent) so the Slint window can actually be screenshotted and visually verified. Right now the GUI's visual identity is only verifiable by reading markup — the 'does it actually look designed' gate cannot be closed on the GUI without a rendered pixel to READ.
+- [ ] P8.V.11 TUI panic-lock (S14): render the ia.md S14 centered '⊘ Locked.' state with a '▸ Unlock' accent and the '⊘' title-bar token, instead of dropping straight into the two-pane unlock form with engineer chatter ('Native unlock now works directly from the TUI; env-based CLI inputs remain valid too').
+
 ## P9 — Paranoia hardening (user-approved 2026-07-17: ALL P9.1-9.7 before FINAL). Threat model: offline / local attacker / memory disclosure / coercion. Ordered by real security value; run before FINAL.
 
 - [x] P9.1 Zeroize decrypted vault-item payloads (LoginRecord/CardRecord/PasswordHistoryEntry + New*/Update* + TUI App.detail + GUI vault_secret)
