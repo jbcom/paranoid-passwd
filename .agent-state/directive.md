@@ -327,7 +327,7 @@ P6.0 CI research + two-tier trust design.
 
 ## PUX — Product design & journey (user 2026-07-17: "not clearly communicating anything — no brand identity, no direction, no storyboarding; just boxes with technical info"). Runs BEFORE P8; P8 becomes its build arm.
 
-- [ ] PUX.1 Positioning & brand foundation — define WHO this is for (threat
+- [x] PUX.1 Positioning & brand foundation — define WHO this is for (threat
   model as persona: the genuinely-targeted individual — activist, journalist,
   engineer under coercion risk) and the ONE promise the name makes. Voice &
   tone, naming of concepts (today's "keyslots/seal posture/federal evidence"
