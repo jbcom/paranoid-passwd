@@ -41,29 +41,68 @@ fi
 if rg -n '\bunsafe\b' \
   "$REPO_ROOT/crates/paranoid-core/src" \
   "$REPO_ROOT/crates/paranoid-cli/src" \
-  "$REPO_ROOT/crates/paranoid-vault/src" \
   --glob '*.rs' >/dev/null 2>&1; then
-  fail "unsafe Rust detected in core, CLI, or vault Rust sources"
+  fail "unsafe Rust detected in core or CLI Rust sources"
 else
-  gui_unsafe_hits="$(
-    rg -n '\bunsafe\b' \
-      "$REPO_ROOT/crates/paranoid-gui/src" \
-      "$REPO_ROOT/crates/paranoid-gui/build.rs" \
-      --glob '*.rs' || true
+  pass "core and CLI Rust sources remain unsafe-free"
+fi
+
+# paranoid-vault is unsafe-free everywhere EXCEPT the audited P9.3 OS
+# memory-hardening module (setrlimit/prctl/ptrace/mlock/munlock FFI, which
+# has no safe equivalent): every `unsafe` hit there must live in
+# mem_hardening.rs, under a `#![allow(unsafe_code)]`/`#[allow(unsafe_code)]`
+# that the crate's `unsafe_code = "deny"` lint permits, with a `// SAFETY:`
+# justification on each block.
+vault_unsafe_hits="$(
+  rg -n '\bunsafe\b' \
+    "$REPO_ROOT/crates/paranoid-vault/src" \
+    --glob '*.rs' || true
+)"
+vault_disallowed_unsafe_hits="$(
+  printf '%s\n' "$vault_unsafe_hits" | rg -v '^[^:]*mem_hardening\.rs:' || true
+)"
+if [ -n "$vault_disallowed_unsafe_hits" ]; then
+  printf '%s\n' "$vault_disallowed_unsafe_hits"
+  fail "unsafe Rust detected in vault sources outside the audited mem_hardening module"
+elif [ -n "$vault_unsafe_hits" ]; then
+  mem_hardening_allow_hits="$(
+    rg -c '#!\[allow\(unsafe_code\)\]|#\[allow\(unsafe_code\)\]' \
+      "$REPO_ROOT/crates/paranoid-vault/src/mem_hardening.rs" || true
   )"
-  gui_disallowed_unsafe_hits="$(
-    printf '%s\n' "$gui_unsafe_hits" \
-      | rg -v '#\[allow\(unsafe_code\)\]' \
-      | rg -v '#\[unsafe\(no_mangle\)\]' || true
+  mem_hardening_safety_comments="$(
+    rg -c '// SAFETY:' "$REPO_ROOT/crates/paranoid-vault/src/mem_hardening.rs" || true
   )"
-  if [ -n "$gui_disallowed_unsafe_hits" ]; then
-    printf '%s\n' "$gui_disallowed_unsafe_hits"
-    fail "handwritten unsafe Rust detected in GUI sources"
-  elif rg -q 'unsafe_code = "deny"' "$REPO_ROOT/crates/paranoid-gui/Cargo.toml"; then
-    pass "handwritten workspace Rust remains unsafe-free; GUI only permits audited platform ABI export attributes under deny-level linting"
+  if [ -z "$mem_hardening_allow_hits" ] || [ "$mem_hardening_allow_hits" -eq 0 ]; then
+    fail "mem_hardening.rs uses unsafe without an #[allow(unsafe_code)] annotation"
+  elif [ -z "$mem_hardening_safety_comments" ] || [ "$mem_hardening_safety_comments" -eq 0 ]; then
+    fail "mem_hardening.rs uses unsafe without any // SAFETY: justification comments"
+  elif rg -q 'unsafe_code = "deny"' "$REPO_ROOT/crates/paranoid-vault/Cargo.toml"; then
+    pass "vault Rust sources remain unsafe-free outside the audited, SAFETY-commented mem_hardening module under deny-level linting"
   else
-    fail "GUI unsafe-code lint is not pinned to deny"
+    fail "vault unsafe-code lint is not pinned to deny"
   fi
+else
+  pass "vault Rust sources remain unsafe-free"
+fi
+
+gui_unsafe_hits="$(
+  rg -n '\bunsafe\b' \
+    "$REPO_ROOT/crates/paranoid-gui/src" \
+    "$REPO_ROOT/crates/paranoid-gui/build.rs" \
+    --glob '*.rs' || true
+)"
+gui_disallowed_unsafe_hits="$(
+  printf '%s\n' "$gui_unsafe_hits" \
+    | rg -v '#\[allow\(unsafe_code\)\]' \
+    | rg -v '#\[unsafe\(no_mangle\)\]' || true
+)"
+if [ -n "$gui_disallowed_unsafe_hits" ]; then
+  printf '%s\n' "$gui_disallowed_unsafe_hits"
+  fail "handwritten unsafe Rust detected in GUI sources"
+elif rg -q 'unsafe_code = "deny"' "$REPO_ROOT/crates/paranoid-gui/Cargo.toml"; then
+  pass "handwritten workspace Rust remains unsafe-free; GUI only permits audited platform ABI export attributes under deny-level linting"
+else
+  fail "GUI unsafe-code lint is not pinned to deny"
 fi
 
 if rg -n '\btodo!\s*\(' \

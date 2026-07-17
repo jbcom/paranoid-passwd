@@ -366,6 +366,540 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
+        "vault.zeroized-payload-secrets",
+        "Zeroize-on-drop decrypted item payload secrets",
+        "vault-security",
+        (
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "pub struct SecretBytes(Zeroizing<String>);",
+                "SecretBytes wraps payload secrets in a zeroize-on-drop buffer",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                r"impl fmt::Debug for SecretBytes \{\n    fn fmt\(&self, f: &mut fmt::Formatter<'_>\) -> fmt::Result \{\n        f\.write_str\(\"<redacted>\"\)",
+                "SecretBytes Debug renders <redacted>, never the secret",
+                True,
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "impl Serialize for SecretBytes",
+                "SecretBytes has a transparent Serialize impl preserving the wire format",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "impl<'de> Deserialize<'de> for SecretBytes",
+                "SecretBytes has a transparent Deserialize impl preserving the wire format",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "pub password: SecretBytes,",
+                "LoginRecord password field is SecretBytes, not a plain String",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "pub number: SecretBytes,",
+                "CardRecord number field is SecretBytes, not a plain String",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "pub security_code: SecretBytes,",
+                "CardRecord security_code field is SecretBytes, not a plain String",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "pub struct SecureNoteRecord {\n    pub title: String,\n    pub content: SecretBytes,",
+                "SecureNoteRecord content field is SecretBytes, not a plain String "
+                "(note bodies routinely hold recovery codes)",
+                True,
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "secret_bytes_debug_renders_redacted_not_the_secret",
+                "test proves SecretBytes Debug never leaks the secret",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "secure_note_content_debug_is_redacted_not_the_secret",
+                "test proves SecureNoteRecord.content Debug never leaks the note body",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "secure_note_content_zeroizes_on_drop",
+                "test proves SecureNoteRecord.content zeroizes on drop",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "secret_bytes_zeroizes_its_buffer_in_place_on_scrub",
+                "test proves SecretBytes zeroizes its buffer on scrub/drop",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "secret_bytes_clone_is_an_independent_zeroizing_copy",
+                "test proves cloning SecretBytes no longer forks an un-scrubbed copy",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "secret_bytes_serde_round_trips_to_the_same_json_a_plain_string_would",
+                "test proves the SecretBytes wire format is unchanged from a plain String field",
+            ),
+            Requirement(
+                "docs/reference/vault-format.md",
+                "`SecretBytes`, a zeroize-on-drop wrapper",
+                "vault format docs describe the zeroize-on-drop payload secret wrapper",
+            ),
+            Requirement(
+                "docs/reference/architecture.md",
+                "SecretBytes` zeroize-on-drop wrapper",
+                "architecture docs describe the zeroize-on-drop payload secret wrapper",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.zeroized-payload-secrets` | `enforced`",
+                "assurance claim enforces the zeroized payload secrets disposition",
+            ),
+        ),
+    ),
+    Claim(
+        "vault.failed-unlock-lockout",
+        "Persisted cross-restart failed-unlock lockout",
+        "vault-security",
+        (
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "pub struct LockoutRecord {",
+                "a durable LockoutRecord model exists",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "pub fn lockout_state_path(vault_path: impl AsRef<Path>) -> PathBuf {",
+                "the lockout record path is a sibling of the vault path",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "pub(crate) fn check_lockout(vault_path: impl AsRef<Path>) -> Result<(), VaultError> {",
+                "a check_lockout gate exists ahead of Argon2id",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "pub(crate) fn record_failed_unlock(vault_path: impl AsRef<Path>) -> Result<(), VaultError> {",
+                "failed unlock attempts are recorded durably",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "pub(crate) fn clear_lockout(vault_path: impl AsRef<Path>) -> Result<(), VaultError> {",
+                "a successful unlock clears the durable lockout record",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "LockedOut { retry_after_secs: i64 },",
+                "VaultError carries a positive retry-after duration when locked out",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lifecycle.rs",
+                "check_lockout(path)?;",
+                "unlock_vault checks the durable lockout before deriving the KEK",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lifecycle.rs",
+                "fn record_unlock_outcome(",
+                "every unlock_vault* entry point records its lockout outcome",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "fn backoff_secs_for_attempt_count(failed_attempt_count: u32) -> i64 {",
+                "backoff is exponential in the failed-attempt count",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "const MAX_BACKOFF_SECS: i64 = 24 * 60 * 60;",
+                "backoff growth is capped",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "backoff_grows_exponentially_with_attempt_count_and_is_capped",
+                "test proves backoff grows exponentially and saturates at the cap",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "lockout_persists_across_a_fresh_process_handle_restart",
+                "test proves the lockout module's own state survives a fresh handle",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "repeated_failed_unlocks_persist_a_cross_restart_lockout",
+                "test proves unlock_vault itself refuses with LockedOut after a restart",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "a_successful_unlock_clears_a_prior_lockout_record",
+                "test proves a successful unlock clears the durable lockout record",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "lockout_state_lives_outside_the_encrypted_vault_rows",
+                "test proves the lockout record is plaintext and separate from the vault file",
+            ),
+            Requirement(
+                "docs/reference/vault-format.md",
+                "## Failed-Unlock Lockout State",
+                "vault format docs describe the lockout state sibling file",
+            ),
+            Requirement(
+                "docs/reference/architecture.md",
+                "VaultError::LockedOut",
+                "architecture docs describe the durable lockout gate on every unlock entry point",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.failed-unlock-lockout` | `enforced`",
+                "assurance claim enforces the failed-unlock lockout disposition",
+            ),
+            Requirement(
+                "tests/test_security_assurance_gate.py",
+                "assert_gate_catches_deletion(",
+                "a negative-proof test demonstrates the gate catches deletion of P9 hardening evidence",
+            ),
+            Requirement(
+                "Makefile",
+                "python3 tests/test_security_assurance_gate.py",
+                "verify-assurance runs the negative-proof gate test",
+            ),
+        ),
+    ),
+    Claim(
+        "vault.memory-hardening",
+        "OS memory hardening: core-dump/ptrace suppression + mlock",
+        "vault-security",
+        (
+            Requirement(
+                "crates/paranoid-vault/src/mem_hardening.rs",
+                "pub fn harden_process_memory() -> ProcessHardeningReport {",
+                "a process-startup memory-hardening entry point exists",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/mem_hardening.rs",
+                "let result = unsafe { libc::setrlimit(libc::RLIMIT_CORE, &limit) };",
+                "process startup disables core dumps via setrlimit(RLIMIT_CORE, 0)",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/mem_hardening.rs",
+                "let result = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0) };",
+                "Linux startup denies same-user ptrace/dump attach via PR_SET_DUMPABLE(0)",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/mem_hardening.rs",
+                "let result = unsafe { libc::ptrace(libc::PT_DENY_ATTACH, 0, std::ptr::null_mut(), 0) };",
+                "macOS startup denies debugger attach via ptrace(PT_DENY_ATTACH)",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/mem_hardening.rs",
+                "pub struct LockedSecretBuffer {",
+                "a mlock-backed zeroize-on-drop secret buffer wrapper exists",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/mem_hardening.rs",
+                "let result = unsafe { libc::mlock(ptr.cast(), len) };",
+                "LockedSecretBuffer mlocks its backing pages on supported platforms",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lifecycle.rs",
+                "pub(crate) master_key: LockedSecretBuffer,",
+                "the unlocked vault master key is held in a LockedSecretBuffer, not a plain Vec/Zeroizing buffer",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/main.rs",
+                "paranoid_vault::harden_process_memory();",
+                "the CLI/TUI binary hardens process memory at startup",
+            ),
+            Requirement(
+                "crates/paranoid-gui/src/lib.rs",
+                "paranoid_vault::harden_process_memory();",
+                "the GUI binary hardens process memory at startup",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/mem_hardening.rs",
+                "fn harden_process_memory_never_panics_and_returns_a_report() {",
+                "test proves the hardening entry point never panics on any platform",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/mem_hardening.rs",
+                "fn harden_process_memory_zeroes_the_core_rlimit_on_linux() {",
+                "test proves the soft+hard core rlimit is zero after startup on Linux",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/mem_hardening.rs",
+                "fn harden_process_memory_reflects_non_dumpable_in_proc_self_status_on_linux() {",
+                "test proves /proc/self/status reports non-dumpable after startup on Linux",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/mem_hardening.rs",
+                "fn locked_secret_buffer_continues_when_lock_is_simulated_unavailable() {",
+                "test proves a simulated mlock failure is a recorded warning, not a crash",
+            ),
+            Requirement(
+                "docs/reference/architecture.md",
+                "paranoid_vault::harden_process_memory()",
+                "architecture docs describe the process-startup memory-hardening call",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.memory-hardening` | `enforced`",
+                "assurance claim enforces the OS memory-hardening disposition",
+            ),
+        ),
+    ),
+    Claim(
+        "vault.clipboard-history-exclusion",
+        "Clipboard-history exclusion hints on the copy path",
+        "vault-security",
+        (
+            Requirement(
+                "crates/paranoid-vault/src/clipboard_hardening.rs",
+                "pub fn set_clipboard_text_excluded(",
+                "a clipboard-history-exclusion entry point exists",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "pub use clipboard_hardening::set_clipboard_text_excluded;",
+                "the clipboard-history-exclusion entry point is exported from paranoid-vault",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/tui.rs",
+                "set_clipboard_text_excluded(&mut clipboard, &password.value)",
+                "the vault TUI copy path uses the exclusion-hint entry point, not plain set_text",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui/mutation_handlers.rs",
+                "set_clipboard_text_excluded(&mut clipboard, enrollment.mnemonic.as_str())",
+                "the vault TUI mnemonic copy path uses the exclusion-hint entry point",
+            ),
+            Requirement(
+                "crates/paranoid-gui/src/lib.rs",
+                ".and_then(|mut clipboard| set_clipboard_text_excluded(&mut clipboard, &password))",
+                "the GUI copy path uses the exclusion-hint entry point, not plain set_text",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/clipboard_hardening.rs",
+                "fn set_clipboard_text_excluded_sets_the_nspasteboard_concealed_type_on_macos() {",
+                "test proves macOS gets the org.nspasteboard.ConcealedType hint",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/clipboard_hardening.rs",
+                "fn set_clipboard_text_excluded_sets_the_kde_password_manager_hint_on_linux() {",
+                "test proves Linux gets the x-kde-passwordManagerHint hint",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/clipboard_hardening.rs",
+                "fn set_clipboard_text_excluded_registers_the_exclude_from_monitoring_format_on_windows() {",
+                "test proves Windows gets the exclude-from-clipboard-history format",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/clipboard_hardening.rs",
+                "fn set_clipboard_text_excluded_writes_the_plain_text_readable_back() {",
+                "test proves the exclusion hint does not break normal clipboard paste",
+            ),
+            Requirement(
+                "docs/guides/tui.md",
+                "Every secret copy also sets the platform clipboard-history-exclusion hint",
+                "TUI guide documents the clipboard-history-exclusion hint per platform",
+            ),
+            Requirement(
+                "docs/reference/architecture.md",
+                "paranoid_vault::set_clipboard_text_excluded",
+                "architecture docs describe the clipboard-history-exclusion entry point",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.clipboard-history-exclusion` | `enforced`",
+                "assurance claim enforces the clipboard-history-exclusion disposition",
+            ),
+        ),
+    ),
+    Claim(
+        "vault.kdf-calibration-floor",
+        "Argon2id runtime calibration with a never-weakened floor",
+        "vault-security",
+        (
+            Requirement(
+                "crates/paranoid-vault/src/kdf_calibration.rs",
+                "pub const MEMORY_COST_FLOOR_KIB: u32 = DEFAULT_MEMORY_COST_KIB;",
+                "a hard, never-lowered memory-cost floor constant exists",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/kdf_calibration.rs",
+                "pub fn calibrate_kdf_params(target: Duration, derived_key_len: usize) -> CalibrationResult {",
+                "a calibration entry point exists",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lifecycle.rs",
+                "let calibration = calibrate_kdf_params(DEFAULT_KDF_CALIBRATION_TARGET, MASTER_KEY_LEN);",
+                "vault creation calls calibration instead of using fixed constants directly",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/kdf_calibration.rs",
+                "fn floor_constant_matches_documented_default() {",
+                "test pins the floor constant to the documented 262144 KiB default",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/kdf_calibration.rs",
+                "fn calibration_never_emits_memory_below_floor() {",
+                "test proves calibration never emits memory_cost below the floor",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/kdf_calibration.rs",
+                "fn calibration_never_emits_memory_below_floor_even_with_huge_target() {",
+                "test proves the floor holds even under an extreme wall-clock target",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/kdf_calibration.rs",
+                "fn fallback_path_still_honors_floor() {",
+                "test proves the benchmark-failure fallback path still honors the floor",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "fn calibrated_kdf_params_persist_and_are_honored_on_fresh_unlock() {",
+                "test proves calibrated params persist in the header and round-trip on unlock",
+            ),
+            Requirement(
+                "docs/reference/vault-format.md",
+                "calibrate_kdf_params` (`crates/paranoid-vault/src/kdf_calibration.rs`)",
+                "vault format docs describe the KDF calibration path and its floor",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.kdf-calibration-floor` | `enforced`",
+                "assurance claim enforces the KDF calibration floor disposition",
+            ),
+        ),
+    ),
+    Claim(
+        "vault.panic-lock-hotkey",
+        "Panic / quick-lock hotkey wired to the existing lock+purge path",
+        "vault-security",
+        (
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui/screen_state.rs",
+                "pub(crate) fn handle_panic_lock_hotkey(&mut self) -> bool {",
+                "a TUI panic/quick-lock handler exists",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui/screen_state.rs",
+                "if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('l')) {",
+                "Ctrl+L is checked unconditionally ahead of per-screen key dispatch",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui/screen_state.rs",
+                "self.purge_secret_state_on_lock();",
+                "the same purge path backs both idle auto-lock and the panic hotkey",
+            ),
+            Requirement(
+                "crates/paranoid-gui/src/lib.rs",
+                "fn lock_vault(state: &mut GuiState) {",
+                "a GUI panic/quick-lock action exists",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui.rs",
+                "fn panic_lock_hotkey_purges_secrets_from_any_unlocked_screen() {",
+                "test proves the TUI hotkey purges secrets from an unlocked screen",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui.rs",
+                "fn panic_lock_hotkey_scrubs_every_secret_bearing_form_and_detail() {",
+                "test proves the purge is COMPLETE: every secret-bearing form "
+                "(add_login_form, card_form, note_form, identity_form) plus "
+                "the decrypted detail item is empty after the panic-lock "
+                "hotkey fires, not merely that a handler exists",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui.rs",
+                "fn purge_secret_state_on_lock_directly_scrubs_the_armed_clipboard_buffer() {",
+                "test enforces that purge scrubs the in-memory armed-clipboard "
+                "buffer (a plaintext copy of the last-copied secret) directly, "
+                "not only via its caller (P9 re-verify LEAK-D)",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui/screen_state.rs",
+                "FAIL-CLOSED EXHAUSTIVENESS (P9 re-verify)",
+                "purge_secret_state_on_lock destructures App with an exhaustive "
+                "(no `..`) field list, so adding a new field fails the build "
+                "until it is triaged as secret-to-scrub or acknowledged non-secret. "
+                "Pinning this marker means reverting the destructure to `..` (which "
+                "would silently lose the compile-time guarantee) also fails the gate.",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui.rs",
+                "fn purge_secret_state_on_lock_directly_scrubs_the_master_recovery_mnemonic() {",
+                "test enforces the purge CONTRACT by calling "
+                "purge_secret_state_on_lock directly (not via the hotkey "
+                "wrapper), so a partial scrub of the master recovery mnemonic "
+                "cannot land green through a hotkey-only test path",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui.rs",
+                "fn panic_lock_hotkey_is_inert_before_unlock() {",
+                "test proves the TUI hotkey is a no-op before unlock",
+            ),
+            Requirement(
+                "crates/paranoid-gui/src/widget_event_tests.rs",
+                "fn ctrl_l_accelerator_locks_vault_while_a_text_field_has_focus() {",
+                "test proves the GUI Ctrl+L accelerator locks even with a text field focused",
+            ),
+            Requirement(
+                "crates/paranoid-gui/src/widget_event_tests.rs",
+                "fn lock_vault_via_real_widgets_scrubs_secrets_from_unlocked_screen() {",
+                "test proves the GUI lock action scrubs secrets via real widget events",
+            ),
+            Requirement(
+                "docs/guides/tui.md",
+                "### Panic / quick-lock hotkey",
+                "TUI guide documents the panic/quick-lock hotkey",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.panic-lock-hotkey` | `process`",
+                "assurance claim records the panic-lock hotkey disposition",
+            ),
+        ),
+    ),
+    Claim(
+        "assurance.p9-claims-honesty",
+        "Claims-integrity gate for P9 hardening claims",
+        "security-docs",
+        (
+            Requirement(
+                "docs/reference/messaging.md",
+                "P9 memory-hardening path (`vault.memory-hardening`)",
+                "messaging docs name the P9 memory-hardening overclaim to avoid",
+            ),
+            Requirement(
+                "docs/reference/messaging.md",
+                "`vault.clipboard-history-exclusion`",
+                "messaging docs name the P9 clipboard-exclusion overclaim to avoid",
+            ),
+            Requirement(
+                "docs/reference/messaging.md",
+                "self-destruct was explicitly rejected as a DoS footgun",
+                "messaging docs name the self-destruct/wipe overclaim to avoid",
+            ),
+            Requirement(
+                "scripts/validate-docs.sh",
+                "p9_overclaim_phrases=(",
+                "docs validation enforces the P9 hardening anti-overclaim phrase list",
+            ),
+            Requirement(
+                "scripts/validate-docs.sh",
+                'docs/ must not claim: \'$phrase\' (see docs/reference/messaging.md Claims To Avoid, P9 hardening honesty)',
+                "docs validation fails closed when a P9 overclaim phrase appears in any doc page",
+            ),
+            Requirement(
+                "scripts/validate-docs.sh",
+                "-not -name 'messaging.md'",
+                "the P9 overclaim scan excludes the messaging.md phrase inventory itself from its own scan",
+            ),
+        ),
+    ),
+    Claim(
         "ops.shared-policy-boundary",
         "Shared ops policy boundary",
         "ops-security",

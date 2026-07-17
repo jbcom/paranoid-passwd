@@ -1618,7 +1618,8 @@ fn parse_update(args: &[String]) -> anyhow::Result<VaultCommand> {
                 update.password = Some(
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--password requires a value"))?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 );
             }
             "--url" => {
@@ -1703,7 +1704,8 @@ fn parse_update_note(args: &[String]) -> anyhow::Result<VaultCommand> {
                 update.content = Some(
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--content requires a value"))?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 );
             }
             "--folder" => {
@@ -1783,7 +1785,8 @@ fn parse_update_card(args: &[String]) -> anyhow::Result<VaultCommand> {
                 update.number = Some(
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--number requires a value"))?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 );
             }
             "--expiry-month" => {
@@ -1804,7 +1807,8 @@ fn parse_update_card(args: &[String]) -> anyhow::Result<VaultCommand> {
                 update.security_code = Some(
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--security-code requires a value"))?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 );
             }
             "--billing-zip" => {
@@ -2500,7 +2504,9 @@ fn parse_login_record(args: &[String]) -> anyhow::Result<NewLoginRecord> {
     Ok(NewLoginRecord {
         title: title.ok_or_else(|| anyhow::anyhow!("vault add requires --title"))?,
         username: username.ok_or_else(|| anyhow::anyhow!("vault add requires --username"))?,
-        password: password.ok_or_else(|| anyhow::anyhow!("vault add requires --password"))?,
+        password: password
+            .ok_or_else(|| anyhow::anyhow!("vault add requires --password"))?
+            .into(),
         url,
         notes,
         folder,
@@ -2561,7 +2567,9 @@ fn parse_secure_note_record(args: &[String]) -> anyhow::Result<NewSecureNoteReco
 
     Ok(NewSecureNoteRecord {
         title: title.ok_or_else(|| anyhow::anyhow!("vault add-note requires --title"))?,
-        content: content.ok_or_else(|| anyhow::anyhow!("vault add-note requires --content"))?,
+        content: content
+            .ok_or_else(|| anyhow::anyhow!("vault add-note requires --content"))?
+            .into(),
         folder,
         tags,
     })
@@ -2665,13 +2673,16 @@ fn parse_card_record(args: &[String]) -> anyhow::Result<NewCardRecord> {
         title: title.ok_or_else(|| anyhow::anyhow!("vault add-card requires --title"))?,
         cardholder_name: cardholder_name
             .ok_or_else(|| anyhow::anyhow!("vault add-card requires --cardholder"))?,
-        number: number.ok_or_else(|| anyhow::anyhow!("vault add-card requires --number"))?,
+        number: number
+            .ok_or_else(|| anyhow::anyhow!("vault add-card requires --number"))?
+            .into(),
         expiry_month: expiry_month
             .ok_or_else(|| anyhow::anyhow!("vault add-card requires --expiry-month"))?,
         expiry_year: expiry_year
             .ok_or_else(|| anyhow::anyhow!("vault add-card requires --expiry-year"))?,
         security_code: security_code
-            .ok_or_else(|| anyhow::anyhow!("vault add-card requires --security-code"))?,
+            .ok_or_else(|| anyhow::anyhow!("vault add-card requires --security-code"))?
+            .into(),
         billing_zip,
         notes,
         folder,
@@ -2863,7 +2874,7 @@ fn print_item(
         paranoid_vault::VaultItemPayload::Login(login) => {
             println!("title: {}", login.title);
             println!("username: {}", login.username);
-            println!("password: {}", login.password);
+            println!("password: {}", login.password.as_str());
             println!("url: {}", login.url.as_deref().unwrap_or(""));
             println!("notes: {}", login.notes.as_deref().unwrap_or(""));
             println!("folder: {}", login.folder.as_deref().unwrap_or(""));
@@ -2873,23 +2884,24 @@ fn print_item(
             for (index, entry) in login.password_history.iter().enumerate() {
                 println!(
                     "password_history[{index}]: {} @ {}",
-                    entry.password, entry.changed_at_epoch
+                    entry.password.as_str(),
+                    entry.changed_at_epoch
                 );
             }
         }
         paranoid_vault::VaultItemPayload::SecureNote(note) => {
             println!("title: {}", note.title);
-            println!("content: {}", note.content);
+            println!("content: {}", note.content.as_str());
             println!("folder: {}", note.folder.as_deref().unwrap_or(""));
             println!("tags: {}", note.tags.join(","));
         }
         paranoid_vault::VaultItemPayload::Card(card) => {
             println!("title: {}", card.title);
             println!("cardholder_name: {}", card.cardholder_name);
-            println!("number: {}", card.number);
+            println!("number: {}", card.number.as_str());
             println!("expiry_month: {}", card.expiry_month);
             println!("expiry_year: {}", card.expiry_year);
-            println!("security_code: {}", card.security_code);
+            println!("security_code: {}", card.security_code.as_str());
             println!("billing_zip: {}", card.billing_zip.as_deref().unwrap_or(""));
             println!("notes: {}", card.notes.as_deref().unwrap_or(""));
             println!("folder: {}", card.folder.as_deref().unwrap_or(""));

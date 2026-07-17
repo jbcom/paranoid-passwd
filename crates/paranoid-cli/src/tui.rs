@@ -11,7 +11,7 @@ use paranoid_core::{
     AuditStage, CharsetOptions, CharsetSpec, GenerationReport, ParanoidRequest,
     combined_framework_requirements, execute_request, secure_preview,
 };
-use paranoid_vault::NativeSessionHardening;
+use paranoid_vault::{NativeSessionHardening, set_clipboard_text_excluded};
 #[cfg(test)]
 use ratatui::backend::TestBackend;
 use ratatui::{
@@ -275,9 +275,9 @@ impl App {
             .as_ref()
             .and_then(|report| report.passwords.first())
         {
-            match Clipboard::new()
-                .and_then(|mut clipboard| clipboard.set_text(password.value.clone()))
-            {
+            match Clipboard::new().and_then(|mut clipboard| {
+                set_clipboard_text_excluded(&mut clipboard, &password.value)
+            }) {
                 Ok(()) => {
                     self.session.arm_clipboard_clear(password.value.clone());
                     self.status = format!(

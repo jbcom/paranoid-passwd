@@ -4024,6 +4024,7 @@ dependencies = [
  "slint",
  "slint-build",
  "tempfile",
+ "zeroize",
 ]
 
 [[package]]
@@ -4053,9 +4054,11 @@ dependencies = [
 name = "paranoid-vault"
 version = "3.7.0"
 dependencies = [
+ "arboard",
  "argon2",
  "bip39",
  "keyring",
+ "libc",
  "openssl",
  "paranoid-core",
  "paranoid-seal",
@@ -4064,6 +4067,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "windows-sys 0.60.2",
  "zeroize",
 ]
 

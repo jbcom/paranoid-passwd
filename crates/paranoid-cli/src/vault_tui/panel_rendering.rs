@@ -189,13 +189,13 @@ pub(crate) fn footer_text(app: &App) -> &'static str {
         }
         Screen::Vault => {
             if app.search_mode {
-                "Controls: Type to filter the unlocked list, Backspace deletes, Ctrl+u clears, Enter or Esc exits filter mode, q quits."
+                "Controls: Type to filter the unlocked list, Backspace deletes, Ctrl+u clears, Enter or Esc exits filter mode, q quits. Ctrl+L panic-locks the vault immediately."
             } else {
-                "Controls: Up/Down select items, / filters, a adds login, n adds secure note, v adds card, i adds identity, e edits, d deletes, g generates and stores one password, x exports backup, t exports transfer, u imports backup, p imports transfer, k opens keyslots, E reviews environment approval, c copies the selected value, r refreshes, q quits."
+                "Controls: Up/Down select items, / filters, a adds login, n adds secure note, v adds card, i adds identity, e edits, d deletes, g generates and stores one password, x exports backup, t exports transfer, u imports backup, p imports transfer, k opens keyslots, E reviews environment approval, c copies the selected value, r refreshes, q quits. Ctrl+L panic-locks the vault immediately."
             }
         }
         Screen::Keyslots => {
-            "Controls: Up/Down select keyslots, m adds mnemonic recovery, b adds device-bound, c adds certificate-wrapped, w rewraps the selected certificate slot, l relabels the selected keyslot, o rotates the selected mnemonic slot, p rotates the recovery secret, d removes the selected non-recovery slot, r rebinds the selected device slot, Esc returns to items, q quits."
+            "Controls: Up/Down select keyslots, m adds mnemonic recovery, b adds device-bound, c adds certificate-wrapped, w rewraps the selected certificate slot, l relabels the selected keyslot, o rotates the selected mnemonic slot, p rotates the recovery secret, d removes the selected non-recovery slot, r rebinds the selected device slot, Esc returns to items, q quits. Ctrl+L panic-locks the vault immediately."
         }
         Screen::UnlockBlocked => {
             "Controls: p/m/b/c pick password, mnemonic, device, or certificate mode; Up/Down or Tab move; Left/Right cycles the mode field; Enter advances or unlocks; r retries current policy; q quits."
@@ -216,19 +216,19 @@ pub(crate) fn footer_text(app: &App) -> &'static str {
         | Screen::RotateMnemonicSlot
         | Screen::RotateRecoverySecret
         | Screen::GenerateStore => {
-            "Controls: Type into the focused field, Up/Down or Tab move, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits."
+            "Controls: Type into the focused field, Up/Down or Tab move, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits. Ctrl+L panic-locks the vault immediately."
         }
         Screen::ExportBackup
         | Screen::ExportTransfer
         | Screen::ImportBackup
         | Screen::ImportTransfer => {
-            "Controls: Type into the focused path field, Up/Down or Tab move, Space/Left/Right toggle overwrite when selected, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits."
+            "Controls: Type into the focused path field, Up/Down or Tab move, Space/Left/Right toggle overwrite when selected, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits. Ctrl+L panic-locks the vault immediately."
         }
         Screen::MnemonicReveal => {
-            "Controls: c copies the phrase, Enter or Esc returns to keyslots, q quits."
+            "Controls: c copies the phrase, Enter or Esc returns to keyslots, q quits. Ctrl+L panic-locks the vault immediately."
         }
         Screen::DeleteConfirm => {
-            "Controls: y or Enter confirms deletion, n or Esc cancels, q quits."
+            "Controls: y or Enter confirms deletion, n or Esc cancels, q quits. Ctrl+L panic-locks the vault immediately."
         }
     }
 }
@@ -678,7 +678,7 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                         Line::raw(format!("id: {}", item.id)),
                         Line::raw(format!("title: {}", login.title)),
                         Line::raw(format!("username: {}", login.username)),
-                        Line::raw(format!("password: {}", login.password)),
+                        Line::raw(format!("password: {}", login.password.as_str())),
                         Line::raw(format!(
                             "duplicate passwords elsewhere: {duplicate_password_count}"
                         )),
@@ -708,7 +708,11 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                                     .rev()
                                     .take(3)
                                     .map(|entry| {
-                                        format!("{} @ {}", entry.password, entry.changed_at_epoch)
+                                        format!(
+                                            "{} @ {}",
+                                            entry.password.as_str(),
+                                            entry.changed_at_epoch
+                                        )
                                     })
                                     .collect::<Vec<_>>()
                                     .join(" | ")
@@ -732,7 +736,7 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                     Line::raw(""),
                     Line::raw(format!("id: {}", item.id)),
                     Line::raw(format!("title: {}", note.title)),
-                    Line::raw(format!("content: {}", note.content)),
+                    Line::raw(format!("content: {}", note.content.as_str())),
                     Line::raw(format!("folder: {}", note.folder.as_deref().unwrap_or(""))),
                     Line::raw(format!(
                         "tags: {}",
@@ -761,12 +765,12 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                     Line::raw(format!("id: {}", item.id)),
                     Line::raw(format!("title: {}", card.title)),
                     Line::raw(format!("cardholder: {}", card.cardholder_name)),
-                    Line::raw(format!("number: {}", card.number)),
+                    Line::raw(format!("number: {}", card.number.as_str())),
                     Line::raw(format!(
                         "expiry: {}/{}",
                         card.expiry_month, card.expiry_year
                     )),
-                    Line::raw(format!("security code: {}", card.security_code)),
+                    Line::raw(format!("security code: {}", card.security_code.as_str())),
                     Line::raw(format!(
                         "billing zip: {}",
                         card.billing_zip.as_deref().unwrap_or("")

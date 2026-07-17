@@ -152,6 +152,91 @@ r
     let _ = vault_cli::run;
 }
 
+/// P9.6: driven through the real scripted event loop (not `App::handle_key`
+/// directly, as the in-crate unit tests already cover), `<ctrl-l>` from an
+/// unlocked screen with a login on screen immediately renders the
+/// unlock-blocked screen and the previously-visible secret no longer appears
+/// in any rendered frame.
+#[test]
+fn scripted_panic_lock_hotkey_clears_screen_from_unlocked_vault() {
+    let tempdir = tempdir().expect("tempdir");
+    let vault_path = tempdir.path().join("vault.sqlite");
+    let master_password = "correct horse battery staple";
+    init_vault(&vault_path, master_password).expect("init vault");
+
+    let open_options = VaultOpenOptions {
+        path: vault_path.clone(),
+        auth: VaultAuth::Password(SecretString::new(master_password.to_string())),
+        mnemonic_phrase_env: None,
+        mnemonic_phrase: None,
+        mnemonic_slot: None,
+        device_slot: None,
+        use_device_auto: false,
+    };
+    let config = VaultTuiConfig {
+        open_options,
+        profile: paranoid_ops::OpsProfile::Default,
+        audit_jsonl: None,
+        require_audit_sink: false,
+    };
+
+    // Add a login (same script as the flow above) so there is decrypted
+    // secret material on screen, then fire the panic-lock hotkey.
+    let script = "\
+a
+G
+i
+t
+H
+u
+b
+<tab>
+o
+c
+t
+o
+c
+a
+t
+<tab>
+h
+u
+n
+t
+e
+r
+2
+<tab>
+<tab>
+<tab>
+<tab>
+<tab>
+<enter>
+<wait-idle>
+<ctrl-l>
+";
+
+    let tokens = scripted::parse_script(script).expect("parse script");
+    let mut terminal = scripted_terminal();
+    let final_frame =
+        vault_tui::run_scripted(&mut terminal, config, &tokens).expect("scripted run");
+
+    assert!(
+        !final_frame.contains("hunter2"),
+        "panic-lock must scrub the plaintext password from the rendered frame:\n{final_frame}"
+    );
+    assert!(
+        final_frame.to_lowercase().contains("lock"),
+        "expected the panic-lock status or unlock-blocked screen in the final frame:\n{final_frame}"
+    );
+
+    // The item must still be safely persisted on disk; panic-lock scrubs
+    // in-memory state, not the vault itself.
+    let unlocked = paranoid_vault::unlock_vault(&vault_path, master_password).expect("unlock");
+    let items = unlocked.list_items().expect("list items");
+    assert_eq!(items.len(), 1);
+}
+
 fn missing_vault_config(vault_path: &std::path::Path) -> VaultTuiConfig {
     // Pointing at a path that does not exist yet is what triggers the
     // first-run environment-approval screen (see `vault_tui::App::refresh`).

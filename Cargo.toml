@@ -28,6 +28,7 @@ arboard = "3.6.1"
 crossterm = "0.29.0"
 i-slint-backend-testing = { version = "=1.16.1", default-features = false }
 lexopt = "0.3.2"
+libc = "0.2.186"
 openssl = { version = "0.10.81", features = ["vendored"] }
 paranoid-audit = { path = "crates/paranoid-audit" }
 paranoid-core = { path = "crates/paranoid-core" }
@@ -44,6 +45,7 @@ slint-build = "1.16.1"
 statrs = "0.18.0"
 tempfile = "3.20.0"
 thiserror = "2.0.18"
+windows-sys = "0.60.2"
 zeroize = "1.8.2"
 
 [workspace.lints.clippy]

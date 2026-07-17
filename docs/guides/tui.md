@@ -76,6 +76,16 @@ On the results screen:
 
 Clipboard copies from the generator and vault views are cleared automatically after 30 seconds if the clipboard contents have not changed.
 
+Every secret copy also sets the platform clipboard-history-exclusion hint alongside the timed clear, so a *cooperating* history manager never stores it in the first place:
+
+| Platform | Hint set | Honored by |
+|---|---|---|
+| macOS | `org.nspasteboard.ConcealedType` (the [nspasteboard.org](http://nspasteboard.org/) community convention) | Maccy, Alfred, Raycast, and other nspasteboard-aware clipboard managers |
+| Linux (X11 and Wayland) | `x-kde-passwordManagerHint` MIME type set to `secret` | KDE Klipper and other cooperating managers that check the same convention |
+| Windows | `ExcludeClipboardContentFromMonitorProcessing` clipboard format | Windows Clipboard History (Win+V) and cloud clipboard sync |
+
+This is a hint, not an OS-enforced control: a history manager that does not check for it — an older Klipper version, a non-cooperating third-party tool, or anything that polls the clipboard directly instead of reading the documented API — still records the secret. The 30-second timed clear above is the actual backstop for every clipboard consumer, cooperating or not; the exclusion hint only reduces exposure to tools that respect it.
+
 ## Audit Model
 
 The audit still runs seven layers:
@@ -187,5 +197,13 @@ The backup flows follow the same pattern as the rest of the vault TUI: `x` opens
 Selective transfer flows now live beside backup/restore in the same native vault surface: `t` opens an export form that writes only the currently filtered decrypted item payloads into a separate encrypted transfer package, and `p` opens an import form that brings one of those packages into the unlocked local vault using either the package recovery secret or a certificate keypair.
 
 When the vault is unlocked in either native interactive surface, inactivity now triggers an automatic lock after 5 minutes: it clears the cached decrypted list/detail state, resets vault auth to a non-secret placeholder that forces re-entry on the next unlock attempt, clears any loaded mnemonic phrase, and resets the unlock, recovery-secret rotation, certificate rewrap, export-transfer, and import-transfer forms to their zeroizing defaults, before returning to the unlock view.
+
+### Panic / quick-lock hotkey
+
+`Ctrl+L` locks the vault immediately, from any unlocked screen, without waiting for the 5-minute idle timeout. It runs the exact same clear-and-purge path as idle auto-lock above (decrypted list/detail state, mnemonic phrase, and every secret-bearing form reset to its zeroizing default, then the clipboard is cleared if it still holds the last thing this session copied) and returns to the unlock view. It is deliberately unconditional: the key is checked before per-screen input handling, so it fires even while a password or recovery-secret field is mid-entry — there is no confirmation step, because under the coercion / "someone is walking up" scenario this is meant for, speed is the safety property. Locking adds no new cryptographic protection beyond what auto-lock and P9.1's payload zeroization already provide; it only makes the existing lock reachable in one keystroke instead of waiting out the idle timer or navigating a menu.
+
+The GUI exposes the same action two ways: a "Lock vault (Ctrl+L)" button, and the identical `Ctrl+L` keyboard accelerator, which is wired at the window level so it fires even while a text field (e.g. the recovery-secret entry) has keyboard focus. Unlike the vault TUI, the GUI's copy path has no arm-and-clear clipboard timer to fire, so its panic-lock scrubs `GuiState` (recovery-secret entry, the cached unlocked-vault handle, decrypted item/keyslot summaries) but does not also clear the clipboard.
+
+Neither surface currently subscribes to an OS screen-lock or system-sleep signal (macOS distributed notifications, Linux `logind`'s `PrepareForSleep`/lock-session signal over D-Bus, Windows session-change notifications) to trigger panic-lock automatically. Locking today is manual (`Ctrl+L` or the button) or automatic only via the 5-minute idle timer above; walking away and having the OS itself lock the screen does not also lock the vault. Wiring that up would add a new per-platform dependency this repo does not currently vendor, so it is a documented gap rather than a silent one.
 
 The GUI now mirrors the same native keyslot inspection, recovery-posture reporting, shared keyslot recommendations, enrollment, mnemonic rotation, certificate rewrap, relabel, recovery-secret rotation, posture-aware removal confirmation, and rebind flows, direct unlock model, folder-plus-tag organization model, backup and transfer export/import flows, clipboard auto-clear, and idle auto-lock behavior, so mnemonic, device-bound, certificate-wrapped recovery, and encrypted vault exchange no longer depend on CLI-only administration.

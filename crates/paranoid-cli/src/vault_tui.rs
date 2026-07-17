@@ -563,7 +563,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("primary code host".to_string()),
                 folder: Some("Work".to_string()),
@@ -949,7 +949,7 @@ mod tests {
         };
         assert_eq!(login.title, "GitHub");
         assert_eq!(login.username, "octocat");
-        assert_eq!(login.password.len(), 20);
+        assert_eq!(login.password.as_str().len(), 20);
         assert_eq!(login.folder.as_deref(), Some("Generated"));
         assert_eq!(
             login.tags,
@@ -970,7 +970,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("primary".to_string()),
                 folder: Some("Work".to_string()),
@@ -994,7 +994,7 @@ mod tests {
         let VaultItemPayload::Login(login) = detail.payload else {
             panic!("expected login");
         };
-        assert_eq!(login.password.len(), 20);
+        assert_eq!(login.password.as_str().len(), 20);
         assert_eq!(login.password_history.len(), 1);
         assert_eq!(login.password_history[0].password, "hunter2");
         assert!(app.status.contains("rotated item"));
@@ -1012,7 +1012,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1023,7 +1023,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Bank".to_string(),
                 username: "jon".to_string(),
-                password: "hunter3".to_string(),
+                password: "hunter3".to_string().into(),
                 url: None,
                 notes: Some("monthly".to_string()),
                 folder: Some("Finance".to_string()),
@@ -1058,7 +1058,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1069,10 +1069,10 @@ mod tests {
             .add_card(NewCardRecord {
                 title: "Travel Card".to_string(),
                 cardholder_name: "Jon Bogaty".to_string(),
-                number: "5555444433331111".to_string(),
+                number: "5555444433331111".to_string().into(),
                 expiry_month: "11".to_string(),
                 expiry_year: "2030".to_string(),
-                security_code: "999".to_string(),
+                security_code: "999".to_string().into(),
                 billing_zip: None,
                 notes: None,
                 folder: Some("Travel".to_string()),
@@ -1121,7 +1121,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1132,7 +1132,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitLab".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1164,7 +1164,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1203,7 +1203,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -1620,7 +1620,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1669,7 +1669,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1686,7 +1686,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Temporary".to_string(),
-                content: "remove me".to_string(),
+                content: "remove me".to_string().into(),
                 folder: Some("Temp".to_string()),
                 tags: vec!["temp".to_string()],
             })
@@ -1722,7 +1722,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1757,7 +1757,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1767,7 +1767,7 @@ mod tests {
         source_vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Recovery".to_string(),
-                content: "paper copy in safe".to_string(),
+                content: "paper copy in safe".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["recovery".to_string()],
             })
@@ -1832,7 +1832,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1891,7 +1891,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -2292,7 +2292,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -2384,6 +2384,207 @@ mod tests {
         assert!(app.export_transfer_form.package_password.is_empty());
         assert!(app.import_transfer_form.package_password.is_empty());
         assert!(app.import_transfer_form.key_passphrase.is_empty());
+    }
+
+    /// P9.6: the panic/quick-lock hotkey (Ctrl+L) must immediately drive any
+    /// unlocked screen to `UnlockBlocked`, purge every secret-bearing form
+    /// via `purge_secret_state_on_lock`, and clear the decrypted vault state
+    /// (`items`/`detail`/`header`) — from a representative unlocked screen
+    /// (`Vault`) and while a secret-bearing text field is mid-entry, proving
+    /// the hotkey is not swallowed by an in-progress edit.
+    #[test]
+    fn panic_lock_hotkey_purges_secrets_from_any_unlocked_screen() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(!app.items.is_empty());
+        assert!(app.detail.is_some());
+
+        // Simulate a secret mid-entry in a form the panic key must still
+        // scrub, proving the hotkey is not blocked by focus on a text field.
+        app.certificate_rewrap_form.key_passphrase =
+            SecretString::new("half-typed-secret".to_string());
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert!(!should_quit, "panic-lock must not quit the app");
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(app.items.is_empty());
+        assert!(app.detail.is_none());
+        assert!(app.header.is_none());
+        assert!(matches!(app.options.auth, VaultAuth::PasswordEnv(_)));
+        assert!(app.certificate_rewrap_form.key_passphrase.is_empty());
+        assert!(app.status.to_lowercase().contains("lock"));
+    }
+
+    /// P9.6 verify fix: `purge_secret_state_on_lock` must scrub EVERY
+    /// secret-bearing UI field, not just the unlock/recovery/certificate/
+    /// transfer forms. Before this fix, triggering the panic-lock hotkey
+    /// from mid-edit on an Add/Edit form (or with a decrypted item still
+    /// shown on the detail screen) left the plaintext password, card
+    /// number/CVV, and note content resident in `add_login_form`,
+    /// `card_form`, `note_form`, `identity_form`, and `self.detail` even
+    /// though the screen had already flipped to `UnlockBlocked`. This test
+    /// must fail before the fix and pass after.
+    #[test]
+    fn panic_lock_hotkey_scrubs_every_secret_bearing_form_and_detail() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(
+            app.detail.is_some(),
+            "a decrypted item must be resident to prove it gets scrubbed"
+        );
+
+        // Simulate mid-entry secrets in every form the panic key must scrub.
+        app.screen = Screen::EditLogin;
+        app.add_login_form.password = "half-typed-password".to_string();
+        app.card_form.number = "4111111111111111".to_string();
+        app.card_form.security_code = "123".to_string();
+        app.note_form.content = "recovery codes: AAAA-BBBB-CCCC".to_string();
+        app.identity_form.full_name = "Jane Doe".to_string();
+        app.identity_form.address = "123 Secret St".to_string();
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert!(!should_quit, "panic-lock must not quit the app");
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(
+            app.detail.is_none(),
+            "the decrypted detail item must be scrubbed from the panic-lock path"
+        );
+        assert!(
+            app.add_login_form.password.is_empty(),
+            "add_login_form.password must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.card_form.number.is_empty(),
+            "card_form.number must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.card_form.security_code.is_empty(),
+            "card_form.security_code must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.note_form.content.is_empty(),
+            "note_form.content must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.identity_form.full_name.is_empty(),
+            "identity_form.full_name must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.identity_form.address.is_empty(),
+            "identity_form.address must be scrubbed on panic-lock"
+        );
+    }
+
+    /// `purge_secret_state_on_lock` must be a COMPLETE scrub on its own, called
+    /// DIRECTLY — not only correct when reached through the hotkey path (which
+    /// clears some fields in its wrapper). This enforces the function's contract
+    /// so a partial scrub cannot land green via a hotkey-only test (P9 re-verify
+    /// LEAK-C: the master recovery mnemonic was cleared by the caller, not here).
+    #[test]
+    fn purge_secret_state_on_lock_directly_scrubs_the_master_recovery_mnemonic() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        // Obtain a real enrollment (holds the 24-word master recovery phrase)
+        // through the vault API, then plant it in App state as the enroll flow does.
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let enrollment = vault
+            .add_mnemonic_keyslot(Some("paper-backup".to_string()))
+            .expect("add mnemonic keyslot");
+        let mut app = App::new(options);
+        app.latest_mnemonic_enrollment = Some(enrollment);
+
+        // Call the purge contract DIRECTLY, not through the hotkey wrapper.
+        app.purge_secret_state_on_lock();
+
+        assert!(
+            app.latest_mnemonic_enrollment.is_none(),
+            "purge_secret_state_on_lock must clear the master recovery mnemonic on its own"
+        );
+    }
+
+    /// The armed clipboard buffer holds a plaintext copy of the last-copied
+    /// secret (including the master recovery mnemonic). `purge_secret_state_on_lock`
+    /// must scrub that in-memory residency ON ITS OWN — not only when reached
+    /// through `clear_decrypted_state_and_lock` (P9 re-verify LEAK-D: the
+    /// caller-vs-contract split, one layer down from the mnemonic itself).
+    #[test]
+    fn purge_secret_state_on_lock_directly_scrubs_the_armed_clipboard_buffer() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        // Arm the clipboard buffer with a plaintext secret, as a copy would.
+        app.session
+            .arm_clipboard_clear("PLANTED-CLIPBOARD-SECRET".to_string());
+
+        // Call the purge contract DIRECTLY, not via the hotkey/lock wrapper.
+        app.purge_secret_state_on_lock();
+
+        assert!(
+            app.session.take_pending_clipboard_contents().is_none(),
+            "purge_secret_state_on_lock must scrub the armed clipboard buffer on its own"
+        );
+    }
+
+    /// The panic-lock hotkey must be a no-op (not crash, not change screen)
+    /// from pre-unlock screens that have no unlocked state to purge.
+    #[test]
+    fn panic_lock_hotkey_is_inert_before_unlock() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+
+        let mut app = App::new(password_only_options(&path));
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert!(!should_quit);
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
     }
 
     #[test]

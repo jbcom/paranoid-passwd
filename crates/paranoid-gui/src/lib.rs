@@ -16,6 +16,8 @@ use paranoid_ops::{
     FederalCryptoProviderEvidence, OpsPolicyContext, OpsProfile, VaultOperationAccess,
     evaluate_vault_operation,
 };
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+use paranoid_vault::set_clipboard_text_excluded;
 #[cfg(not(target_arch = "wasm32"))]
 use paranoid_vault::{
     GenerateStoreLoginRecord, NewLoginRecord, SecretString, VaultAuth, VaultHeader,
@@ -418,6 +420,13 @@ pub fn cli_main() -> Result<(), slint::PlatformError> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
+    // P9.3: disable core dumps and deny same-user debugger/crash-dump
+    // attachment before any secret material (master password, derived KEK,
+    // vault master key) is ever read into memory. Best-effort — see
+    // `paranoid_vault::harden_process_memory` for the per-platform outcome
+    // semantics; a sandboxed environment that can't apply this still runs.
+    paranoid_vault::harden_process_memory();
+
     let window = slint_shell::ParanoidPasswdShell::new()?;
     let runtime_config = GuiRuntimeConfig::from_launch_options(&options);
     let state = Rc::new(RefCell::new(GuiState::with_runtime_config(runtime_config)));
@@ -598,6 +607,27 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         }
         state.apply_to(&window);
     });
+
+    // P9.6: panic / quick-lock. Wired to both the `Control+L` accelerator
+    // (`PanicLockShortcut` in paranoid.slint) and the explicit "Lock vault"
+    // button, so it fires identically from either trigger. Scrubs every
+    // secret-bearing `GuiState` field (recovery-secret entry, cached
+    // unlocked-vault handle, decrypted item/keyslot summaries), mirroring
+    // the TUI's `purge_secret_state_on_lock`. Unlike the TUI, the GUI copy
+    // path (`copy_primary_password`) has no arm-and-clear clipboard timer
+    // (`NativeSessionHardening`) to fire, so panic-lock here does NOT also
+    // clear the clipboard — a real gap tracked as a P9.6 follow-up, not
+    // silently claimed as covered.
+    let weak = window.as_weak();
+    let state_for_lock = Rc::clone(&state);
+    window.on_lock_vault(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let mut state = state_for_lock.borrow_mut();
+        lock_vault(&mut state);
+        state.apply_to(&window);
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -694,6 +724,20 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         };
         apply_wasm_gate(&mut state_for_copy.borrow_mut(), "Clipboard", gate_message);
         state_for_copy.borrow().apply_to(&window);
+    });
+
+    // P9.6: the gated WASM surface never unlocks a vault or holds secret
+    // state (see `apply_wasm_gate`), so there is nothing for panic-lock to
+    // scrub here; still wire it so the accelerator/button are inert rather
+    // than dead callbacks.
+    let weak = window.as_weak();
+    let state_for_lock = Rc::clone(&state);
+    window.on_lock_vault(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        apply_wasm_gate(&mut state_for_lock.borrow_mut(), "Lock", gate_message);
+        state_for_lock.borrow().apply_to(&window);
     });
 }
 
@@ -992,6 +1036,31 @@ fn load_vault_from_ui(
     load_vault(state, Path::new(path.as_str()), secret.as_str())
 }
 
+/// P9.6 panic / quick-lock action: drops the cached unlocked-vault handle
+/// (scrubbing its `LockedSecretBuffer` master key via `Drop`) and scrubs
+/// every other decrypted/secret-derived field the GUI keeps in `GuiState`,
+/// mirroring the vault TUI's `purge_secret_state_on_lock` +
+/// `clear_decrypted_state_and_lock`. `vault_secret` is a plain `String`
+/// (not a zeroizing wrapper) here, so it is explicitly zeroized in place
+/// before being cleared rather than just dropped/reassigned, matching the
+/// P9.1 zeroize-on-drop guarantee given to vault item payload secrets.
+/// Idempotent: safe to invoke when nothing is unlocked (the Ctrl+L
+/// accelerator and the Lock button are both always enabled).
+#[cfg(not(target_arch = "wasm32"))]
+fn lock_vault(state: &mut GuiState) {
+    state.unlocked_vault = None;
+    zeroize::Zeroize::zeroize(&mut state.vault_secret);
+    state.vault_secret.clear();
+    state.selected_login_id = None;
+    state.last_report = None;
+    state.selected_item = "No vault item selected.".to_string();
+    state.vault_items = "Vault is locked or not loaded.".to_string();
+    state.vault_posture = "Vault posture unavailable".to_string();
+    state.keyslot_summary = "No keyslots loaded.".to_string();
+    state.generated_passwords = "No passwords generated yet.".to_string();
+    state.status = "Vault locked. Re-enter the recovery secret to unlock.".to_string();
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 struct LoginFormInput<'a> {
     title: &'a SharedString,
@@ -1187,7 +1256,7 @@ fn add_login(
         .add_login(NewLoginRecord {
             title: input.title.trim().to_string(),
             username: input.username.trim().to_string(),
-            password: input.password,
+            password: input.password.into(),
             url: None,
             notes: None,
             folder: input.folder,
@@ -1279,7 +1348,7 @@ fn copy_primary_password(state: &GuiState) -> Result<(), String> {
             return Err("no generated password is available to copy".to_string());
         };
         Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(password))
+            .and_then(|mut clipboard| set_clipboard_text_excluded(&mut clipboard, &password))
             .map_err(|error| error.to_string())
     }
 }
@@ -1553,6 +1622,64 @@ mod tests {
         let debug_output = format!("{state:?}");
         assert!(debug_output.contains("selected_item: \"<redacted>\""));
         assert!(!debug_output.contains(&mnemonic));
+    }
+
+    /// P9.6: `lock_vault` (the GUI panic / quick-lock action, wired to both
+    /// the `Control+L` accelerator and the "Lock vault" button) must drop
+    /// the cached unlocked-vault handle and scrub every other
+    /// secret/decrypted-derived field, leaving `GuiState` in the same
+    /// "nothing loaded" shape as a freshly constructed default.
+    #[test]
+    fn lock_vault_scrubs_secret_and_decrypted_state() {
+        let tmpdir = tempfile::tempdir().expect("temporary GUI lock-vault directory");
+        let vault_path = tmpdir.path().join("vault.sqlite");
+        init_vault(&vault_path, "correct horse battery staple").expect("test vault init");
+
+        let mut state = GuiState {
+            vault_secret: "correct horse battery staple".to_string(),
+            ..GuiState::default()
+        };
+        add_login(
+            &mut state,
+            &vault_path,
+            "correct horse battery staple",
+            LoginInput {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string(),
+                folder: None,
+                tags: vec![],
+            },
+        )
+        .expect("add login");
+        run_generator_audit(&mut state, "24", "1", true, false, false)
+            .expect("valid generator audit request");
+
+        // Preconditions: the state genuinely holds secret/decrypted material
+        // before locking, so the assertions below prove `lock_vault` did the
+        // scrubbing rather than there being nothing to scrub.
+        assert!(state.unlocked_vault.is_some());
+        assert!(!state.vault_secret.is_empty());
+        assert!(state.selected_login_id.is_some());
+        assert!(state.last_report.is_some());
+        assert!(state.vault_items.contains("GitHub"));
+
+        lock_vault(&mut state);
+
+        assert!(state.unlocked_vault.is_none());
+        assert!(state.vault_secret.is_empty());
+        assert!(state.selected_login_id.is_none());
+        assert!(state.last_report.is_none());
+        assert!(!state.vault_items.contains("GitHub"));
+        assert_eq!(state.vault_items, "Vault is locked or not loaded.");
+        assert_eq!(state.selected_item, "No vault item selected.");
+        assert_eq!(state.generated_passwords, "No passwords generated yet.");
+        assert!(state.status.to_lowercase().contains("locked"));
+
+        // The vault item persisted to disk survives the in-memory lock.
+        let unlocked = paranoid_vault::unlock_vault(&vault_path, "correct horse battery staple")
+            .expect("unlock");
+        assert_eq!(unlocked.list_items().expect("list items").len(), 1);
     }
 
     #[test]

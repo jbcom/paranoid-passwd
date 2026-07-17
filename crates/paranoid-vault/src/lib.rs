@@ -1,18 +1,28 @@
 mod native_access;
 
 mod backup_transfer;
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+mod clipboard_hardening;
+mod kdf_calibration;
 mod keyslots;
 mod lifecycle;
+mod lockout;
+mod mem_hardening;
 mod recovery_posture;
 
 pub use backup_transfer::*;
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+pub use clipboard_hardening::set_clipboard_text_excluded;
+pub use kdf_calibration::*;
 pub use keyslots::*;
 pub use lifecycle::*;
+pub use lockout::*;
+pub use mem_hardening::*;
 pub use recovery_posture::*;
 
 pub use native_access::{
-    NativeSessionHardening, SecretString, VaultAuth, VaultOpenOptions, default_vault_path,
-    read_master_password, unlock_vault_for_options,
+    NativeSessionHardening, SecretBytes, SecretString, VaultAuth, VaultOpenOptions,
+    default_vault_path, read_master_password, unlock_vault_for_options,
 };
 
 use serde::{Deserialize, Serialize};
@@ -86,6 +96,10 @@ pub enum VaultError {
     VaultNotFound(String),
     #[error("vault unlock failed")]
     UnlockFailed,
+    #[error(
+        "vault locked out after too many failed unlock attempts; retry after {retry_after_secs}s"
+    )]
+    LockedOut { retry_after_secs: i64 },
     #[error("vault item not found: {0}")]
     ItemNotFound(String),
     #[error("export destination {0} resolves to the source vault path; refusing to overwrite it")]
@@ -199,7 +213,7 @@ impl VaultItemFilter {
 pub struct LoginRecord {
     pub title: String,
     pub username: String,
-    pub password: String,
+    pub password: SecretBytes,
     pub url: Option<String>,
     pub notes: Option<String>,
     #[serde(default)]
@@ -212,14 +226,14 @@ pub struct LoginRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PasswordHistoryEntry {
-    pub password: String,
+    pub password: SecretBytes,
     pub changed_at_epoch: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecureNoteRecord {
     pub title: String,
-    pub content: String,
+    pub content: SecretBytes,
     #[serde(default)]
     pub folder: Option<String>,
     #[serde(default)]
@@ -230,10 +244,10 @@ pub struct SecureNoteRecord {
 pub struct CardRecord {
     pub title: String,
     pub cardholder_name: String,
-    pub number: String,
+    pub number: SecretBytes,
     pub expiry_month: String,
     pub expiry_year: String,
-    pub security_code: String,
+    pub security_code: SecretBytes,
     pub billing_zip: Option<String>,
     pub notes: Option<String>,
     #[serde(default)]
@@ -291,7 +305,7 @@ pub struct VaultItemSummary {
 pub struct NewLoginRecord {
     pub title: String,
     pub username: String,
-    pub password: String,
+    pub password: SecretBytes,
     pub url: Option<String>,
     pub notes: Option<String>,
     pub folder: Option<String>,
@@ -320,7 +334,7 @@ pub struct GenerateStoreLoginRecord {
 pub struct UpdateLoginRecord {
     pub title: Option<String>,
     pub username: Option<String>,
-    pub password: Option<String>,
+    pub password: Option<SecretBytes>,
     pub url: Option<Option<String>>,
     pub notes: Option<Option<String>>,
     pub folder: Option<Option<String>>,
@@ -330,7 +344,7 @@ pub struct UpdateLoginRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewSecureNoteRecord {
     pub title: String,
-    pub content: String,
+    pub content: SecretBytes,
     pub folder: Option<String>,
     pub tags: Vec<String>,
 }
@@ -338,7 +352,7 @@ pub struct NewSecureNoteRecord {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateSecureNoteRecord {
     pub title: Option<String>,
-    pub content: Option<String>,
+    pub content: Option<SecretBytes>,
     pub folder: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
 }
@@ -347,10 +361,10 @@ pub struct UpdateSecureNoteRecord {
 pub struct NewCardRecord {
     pub title: String,
     pub cardholder_name: String,
-    pub number: String,
+    pub number: SecretBytes,
     pub expiry_month: String,
     pub expiry_year: String,
-    pub security_code: String,
+    pub security_code: SecretBytes,
     pub billing_zip: Option<String>,
     pub notes: Option<String>,
     pub folder: Option<String>,
@@ -361,10 +375,10 @@ pub struct NewCardRecord {
 pub struct UpdateCardRecord {
     pub title: Option<String>,
     pub cardholder_name: Option<String>,
-    pub number: Option<String>,
+    pub number: Option<SecretBytes>,
     pub expiry_month: Option<String>,
     pub expiry_year: Option<String>,
-    pub security_code: Option<String>,
+    pub security_code: Option<SecretBytes>,
     pub billing_zip: Option<Option<String>>,
     pub notes: Option<Option<String>>,
     pub folder: Option<Option<String>>,
@@ -515,6 +529,36 @@ mod tests {
     }
 
     #[test]
+    fn calibrated_kdf_params_persist_and_are_honored_on_fresh_unlock() {
+        // P9.5: vault creation calibrates Argon2id params to this host
+        // rather than always writing the fixed DEFAULT_* constants, and
+        // unlock must use whatever ended up in the header — not the fixed
+        // defaults — since a calibrated host can land on a different
+        // iteration count. Read the header back independently (not the
+        // handle returned by init) and unlock with a freshly opened
+        // connection to prove the persisted params, not an in-memory
+        // value, are what makes unlock succeed.
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let persisted_header = read_vault_header(&path).expect("read header");
+        assert!(persisted_header.kdf.memory_cost_kib >= DEFAULT_MEMORY_COST_KIB);
+        assert!(persisted_header.kdf.iterations >= 1);
+
+        let vault = unlock_vault(&path, "correct horse battery staple")
+            .expect("unlock must honor the persisted calibrated kdf params");
+        assert_eq!(
+            vault.header().kdf.memory_cost_kib,
+            persisted_header.kdf.memory_cost_kib
+        );
+        assert_eq!(
+            vault.header().kdf.iterations,
+            persisted_header.kdf.iterations
+        );
+    }
+
+    #[test]
     fn init_unlock_and_login_crud_round_trip() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("vault.sqlite");
@@ -526,7 +570,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Example".to_string(),
                 username: "jon@example.com".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: Some("https://example.com".to_string()),
                 notes: Some("phase-3 smoke".to_string()),
                 folder: Some("Personal".to_string()),
@@ -553,7 +597,7 @@ mod tests {
                 &item.id,
                 UpdateLoginRecord {
                     title: Some("Example Updated".to_string()),
-                    password: Some("Sup3r$ecret!#2".to_string()),
+                    password: Some("Sup3r$ecret!#2".to_string().into()),
                     folder: Some(Some("Primary".to_string())),
                     tags: Some(vec!["primary".to_string(), "email".to_string()]),
                     ..UpdateLoginRecord::default()
@@ -583,7 +627,7 @@ mod tests {
         let debug_output = format!("{vault:?}");
 
         assert!(debug_output.contains("<redacted>"));
-        let key_hex = hex_encode(&vault.master_key);
+        let key_hex = hex_encode(vault.master_key.as_slice());
         assert!(!debug_output.contains(&key_hex));
         assert!(
             !debug_output
@@ -603,7 +647,7 @@ mod tests {
         let item = vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Recovery Plan".to_string(),
-                content: "Keep paper copy in the safe.".to_string(),
+                content: "Keep paper copy in the safe.".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["recovery".to_string(), "paper".to_string()],
             })
@@ -624,7 +668,7 @@ mod tests {
             .update_secure_note(
                 &item.id,
                 UpdateSecureNoteRecord {
-                    content: Some("Move paper copy to the fire safe.".to_string()),
+                    content: Some("Move paper copy to the fire safe.".to_string().into()),
                     folder: Some(Some("Ops".to_string())),
                     tags: Some(vec!["recovery".to_string(), "safe".to_string()]),
                     ..UpdateSecureNoteRecord::default()
@@ -638,6 +682,62 @@ mod tests {
         assert_eq!(note.tags, vec!["recovery".to_string(), "safe".to_string()]);
     }
 
+    /// P9 verify fix: secure note bodies routinely hold recovery codes and
+    /// other secrets (the TUI/CLI already treat them as secrets — see
+    /// `copy_selected_secret`, the detail panel, and `vault show`), so
+    /// `SecureNoteRecord.content` must be a `SecretBytes`, not a plain
+    /// `String`. A plain `String` field's `Debug` prints the plaintext,
+    /// which leaks the secret into any `{:?}`-formatted log or panic
+    /// message. This test must fail before the fix (plain `String` prints
+    /// the raw content) and pass after (SecretBytes's `Debug` prints only
+    /// `<redacted>`).
+    #[test]
+    fn secure_note_content_debug_is_redacted_not_the_secret() {
+        let note = SecureNoteRecord {
+            title: "Recovery Plan".to_string(),
+            content: SecretBytes::new("recovery codes: AAAA-BBBB-CCCC".to_string()),
+            folder: None,
+            tags: vec![],
+        };
+
+        let debug_output = format!("{:?}", note.content);
+
+        assert_eq!(debug_output, "<redacted>");
+        assert!(!debug_output.contains("AAAA-BBBB-CCCC"));
+    }
+
+    /// P9 verify fix: dropping a `SecureNoteRecord` must zeroize its note
+    /// content in place, exactly like `LoginRecord.password` and
+    /// `CardRecord.number`/`security_code` already do. Proven the same way
+    /// `secret_bytes_zeroizes_its_buffer_in_place_on_scrub` proves it for
+    /// the wrapper generically: this test additionally proves the *note
+    /// record's* content field is actually wired to `SecretBytes` (a
+    /// regression here would mean someone reverted the field back to a
+    /// plain, un-zeroizing `String`).
+    #[test]
+    fn secure_note_content_zeroizes_on_drop() {
+        let mut content = SecretBytes::new("recovery codes: AAAA-BBBB-CCCC".to_string());
+        assert_eq!(content.as_str(), "recovery codes: AAAA-BBBB-CCCC");
+
+        // Exercise the same in-place scrub that `Drop` performs, without a
+        // memory-unsound pointer-after-free read (forbidden by this crate's
+        // `unsafe_code = "forbid"` lint).
+        content.zeroize_in_place();
+
+        assert!(content.is_empty());
+
+        let note = SecureNoteRecord {
+            title: "Recovery Plan".to_string(),
+            content: SecretBytes::new("recovery codes: AAAA-BBBB-CCCC".to_string()),
+            folder: None,
+            tags: vec![],
+        };
+        // `content` moved into `note`; confirm the record's field really is
+        // `SecretBytes` (not `String`) by round-tripping through the same
+        // redacted-Debug/zeroizing API asserted above.
+        assert_eq!(format!("{:?}", note.content), "<redacted>");
+    }
+
     #[test]
     fn card_crud_round_trip() {
         let dir = tempdir().expect("tempdir");
@@ -649,10 +749,10 @@ mod tests {
             .add_card(NewCardRecord {
                 title: "Primary Visa".to_string(),
                 cardholder_name: "Jon Bogaty".to_string(),
-                number: "4111111111111111".to_string(),
+                number: "4111111111111111".to_string().into(),
                 expiry_month: "08".to_string(),
                 expiry_year: "2031".to_string(),
-                security_code: "123".to_string(),
+                security_code: "123".to_string().into(),
                 billing_zip: Some("60601".to_string()),
                 notes: Some("travel card".to_string()),
                 folder: Some("Wallet".to_string()),
@@ -756,7 +856,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("source hosting".to_string()),
                 folder: Some("Work".to_string()),
@@ -767,7 +867,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Bank".to_string(),
                 username: "jon".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: Some("https://bank.example".to_string()),
                 notes: Some("monthly bills".to_string()),
                 folder: Some("Finance".to_string()),
@@ -777,7 +877,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Travel checklist".to_string(),
-                content: "Passport copy in the red folder.".to_string(),
+                content: "Passport copy in the red folder.".to_string().into(),
                 folder: Some("Travel".to_string()),
                 tags: vec!["travel".to_string(), "docs".to_string()],
             })
@@ -786,10 +886,10 @@ mod tests {
             .add_card(NewCardRecord {
                 title: "Backup Mastercard".to_string(),
                 cardholder_name: "Jon Bogaty".to_string(),
-                number: "5555444433331111".to_string(),
+                number: "5555444433331111".to_string().into(),
                 expiry_month: "11".to_string(),
                 expiry_year: "2030".to_string(),
-                security_code: "999".to_string(),
+                security_code: "999".to_string().into(),
                 billing_zip: Some("73301".to_string()),
                 notes: Some("backup travel wallet".to_string()),
                 folder: Some("Travel".to_string()),
@@ -839,7 +939,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("source hosting".to_string()),
                 folder: Some("Work".to_string()),
@@ -850,7 +950,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitLab".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://gitlab.com".to_string()),
                 notes: Some("mirror".to_string()),
                 folder: Some("Work".to_string()),
@@ -861,10 +961,10 @@ mod tests {
             .add_card(NewCardRecord {
                 title: "Travel Card".to_string(),
                 cardholder_name: "Jon Bogaty".to_string(),
-                number: "5555444433331111".to_string(),
+                number: "5555444433331111".to_string().into(),
                 expiry_month: "11".to_string(),
                 expiry_year: "2030".to_string(),
-                security_code: "999".to_string(),
+                security_code: "999".to_string().into(),
                 billing_zip: None,
                 notes: Some("backup travel wallet".to_string()),
                 folder: Some("Travel".to_string()),
@@ -915,7 +1015,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -926,7 +1026,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitLab".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -937,7 +1037,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Bank".to_string(),
                 username: "jon".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Finance".to_string()),
@@ -992,7 +1092,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("source hosting".to_string()),
                 folder: Some("Work".to_string()),
@@ -1043,7 +1143,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1095,7 +1195,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Mnemonic Backup".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Recovery".to_string()),
@@ -1157,7 +1257,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Certificate Backup".to_string(),
-                content: "certificate path".to_string(),
+                content: "certificate path".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["recovery".to_string()],
             })
@@ -1230,7 +1330,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1240,7 +1340,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Recovery".to_string(),
-                content: "paper copy in safe".to_string(),
+                content: "paper copy in safe".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["recovery".to_string()],
             })
@@ -1281,7 +1381,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -1329,7 +1429,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -1438,7 +1538,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1448,7 +1548,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Recovery".to_string(),
-                content: "paper copy".to_string(),
+                content: "paper copy".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["offline".to_string()],
             })
@@ -1498,7 +1598,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1774,7 +1874,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "First Login".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1785,7 +1885,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Second Login".to_string(),
                 username: "octocat2".to_string(),
-                password: "hunter3".to_string(),
+                password: "hunter3".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1832,7 +1932,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "First Login".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1843,7 +1943,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Second Login".to_string(),
                 username: "octocat2".to_string(),
-                password: "hunter3".to_string(),
+                password: "hunter3".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1924,7 +2024,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Original Login One".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1935,7 +2035,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Original Login Two".to_string(),
                 username: "octocat2".to_string(),
-                password: "hunter3".to_string(),
+                password: "hunter3".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -2005,7 +2105,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Replacement Login".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -2048,7 +2148,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -2078,6 +2178,92 @@ mod tests {
         init_vault(&path, "correct horse battery staple").expect("init");
         let error = unlock_vault(&path, "wrong").expect_err("unlock should fail");
         assert!(matches!(error, VaultError::UnlockFailed));
+    }
+
+    /// Repeated wrong-password attempts through the real `unlock_vault`
+    /// entry point (not the lower-level `lockout` module directly) must
+    /// eventually be refused with `VaultError::LockedOut` before Argon2id
+    /// even runs, and that refusal must persist against a brand-new
+    /// `Connection`/process handle — i.e. survive a restart, since nothing
+    /// but the on-disk `.lock-state` sibling file carries the state across
+    /// these calls.
+    #[test]
+    fn repeated_failed_unlocks_persist_a_cross_restart_lockout() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        // The first several wrong attempts stay within the free allowance
+        // and must each fail with the ordinary wrong-credential error, not
+        // a lockout.
+        let mut last_error = None;
+        for _ in 0..8 {
+            match unlock_vault(&path, "wrong") {
+                Err(VaultError::LockedOut { retry_after_secs }) => {
+                    assert!(retry_after_secs > 0);
+                    last_error = Some(VaultError::LockedOut { retry_after_secs });
+                    break;
+                }
+                Err(VaultError::UnlockFailed) => {}
+                other => panic!("unexpected unlock_vault result: {other:?}"),
+            }
+        }
+
+        let error = last_error.expect("enough failed attempts must eventually lock out");
+        assert!(matches!(error, VaultError::LockedOut { .. }));
+
+        // Simulate a restart: a fresh call against the same path (no shared
+        // in-memory state at all) must still be refused.
+        let error_after_restart = unlock_vault(&path, "correct horse battery staple")
+            .expect_err("even the correct password must be refused while locked out");
+        match error_after_restart {
+            VaultError::LockedOut { retry_after_secs } => assert!(retry_after_secs > 0),
+            other => panic!("expected LockedOut after restart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_successful_unlock_clears_a_prior_lockout_record() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        // A couple of wrong attempts (within the free allowance) leave a
+        // lockout record on disk, but not yet an active lockout.
+        for _ in 0..2 {
+            let error = unlock_vault(&path, "wrong").expect_err("unlock should fail");
+            assert!(matches!(error, VaultError::UnlockFailed));
+        }
+        assert!(
+            lockout_state_path(&path).exists(),
+            "a failed attempt must persist a lockout record"
+        );
+
+        unlock_vault(&path, "correct horse battery staple").expect("correct password unlocks");
+
+        assert!(
+            !lockout_state_path(&path).exists(),
+            "a successful unlock must clear the durable lockout record"
+        );
+    }
+
+    #[test]
+    fn lockout_state_lives_outside_the_encrypted_vault_rows() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let _ = unlock_vault(&path, "wrong");
+
+        // The lockout record must be readable without ever unlocking the
+        // vault: it is required precisely because unlock hasn't succeeded
+        // yet, so it cannot live inside the AEAD-encrypted item rows or
+        // depend on the master key in any way.
+        let lock_state_path = lockout_state_path(&path);
+        let raw = fs::read_to_string(&lock_state_path).expect("read lockout state as plaintext");
+        let record: LockoutRecord =
+            serde_json::from_str(&raw).expect("lockout state is plain, unencrypted JSON");
+        assert_eq!(record.failed_attempt_count, 1);
     }
 
     #[test]
@@ -2125,7 +2311,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Cert Login".to_string(),
                 username: "jon@example.com".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -2183,7 +2369,7 @@ mod tests {
         let item = unlocked
             .add_secure_note(NewSecureNoteRecord {
                 title: "Legacy Cert Slot".to_string(),
-                content: "legacy compatibility preserved".to_string(),
+                content: "legacy compatibility preserved".to_string().into(),
                 folder: None,
                 tags: vec!["legacy".to_string()],
             })
@@ -2446,7 +2632,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Mnemonic Login".to_string(),
                 username: "jon@example.com".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -2685,7 +2871,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Device Login".to_string(),
                 username: "jon@example.com".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -3277,7 +3463,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Example".to_string(),
                 username: "jon@example.com".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Personal".to_string()),
@@ -3290,7 +3476,7 @@ mod tests {
                 &item.id,
                 UpdateLoginRecord {
                     title: Some("Example Updated".to_string()),
-                    password: Some("Sup3r$ecret!".to_string()),
+                    password: Some("Sup3r$ecret!".to_string().into()),
                     ..UpdateLoginRecord::default()
                 },
             )
@@ -3394,7 +3580,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("primary".to_string()),
                 folder: Some("Work".to_string()),

@@ -21,17 +21,44 @@ serde_json.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
 
+# P9.4 clipboard-history-exclusion hints (crates/paranoid-vault/src/clipboard_hardening.rs)
+# call arboard's `SetExtApple`/`SetExtLinux`/`SetExtWindows` builder extensions. Gated
+# identically to paranoid-gui's own arboard dependency (target.'cfg(not(any(target_os =
+# "android", target_arch = "wasm32")))') so this crate stays wasm32/Android-clean: the
+# GUI's Android target excludes arboard entirely, and paranoid-vault is still compiled
+# (without a clipboard) as one of its dependencies.
+[target.'cfg(not(any(target_os = "android", target_arch = "wasm32")))'.dependencies]
+arboard.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
+libc.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+windows-sys = { workspace = true, features = ["Win32_System_ErrorReporting"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-openssl"] }
+libc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 
-[lints]
-workspace = true
+# The workspace forbids unsafe_code outright. P9.3 OS memory-hardening
+# (crates/paranoid-vault/src/mem_hardening.rs) needs a tightly-scoped,
+# per-platform `libc`/`windows-sys` FFI surface (setrlimit/prctl/ptrace/
+# mlock/munlock/WerSetFlags) that has no safe equivalent. `forbid` cannot be
+# overridden by an in-source `#[allow]` at all (rustc E0453), so — matching
+# the existing paranoid-gui precedent for its Android/WASM `#[unsafe(no_mangle)]`
+# entry points — this crate downgrades to `deny`, which the `mem_hardening`
+# module's `#![allow(unsafe_code)]` (with a `// SAFETY:` comment on every
+# unsafe block) can then locally override. Clippy lints stay on the
+# workspace table unchanged.
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unwrap_used = "deny"
+
+[lints.rust]
+unsafe_code = "deny"

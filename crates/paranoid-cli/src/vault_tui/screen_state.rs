@@ -1570,20 +1570,7 @@ impl App {
         }
 
         if self.screen.is_unlocked_vault_screen() && self.session.should_auto_lock() {
-            let clipboard_cleared = match self.session.take_pending_clipboard_contents() {
-                Some(expected) => clear_clipboard_if_matches(expected.as_str()).unwrap_or(false),
-                None => false,
-            };
-            self.header = None;
-            self.items.clear();
-            self.selected_index = 0;
-            self.selected_keyslot_index = 0;
-            self.detail = None;
-            self.search_mode = false;
-            self.editing_item_id = None;
-            self.latest_mnemonic_enrollment = None;
-            self.screen = Screen::UnlockBlocked;
-            self.purge_secret_state_on_lock();
+            let clipboard_cleared = self.clear_decrypted_state_and_lock();
             self.session.note_activity();
             self.status = if clipboard_cleared {
                 format!(
@@ -1599,24 +1586,153 @@ impl App {
         }
     }
 
+    /// Immediately drives any unlocked-vault screen to `UnlockBlocked`,
+    /// clearing decrypted vault state and purging every secret-bearing form
+    /// (via [`Self::purge_secret_state_on_lock`]) and the armed clipboard
+    /// contents. Shared by idle auto-lock (`poll_hardening`) and the panic
+    /// / quick-lock hotkey (`Ctrl+L`, see `handle_key`) so both triggers run
+    /// the exact same scrub path. Returns whether an armed clipboard entry
+    /// was found and cleared.
+    fn clear_decrypted_state_and_lock(&mut self) -> bool {
+        let clipboard_cleared = match self.session.take_pending_clipboard_contents() {
+            Some(expected) => clear_clipboard_if_matches(expected.as_str()).unwrap_or(false),
+            None => false,
+        };
+        self.header = None;
+        self.items.clear();
+        self.selected_index = 0;
+        self.selected_keyslot_index = 0;
+        self.detail = None;
+        self.search_mode = false;
+        self.editing_item_id = None;
+        self.screen = Screen::UnlockBlocked;
+        self.purge_secret_state_on_lock();
+        clipboard_cleared
+    }
+
+    /// Panic / quick-lock hotkey (P9.6): from any unlocked-vault screen,
+    /// `Ctrl+L` immediately runs the same lock-and-purge path as idle
+    /// auto-lock, then re-arms the idle timer so the freshly-shown unlock
+    /// screen does not itself appear to have triggered an auto-lock. A
+    /// no-op on pre-unlock screens (`EnvironmentApproval`/`UnlockBlocked`),
+    /// which have no unlocked state to purge.
+    ///
+    /// Documented as the TUI panic key in `docs/guides/tui.md` (see
+    /// "Panic / quick-lock hotkey").
+    pub(crate) fn handle_panic_lock_hotkey(&mut self) -> bool {
+        if !self.screen.is_unlocked_vault_screen() {
+            return false;
+        }
+        let clipboard_cleared = self.clear_decrypted_state_and_lock();
+        self.session.note_activity();
+        self.status = if clipboard_cleared {
+            "Panic lock: vault locked immediately and the clipboard was cleared.".to_string()
+        } else {
+            "Panic lock: vault locked immediately.".to_string()
+        };
+        true
+    }
+
     /// Purges every secret-bearing field reachable from an unlocked-vault
     /// screen once auto-lock (or an explicit lock) fires. `options.auth`
     /// is reset to a non-secret `PasswordEnv` placeholder that forces
     /// re-entry on the next unlock attempt, and every form that can hold a
-    /// `SecretString` is reset to its default so the zeroizing drop scrubs
-    /// the old plaintext immediately instead of leaving it resident until
-    /// the next time that form happens to be reused.
+    /// `SecretString` (or a plaintext secret in a plain `String` field, e.g.
+    /// `add_login_form.password`, `card_form.number`/`security_code`,
+    /// `note_form.content`) is reset to its default so the zeroizing drop
+    /// (or, for the plain-`String` add/edit forms, simple replacement of the
+    /// old heap buffer) scrubs the old plaintext immediately instead of
+    /// leaving it resident until the next time that form happens to be
+    /// reused. `self.detail` — the decrypted item shown on the detail
+    /// screen — is cleared here too so the panic-lock hotkey scrubs it even
+    /// though `clear_decrypted_state_and_lock` also clears it independently;
+    /// this method must be a complete purge on its own so a caller that
+    /// invokes it directly (as the P9 gate's pinned test now does) can't be
+    /// fooled by a partial scrub landing green.
     pub(crate) fn purge_secret_state_on_lock(&mut self) {
-        self.options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
-        self.options.mnemonic_phrase = None;
-        self.unlock_form = UnlockForm::default();
-        self.recovery_secret_form = RecoverySecretForm::default();
-        self.certificate_rewrap_form = CertificateRewrapForm::default();
-        self.export_transfer_form = ExportTransferForm::default();
-        self.import_transfer_form = ImportTransferForm::default();
+        // FAIL-CLOSED EXHAUSTIVENESS (P9 re-verify): destructure `self` with an
+        // explicit `..`-free field list so adding ANY new App field breaks this
+        // build until it is triaged here as either a secret to scrub or an
+        // acknowledged non-secret. Three prior leaks (form fields, the master
+        // recovery mnemonic, its clipboard copy) all came from a purge that
+        // silently omitted a field; the compiler now catches the next one.
+        let Self {
+            // --- secret-bearing: MUST be scrubbed ---
+            options,
+            detail,
+            latest_mnemonic_enrollment,
+            unlock_form,
+            add_login_form,
+            note_form,
+            card_form,
+            identity_form,
+            recovery_secret_form,
+            certificate_rewrap_form,
+            export_transfer_form,
+            import_transfer_form,
+            // `session` holds the armed clipboard buffer (a plaintext copy of the
+            // last-copied secret, incl. the master recovery mnemonic). Its
+            // in-memory residency is scrubbed here; the OS clipboard wipe stays
+            // with the caller that owns the arboard handle (LEAK-D).
+            session,
+            // --- non-secret: acknowledged, intentionally not scrubbed. NO `..`:
+            // adding an App field breaks this destructure until it is triaged
+            // here, which is the fail-closed guarantee. If any of these gains a
+            // secret field, convert it and move it above.
+            profile: _,
+            audit_jsonl: _,
+            require_audit_sink: _,
+            audit_sink_health: _,
+            ops_audit_events: _, // redacted by construction (P0.4)
+            screen: _,
+            status: _,
+            header: _,
+            items: _,
+            selected_index: _,
+            selected_keyslot_index: _,
+            filters: _,
+            search_mode: _,
+            capability_report: _,
+            environment_approval: _,
+            mnemonic_slot_form: _,
+            device_slot_form: _,
+            certificate_slot_form: _,
+            keyslot_label_form: _,
+            pending_keyslot_removal_confirmation: _,
+            generate_store_form: _,
+            export_backup_form: _,
+            export_backup_preview: _,
+            import_backup_form: _,
+            editing_item_id: _,
+        } = self;
+
+        options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
+        options.mnemonic_phrase = None;
+        *detail = None;
+        *latest_mnemonic_enrollment = None;
+        *unlock_form = UnlockForm::default();
+        *add_login_form = AddLoginForm::default();
+        *note_form = NoteForm::default();
+        *card_form = CardForm::default();
+        *identity_form = IdentityForm::default();
+        *recovery_secret_form = RecoverySecretForm::default();
+        *certificate_rewrap_form = CertificateRewrapForm::default();
+        *export_transfer_form = ExportTransferForm::default();
+        *import_transfer_form = ImportTransferForm::default();
+        session.clear_clipboard_tracking();
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> bool {
+        // P9.6: the panic / quick-lock hotkey is checked before per-screen
+        // dispatch so it fires from ANY unlocked screen — including mid-edit
+        // in a secret-bearing text field — rather than only where a screen
+        // handler happens to leave 'l' unbound. `handle_panic_lock_hotkey`
+        // itself no-ops on pre-unlock screens, so this is safe to check
+        // unconditionally on every keypress.
+        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('l')) {
+            self.handle_panic_lock_hotkey();
+            return false;
+        }
         match self.screen {
             Screen::EnvironmentApproval => self.handle_environment_approval_key(key),
             Screen::Vault | Screen::Keyslots => self.handle_vault_key(key),
@@ -2705,7 +2821,7 @@ impl App {
             self.detail.as_ref().map(|item| &item.payload)
         {
             self.note_form.title = note.title.clone();
-            self.note_form.content = note.content.clone();
+            self.note_form.content = note.content.as_str().to_string();
             self.note_form.folder = note.folder.clone().unwrap_or_default();
             self.note_form.tags = note.tags.join(", ");
         }
@@ -2719,10 +2835,10 @@ impl App {
         if let Some(VaultItemPayload::Card(card)) = self.detail.as_ref().map(|item| &item.payload) {
             self.card_form.title = card.title.clone();
             self.card_form.cardholder_name = card.cardholder_name.clone();
-            self.card_form.number = card.number.clone();
+            self.card_form.number = card.number.as_str().to_string();
             self.card_form.expiry_month = card.expiry_month.clone();
             self.card_form.expiry_year = card.expiry_year.clone();
-            self.card_form.security_code = card.security_code.clone();
+            self.card_form.security_code = card.security_code.as_str().to_string();
             self.card_form.billing_zip = card.billing_zip.clone().unwrap_or_default();
             self.card_form.notes = card.notes.clone().unwrap_or_default();
             self.card_form.folder = card.folder.clone().unwrap_or_default();
@@ -2838,7 +2954,7 @@ impl App {
                     focus_index: 0,
                     title: login.title.clone(),
                     username: login.username.clone(),
-                    password: login.password.clone(),
+                    password: login.password.as_str().to_string(),
                     url: login.url.clone().unwrap_or_default(),
                     notes: login.notes.clone().unwrap_or_default(),
                     folder: login.folder.clone().unwrap_or_default(),
@@ -2853,7 +2969,7 @@ impl App {
                 self.note_form = NoteForm {
                     focus_index: 0,
                     title: note.title.clone(),
-                    content: note.content.clone(),
+                    content: note.content.as_str().to_string(),
                     folder: note.folder.clone().unwrap_or_default(),
                     tags: note.tags.join(", "),
                 };
@@ -2868,10 +2984,10 @@ impl App {
                     focus_index: 0,
                     title: card.title.clone(),
                     cardholder_name: card.cardholder_name.clone(),
-                    number: card.number.clone(),
+                    number: card.number.as_str().to_string(),
                     expiry_month: card.expiry_month.clone(),
                     expiry_year: card.expiry_year.clone(),
-                    security_code: card.security_code.clone(),
+                    security_code: card.security_code.as_str().to_string(),
                     billing_zip: card.billing_zip.clone().unwrap_or_default(),
                     notes: card.notes.clone().unwrap_or_default(),
                     folder: card.folder.clone().unwrap_or_default(),

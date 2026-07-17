@@ -7,6 +7,23 @@ import {
     HorizontalBox,
 } from "std-widgets.slint";
 
+// P9.6: panic / quick-lock keyboard accelerator. `Control+L` is the GUI
+// counterpart of the TUI's Ctrl+L panic key (see
+// docs/guides/tui.md#panic--quick-lock-hotkey) and is documented there.
+component PanicLockShortcut inherits FocusScope {
+    callback panic-lock();
+
+    // `KeyBinding` matches in the *capture* phase, which Slint dispatches
+    // top-down from the window to whichever descendant currently holds
+    // focus (see i-slint-core's `process_key_input`) — so this fires even
+    // while a `LineEdit` (e.g. the master-password field) has focus and is
+    // mid-entry, before that field's own key handling ever runs.
+    KeyBinding {
+        keys: @keys(Control + L);
+        activated => { root.panic-lock(); }
+    }
+}
+
 component FieldLabel inherits Text {
     color: #b8c0d8;
     font-size: 13px;
@@ -58,329 +75,358 @@ export component ParanoidPasswdShell inherits Window {
     callback enroll-mnemonic(string, string, string);
     callback export-backup(string, string, string);
     callback copy-primary();
+    callback lock-vault();
 
     title: "paranoid-passwd";
     preferred-width: 1240px;
     preferred-height: 1020px;
     background: #0f141b;
 
-    VerticalLayout {
-        padding: 18px;
-        spacing: 14px;
+    // Slint only dispatches key events (including the capture phase) along
+    // the ancestor chain of whatever item currently holds focus; a window
+    // with nothing focused yet ignores all keys. Giving `panic-lock-scope`
+    // initial focus means Control+L works immediately at launch, and it
+    // keeps working after the user tabs/clicks into any descendant field
+    // (a `LineEdit` becoming focused does not remove `panic-lock-scope`
+    // from that field's ancestor chain, so capture still reaches it first).
+    forward-focus: panic-lock-scope;
 
-        Rectangle {
-            height: 104px;
-            background: #111822;
-            border-color: #405368;
-            border-width: 1px;
-            border-radius: 6px;
+    // P9.6 panic / quick-lock hotkey: `PanicLockShortcut` above wraps the
+    // whole window body in a `FocusScope` + `KeyBinding` for Control+L,
+    // firing `root.lock-vault()` even while a `LineEdit` (e.g. the
+    // recovery-secret field) has focus and is mid-entry, since `KeyBinding`
+    // matches in the capture phase before descendant key handling runs.
+    panic-lock-scope := PanicLockShortcut {
+        panic-lock => { root.lock-vault(); }
 
-            HorizontalLayout {
-                padding: 20px;
-                spacing: 22px;
-
-                VerticalLayout {
-                    spacing: 6px;
-                    width: 500px;
-
-                    Text {
-                        text: "paranoid-passwd";
-                        color: #f6f8ff;
-                        font-size: 34px;
-                        font-weight: 800;
-                    }
-
-                    Text {
-                        text: "Local secrets. Verifiable trust.";
-                        color: #9fd4c9;
-                        font-size: 18px;
-                    }
-                }
-
-                Rectangle {
-                    width: 170px;
-                    height: 54px;
-                    background: #1f2a37;
-                    border-color: #4c6178;
-                    border-width: 1px;
-                    border-radius: 4px;
-
-                    VerticalLayout {
-                        padding: 8px;
-                        spacing: 2px;
-                        FieldLabel { text: "SURFACE"; }
-                        Text {
-                            text: root.mode;
-                            color: #f5d76e;
-                            font-size: 16px;
-                            font-weight: 700;
-                        }
-                    }
-                }
-
-                Rectangle {
-                    width: 355px;
-                    height: 54px;
-                    background: #1b2a26;
-                    border-color: #487263;
-                    border-width: 1px;
-                    border-radius: 4px;
-
-                    VerticalLayout {
-                        padding: 8px;
-                        spacing: 2px;
-                        FieldLabel { text: "POSTURE"; }
-                        Text {
-                            text: root.posture;
-                            color: #a7e3c1;
-                            font-size: 14px;
-                            wrap: word-wrap;
-                        }
-                    }
-                }
-            }
-        }
-
-        GridLayout {
+        VerticalLayout {
+            padding: 18px;
             spacing: 14px;
 
-            Row {
-                Panel {
-                    width: 390px;
-                    height: 440px;
+            Rectangle {
+                height: 104px;
+                background: #111822;
+                border-color: #405368;
+                border-width: 1px;
+                border-radius: 6px;
 
-                    VerticalBox {
-                        padding: 18px;
-                        spacing: 10px;
+                HorizontalLayout {
+                    padding: 20px;
+                    spacing: 22px;
 
-                        SectionTitle { text: "Generator"; }
-                        BodyText {
-                            text: "Run the audited Rust core. The GUI submits policy; paranoid-core owns entropy, rejection sampling, and compliance math.";
+                    VerticalLayout {
+                        spacing: 6px;
+                        width: 500px;
+
+                        Text {
+                            text: "paranoid-passwd";
+                            color: #f6f8ff;
+                            font-size: 34px;
+                            font-weight: 800;
                         }
 
-                        HorizontalBox {
-                            spacing: 8px;
-                            VerticalLayout {
-                                spacing: 4px;
-                                FieldLabel { text: "Length"; }
-                                gen-length := LineEdit {
-                                    text: "32";
-                                    placeholder-text: "32";
-                                }
-                            }
-                            VerticalLayout {
-                                spacing: 4px;
-                                FieldLabel { text: "Count"; }
-                                gen-count := LineEdit {
-                                    text: "1";
-                                    placeholder-text: "1";
-                                }
-                            }
+                        Text {
+                            text: "Local secrets. Verifiable trust.";
+                            color: #9fd4c9;
+                            font-size: 18px;
                         }
+                    }
 
-                        HorizontalBox {
-                            nist := CheckBox { text: "NIST"; checked: true; }
-                            pci := CheckBox { text: "PCI DSS"; }
-                            soc2 := CheckBox { text: "SOC 2"; }
-                        }
+                    Rectangle {
+                        width: 170px;
+                        height: 54px;
+                        background: #1f2a37;
+                        border-color: #4c6178;
+                        border-width: 1px;
+                        border-radius: 4px;
 
-                        HorizontalBox {
-                            run-audit-button := Button {
-                                text: "Run audit";
-                                clicked => {
-                                    root.run-audit(gen-length.text, gen-count.text, nist.checked, pci.checked, soc2.checked);
-                                }
-                            }
-                            copy-primary-button := Button {
-                                text: "Copy primary";
-                                clicked => { root.copy-primary(); }
+                        VerticalLayout {
+                            padding: 8px;
+                            spacing: 2px;
+                            FieldLabel { text: "SURFACE"; }
+                            Text {
+                                text: root.mode;
+                                color: #f5d76e;
+                                font-size: 16px;
+                                font-weight: 700;
                             }
                         }
                     }
-                }
 
-                Panel {
-                    width: 390px;
-                    height: 440px;
+                    Rectangle {
+                        width: 355px;
+                        height: 54px;
+                        background: #1b2a26;
+                        border-color: #487263;
+                        border-width: 1px;
+                        border-radius: 4px;
 
-                    VerticalBox {
-                        padding: 18px;
-                        spacing: 10px;
-
-                        SectionTitle { text: "Vault Access"; }
-                        BodyText {
-                            text: "Unlock a local encrypted vault and perform item, rotation, recovery, and backup operations through typed ops policy and paranoid-vault.";
-                        }
-
-                        FieldLabel { text: "Vault path"; }
-                        vault-path-input := LineEdit {
-                            text: root.vault-path;
-                            placeholder-text: "vault.sqlite";
-                        }
-
-                        FieldLabel { text: "Recovery secret"; }
-                        vault-secret := LineEdit {
-                            input-type: InputType.password;
-                            placeholder-text: "enter local recovery secret";
-                        }
-
-                        HorizontalBox {
-                            init-vault-button := Button {
-                                text: "Init";
-                                clicked => { root.init-vault(vault-path-input.text, vault-secret.text); }
-                            }
-                            unlock-vault-button := Button {
-                                text: "Unlock";
-                                clicked => { root.unlock-vault(vault-path-input.text, vault-secret.text); }
-                            }
-                        }
-                    }
-                }
-
-                Panel {
-                    width: 390px;
-                    height: 440px;
-
-                    VerticalBox {
-                        padding: 18px;
-                        spacing: 10px;
-
-                        SectionTitle { text: "Operations"; }
-                        FieldLabel { text: "TYPED OPS POLICY"; }
-
-                        HorizontalBox {
-                            login-title := LineEdit { placeholder-text: "Title"; text: "GitHub"; }
-                            login-user := LineEdit { placeholder-text: "Username"; text: "octocat"; }
-                        }
-
-                        login-password := LineEdit {
-                            input-type: InputType.password;
-                            placeholder-text: "Existing password";
-                        }
-
-                        HorizontalBox {
-                            login-folder := LineEdit { placeholder-text: "Folder"; text: "Work"; }
-                            login-tags := LineEdit { placeholder-text: "Tags"; text: "work,code"; }
-                        }
-
-                        HorizontalBox {
-                            rotate-length := LineEdit { text: "28"; placeholder-text: "Rotate length"; }
-                            mnemonic-label := LineEdit { text: "paper-backup"; placeholder-text: "Mnemonic label"; }
-                        }
-
-                        backup-path := LineEdit {
-                            placeholder-text: "Backup output path";
-                        }
-
-                        HorizontalBox {
-                            add-login-button := Button {
-                                text: "Add login";
-                                clicked => {
-                                    root.add-login(vault-path-input.text, vault-secret.text, login-title.text, login-user.text, login-password.text, login-folder.text, login-tags.text);
-                                }
-                            }
-                            rotate-button := Button {
-                                text: "Rotate";
-                                clicked => { root.generate-rotate(vault-path-input.text, vault-secret.text, rotate-length.text); }
-                            }
-                        }
-
-                        HorizontalBox {
-                            enroll-mnemonic-button := Button {
-                                text: "Enroll mnemonic";
-                                clicked => { root.enroll-mnemonic(vault-path-input.text, vault-secret.text, mnemonic-label.text); }
-                            }
-                            export-backup-button := Button {
-                                text: "Export backup";
-                                clicked => { root.export-backup(vault-path-input.text, vault-secret.text, backup-path.text); }
+                        VerticalLayout {
+                            padding: 8px;
+                            spacing: 2px;
+                            FieldLabel { text: "POSTURE"; }
+                            Text {
+                                text: root.posture;
+                                color: #a7e3c1;
+                                font-size: 14px;
+                                wrap: word-wrap;
                             }
                         }
                     }
                 }
             }
 
-            Row {
-                Panel {
-                    width: 390px;
-                    height: 340px;
+            GridLayout {
+                spacing: 14px;
 
-                    VerticalBox {
-                        padding: 18px;
-                        spacing: 10px;
-                        SectionTitle { text: "Audit Evidence"; }
-                        ScrollView {
-                            viewport-height: 255px;
-                            EvidenceText {
-                                width: parent.width - 4px;
-                                text: root.audit-details + "\n\n" + root.generated-passwords;
+                Row {
+                    Panel {
+                        width: 390px;
+                        height: 440px;
+
+                        VerticalBox {
+                            padding: 18px;
+                            spacing: 10px;
+
+                            SectionTitle { text: "Generator"; }
+                            BodyText {
+                                text: "Run the audited Rust core. The GUI submits policy; paranoid-core owns entropy, rejection sampling, and compliance math.";
+                            }
+
+                            HorizontalBox {
+                                spacing: 8px;
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    FieldLabel { text: "Length"; }
+                                    gen-length := LineEdit {
+                                        text: "32";
+                                        placeholder-text: "32";
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    FieldLabel { text: "Count"; }
+                                    gen-count := LineEdit {
+                                        text: "1";
+                                        placeholder-text: "1";
+                                    }
+                                }
+                            }
+
+                            HorizontalBox {
+                                nist := CheckBox { text: "NIST"; checked: true; }
+                                pci := CheckBox { text: "PCI DSS"; }
+                                soc2 := CheckBox { text: "SOC 2"; }
+                            }
+
+                            HorizontalBox {
+                                run-audit-button := Button {
+                                    text: "Run audit";
+                                    clicked => {
+                                        root.run-audit(gen-length.text, gen-count.text, nist.checked, pci.checked, soc2.checked);
+                                    }
+                                }
+                                copy-primary-button := Button {
+                                    text: "Copy primary";
+                                    clicked => { root.copy-primary(); }
+                                }
+                            }
+                        }
+                    }
+
+                    Panel {
+                        width: 390px;
+                        height: 440px;
+
+                        VerticalBox {
+                            padding: 18px;
+                            spacing: 10px;
+
+                            SectionTitle { text: "Vault Access"; }
+                            BodyText {
+                                text: "Unlock a local encrypted vault and perform item, rotation, recovery, and backup operations through typed ops policy and paranoid-vault.";
+                            }
+
+                            FieldLabel { text: "Vault path"; }
+                            vault-path-input := LineEdit {
+                                text: root.vault-path;
+                                placeholder-text: "vault.sqlite";
+                            }
+
+                            FieldLabel { text: "Recovery secret"; }
+                            vault-secret := LineEdit {
+                                input-type: InputType.password;
+                                placeholder-text: "enter local recovery secret";
+                            }
+
+                            HorizontalBox {
+                                init-vault-button := Button {
+                                    text: "Init";
+                                    clicked => { root.init-vault(vault-path-input.text, vault-secret.text); }
+                                }
+                                unlock-vault-button := Button {
+                                    text: "Unlock";
+                                    clicked => { root.unlock-vault(vault-path-input.text, vault-secret.text); }
+                                }
+                            }
+
+                            // P9.6: explicit panic / quick-lock action,
+                            // equivalent to the Control+L accelerator above.
+                            // Always enabled (a no-op on an already-locked
+                            // vault) so a mouse-only user has the same fast
+                            // exit as the keyboard shortcut.
+                            lock-vault-button := Button {
+                                text: "Lock vault (Ctrl+L)";
+                                clicked => { root.lock-vault(); }
+                            }
+                        }
+                    }
+
+                    Panel {
+                        width: 390px;
+                        height: 440px;
+
+                        VerticalBox {
+                            padding: 18px;
+                            spacing: 10px;
+
+                            SectionTitle { text: "Operations"; }
+                            FieldLabel { text: "TYPED OPS POLICY"; }
+
+                            HorizontalBox {
+                                login-title := LineEdit { placeholder-text: "Title"; text: "GitHub"; }
+                                login-user := LineEdit { placeholder-text: "Username"; text: "octocat"; }
+                            }
+
+                            login-password := LineEdit {
+                                input-type: InputType.password;
+                                placeholder-text: "Existing password";
+                            }
+
+                            HorizontalBox {
+                                login-folder := LineEdit { placeholder-text: "Folder"; text: "Work"; }
+                                login-tags := LineEdit { placeholder-text: "Tags"; text: "work,code"; }
+                            }
+
+                            HorizontalBox {
+                                rotate-length := LineEdit { text: "28"; placeholder-text: "Rotate length"; }
+                                mnemonic-label := LineEdit { text: "paper-backup"; placeholder-text: "Mnemonic label"; }
+                            }
+
+                            backup-path := LineEdit {
+                                placeholder-text: "Backup output path";
+                            }
+
+                            HorizontalBox {
+                                add-login-button := Button {
+                                    text: "Add login";
+                                    clicked => {
+                                        root.add-login(vault-path-input.text, vault-secret.text, login-title.text, login-user.text, login-password.text, login-folder.text, login-tags.text);
+                                    }
+                                }
+                                rotate-button := Button {
+                                    text: "Rotate";
+                                    clicked => { root.generate-rotate(vault-path-input.text, vault-secret.text, rotate-length.text); }
+                                }
+                            }
+
+                            HorizontalBox {
+                                enroll-mnemonic-button := Button {
+                                    text: "Enroll mnemonic";
+                                    clicked => { root.enroll-mnemonic(vault-path-input.text, vault-secret.text, mnemonic-label.text); }
+                                }
+                                export-backup-button := Button {
+                                    text: "Export backup";
+                                    clicked => { root.export-backup(vault-path-input.text, vault-secret.text, backup-path.text); }
+                                }
                             }
                         }
                     }
                 }
 
-                Panel {
-                    width: 390px;
-                    height: 340px;
+                Row {
+                    Panel {
+                        width: 390px;
+                        height: 340px;
 
-                    VerticalBox {
-                        padding: 18px;
-                        spacing: 10px;
-                        SectionTitle { text: "Vault Records"; }
-                        ScrollView {
-                            viewport-height: 255px;
-                            EvidenceText {
-                                width: parent.width - 4px;
-                                text: root.vault-items + "\n\n" + root.selected-item;
+                        VerticalBox {
+                            padding: 18px;
+                            spacing: 10px;
+                            SectionTitle { text: "Audit Evidence"; }
+                            ScrollView {
+                                viewport-height: 255px;
+                                EvidenceText {
+                                    width: parent.width - 4px;
+                                    text: root.audit-details + "\n\n" + root.generated-passwords;
+                                }
                             }
                         }
                     }
-                }
 
-                Panel {
-                    width: 390px;
-                    height: 340px;
+                    Panel {
+                        width: 390px;
+                        height: 340px;
 
-                    VerticalBox {
-                        padding: 18px;
-                        spacing: 10px;
-                        SectionTitle { text: "Assurance"; }
-                        BodyText {
-                            text: root.readiness;
-                        }
-                        Rectangle {
-                            height: 1px;
-                            background: #405368;
-                        }
-                        FieldLabel { text: "KEYSLOTS"; }
-                        ScrollView {
-                            viewport-height: 120px;
-                            EvidenceText {
-                                width: parent.width - 4px;
-                                text: root.keyslot-summary;
+                        VerticalBox {
+                            padding: 18px;
+                            spacing: 10px;
+                            SectionTitle { text: "Vault Records"; }
+                            ScrollView {
+                                viewport-height: 255px;
+                                EvidenceText {
+                                    width: parent.width - 4px;
+                                    text: root.vault-items + "\n\n" + root.selected-item;
+                                }
                             }
                         }
-                        FieldLabel { text: "AUTOMATION"; }
-                        EvidenceText { text: root.automation-status; }
+                    }
+
+                    Panel {
+                        width: 390px;
+                        height: 340px;
+
+                        VerticalBox {
+                            padding: 18px;
+                            spacing: 10px;
+                            SectionTitle { text: "Assurance"; }
+                            BodyText {
+                                text: root.readiness;
+                            }
+                            Rectangle {
+                                height: 1px;
+                                background: #405368;
+                            }
+                            FieldLabel { text: "KEYSLOTS"; }
+                            ScrollView {
+                                viewport-height: 120px;
+                                EvidenceText {
+                                    width: parent.width - 4px;
+                                    text: root.keyslot-summary;
+                                }
+                            }
+                            FieldLabel { text: "AUTOMATION"; }
+                            EvidenceText { text: root.automation-status; }
+                        }
                     }
                 }
             }
-        }
 
-        Rectangle {
-            height: 46px;
-            background: #121922;
-            border-color: #314154;
-            border-width: 1px;
-            border-radius: 5px;
+            Rectangle {
+                height: 46px;
+                background: #121922;
+                border-color: #314154;
+                border-width: 1px;
+                border-radius: 5px;
 
-            Text {
-                x: 16px;
-                y: 12px;
-                width: parent.width - 32px;
-                text: root.status;
-                color: #f2f5ff;
-                font-size: 14px;
-                wrap: word-wrap;
+                Text {
+                    x: 16px;
+                    y: 12px;
+                    width: parent.width - 32px;
+                    text: root.status;
+                    color: #f2f5ff;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                }
             }
         }
     }

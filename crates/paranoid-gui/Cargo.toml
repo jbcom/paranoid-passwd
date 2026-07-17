@@ -28,6 +28,7 @@ gui-widget-tests = []
 
 [dependencies]
 slint.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 paranoid-audit = { workspace = true }
