@@ -24,7 +24,7 @@ use ratatui::backend::TestBackend;
 use ratatui::{
     Terminal,
     backend::{Backend, CrosstermBackend},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 
@@ -38,19 +38,7 @@ pub(crate) use panel_rendering::*;
 pub use screen_state::VaultTuiConfig;
 pub(crate) use screen_state::*;
 
-const BG: Color = Color::Rgb(8, 12, 20);
-
-const PANEL: Color = Color::Rgb(13, 17, 25);
-
-const TEXT: Color = Color::Rgb(228, 231, 242);
-
-const GREEN: Color = Color::Rgb(52, 211, 153);
-
-const BLUE: Color = Color::Rgb(96, 165, 250);
-
-const AMBER: Color = Color::Rgb(251, 191, 36);
-
-const RED: Color = Color::Rgb(248, 113, 113);
+use crate::theme::{AMBER, BG, BLUE, GREEN, PANEL, RED, TEXT};
 
 trait EditableText {
     fn edit_pop(&mut self);

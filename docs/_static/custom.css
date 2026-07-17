@@ -1,4 +1,5 @@
 :root {
+  /* Color tokens (docs/design/system.md §1) */
   --pp-bg: #080c14;
   --pp-panel: #0d1119;
   --pp-border: #17304b;
@@ -8,6 +9,27 @@
   --pp-blue: #60a5fa;
   --pp-red: #f87171;
   --pp-amber: #fbbf24;
+
+  /* Spacing scale (docs/design/system.md §2) — rem, docs column */
+  --pp-space-tight: 0.375rem;
+  --pp-space-snug: 0.5rem;
+  --pp-space-base: 0.875rem;
+  --pp-space-loose: 1.375rem;
+
+  /* Type scale (docs/design/system.md §3) */
+  --pp-type-title: 1.25rem;
+  --pp-type-title-weight: 600;
+  --pp-type-body: 1rem;
+  --pp-type-body-weight: 400;
+  --pp-type-label: 0.85rem;
+  --pp-type-label-weight: 500;
+  --pp-type-mono: 1rem;
+  --pp-type-mono-family:
+    "IBM Plex Mono", "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
+
+  /* Component specs (docs/design/system.md §4.1) */
+  --pp-panel-radius: 0.5rem;
+  --pp-panel-border-width: 1px;
 }
 
 body {
@@ -23,7 +45,7 @@ body,
 .md-sidebar,
 .shibuya-content,
 .shibuya-main {
-  font-family: "IBM Plex Mono", "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--pp-type-mono-family);
 }
 
 .shibuya-main,
@@ -37,7 +59,7 @@ body,
 .shibuya-page-nav,
 .shibuya-sidebar__inner {
   background: rgba(13, 17, 25, 0.88);
-  border: 1px solid var(--pp-border);
+  border: var(--pp-panel-border-width) solid var(--pp-border);
   border-radius: 18px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
 }

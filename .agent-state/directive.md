@@ -383,7 +383,7 @@ P6.0 CI research + two-tier trust design.
 
 ## P8 — UX maturity (user signal 2026-07-16: "feels like a prototype"; runs after P5, before FINAL). PUX.5 turned this from ad-hoc polish into "build the designed product" — every item below implements a specific storyboard step in docs/design/journeys.md, a specific screen in docs/design/ia.md, and specific tokens in docs/design/system.md. No P8 item re-decides brand/journey/IA/token choices; a P8 string, color, spacing, or key that contradicts those docs is a defect against them, not a new decision to make locally.
 
-- [ ] P8.0 Shared theme/token module — stand up the token consumption
+- [x] P8.0 Shared theme/token module — stand up the token consumption
   mechanism system.md §6 specifies, BEFORE P8.2/P8.3 touch a single screen,
   so both surfaces consume it rather than re-deriving values:
   - **ratatui**: new `crates/paranoid-cli/src/theme.rs` exposing the 9 color

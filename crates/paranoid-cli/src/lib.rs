@@ -8,6 +8,7 @@
 
 pub mod capability_detect;
 pub mod scripted;
+pub mod theme;
 pub mod tui;
 pub mod vault_cli;
 pub mod vault_tui;

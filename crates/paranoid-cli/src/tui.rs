@@ -18,7 +18,7 @@ use ratatui::{
     Frame, Terminal,
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Tabs, Wrap},
 };
@@ -29,14 +29,7 @@ use std::{
     time::Duration,
 };
 
-const BG: Color = Color::Rgb(8, 12, 20);
-const PANEL: Color = Color::Rgb(13, 17, 25);
-const TEXT: Color = Color::Rgb(228, 231, 242);
-const GREEN: Color = Color::Rgb(52, 211, 153);
-const BLUE: Color = Color::Rgb(96, 165, 250);
-const AMBER: Color = Color::Rgb(251, 191, 36);
-const RED: Color = Color::Rgb(248, 113, 113);
-const PURPLE: Color = Color::Rgb(167, 139, 250);
+use crate::theme::{AMBER, BG, BLUE, GREEN, PANEL, RED, TEXT};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Screen {
@@ -1165,7 +1158,7 @@ fn result_tab_text(tab: usize, report: &GenerationReport) -> Text<'static> {
         4 => Text::from(vec![
             Line::styled(
                 "Threat Model",
-                Style::default().fg(PURPLE).add_modifier(Modifier::BOLD),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ),
             Line::raw("T1 Training-data leakage — mitigated by OpenSSL-backed OS entropy."),
             Line::raw("T2 Token-distribution bias — mitigated by rejection sampling."),

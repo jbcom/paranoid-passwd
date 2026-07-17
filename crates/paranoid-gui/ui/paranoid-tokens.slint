@@ -1,0 +1,102 @@
+// Shared design tokens for the Slint GUI — the GUI half of the cross-surface
+// token system defined in docs/design/system.md.
+//
+// Every brush and length below traces to a named token in
+// docs/design/system.md §1-§3, cited inline. `paranoid.slint` imports this
+// `global` and references `Tokens.*` exclusively; it must never hard-code a
+// hex color, a pixel size, or a font weight of its own (system.md's
+// "consumption rule"). This file is the GUI's single source of values, the
+// counterpart of the ratatui `crates/paranoid-cli/src/theme.rs` module and
+// the Sphinx `docs/_static/custom.css` `:root` custom properties.
+export global Tokens {
+    // -------------------------------------------------------------
+    // Color tokens (docs/design/system.md §1)
+    // -------------------------------------------------------------
+
+    // `color.bg.base` — the ground. Near-black, low-glare; the whole surface.
+    out property <brush> bg-base: #080c14;
+
+    // `color.bg.panel` — a raised panel or focused region.
+    out property <brush> bg-panel: #0d1119;
+
+    // `color.border` — structure and separation between regions.
+    out property <brush> border: #17304b;
+
+    // `color.text.primary` — primary reading text.
+    out property <brush> text-primary: #e4e7f2;
+
+    // `color.text.muted` — secondary text, labels, footer keys, hints.
+    out property <brush> text-muted: #95a0b8;
+
+    // `color.status.verified` — verified / safe / passed. Earned only after
+    // a real check; never a default "all fine" wash.
+    out property <brush> status-verified: #34d399;
+
+    // `color.accent.action` — the one next thing to do. One per screen.
+    out property <brush> accent-action: #60a5fa;
+
+    // `color.status.danger` — danger / failure / irreversible. A stop, never
+    // decoration.
+    out property <brush> status-danger: #f87171;
+
+    // `color.status.caution` — attention / unverified / in-between.
+    out property <brush> status-caution: #fbbf24;
+
+    // -------------------------------------------------------------
+    // Spacing scale (docs/design/system.md §2) — pixels, GUI column.
+    // -------------------------------------------------------------
+
+    // `space.tight` — between a label and its value; intra-row.
+    out property <length> space-tight: 6px;
+
+    // `space.snug` — between stacked lines in a group.
+    out property <length> space-snug: 8px;
+
+    // `space.base` — between groups; default panel padding.
+    out property <length> space-base: 14px;
+
+    // `space.loose` — between major regions; around the primary action.
+    out property <length> space-loose: 22px;
+
+    // -------------------------------------------------------------
+    // Type scale (docs/design/system.md §3) — four steps.
+    // -------------------------------------------------------------
+
+    // `type.title` — screen title, one per screen, states its one job.
+    out property <length> type-title-size: 20px;
+    out property <int> type-title-weight: 600;
+
+    // `type.body` — primary content and reading text.
+    out property <length> type-body-size: 15px;
+    out property <int> type-body-weight: 400;
+
+    // `type.label` — field labels, footer keys, hints.
+    out property <length> type-label-size: 13px;
+    out property <int> type-label-weight: 500;
+
+    // `type.mono` — secrets, hashes, phrases, generated passwords — anything
+    // read or copied character-by-character. Always monospace so no
+    // character (l/1/I, O/0) is ambiguous.
+    out property <length> type-mono-size: 15px;
+    out property <string> type-mono-family: "IBM Plex Mono";
+
+    // -------------------------------------------------------------
+    // Component specs (docs/design/system.md §4)
+    // -------------------------------------------------------------
+
+    // Panel border radius (§4.1) — GUI/docs only, no ratatui equivalent.
+    out property <length> panel-radius: 6px;
+    out property <length> panel-border-width: 1px;
+
+    // -------------------------------------------------------------
+    // Iconography set (docs/design/system.md §5) — the monochrome carriers
+    // that pair with each status color so meaning survives with zero color.
+    // -------------------------------------------------------------
+
+    out property <string> icon-verified: "✓";
+    out property <string> icon-danger: "✗";
+    out property <string> icon-caution: "!";
+    out property <string> icon-locked: "⊘";
+    out property <string> icon-action: "▸";
+    out property <string> icon-drill-down: "⋯";
+}
