@@ -148,6 +148,119 @@ non-secret Slint WASM surface. The native vault and generator crates are not lin
 `wasm32-unknown-unknown`; target-appropriate vault storage, crypto, packaging, and runtime
 validation remain product work before WASM can become a supported secret-handling surface.
 
+## e2e Test Tiers: `make e2e-ci` and `make e2e-local`
+
+The end-to-end suites split into two Make targets by what environment they need, not by what they
+cover:
+
+- **`make e2e-ci`** — the headless-deterministic tier. Runs on any machine with no display, no
+  Accessibility permission, and no human present: `test-cli-contract`, `test-vault-e2e`,
+  `test-tui-e2e` (PTY-driven, no real terminal window needed), `test-gui-e2e` when the host is
+  Linux (under `xvfb-run`; empty on macOS/Windows, matching `CI_GUI_E2E_TARGET`'s existing
+  Linux-only gating), and `test-gui-widgets` (the in-process real-widget-event suite from
+  [Real Widget-Event Tests](#real-widget-event-tests), itself already headless with no display
+  server). `make ci` calls `make e2e-ci` in place of the individual targets it used to invoke
+  directly — this is a pure aggregation: the exact same commands run in the exact same order, just
+  grouped under one name. Verified by diffing `make ci -n`'s full command list before and after the
+  regrouping.
+- **`make e2e-local`** — `make e2e-ci` plus [`tests/test_gui_e2e_local.sh`](../../../tests/test_gui_e2e_local.sh),
+  which drives the real `paranoid-passwd-gui` window with real OS-level mouse clicks and keyboard
+  input on a real display, gated to macOS with a real (Aqua) desktop session and Accessibility
+  permission granted to the calling terminal. This is the only tier that proves the compiled GUI
+  is actually operable by a human pointing a mouse and typing — every other GUI gate either drives
+  the widget tree in-process (`test-gui-widgets`) or drives the binary through the
+  `PARANOID_GUI_AUTOMATION_*` side-channel (`test-gui-e2e`), neither of which touches the OS input
+  path at all.
+
+### Real-Input Local GUI e2e (`make e2e-local`)
+
+`tests/test_gui_e2e_local.sh` launches the real `paranoid-passwd-gui` binary and drives it through
+the full operator workflow — generate passwords, init vault, add a login, lock, unlock, export
+backup — using genuine synthetic mouse/keyboard events, then asserts every outcome through the
+vault CLI (`paranoid-passwd vault --cli --path <vault> list`) against the real on-disk vault file,
+not through screen text. It captures a screenshot of each stage to `dist/e2e-local/` for review.
+
+**Why not AppleScript's `System Events` GUI scripting.** `paranoid-passwd-gui` is a winit-backed
+Slint window. Probing it live shows its NSAccessibility tree exposes only titlebar chrome (close
+/zoom/minimize buttons and the title text) — every `LineEdit`, `Button`, and `CheckBox` inside the
+compiled `.slint` tree is invisible to the AX tree Apple's UI-scripting APIs walk. `tell
+application "System Events" to click at {x,y}` and `keystroke` are silently dropped by the window
+in this state: no error, no effect, the field never gets focus. This was confirmed empirically
+(clicking a checkbox and a `LineEdit` at their exact on-screen coordinates through `System Events`
+changed nothing; the same coordinates through a raw CGEvent post worked immediately).
+
+**The real driver: raw CGEvents at the HID tap.** [`scripts/gui_real_input_macos.swift`](../../../scripts/gui_real_input_macos.swift)
+is a small Swift CLI, compiled on demand with `swiftc` (part of the Xcode Command Line Tools this
+repository's macOS builds already require — no new package install), that posts `CGEvent`s
+directly at `.cghidEventTap` — the same event path a physical mouse or keyboard produces. This
+bypasses the AX tree entirely and is delivered to the window exactly as real hardware input would
+be, which paranoid-gui's winit event loop does receive and process. It has three subcommands:
+
+- `click <x> <y>` — moves the cursor and posts a real left mouse down/up at an absolute screen
+  point.
+- `type <string>` — posts one keyDown/keyUp pair per character via CGEvent's Unicode-string path,
+  so any printable character works without a virtual-keycode table.
+- `keyrepeat <keycode> <count> [cmd]` — posts a virtual-keycode key event `count` times in a row,
+  optionally with the Command modifier held throughout. Used to clear a `LineEdit`'s existing text
+  deterministically: Right-arrow (keycode 124) ×100 to reach the true end of the field regardless
+  of where the cursor started, then Backspace (keycode 51) ×150 to clear it regardless of prior
+  content length. `Cmd+A` (select-all) and `Cmd+Right` (end-of-line) were tried first and are not
+  reliably honored by this Slint `LineEdit` build; plain repeated navigation keys were verified to
+  work deterministically instead.
+
+**Coordinates are measured, not guessed.** Every field/button coordinate the driver clicks is a
+window-relative point measured once against a real running instance of the exact compiled
+`paranoid.slint` tree (screenshot the window, locate each control's pixel center, convert through
+the retina scale factor). This is sound because `paranoid.slint`'s three-column operator layout is
+fully static — every panel, field, and button carries a literal pixel width/height with no
+data-dependent reflow — so the same relative offsets are stable across runs. The driver still reads
+the window's actual position and size fresh at the start of each stage (via `System Events`, which
+*can* see window-chrome-level geometry even though it cannot see or click the inner widget tree)
+and rescales every reference coordinate against the window's actual granted size, so it keeps
+working if a future toolchain change shifts the window's default size slightly.
+
+**"Lock" is a real process quit, not an idle-timeout wait.** The GUI has no manual lock button —
+session lock/unlock in `paranoid_vault::native_access::NativeSessionHardening` is purely
+idle-timeout-driven, and waiting out that timeout in an e2e run is impractical. `test_gui_e2e_local.sh`
+quits the running GUI process (via the real, AX-visible titlebar close button) and relaunches it
+against the same vault path, which exercises the same on-disk persistence and Argon2id
+re-derivation path a real lock/unlock cycle would — the same technique
+[`tests/test_tui_e2e.py`](../../../tests/test_tui_e2e.py) already uses for its own fresh-process
+restart/unlock coverage.
+
+**Real KDF timing.** Vault init and unlock both derive against the real
+`DEFAULT_MEMORY_COST_KIB` (256 MiB) Argon2id parameters on a `--profile dev` / `CARGO_PROFILE_DEV_DEBUG=0`
+build — measured at roughly 9-10 seconds per derivation on Apple Silicon. The script polls the
+vault CLI (not a fixed sleep) for each stage's outcome, bounded generously and scaled by
+`PARANOID_E2E_TIMEOUT_SCALE` like the other e2e harnesses, so it neither races the real KDF cost
+nor stalls longer than necessary on a fast machine.
+
+**Display-feasibility gate.** The script fails fast with an actionable message, instead of hanging
+or silently no-op-ing, when either precondition is missing:
+
+- `launchctl managername` must report `Aqua` (a real logged-in WindowServer session). A headless
+  SSH session or CI runner reports something else and the script exits `64` immediately.
+- `System Events`'s "UI elements enabled" must be `true` — the calling terminal (Terminal.app,
+  iTerm2, etc.) needs Accessibility permission in System Settings > Privacy & Security >
+  Accessibility for its synthetic `CGEvent`s to be delivered to another application, and on current
+  macOS may also need Input Monitoring if clicks/keystrokes still do not land after granting
+  Accessibility. Without this grant, every synthetic event is silently dropped by the OS rather
+  than erroring, so this check is the only way to fail loud instead of hanging on a GUI that never
+  receives any input.
+
+Run it directly (after granting the permissions above) with:
+
+```bash
+CARGO_PROFILE_DEV_DEBUG=0 cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline
+bash tests/test_gui_e2e_local.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui dist/e2e-local
+```
+
+or through the aggregate target:
+
+```bash
+make e2e-local
+```
+
 Current GUI platform coverage is explicit:
 
 | GUI surface | Current gate | What it proves |
@@ -155,6 +268,7 @@ Current GUI platform coverage is explicit:
 | Widget-event unit coverage | `make test-gui-widgets` | Drives the real compiled `paranoid.slint` widget tree in-process through synthetic pointer/accessible-value events (see below) and asserts on window property state. No display server, no `SLINT_BACKEND`, no `xvfb-run`. |
 | Desktop Slint | `make test-gui-e2e` or `make test-gui-e2e-emulate` | Runs the real GUI binary through the operator workflow (see below), validates durable audit evidence, and captures a rendered screenshot. |
 | Desktop viewport classes | `make test-gui-visual-regression` or `make test-gui-visual-regression-emulate` | Replays the real GUI workflow at desktop, tablet, and narrow/mobile-class viewport sizes and rejects blank or low-information screenshots. |
+| Real-input local e2e | `make e2e-local` (macOS, real display + Accessibility permission) | Drives the real GUI binary with genuine OS-level mouse clicks and keyboard input (see [Real-Input Local GUI e2e](#real-input-local-gui-e2e-make-e2e-local) above), the only GUI gate that exercises the actual OS input path end to end. |
 | Android Slint | `make test-gui-android-check` | Compile-checks the Rust-native Slint library against the configured Android NDK while preserving native core/vault linkage. Runtime emulator/Maestro coverage remains the next Android gate. |
 | WASM Slint | `make test-gui-wasm-check` | Compile-checks the gated non-secret Slint WASM surface. Secret-handling WASM is not supported until target storage, crypto, and runtime validation are threat-modeled. |
 

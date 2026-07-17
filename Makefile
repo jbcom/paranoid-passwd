@@ -1,4 +1,4 @@
-.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-widgets test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e test-platform-signing-boundary test-ops-mtls-transport verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality quality-emulate builder-image _builder-image ci-emulate _ci-emulate _quality-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
+.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-widgets test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e test-platform-signing-boundary test-ops-mtls-transport verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check e2e-ci e2e-local ci quality quality-emulate builder-image _builder-image ci-emulate _ci-emulate _quality-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -177,17 +177,25 @@ docs-linkcheck: ## Validate outbound documentation links
 docs-check: ## Validate the docs site, generated API docs, and external links
 	python3 -m tox -e docs,docs-linkcheck
 
+e2e-ci: ## Run the headless-deterministic e2e tier: CLI/vault/TUI contracts, xvfb GUI e2e where DISPLAY-feasible, real widget-event GUI tests
+	$(MAKE) test-cli-contract
+	$(MAKE) test-vault-e2e
+	$(MAKE) test-tui-e2e
+	$(if $(CI_GUI_E2E_TARGET),$(MAKE) $(CI_GUI_E2E_TARGET))
+	$(MAKE) test-gui-widgets
+
+e2e-local: ## Run e2e-ci plus real mouse/keyboard GUI e2e driven through the OS input system on a real display
+	$(MAKE) e2e-ci
+	cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline
+	bash tests/test_gui_e2e_local.sh "$(CLI_DEBUG_BIN)" "$(GUI_DEBUG_BIN)" "$(DIST_DIR)/e2e-local"
+
 ci: ## Run the local equivalent of the repository CI gates
 	cargo fmt --check
 	cargo clippy --workspace --all-targets --locked --frozen --offline -- -D warnings
 	bash scripts/cargo_test.sh --workspace --locked --frozen --offline
 	$(MAKE) test-ops-mtls-transport
-	$(MAKE) test-cli-contract
-	$(MAKE) test-tui-e2e
-	$(if $(CI_GUI_E2E_TARGET),$(MAKE) $(CI_GUI_E2E_TARGET))
+	$(MAKE) e2e-ci
 	$(MAKE) test-gui-host-check
-	$(MAKE) test-gui-widgets
-	$(MAKE) test-vault-e2e
 	$(MAKE) test-platform-signing-boundary
 	$(MAKE) verify-assurance
 	python3 -m tox -e docs,docs-linkcheck
