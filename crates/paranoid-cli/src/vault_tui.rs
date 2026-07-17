@@ -570,6 +570,65 @@ mod tests {
         assert!(matches!(app.screen, Screen::EnvironmentApproval));
     }
 
+    /// P8.V.6: the trust-gate `?` overlay advertises `d show the
+    /// fingerprint` (ia.md §2/§4 S2d) — this pins that the `d` key on S1
+    /// actually navigates there, honestly, rather than being a dead
+    /// advertised binding.
+    #[test]
+    fn trust_gate_d_key_opens_the_fingerprint_leaf_and_reports_build_identity_honestly() {
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(app_options(&path));
+        app.enter_trust_gate();
+        assert!(matches!(app.screen, Screen::TrustGate));
+
+        press_key(&mut app, KeyCode::Char('d'));
+        assert!(matches!(app.screen, Screen::TrustFingerprint));
+
+        let rendered = render_to_string(&app);
+        // Real, verifiable build-identity fields — the same ones
+        // `--federal-evidence` already reports for this build.
+        assert!(rendered.contains("Product version"));
+        assert!(rendered.contains("Build commit"));
+        assert!(rendered.contains("Platform"));
+        // brand.md §3 rule 4: never overpromise — must state the real limit
+        // plainly, not fabricate a signature-verification pass.
+        assert!(rendered.contains("does not confirm"));
+        assert!(rendered.contains("signed-release check"));
+    }
+
+    /// S2d must return to whichever of S1/S3 opened it, not a hardcoded
+    /// destination — reached from S3 here.
+    #[test]
+    fn trust_fingerprint_leaf_returns_to_verified_when_opened_from_s3() {
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(app_options(&path));
+        app.enter_trust_gate();
+        app.submit_trust_gate();
+        assert!(matches!(app.screen, Screen::Verified));
+
+        press_key(&mut app, KeyCode::Char('d'));
+        assert!(matches!(app.screen, Screen::TrustFingerprint));
+
+        press_key(&mut app, KeyCode::Esc);
+        assert!(matches!(app.screen, Screen::Verified));
+    }
+
+    /// Reached from S1 instead, `⎋` must return to S1 — pins the
+    /// per-visit return target rather than a screen-agnostic default.
+    #[test]
+    fn trust_fingerprint_leaf_returns_to_trust_gate_when_opened_from_s1() {
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(app_options(&path));
+        app.enter_trust_gate();
+        assert!(matches!(app.screen, Screen::TrustGate));
+
+        press_key(&mut app, KeyCode::Char('d'));
+        assert!(matches!(app.screen, Screen::TrustFingerprint));
+
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::TrustGate));
+    }
+
     #[test]
     fn panic_lock_shows_the_minimal_s14_footer_until_the_next_interaction() {
         let tempdir = tempdir().expect("tempdir");
@@ -820,6 +879,7 @@ mod tests {
             screen: Screen::Vault,
             help_overlay_open: false,
             trust_state: TrustState::default(),
+            fingerprint_return_screen: Screen::TrustGate,
             just_locked: false,
             confirm_input: String::new(),
             confirm_target_name: String::new(),
@@ -2475,6 +2535,7 @@ mod tests {
             screen: Screen::UnlockBlocked,
             help_overlay_open: false,
             trust_state: TrustState::default(),
+            fingerprint_return_screen: Screen::TrustGate,
             just_locked: false,
             confirm_input: String::new(),
             confirm_target_name: String::new(),

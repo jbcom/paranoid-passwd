@@ -53,7 +53,11 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
     // — there is no list to browse before trust is established.
     if matches!(
         app.screen,
-        Screen::TrustGate | Screen::Verifying | Screen::Verified | Screen::ItemDetail
+        Screen::TrustGate
+            | Screen::Verifying
+            | Screen::Verified
+            | Screen::TrustFingerprint
+            | Screen::ItemDetail
     ) {
         frame.render_widget(right_panel(app), chunks[2]);
     } else {
@@ -191,6 +195,7 @@ pub(crate) fn header_title(screen: Screen) -> &'static str {
         Screen::TrustGate => "Verify this copy",
         Screen::Verifying => "Verifying…",
         Screen::Verified => "Verified",
+        Screen::TrustFingerprint => "Fingerprint",
         Screen::EnvironmentApproval => "Create vault",
         Screen::Vault => "Vault",
         Screen::ItemDetail => "Item",
@@ -230,6 +235,9 @@ pub(crate) fn header_subtitle(screen: Screen) -> &'static str {
         Screen::Verifying => "Watch the check without being trapped — Esc returns any time.",
         Screen::Verified => {
             "The self-check finished. Its fingerprint stays reachable one level down."
+        }
+        Screen::TrustFingerprint => {
+            "What this build can honestly tell you about itself, and what it can't yet."
         }
         Screen::EnvironmentApproval => {
             "Make the container and the way to open it. Ways in and hardware protection come later."
@@ -464,6 +472,7 @@ pub(crate) fn right_panel(app: &App) -> Paragraph<'static> {
         Screen::TrustGate => trust_gate_panel(app),
         Screen::Verifying => verifying_panel(app),
         Screen::Verified => verified_panel(app),
+        Screen::TrustFingerprint => trust_fingerprint_panel(app),
         Screen::EnvironmentApproval => environment_approval_panel(app),
         Screen::Vault => detail_panel(app),
         Screen::ItemDetail => item_detail_panel(app),
@@ -567,6 +576,60 @@ pub(crate) fn verified_panel(app: &App) -> Paragraph<'static> {
                 .title("Verified")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(GREEN))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
+}
+
+/// S2d (ia.md §2/§4 "Fingerprint & signature" leaf). Reached from S1/S3 via
+/// `d show the fingerprint`. This is the honest version of the promised
+/// evidence leaf: there is no signed-release/attestation backend anywhere in
+/// this workspace, so it does not claim a hash matches a published release
+/// (that would be fabricating a security claim — brand.md §3 rule 4). It
+/// instead shows exactly what this build CAN prove about itself — the same
+/// build-identity fields `--federal-evidence` already surfaces
+/// (`paranoid_ops::collect_federal_startup_evidence_with_audit_sink`) — and
+/// states the real limit plainly, mirroring `verified_panel`'s caution line.
+pub(crate) fn trust_fingerprint_panel(_app: &App) -> Paragraph<'static> {
+    let build_commit = option_env!("PARANOID_CLI_BUILD_COMMIT").unwrap_or("dev");
+    let build_date = option_env!("PARANOID_CLI_BUILD_DATE").unwrap_or("dev");
+    let lines = vec![
+        Line::styled(
+            "Build identity",
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(format!("Product version: {}", paranoid_core::VERSION)),
+        Line::raw(format!("Build commit:    {build_commit}")),
+        Line::raw(format!("Build date:      {build_date}")),
+        Line::raw(format!(
+            "Platform:        {} / {}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )),
+        Line::raw(""),
+        Line::styled(
+            "What this confirms",
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(
+            "This is the identity this specific running binary carries. It matches what `--federal-evidence` reports for the same build.",
+        ),
+        Line::raw(""),
+        Line::styled(
+            "What this does not confirm",
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+        ),
+        Line::styled(
+            "There is no signed-release check yet, so this cannot tell you whether this copy matches the publisher's official release — that is a real limit, stated plainly rather than papered over.",
+            theme::caution(),
+        ),
+    ];
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title("Fingerprint")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BLUE))
                 .style(Style::default().bg(PANEL).fg(TEXT)),
         )
         .wrap(Wrap { trim: false })

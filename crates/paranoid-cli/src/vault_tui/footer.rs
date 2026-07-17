@@ -13,8 +13,12 @@ use crate::vault_tui::{App, Screen};
 /// verbatim per screen where the doc specifies exact text.
 pub(crate) fn contextual_footer(app: &App) -> &'static str {
     match app.screen {
-        Screen::TrustGate | Screen::Verified => "↑↓ move  ⏎ select  ? help  q quit",
+        Screen::TrustGate | Screen::Verified => "↑↓ move  ⏎ select  d fingerprint  ? help  q quit",
         Screen::Verifying => "⎋ back  (verifying…)",
+        // S2d (ia.md §2/§4): a drill-down leaf, not a browsing pane — the
+        // only valid acts are going back or quitting (rule 2's "⎋ back" is
+        // the whole navigational surface at a drill-down).
+        Screen::TrustFingerprint => "⏎/⎋ back  q quit",
         Screen::EnvironmentApproval => "↑↓ move  ⏎ create vault  ? help  ⎋ back",
         Screen::Vault => {
             if app.search_mode {

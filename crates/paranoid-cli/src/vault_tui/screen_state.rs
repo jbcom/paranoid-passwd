@@ -35,6 +35,15 @@ pub(crate) enum Screen {
     /// signed-release backend yet, the check cannot fail closed on a
     /// tampered binary, so it never claims a false pass; see `TrustState`).
     Verified,
+    /// S2d (ia.md §2/§4) — the fingerprint/build-identity drill-down leaf
+    /// reached from S1/S3 via `d show the fingerprint`. Honestly reports what
+    /// *is* verifiable today (build commit, build date, product version,
+    /// platform) and states plainly that cryptographic release-signature
+    /// verification is not available yet (brand.md §3 rule 4, no
+    /// overpromise) rather than fabricating a hash the binary cannot check
+    /// against a signed publisher record. `⎋` returns to whichever of
+    /// S1/S3 it was opened from.
+    TrustFingerprint,
     EnvironmentApproval,
     Vault,
     /// S7 (ia.md §5) — one selected item, masked by default. Reached from
@@ -89,6 +98,7 @@ impl Screen {
             Self::TrustGate
                 | Self::Verifying
                 | Self::Verified
+                | Self::TrustFingerprint
                 | Self::EnvironmentApproval
                 | Self::UnlockBlocked
         )
@@ -1226,6 +1236,12 @@ pub(crate) struct App {
     /// `TrustState::Unchecked` lets `TrustGate`'s copy tell "verified on
     /// this machine" (ia.md §3 short-circuit) from "not yet checked".
     pub(crate) trust_state: TrustState,
+    /// The screen `Screen::TrustFingerprint` (S2d) was opened from — `S1`
+    /// (`TrustGate`) or `S3` (`Verified`), ia.md §2's only two `d show the
+    /// fingerprint` entry points. `⎋`/`q` from S2d returns here rather than
+    /// to a hardcoded destination, so re-verifying from S1 and inspecting
+    /// after S3 both come back to where the persona actually was.
+    pub(crate) fingerprint_return_screen: Screen,
     /// `true` on `Screen::UnlockBlocked` immediately after a lock event
     /// (panic-lock or idle auto-lock), distinguishing ia.md §5 S14 ("in a
     /// locked state the only valid acts are unlock or quit" — minimal
@@ -1307,6 +1323,7 @@ impl App {
             screen: Screen::UnlockBlocked,
             help_overlay_open: false,
             trust_state: TrustState::default(),
+            fingerprint_return_screen: Screen::TrustGate,
             just_locked: false,
             confirm_input: String::new(),
             confirm_target_name: String::new(),
@@ -1394,6 +1411,27 @@ impl App {
     /// already-computed destination screen from `refresh()`.
     pub(crate) fn dismiss_trust_gate(&mut self) {
         self.refresh();
+    }
+
+    /// S2d (ia.md §2/§4 "Fingerprint & signature" drill-down leaf):
+    /// `d show the fingerprint` from S1 or S3. Honestly reports the one
+    /// thing this build *can* verify about itself — its own build identity
+    /// (commit, build date, product version, platform) — and states plainly
+    /// that cryptographic verification against a signed publisher record is
+    /// not available yet, rather than fabricating a pass/fail signature
+    /// check (brand.md §3 rule 4, "never overpromise"; ia.md rule 2,
+    /// "the math is never shown without first showing the verdict" — here,
+    /// the verdict IS "not available yet," stated at S1/S3, and this leaf is
+    /// where the honest detail behind that verdict lives).
+    pub(crate) fn enter_trust_fingerprint(&mut self) {
+        self.fingerprint_return_screen = self.screen;
+        self.screen = Screen::TrustFingerprint;
+    }
+
+    /// `⎋`/`q`-back from S2d returns to wherever it was opened from (S1 or
+    /// S3), not a hardcoded destination.
+    pub(crate) fn leave_trust_fingerprint(&mut self) {
+        self.screen = self.fingerprint_return_screen;
     }
 
     pub(crate) fn ops_policy_context(&self) -> OpsPolicyContext {
@@ -1861,6 +1899,10 @@ impl App {
             audit_sink_health: _,
             ops_audit_events: _, // redacted by construction (P0.4)
             screen: _,
+            // S2d return-target (ia.md §2/§4): a `Screen` value naming which
+            // pre-unlock screen opened the fingerprint leaf — navigation
+            // state, not secret material, same tier as `screen` itself.
+            fingerprint_return_screen: _,
             status: _,
             header: _,
             items: _,
@@ -1954,6 +1996,7 @@ impl App {
             Screen::TrustGate => self.handle_trust_gate_key(key),
             Screen::Verifying => self.handle_verifying_key(key),
             Screen::Verified => self.handle_verified_key(key),
+            Screen::TrustFingerprint => self.handle_trust_fingerprint_key(key),
             Screen::EnvironmentApproval => self.handle_environment_approval_key(key),
             Screen::Vault | Screen::Keyslots => self.handle_vault_key(key),
             Screen::ItemDetail => self.handle_item_detail_key(key),
@@ -1987,6 +2030,10 @@ impl App {
                 self.submit_trust_gate();
                 false
             }
+            KeyCode::Char('d') => {
+                self.enter_trust_fingerprint();
+                false
+            }
             KeyCode::Char('s') | KeyCode::Esc => {
                 self.dismiss_trust_gate();
                 false
@@ -2009,8 +2056,26 @@ impl App {
     pub(crate) fn handle_verified_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') => true,
+            KeyCode::Char('d') => {
+                self.enter_trust_fingerprint();
+                false
+            }
             KeyCode::Enter | KeyCode::Esc => {
                 self.dismiss_trust_gate();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// S2d (ia.md §2/§4): `⎋`/`Enter` return to whichever of S1/S3 opened
+    /// this leaf (`leave_trust_fingerprint`); `q` quits like every other
+    /// pre-unlock screen.
+    pub(crate) fn handle_trust_fingerprint_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Enter | KeyCode::Esc => {
+                self.leave_trust_fingerprint();
                 false
             }
             _ => false,
