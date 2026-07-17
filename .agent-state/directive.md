@@ -23,6 +23,44 @@ comprehensive review + architecture review + CI-modernization research
   The main-checkout mirror stays uncommitted and truthful ([WAIT]-annotated)
   for the anti-stop hook.
 
+## P0-META — Autonomous continuous-shipping loop (STANDING; user 2026-07-17)
+
+STOP-HOOK CONTRACT: the directive is NEVER "done". It has no terminal state
+until the user manually ends the session. The queue is a living document the
+orchestrator continuously mutates. There is NO "RELEASED" flip that stops the
+loop; there is no FINAL that ends work — FINAL just ships the current
+milestone PR, then the loop discovers the next.
+
+ZEROTH LAW — never block on the user. AskUserQuestion is BANNED under this
+mandate. Every design/architecture/scope/priority call is the agent's to make
+against the quality standards; record the decision + why in the directive and
+execute. Disagreement is corrected later by the user, never by a blocked loop.
+
+COMPRESSION: when a phase's items are all [x], compress that phase out of the
+active queue into docs/PILLARS.md (one durable section per completed phase:
+what shipped, key decisions, where it lives) and delete the verbose entries
+from directive.md. The active directive stays short — only in-flight + next.
+
+FORWARD EXPLORATION (the engine): whenever the active queue would otherwise
+drain, the orchestrator MUST generate new work by running a DIFFERENT review/
+discovery lens than last time, rotating through at least: comprehensive-review
+(correctness), security-scanning/sec-context-depth, code-simplifier, a
+paranoia-gap re-scan (P9-style), a UX/design critique (PUX/P8-style), a
+performance pass, a docs-currency re-sweep, an accessibility pass, a
+dependency/supply-chain audit, and "what would make this a better PRODUCT"
+product-thinking. Each lens run appends a new numbered phase with acceptance
+criteria; the loop never idles.
+
+SHIPPING CADENCE: keep opening PRs. Land work in milestone-sized PRs off the
+long-running branch (or fresh branches per the churn guidance), babysit each to
+squash-merge, let release-please cut versions. Always be shipping.
+
+LOOP MECHANICS: reschedule the ScheduleWakeup every turn with the current
+next-action; keep the persistent PR + executor-failure Monitors alive; keep the
+task list mirroring real phases; keep the hook mirror truthful ([WAIT-AGENT]/
+[WAIT] annotations so the anti-stop hook sees legitimate yields, never a false
+"done"). Only the user ending the session stops this.
+
 ## Done (merged to main or on the integration/directive-completion lineage)
 
 P0.1-P0.7 (security hardening incl. SecretString constant-time eq,
@@ -236,6 +274,112 @@ P6.0 CI research + two-tier trust design.
 - [ ] P5.1 data-driven framework/charset registries (crypto math stays Rust).
 - [ ] P5.2 seal-provider trait seam.
 - [ ] P5.3b docs/reference/extending.md with worked examples (after P5.1/2).
+
+
+
+### PUX decisions (user 2026-07-17, full-autonomy delegation)
+- PRIMARY PERSONA: the targeted individual (activist / journalist / person
+  under real coercion or surveillance risk). The name is the promise. Hero
+  flows: establish trust (verify attestation), recovery + duress/decoy
+  vaults, panic-lock. Voice: grave, precise, respectful, zero whimsy.
+  Visual: austere, high-contrast, no decoration for its own sake.
+- SCOPE: full design AND implementation before FINAL/release — the release
+  ships the redesigned product (PUX.1-5 then P8.1-5 all execute this pass).
+
+
+## P9 — Paranoia hardening (user-approved 2026-07-17: ALL P9.1-9.7 before FINAL). Threat model: offline / local attacker / memory disclosure / coercion. Ordered by real security value; run before FINAL.
+
+- [ ] P9.1 Zeroize decrypted vault-item payloads (LoginRecord/CardRecord/PasswordHistoryEntry + New*/Update* + TUI App.detail + GUI vault_secret)
+  WHY: This is the single largest gap between the name and the reality. Under THIS threat model (local attacker + memory disclosure + coercion via seized device), the whole point of Zeroizing the master key is defeated if the decrypted secrets it protects are plain cloneable String. crates/paranoid-vault/src/lib.rs:202/215/233/236 (and the New*/Update* mirrors at 294/323) are #[derive(Clone, Debug)] plain String: every .clone() forks an un-scrubbed heap copy, {:?} prints the secret verbatim, and on dro
+  SKETCH: Introduce a SecretString-equivalent for payload fields (reuse/extend crates/paranoid-vault/src/native_access.rs SecretString, or a SecretBytes newtype wrapping Zeroizing<String>) with a manual Debug that prints <redacted>, Serialize/Deserialize that round-trips the raw value (serde over the inner string) so on-disk format is unchanged, and Drop/ZeroizeOnDrop. Change LoginRecord.password, PasswordHistoryEntry.password, CardRecord.number/.security_code and the New*/Update* mirrors (lib.rs:199-323) from String to that type. Remove blanket #[derive(Clone)] where it forks secrets, or make the secre
+  ACCEPT: All decrypted item payload secret fields (login password, password-history password, card number, card security code, and their New*/Update* forms) are a zeroize-on-drop wrapper, not plain String; {:?} on any of them renders <redacted> not the secret (unit test); a test captures the heap address of a payload secret, drops the owner, and asserts the bytes are zeroed; serde round-trip proves the on-disk JSON/blob wire format is byte-identical to pr
+- [ ] P9.2 Persisted cross-restart failed-attempt lockout with exponential backoff
+  WHY: Screen::UnlockBlocked (screen_state.rs:30, entered on any unlock Err at :1358) is a pure in-memory UI enum with no backing counter, no persisted timestamp, no backoff — grep for failed_attempts/lockout/backoff/retry_after across crates/*/src returns zero. A restart or even just re-opening the unlock form clears the 'blocked' state instantly. So the ONLY throttle on offline brute-force is Argon2id's per-guess compute cost. Under this exact threat model — local attacker with the vault file on a se
+  SKETCH: Add a durable lockout record next to the vault (a sibling file, e.g. <vault>.lock-state, or a dedicated unauthenticated row in the SQLite metadata table like header_json — but NOT inside the encrypted rows, since it must be readable pre-unlock). Store: failed_attempt_count, first_failure_utc, locked_until_utc. Bind it to the vault path. On unlock attempt: if now < locked_until_utc, refuse before running Argon2id (saves the attacker nothing but denies the legitimate fast retry and makes the wait explicit). On failure: increment count, compute locked_until = now + backoff(count) with exponential
+  ACCEPT: A failed unlock persists a durable lockout record (path-bound) that survives process restart; a test performs N failed unlocks, restarts the process (fresh handle), and asserts the (N+1)th attempt is refused with a positive remaining-lockout duration; backoff grows exponentially with attempt count and is capped; a successful unlock clears the record; the record lives outside the AEAD-encrypted rows (readable pre-unlock, required since unlock hasn
+- [ ] P9.3 OS memory-hardening: disable core dumps + PR_SET_DUMPABLE(0) / ptrace-deny, and mlock secret pages
+  WHY: grep for mlock/munlock/setrlimit/prctl/RLIMIT/PR_SET_DUMPABLE/VirtualLock across crates/*/src returns zero. So today: (a) a crash produces a core dump containing every resident secret, and (b) any same-user process can attach/dump the process memory or read /proc/$pid/mem, and (c) secret pages can be swapped/hibernated to disk. KeePassXC and Bitwarden both do the dump/ptrace suppression explicitly; GnuPG does mlock. The research is candid about the ceiling (does NOT stop root/Administrator — the
+  SKETCH: Add a platform module in paranoid-vault (or a small new crate paranoid-harden) gated by cfg(target_os). Linux/macOS via the libc crate: at process startup for the CLI and GUI binaries call setrlimit(RLIMIT_CORE, {0,0}); on Linux prctl(PR_SET_DUMPABLE, 0); on macOS the equivalent is ptrace(PT_DENY_ATTACH) (note: interacts with debugging/notarization — gate behind a runtime flag and document). Windows: SetProcessMitigationPolicy / disable WER for the process. For mlock: wrap the master_key and derived-KEK Zeroizing buffers (lifecycle.rs:37/963) so their pages are mlock/munlock'd around use (or a
+  ACCEPT: CLI and GUI process startup calls setrlimit(RLIMIT_CORE,0) and the platform dump/ptrace-deny primitive; a test (Linux) asserts the soft+hard core limit is 0 after startup and that /proc/self/status shows non-dumpable; master-key and derived-KEK pages are mlock'd with a documented warn-and-continue fallback when locking is unavailable (test simulates lock failure and asserts the process continues with a recorded warning); any unsafe/libc FFI has a
+- [ ] P9.4 Clipboard-history exclusion hints (macOS ConcealedType/TransientType, KDE x-kde-passwordManagerHint, Windows ExcludeClipboardContentFromMonitorProcessing)
+  WHY: The app already does the harder half well — arm-and-match-before-clear with a 30s timer that only clears if the clipboard still holds the copied value (native_access.rs:133-159, tui.rs:995-1002). But grep for org.nspasteboard/x-kde-passwordManagerHint/concealed/transient/ClipboardFormat returns zero: it calls arboard's plain set_text. That means the instant a password lands on the clipboard, Windows Clipboard History (Win+V), KDE Klipper, Maccy, Alfred, GPaste etc. capture a PERSISTENT, searchab
+  SKETCH: Extend the copy path (native_access.rs arm_clipboard_clear + the two TUI copy sites) to set platform exclusion metadata instead of plain set_text. arboard's plain set_text is insufficient; either use arboard's platform-specific extensions where available or drop to per-OS clipboard APIs behind cfg(target_os): macOS — declare org.nspasteboard.ConcealedType (and TransientType) pasteboard types alongside the string; Linux/X11+Wayland — offer the x-kde-passwordManagerHint='secret' target so Klipper skips it; Windows — set the ExcludeClipboardContentFromMonitorProcessing / CanIncludeInClipboardHist
+  ACCEPT: On each supported platform the copy-secret path sets the platform clipboard-history-exclusion hint (macOS ConcealedType+TransientType, KDE x-kde-passwordManagerHint, Windows exclude-from-history) in addition to the existing timed clear; a per-platform test (or a harness asserting the exclusion type/format is present on the written clipboard item) proves the hint is set; docs state per-platform which history managers honor the hint and explicitly 
+- [ ] P9.5 Argon2id runtime calibration with an honest floor
+  WHY: DEFAULT_MEMORY_COST_KIB=262_144/ITERATIONS=3/PARALLELISM=1 (lib.rs:45-49) are fixed compile-time constants used at creation and re-wrap. grep for calibrat/benchmark returns nothing. The 256 MiB/t=3 floor already EXCEEDS OWASP's high-security profile (m=128 MiB/t=4) on memory, so unlike most managers this project is NOT under-provisioned — the gap is the opposite: a fixed constant is fragile at both ends (a RAM-constrained host either eats 256 MiB or can't unlock; a high-end host gets no addition
+  SKETCH: Add a calibration helper in paranoid-vault: at vault creation (and optionally an opt-in re-derive-and-rewrap maintenance op) benchmark Argon2id on the host, then raise m/t toward a target interactive wall-clock (e.g. ~250-500ms, up to ~1s for a high-security toggle) — but clamp the memory cost to a hard floor at the current 262_144 KiB so calibration can only ever strengthen, never weaken. Persist the chosen params in the existing VaultHeader KDF block (already stored, lib.rs:113-120) so unlock uses the same params — no format change, the header already carries kdf params. Keep DEFAULT_* as th
+  ACCEPT: Vault creation calibrates Argon2id params to a documented wall-clock target on the host while clamping memory cost to a hard floor >= 262_144 KiB (a test proves calibration never emits memory_cost below the floor, even when the benchmark suggests a slower/cheaper setting); chosen params persist in VaultHeader.kdf and unlock uses them (round-trip test); a constrained-host path falls back to the floor with a surfaced warning rather than failing; th
+- [ ] P9.6 Panic / quick-lock global hotkey wired to the existing lock+purge path
+  WHY: The lock machinery already exists and is correct: purge_secret_state_on_lock (screen_state.rs:1609) scrubs every secret-bearing form, and idle auto-lock fires it (should_auto_lock at :1572). What's missing is a fast, deliberate trigger. Under the coercion / shoulder-surfer / 'someone walks up' scenario in this threat model, seconds matter and menu-diving loses them. The research is clear this adds NO new cryptographic protection — it's a UX feature riding an already-correct lock path — so it ran
+  SKETCH: TUI: bind a global key (e.g. Ctrl+L, plus a configurable panic key) in handle_key (screen_state.rs:1619) that, from any unlocked screen, immediately calls the existing lock path: purge_secret_state_on_lock + clear App.detail + transition to the unlock screen + fire the clipboard clear. GUI: add a lock action/button and a keyboard accelerator that runs the equivalent (scrub GuiState.vault_secret + drop unlocked handle). For OS lock/suspend: where feasible per-platform, subscribe to screen-lock/suspend signals (macOS distributed notification, Linux logind PrepareForSleep/lock via dbus, Windows s
+  ACCEPT: A documented global hotkey in both TUI and GUI immediately invokes the existing lock+purge path (secrets scrubbed, clipboard cleared, unlock screen shown) from any unlocked screen; a test drives the hotkey from an unlocked state and asserts purge_secret_state_on_lock ran and no plaintext remains in the detail/secret fields; where an OS screen-lock/suspend hook is implemented it invokes the same path and is per-platform tested, and any platform wi
+- [ ] P9.7 Claims-integrity gate: docs must never assert hardening that is absent, and every new P9 hardening is pinned as an enforced/process claim
+  WHY: The user's core instruction and the product's whole credibility model: a vault named 'paranoid' that DOCUMENTS memory zeroization or brute-force lockout it does not actually have is worse than one that honestly says it lacks them — that's the overclaiming the research repeatedly flags (Windows Hello 'hardware-backed' when it silently falls back to software TPM; NSWindow.sharingType 'protects screenshots' when Sequoia's ScreenCaptureKit ignores it; 'we clear secrets from memory' when CVE-2023-388
+  SKETCH: For each landed P9 item, add a Claim to CLAIMS in scripts/security_assurance_gate.py whose Requirements pin the load-bearing code strings AND the proving test names (the gate's own pattern — see the seal.lifecycle-boundary claim's ~90 requirements), and add the matching row to docs/reference/assurance-claims.md with the correct state (enforced for zeroize/lockout/mem-hardening/clipboard/kdf-floor; process for panic-lock UX). Add anti-overclaim guards to scripts/validate-docs.sh mirroring the existing 'must not claim' pattern: e.g. if any public doc says 'zeroized in memory' / 'memory-safe agai
+  ACCEPT: Every P9 hardening that ships has a corresponding Claim in security_assurance_gate.py with Requirements pinning both its code and its test, and a row in assurance-claims.md with the honest state; removing any P9 hardening call/test causes make verify-assurance to fail (a negative test or documented manual verification proves the gate catches deletion of at least one representative hardening, e.g. the mlock call or the zeroize wrapper); validate-d
+
+### P9 rejected as theater (do NOT implement; recorded so they are not re-proposed)
+- Self-destruct / wipe-local-data after N failed master-password attempts: Research and the vendors' own caution (DataLocker, Bitwarden) flag it as a documented DoS/availability footgun: for a NO-CLOUD-BACKUP offline vault this design lets anyone with brief device access (or
+- macOS NSWindow.sharingType=.none / Windows SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) to hide reveal windows from screen capture: Largely theater on current OSes per the research: macOS 15 Sequoia's ScreenCaptureKit (the API modern recorders/sharers use) now ignores sharingType entirely, and WDA_EXCLUDEFROMCAPTURE is documented 
+- Whole-process memory encryption / encrypt-secrets-between-uses (CryptProtectMemory, .NET-style ProtectedMemory): High complexity, low marginal value on top of P9.1+P9.3 for a native Rust process. It targets managed-runtime apps (Electron/JS, GC'd .NET) that structurally can't scrub memory — a native Rust process
+- TPM / Secure Enclave / Windows Hello hardware-backed unlock: Genuine value but out of scope for the current ranking and high-risk to claim: the research shows it is ONLY as strong as a verified, correctly-provisioned TPM, and ElcomSoft demonstrated it degrades 
+- Travel / border-crossing mode (hide non-essential vaults, restorable later): 1Password-style travel mode depends on a cloud/multi-vault sync model to remove-then-restore vaults across devices; this product is a single offline vault with no sync backbone, so the feature would e
+
+## PUX — Product design & journey (user 2026-07-17: "not clearly communicating anything — no brand identity, no direction, no storyboarding; just boxes with technical info"). Runs BEFORE P8; P8 becomes its build arm.
+
+- [ ] PUX.1 Positioning & brand foundation — define WHO this is for (threat
+  model as persona: the genuinely-targeted individual — activist, journalist,
+  engineer under coercion risk) and the ONE promise the name makes. Voice &
+  tone, naming of concepts (today's "keyslots/seal posture/federal evidence"
+  is engineer-speak — decide user-facing vocabulary), a minimal visual
+  identity the TUI+GUI+docs+site share (palette with intent, one type scale,
+  iconography stance). Deliverable: docs/design/brand.md.
+- [ ] PUX.2 Journey mapping — map the real user journeys end to end
+  (first-run → trust establishment → first password → first vault item →
+  daily unlock → recovery-someday → coercion/panic → verify-the-binary),
+  each as a storyboard with intent/emotion per step and the "what should I do
+  next" always answered. Name the moments that currently dead-end in a box of
+  data. Deliverable: docs/design/journeys.md with per-journey storyboards.
+- [ ] PUX.3 Information architecture & flow — from the journeys, redesign the
+  screen graph: what each screen is FOR (one job), progressive disclosure of
+  the technical evidence (audit math, seal posture, attestation) behind
+  intent-first surfaces, guided first-run instead of a menu of hotkeys.
+  Deliverable: docs/design/ia.md + annotated wireframes (ASCII/text
+  storyboards fine for TUI; layout specs for GUI).
+- [ ] PUX.4 Design system → tokens — turn PUX.1 into concrete shared tokens
+  (color/space/type/component specs) consumable by ratatui theme + .slint
+  styles + Sphinx theme, so all three surfaces read as one product.
+  Deliverable: crates-level theme module + docs/design/system.md.
+- [ ] PUX.5 Spec handoff — fold PUX.1-4 into P8's build items: rewrite P8.2/
+  P8.3/P8.4 acceptance criteria to implement the storyboards and system, not
+  ad-hoc polish. P8 then executes the design rather than guessing at it.
+
+## P8 — UX maturity (user signal 2026-07-16: "feels like a prototype"; runs after P5, before FINAL)
+
+- [ ] P8.1 Evidence pass — run the REAL TUI and GUI on this machine, capture
+  screenshots of every screen/state (generator wizard, results panels, vault
+  list/detail, every form, approval screen, lockout, keyslots; GUI: all
+  callback flows), and LOOK at them against named references (TUI: lazygit/
+  k9s-class conventions — focused density, visual hierarchy, purposeful
+  color; GUI: native desktop password-manager conventions — 1Password/
+  Bitwarden-class layout, spacing, empty states, progress feedback).
+  Output: a defect list with per-screen screenshots, ranked.
+- [ ] P8.2 TUI polish — likely defects to confirm from evidence: the
+  controls-legend wall (40+ hotkeys in one wrapped line) needs a contextual
+  footer + help overlay (?); form screens need visual grouping/focus
+  affordances; status/error strings read engineering-grade not user-grade;
+  empty states and progress (KDF derivation ~0.3s release) need explicit
+  feedback instead of frozen frames.
+- [ ] P8.3 GUI polish — confirm from evidence: default-widget look, layout
+  spacing/alignment, empty states, operation feedback (derivation/backup
+  progress), window sizing/title, error presentation; align .slint styling
+  into a coherent design (spacing scale, type scale, consistent buttons).
+- [ ] P8.4 Copy pass — every user-facing string (TUI + GUI + CLI errors)
+  reviewed for human tone; keep security precision, drop internals-speak.
+- [ ] P8.5 Re-verify e2e — harness assertions updated with the UI changes
+  (assert-on-meaning not exact pixel strings where possible); screenshots
+  re-captured as the new visual baseline for test-gui-visual-regression.
+
 - [ ] FINAL: full gate (make ci + quality + e2e-ci + e2e-local on this
   machine), docs both-directions sweep, open the single PR, babysit to
   squash-merge, verify the app RUNS (TUI + GUI), release-please takes over.
