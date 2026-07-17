@@ -143,6 +143,10 @@ paranoid-passwd vault --cli --path "$VAULT" export-backup --output vault.backup.
 paranoid-passwd vault --cli --path "$VAULT" inspect-backup --input vault.backup.json
 ```
 
+`--output` must not resolve to the same file as `--path`: export fails closed with a typed error rather
+than overwriting the source vault, and the write itself is atomic (temp file in the destination
+directory, then renamed into place), so an interrupted export never leaves a partial file behind.
+
 Restore into a new path first when you are testing a backup:
 
 ```bash

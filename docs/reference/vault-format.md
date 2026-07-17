@@ -55,6 +55,8 @@ Export does not decrypt items into a new storage format. Restore recreates a nor
 
 Backup packages can now be inspected before restore through a read-only `VaultBackupSummary`, which reports item-kind counts, keyslot posture, keyslot detail summaries including certificate metadata, and whether the current build can restore the package directly without mutating a live vault.
 
+Export is fail-closed against overwriting the source vault: the requested output path is canonicalized and compared against the vault's own path before any write happens, and a collision returns `VaultError::ExportPathCollision` instead of touching either file. The package bytes are then written to a same-directory temp file and moved into place with `fs::rename`, so a mid-write interruption (disk full, permission change, process kill) never leaves a partially written file at the destination path — the destination is either the previous contents or the complete new package, never a truncated one.
+
 ## Transfer Package
 
 The standardized transfer format is a **portable encrypted package of selected item payloads**, not a second full-vault backup.
@@ -81,6 +83,8 @@ Import keeps the cryptographic boundary in application code:
 - imported items are revalidated before storage
 - conflicting ids are remapped by default instead of overwriting local records silently
 - headless import can explicitly replace matching ids when the operator chooses that behavior
+
+Transfer export shares the same fail-closed path-collision check and atomic temp-file-then-rename write as backup export: it never overwrites the source vault path, and an interrupted write never corrupts or truncates a pre-existing file at the destination.
 
 ## Key Hierarchy
 

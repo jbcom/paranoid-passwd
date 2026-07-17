@@ -7,7 +7,7 @@ use crate::{
     VaultRecoveryPosture, certificate_fingerprint_hex, certificate_keyslot_metadata,
     certificate_validity_warnings, configure_connection, create_schema, decrypt_blob, derive_key,
     encrypt_blob, hex_decode, hex_encode, item_matches_filter, load_certificate, load_private_key,
-    next_unused_item_id, normalize_and_validate_item, random_bytes, unix_epoch_now,
+    next_unused_item_id, normalize_and_validate_item, random_bytes, random_hex_id, unix_epoch_now,
     unwrap_legacy_secret_with_certificate, unwrap_secret_with_certificate,
     wrap_secret_with_certificate,
 };
@@ -19,6 +19,72 @@ use std::{
     path::{Path, PathBuf},
 };
 use zeroize::Zeroizing;
+
+fn reject_export_path_collision(vault_path: &Path, output_path: &Path) -> Result<(), VaultError> {
+    let canonical_vault_path = fs::canonicalize(vault_path)?;
+    let canonical_output_path = match fs::canonicalize(output_path) {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = output_path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty());
+            let canonical_parent = match parent {
+                Some(parent) => fs::canonicalize(parent)?,
+                None => std::env::current_dir()?,
+            };
+            let file_name = output_path.file_name().ok_or_else(|| {
+                VaultError::InvalidArguments(format!(
+                    "export output path {} has no file name",
+                    output_path.display()
+                ))
+            })?;
+            canonical_parent.join(file_name)
+        }
+        Err(error) => return Err(error.into()),
+    };
+
+    if canonical_output_path == canonical_vault_path {
+        return Err(VaultError::ExportPathCollision(
+            output_path.display().to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn write_export_atomically(output_path: &Path, contents: &[u8]) -> Result<(), VaultError> {
+    let parent = output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    let temp_dir = match parent {
+        Some(parent) => parent.to_path_buf(),
+        None => PathBuf::from("."),
+    };
+    let file_name = output_path.file_name().ok_or_else(|| {
+        VaultError::InvalidArguments(format!(
+            "export output path {} has no file name",
+            output_path.display()
+        ))
+    })?;
+    let temp_name = format!(
+        ".{}.{}.{}.tmp",
+        file_name.to_string_lossy(),
+        std::process::id(),
+        random_hex_id(8)?
+    );
+    let temp_path = temp_dir.join(temp_name);
+
+    let write_result = fs::write(&temp_path, contents);
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.into());
+    }
+
+    if let Err(error) = fs::rename(&temp_path, output_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.into());
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultBackupPackage {
@@ -182,6 +248,7 @@ impl UnlockedVault {
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent)?;
         }
+        reject_export_path_collision(self.path(), output_path)?;
 
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, created_at_epoch, updated_at_epoch, nonce, tag, ciphertext
@@ -207,7 +274,7 @@ impl UnlockedVault {
             header: self.header.clone(),
             items,
         };
-        fs::write(output_path, serde_json::to_vec_pretty(&package)?)?;
+        write_export_atomically(output_path, serde_json::to_vec_pretty(&package)?.as_slice())?;
         Ok(output_path.to_path_buf())
     }
 
@@ -234,6 +301,7 @@ impl UnlockedVault {
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent)?;
         }
+        reject_export_path_collision(self.path(), output_path)?;
 
         let normalized = filter.normalized();
         let items = self
@@ -316,7 +384,7 @@ impl UnlockedVault {
             },
             payload,
         );
-        fs::write(output_path, serde_json::to_vec_pretty(&package)?)?;
+        write_export_atomically(output_path, serde_json::to_vec_pretty(&package)?.as_slice())?;
         Ok(output_path.to_path_buf())
     }
 

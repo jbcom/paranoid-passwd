@@ -88,6 +88,8 @@ pub enum VaultError {
     UnlockFailed,
     #[error("vault item not found: {0}")]
     ItemNotFound(String),
+    #[error("export destination {0} resolves to the source vault path; refusing to overwrite it")]
+    ExportPathCollision(String),
     #[error("random failure: {0}")]
     RandomFailure(String),
     #[error("crypto failure: {0}")]
@@ -1266,6 +1268,160 @@ mod tests {
             Some("CN=paranoid-passwd.test")
         );
         assert!(certificate_slot.certificate_not_after.is_some());
+    }
+
+    #[test]
+    fn export_backup_rejects_output_path_equal_to_vault_path() {
+        let dir = tempdir().expect("tempdir");
+        let source = dir.path().join("vault.sqlite");
+        init_vault(&source, "correct horse battery staple").expect("init");
+        let vault = unlock_vault(&source, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+        let before = fs::read(&source).expect("read vault before export");
+
+        let error = vault
+            .export_backup(&source)
+            .expect_err("export to the vault's own path must fail closed");
+        assert!(matches!(error, VaultError::ExportPathCollision(_)));
+
+        let after = fs::read(&source).expect("read vault after export attempt");
+        assert_eq!(
+            before, after,
+            "vault file must be untouched after rejection"
+        );
+        assert_eq!(vault.list_items().expect("list items").len(), 1);
+    }
+
+    #[test]
+    fn export_backup_rejects_output_path_equal_to_vault_path_via_relative_components() {
+        let dir = tempdir().expect("tempdir");
+        let nested = dir.path().join("nested");
+        fs::create_dir_all(&nested).expect("mkdir nested");
+        let source = nested.join("vault.sqlite");
+        init_vault(&source, "correct horse battery staple").expect("init");
+        let vault = unlock_vault(&source, "correct horse battery staple").expect("unlock");
+
+        let indirect_path = nested.join("..").join("nested").join("vault.sqlite");
+        let error = vault
+            .export_backup(&indirect_path)
+            .expect_err("canonicalized collision must be rejected");
+        assert!(matches!(error, VaultError::ExportPathCollision(_)));
+    }
+
+    #[test]
+    fn export_transfer_package_rejects_output_path_equal_to_vault_path() {
+        let dir = tempdir().expect("tempdir");
+        let source = dir.path().join("vault.sqlite");
+        init_vault(&source, "correct horse battery staple").expect("init");
+        let vault = unlock_vault(&source, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+        let before = fs::read(&source).expect("read vault before export");
+
+        let error = vault
+            .export_transfer_package(&source, &VaultItemFilter::default(), Some("secret"), None)
+            .expect_err("export-transfer to the vault's own path must fail closed");
+        assert!(matches!(error, VaultError::ExportPathCollision(_)));
+
+        let after = fs::read(&source).expect("read vault after export attempt");
+        assert_eq!(
+            before, after,
+            "vault file must be untouched after rejection"
+        );
+    }
+
+    #[test]
+    fn export_backup_writes_atomically_leaving_no_visible_temp_file() {
+        let dir = tempdir().expect("tempdir");
+        let source = dir.path().join("vault.sqlite");
+        let backup = dir.path().join("vault-backup.ppv.json");
+        init_vault(&source, "correct horse battery staple").expect("init");
+        let vault = unlock_vault(&source, "correct horse battery staple").expect("unlock");
+
+        vault.export_backup(&backup).expect("export backup");
+        assert!(backup.exists());
+
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .expect("read dir")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name())
+            .filter(|name| name != "vault.sqlite" && name != "vault-backup.ppv.json")
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no temp files should remain after a successful export: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn export_backup_interrupted_temp_write_leaves_existing_backup_untouched() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().expect("tempdir");
+        let source = dir.path().join("vault.sqlite");
+        let export_dir = dir.path().join("export-dest");
+        fs::create_dir_all(&export_dir).expect("mkdir export dest");
+        let backup = export_dir.join("vault-backup.ppv.json");
+        init_vault(&source, "correct horse battery staple").expect("init");
+        let vault = unlock_vault(&source, "correct horse battery staple").expect("unlock");
+
+        fs::write(&backup, b"pre-existing backup contents").expect("seed pre-existing backup");
+        let original_contents = fs::read(&backup).expect("read seeded backup");
+
+        let mut perms = fs::metadata(&export_dir)
+            .expect("dir metadata")
+            .permissions();
+        perms.set_mode(0o500);
+        fs::set_permissions(&export_dir, perms).expect("lock down export dir");
+
+        let result = vault.export_backup(&backup);
+
+        let mut restore_perms = fs::metadata(&export_dir)
+            .expect("dir metadata")
+            .permissions();
+        restore_perms.set_mode(0o700);
+        fs::set_permissions(&export_dir, restore_perms).expect("restore dir permissions");
+
+        assert!(
+            result.is_err(),
+            "export into an unwritable directory must fail, not silently succeed"
+        );
+        let after_contents = fs::read(&backup).expect("read backup after failed export");
+        assert_eq!(
+            original_contents, after_contents,
+            "pre-existing backup file must be untouched by an interrupted export"
+        );
+
+        let leftovers: Vec<_> = fs::read_dir(&export_dir)
+            .expect("read export dir")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name())
+            .filter(|name| name != "vault-backup.ppv.json")
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no temp file should remain in the export directory: {leftovers:?}"
+        );
     }
 
     #[test]

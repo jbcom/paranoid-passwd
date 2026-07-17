@@ -142,8 +142,24 @@ P6.0 CI research + two-tier trust design.
   (mutation_handlers.rs:418, #146 review).
 - [x] P7.2 Auto-lock hardening — never on EnvironmentApproval; purge
   options.auth + secret forms on lock (screen_state.rs:1584).
-- [ ] P7.3 Export safety — reject source==destination; temp-file atomic
-  rename (backup_transfer.rs:210).
+- [x] P7.3 Export safety — reject source==destination; temp-file atomic
+  rename (backup_transfer.rs:210). `export_backup` and
+  `export_transfer_package` both canonicalize the vault path and the
+  requested output path (falling back to canonicalizing the parent +
+  file name when the destination does not yet exist) and fail closed with
+  the new typed `VaultError::ExportPathCollision` on a match, before any
+  write happens. Both writers now go through `write_export_atomically`:
+  serialize to a same-directory `.{name}.{pid}.{random-hex}.tmp` file
+  (std-only naming, openssl `rand_bytes` via the existing `random_hex_id`
+  helper — no new deps) then `fs::rename` into place, with the temp file
+  removed on any write/rename failure. Five new tests in
+  crates/paranoid-vault/src/lib.rs cover: same-path rejection leaving the
+  vault byte-for-byte untouched (direct and via `..`-relative components),
+  the same rejection for export-transfer, no leftover temp file after a
+  successful export, and (unix-gated) an unwritable destination directory
+  leaving a pre-existing backup file untouched with no temp-file leftover.
+  docs/reference/vault-format.md and docs/guides/recovery-operations.md
+  updated with the fail-closed/atomic-write guarantee.
 - [ ] P7.4 Transactional imports; temp-DB restores (backup_transfer.rs:440).
 - [x] P7.5 Zeroize MnemonicRecoveryEnrollment (SecretString + redacted
   Debug, keyslots.rs:98) — completes the P0 sweep.
