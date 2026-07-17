@@ -338,7 +338,7 @@ P6.0 CI research + two-tier trust design.
   is engineer-speak — decide user-facing vocabulary), a minimal visual
   identity the TUI+GUI+docs+site share (palette with intent, one type scale,
   iconography stance). Deliverable: docs/design/brand.md.
-- [ ] PUX.2 Journey mapping — map the real user journeys end to end
+- [x] PUX.2 Journey mapping — map the real user journeys end to end
   (first-run → trust establishment → first password → first vault item →
   daily unlock → recovery-someday → coercion/panic → verify-the-binary),
   each as a storyboard with intent/emotion per step and the "what should I do
