@@ -414,6 +414,7 @@ mod tests {
     use paranoid_seal::VaultSealProviderKind;
     use rusqlite::{Connection, params};
     use std::fs;
+    use std::path::Path;
     use tempfile::tempdir;
     use zeroize::Zeroizing;
 
@@ -1695,6 +1696,179 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "Legacy Transfer Identity");
         assert_eq!(items[0].kind, VaultItemKind::Identity);
+    }
+
+    fn tamper_transfer_payload_last_item_title(
+        transfer_path: &Path,
+        recovery_secret: &str,
+    ) -> VaultTransferPackage {
+        let mut package = read_transfer_package(transfer_path).expect("read transfer package");
+        let access = package
+            .access
+            .recovery
+            .clone()
+            .expect("password recovery access");
+        let salt_raw = hex_decode(access.salt_hex.as_str()).expect("decode salt");
+        let salt_text = String::from_utf8(salt_raw).expect("utf8 salt");
+        let salt = SaltString::from_b64(salt_text.as_str()).expect("parse salt");
+        let kek = derive_key(recovery_secret, &salt, &access.kdf).expect("derive kek");
+        let transfer_key = decrypt_blob(
+            kek.as_slice(),
+            TRANSFER_KEY_AAD,
+            EncryptedBlob {
+                nonce: hex_decode(access.nonce_hex.as_str()).expect("decode nonce"),
+                tag: hex_decode(access.tag_hex.as_str()).expect("decode tag"),
+                ciphertext: hex_decode(access.encrypted_transfer_key_hex.as_str())
+                    .expect("decode ciphertext"),
+            },
+        )
+        .expect("unwrap transfer key");
+        let payload_plaintext = decrypt_blob(
+            transfer_key.as_slice(),
+            TRANSFER_PAYLOAD_AAD,
+            EncryptedBlob {
+                nonce: hex_decode(package.payload_nonce_hex.as_str()).expect("decode nonce"),
+                tag: hex_decode(package.payload_tag_hex.as_str()).expect("decode tag"),
+                ciphertext: hex_decode(package.payload_ciphertext_hex.as_str())
+                    .expect("decode ciphertext"),
+            },
+        )
+        .expect("decrypt payload");
+        let mut payload: VaultTransferPayload =
+            serde_json::from_slice(payload_plaintext.as_slice()).expect("parse payload");
+        let last = payload.items.last_mut().expect("at least one item");
+        let VaultItemPayload::Login(login) = &mut last.payload else {
+            panic!("last item must be a login for this test");
+        };
+        login.title = String::new();
+
+        let retampered_plaintext = serde_json::to_vec(&payload).expect("serialize payload");
+        let retampered = encrypt_blob(
+            transfer_key.as_slice(),
+            TRANSFER_PAYLOAD_AAD,
+            retampered_plaintext.as_slice(),
+        )
+        .expect("re-encrypt payload");
+        package.payload_nonce_hex = hex_encode(retampered.nonce.as_slice());
+        package.payload_tag_hex = hex_encode(retampered.tag.as_slice());
+        package.payload_ciphertext_hex = hex_encode(retampered.ciphertext.as_slice());
+        fs::write(
+            transfer_path,
+            serde_json::to_vec_pretty(&package).expect("serialize package"),
+        )
+        .expect("write tampered transfer");
+        package
+    }
+
+    #[test]
+    fn import_transfer_with_malformed_final_item_leaves_zero_rows_imported() {
+        let dir = tempdir().expect("tempdir");
+        let source = dir.path().join("source.sqlite");
+        let target = dir.path().join("target.sqlite");
+        let transfer = dir.path().join("vault-transfer.ppvt.json");
+        init_vault(&source, "correct horse battery staple").expect("init source");
+        init_vault(&target, "correct horse battery staple").expect("init target");
+
+        let source_vault = unlock_vault(&source, "correct horse battery staple").expect("unlock");
+        source_vault
+            .add_login(NewLoginRecord {
+                title: "First Login".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string(),
+                url: None,
+                notes: None,
+                folder: Some("Work".to_string()),
+                tags: vec!["work".to_string()],
+            })
+            .expect("add first login");
+        source_vault
+            .add_login(NewLoginRecord {
+                title: "Second Login".to_string(),
+                username: "octocat2".to_string(),
+                password: "hunter3".to_string(),
+                url: None,
+                notes: None,
+                folder: Some("Work".to_string()),
+                tags: vec!["work".to_string()],
+            })
+            .expect("add second login");
+        source_vault
+            .export_transfer_package(
+                &transfer,
+                &VaultItemFilter::default(),
+                Some("transfer secret"),
+                None,
+            )
+            .expect("export transfer");
+
+        tamper_transfer_payload_last_item_title(&transfer, "transfer secret");
+
+        let target_vault = unlock_vault(&target, "correct horse battery staple").expect("unlock");
+        let before = target_vault.list_items().expect("list items before").len();
+        let error = target_vault
+            .import_transfer_package_with_password(&transfer, "transfer secret", false)
+            .expect_err("import fails closed on malformed final item");
+        assert!(matches!(error, VaultError::InvalidArguments(_)));
+
+        let after = target_vault.list_items().expect("list items after").len();
+        assert_eq!(
+            before, after,
+            "a malformed final item must leave zero rows imported, not a partial commit"
+        );
+        assert_eq!(before, 0);
+    }
+
+    #[test]
+    fn import_transfer_with_all_valid_items_commits_all_rows() {
+        let dir = tempdir().expect("tempdir");
+        let source = dir.path().join("source.sqlite");
+        let target = dir.path().join("target.sqlite");
+        let transfer = dir.path().join("vault-transfer.ppvt.json");
+        init_vault(&source, "correct horse battery staple").expect("init source");
+        init_vault(&target, "correct horse battery staple").expect("init target");
+
+        let source_vault = unlock_vault(&source, "correct horse battery staple").expect("unlock");
+        source_vault
+            .add_login(NewLoginRecord {
+                title: "First Login".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string(),
+                url: None,
+                notes: None,
+                folder: Some("Work".to_string()),
+                tags: vec!["work".to_string()],
+            })
+            .expect("add first login");
+        source_vault
+            .add_login(NewLoginRecord {
+                title: "Second Login".to_string(),
+                username: "octocat2".to_string(),
+                password: "hunter3".to_string(),
+                url: None,
+                notes: None,
+                folder: Some("Work".to_string()),
+                tags: vec!["work".to_string()],
+            })
+            .expect("add second login");
+        source_vault
+            .export_transfer_package(
+                &transfer,
+                &VaultItemFilter::default(),
+                Some("transfer secret"),
+                None,
+            )
+            .expect("export transfer");
+
+        let target_vault = unlock_vault(&target, "correct horse battery staple").expect("unlock");
+        let summary = target_vault
+            .import_transfer_package_with_password(&transfer, "transfer secret", false)
+            .expect("import succeeds");
+        assert_eq!(summary.imported_count, 2);
+
+        let items = target_vault.list_items().expect("list items");
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().any(|item| item.title == "First Login"));
+        assert!(items.iter().any(|item| item.title == "Second Login"));
     }
 
     #[test]

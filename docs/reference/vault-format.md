@@ -85,6 +85,10 @@ Import keeps the cryptographic boundary in application code:
 - imported items are revalidated before storage
 - conflicting ids are remapped by default instead of overwriting local records silently
 - headless import can explicitly replace matching ids when the operator chooses that behavior
+- the whole item list is imported inside a single SQLite transaction: if any item fails
+  normalization/validation partway through the list, the transaction rolls back and the
+  destination vault ends with zero newly-imported rows, never a partial commit of the
+  items that happened to validate before the failing one
 
 Transfer export shares the same fail-closed path-collision check and atomic temp-file-then-rename write as backup export: it never overwrites the source vault path, and an interrupted write never corrupts or truncates a pre-existing file at the destination.
 

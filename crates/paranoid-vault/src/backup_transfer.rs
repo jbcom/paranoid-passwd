@@ -487,6 +487,24 @@ impl UnlockedVault {
         payload: VaultTransferPayload,
         replace_existing: bool,
     ) -> Result<VaultTransferImportSummary, VaultError> {
+        self.conn.execute_batch("BEGIN;")?;
+        match self.import_transfer_payload_in_transaction(payload, replace_existing) {
+            Ok(summary) => {
+                self.conn.execute_batch("COMMIT;")?;
+                Ok(summary)
+            }
+            Err(error) => {
+                let _ = self.conn.execute_batch("ROLLBACK;");
+                Err(error)
+            }
+        }
+    }
+
+    fn import_transfer_payload_in_transaction(
+        &self,
+        payload: VaultTransferPayload,
+        replace_existing: bool,
+    ) -> Result<VaultTransferImportSummary, VaultError> {
         let mut imported_count = 0;
         let mut replaced_count = 0;
         let mut remapped_count = 0;

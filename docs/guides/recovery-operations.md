@@ -203,6 +203,12 @@ paranoid-passwd vault --cli --path "$DEST_VAULT" import-transfer \
 By default, conflicting item ids are remapped instead of silently replacing destination records. Use
 `--replace-existing` only when the transfer is intended to update existing records.
 
+Import is transactional: every item in the package is imported inside a single database
+transaction, and a malformed or invalid item anywhere in the list — including the last one —
+rolls back the entire import. The destination vault ends with either all items from the package
+imported or none of them; it never ends up with only the items that happened to validate before
+a later one failed.
+
 ## Disaster Recovery Drill
 
 Run a recovery drill before you need it:

@@ -181,7 +181,37 @@ P6.0 CI research + two-tier trust design.
   leaving a pre-existing backup file untouched with no temp-file leftover.
   docs/reference/vault-format.md and docs/guides/recovery-operations.md
   updated with the fail-closed/atomic-write guarantee.
-- [ ] P7.4 Transactional imports; temp-DB restores (backup_transfer.rs:440).
+- [x] P7.4 Transactional imports; temp-DB restores (backup_transfer.rs:440).
+  `import_transfer_payload` (crates/paranoid-vault/src/backup_transfer.rs) now
+  wraps the whole per-item loop in an explicit `BEGIN`/`COMMIT` transaction on
+  `self.conn`, rolling back on the first validation or storage failure so a
+  malformed item anywhere in the payload — including the last one — leaves
+  zero newly-imported rows instead of committing every item that validated
+  before it. Confirmed P7.1's `restore_vault_backup` already builds the full
+  restored vault in a same-directory temp-DB sibling and only renames it over
+  the destination after validation, so the restore side has no incremental
+  persistence path left to transactionalize. Two new tests in
+  paranoid-vault/src/lib.rs:
+  `import_transfer_with_malformed_final_item_leaves_zero_rows_imported`
+  (tampers the last item's title to empty inside a real transfer package,
+  re-derives/re-encrypts the payload, and asserts item count before == after
+  the failed import) and `import_transfer_with_all_valid_items_commits_all_rows`
+  (asserts a successful import commits every item). cargo test -p
+  paranoid-vault -p paranoid-cli clean (80 + 103 + 9 + 5 tests, one
+  pre-existing unrelated flaky test excluded — see below); fmt+clippy -D
+  warnings clean on both crates; scripts/validate-docs.sh clean.
+  docs/reference/vault-format.md and docs/guides/recovery-operations.md
+  updated with the transactional-import guarantee.
+
+  Note (out of scope, not touched): `mnemonic_enrollment_debug_never_contains_the_phrase`
+  in paranoid-vault/src/lib.rs is flaky independent of this change — it
+  substring-matches every BIP-39 word in a freshly generated mnemonic against
+  the enrollment's Debug output, which also contains the embedded
+  `VaultKeyslot`'s own Debug field labels (e.g. "kind"). Common English words
+  in the wordlist ("kind", "one", "before", ...) coincidentally collide with
+  those labels and fail the test on an unrelated basis. Reproduced failing on
+  base `main` before this change (single mnemonic-generation seed) — not
+  introduced or worsened here.
 - [x] P7.5 Zeroize MnemonicRecoveryEnrollment (SecretString + redacted
   Debug, keyslots.rs:98) — completes the P0 sweep.
 - [ ] P2.4 vendored slint-testing + real widget-event GUI tests.
