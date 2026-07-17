@@ -2719,10 +2719,10 @@ impl App {
         if let Some(VaultItemPayload::Card(card)) = self.detail.as_ref().map(|item| &item.payload) {
             self.card_form.title = card.title.clone();
             self.card_form.cardholder_name = card.cardholder_name.clone();
-            self.card_form.number = card.number.clone();
+            self.card_form.number = card.number.as_str().to_string();
             self.card_form.expiry_month = card.expiry_month.clone();
             self.card_form.expiry_year = card.expiry_year.clone();
-            self.card_form.security_code = card.security_code.clone();
+            self.card_form.security_code = card.security_code.as_str().to_string();
             self.card_form.billing_zip = card.billing_zip.clone().unwrap_or_default();
             self.card_form.notes = card.notes.clone().unwrap_or_default();
             self.card_form.folder = card.folder.clone().unwrap_or_default();
@@ -2838,7 +2838,7 @@ impl App {
                     focus_index: 0,
                     title: login.title.clone(),
                     username: login.username.clone(),
-                    password: login.password.clone(),
+                    password: login.password.as_str().to_string(),
                     url: login.url.clone().unwrap_or_default(),
                     notes: login.notes.clone().unwrap_or_default(),
                     folder: login.folder.clone().unwrap_or_default(),
@@ -2868,10 +2868,10 @@ impl App {
                     focus_index: 0,
                     title: card.title.clone(),
                     cardholder_name: card.cardholder_name.clone(),
-                    number: card.number.clone(),
+                    number: card.number.as_str().to_string(),
                     expiry_month: card.expiry_month.clone(),
                     expiry_year: card.expiry_year.clone(),
-                    security_code: card.security_code.clone(),
+                    security_code: card.security_code.as_str().to_string(),
                     billing_zip: card.billing_zip.clone().unwrap_or_default(),
                     notes: card.notes.clone().unwrap_or_default(),
                     folder: card.folder.clone().unwrap_or_default(),

@@ -678,7 +678,7 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                         Line::raw(format!("id: {}", item.id)),
                         Line::raw(format!("title: {}", login.title)),
                         Line::raw(format!("username: {}", login.username)),
-                        Line::raw(format!("password: {}", login.password)),
+                        Line::raw(format!("password: {}", login.password.as_str())),
                         Line::raw(format!(
                             "duplicate passwords elsewhere: {duplicate_password_count}"
                         )),
@@ -708,7 +708,11 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                                     .rev()
                                     .take(3)
                                     .map(|entry| {
-                                        format!("{} @ {}", entry.password, entry.changed_at_epoch)
+                                        format!(
+                                            "{} @ {}",
+                                            entry.password.as_str(),
+                                            entry.changed_at_epoch
+                                        )
                                     })
                                     .collect::<Vec<_>>()
                                     .join(" | ")
@@ -761,12 +765,12 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                     Line::raw(format!("id: {}", item.id)),
                     Line::raw(format!("title: {}", card.title)),
                     Line::raw(format!("cardholder: {}", card.cardholder_name)),
-                    Line::raw(format!("number: {}", card.number)),
+                    Line::raw(format!("number: {}", card.number.as_str())),
                     Line::raw(format!(
                         "expiry: {}/{}",
                         card.expiry_month, card.expiry_year
                     )),
-                    Line::raw(format!("security code: {}", card.security_code)),
+                    Line::raw(format!("security code: {}", card.security_code.as_str())),
                     Line::raw(format!(
                         "billing zip: {}",
                         card.billing_zip.as_deref().unwrap_or("")

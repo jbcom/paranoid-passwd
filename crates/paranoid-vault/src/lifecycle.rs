@@ -462,7 +462,7 @@ impl UnlockedVault {
                 UpdateLoginRecord {
                     title: Some(record.title.unwrap_or(login.title)),
                     username: Some(record.username.unwrap_or(login.username)),
-                    password: Some(password),
+                    password: Some(password.into()),
                     url: Some(record.url.or(login.url)),
                     notes: Some(record.notes.or(login.notes)),
                     folder: Some(record.folder.or(login.folder)),
@@ -484,7 +484,7 @@ impl UnlockedVault {
             self.add_login(NewLoginRecord {
                 title,
                 username,
-                password,
+                password: password.into(),
                 url: record.url,
                 notes: record.notes,
                 folder: record.folder,
@@ -1071,7 +1071,7 @@ fn validate_card_record(record: &NewCardRecord) -> Result<(), VaultError> {
             "vault cardholder name must not be empty".to_string(),
         ));
     }
-    if record.number.trim().is_empty() {
+    if record.number.as_str().trim().is_empty() {
         return Err(VaultError::InvalidArguments(
             "vault card number must not be empty".to_string(),
         ));
@@ -1086,7 +1086,7 @@ fn validate_card_record(record: &NewCardRecord) -> Result<(), VaultError> {
             "vault expiry year must not be empty".to_string(),
         ));
     }
-    if record.security_code.trim().is_empty() {
+    if record.security_code.as_str().trim().is_empty() {
         return Err(VaultError::InvalidArguments(
             "vault security code must not be empty".to_string(),
         ));
@@ -1174,7 +1174,7 @@ pub(crate) fn item_summary(item: &VaultItem, duplicate_password_count: usize) ->
             subtitle: format!(
                 "{} · {}",
                 card.cardholder_name,
-                card_number_preview(&card.number)
+                card_number_preview(card.number.as_str())
             ),
             location: Some(format!("{}/{}", card.expiry_month, card.expiry_year)),
             folder: card.folder.clone(),
@@ -1195,10 +1195,20 @@ pub(crate) fn item_summary(item: &VaultItem, duplicate_password_count: usize) ->
 }
 
 pub(crate) fn duplicate_password_counts(items: &[VaultItem]) -> HashMap<String, usize> {
+    // Duplicate-password detection is inherently a plaintext comparison
+    // across every login's password, so this local, function-scoped map
+    // necessarily holds plaintext `String` copies of each password for the
+    // duration of the count — there is no way to detect "these two secrets
+    // are equal" without comparing their bytes. The map (and its copies)
+    // are dropped at the end of this function; the `SecretBytes` wrapper on
+    // `LoginRecord.password` still ensures the copy resident in the vault
+    // item itself, and every other clone of it, zeroizes on drop.
     let mut password_totals = HashMap::<String, usize>::new();
     for item in items {
         if let VaultItemPayload::Login(login) = &item.payload {
-            *password_totals.entry(login.password.clone()).or_insert(0) += 1;
+            *password_totals
+                .entry(login.password.as_str().to_string())
+                .or_insert(0) += 1;
         }
     }
 
@@ -1401,10 +1411,10 @@ fn item_matches_query(item: &VaultItem, normalized_query: &str) -> bool {
             VaultItemPayload::Card(card) => {
                 field_matches(&card.title, normalized_query)
                     || field_matches(&card.cardholder_name, normalized_query)
-                    || field_matches(&card.number, normalized_query)
+                    || field_matches(card.number.as_str(), normalized_query)
                     || field_matches(&card.expiry_month, normalized_query)
                     || field_matches(&card.expiry_year, normalized_query)
-                    || field_matches(&card.security_code, normalized_query)
+                    || field_matches(card.security_code.as_str(), normalized_query)
                     || card
                         .billing_zip
                         .as_deref()

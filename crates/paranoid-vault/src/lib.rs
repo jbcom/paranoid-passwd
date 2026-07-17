@@ -11,8 +11,8 @@ pub use lifecycle::*;
 pub use recovery_posture::*;
 
 pub use native_access::{
-    NativeSessionHardening, SecretString, VaultAuth, VaultOpenOptions, default_vault_path,
-    read_master_password, unlock_vault_for_options,
+    NativeSessionHardening, SecretBytes, SecretString, VaultAuth, VaultOpenOptions,
+    default_vault_path, read_master_password, unlock_vault_for_options,
 };
 
 use serde::{Deserialize, Serialize};
@@ -199,7 +199,7 @@ impl VaultItemFilter {
 pub struct LoginRecord {
     pub title: String,
     pub username: String,
-    pub password: String,
+    pub password: SecretBytes,
     pub url: Option<String>,
     pub notes: Option<String>,
     #[serde(default)]
@@ -212,7 +212,7 @@ pub struct LoginRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PasswordHistoryEntry {
-    pub password: String,
+    pub password: SecretBytes,
     pub changed_at_epoch: i64,
 }
 
@@ -230,10 +230,10 @@ pub struct SecureNoteRecord {
 pub struct CardRecord {
     pub title: String,
     pub cardholder_name: String,
-    pub number: String,
+    pub number: SecretBytes,
     pub expiry_month: String,
     pub expiry_year: String,
-    pub security_code: String,
+    pub security_code: SecretBytes,
     pub billing_zip: Option<String>,
     pub notes: Option<String>,
     #[serde(default)]
@@ -291,7 +291,7 @@ pub struct VaultItemSummary {
 pub struct NewLoginRecord {
     pub title: String,
     pub username: String,
-    pub password: String,
+    pub password: SecretBytes,
     pub url: Option<String>,
     pub notes: Option<String>,
     pub folder: Option<String>,
@@ -320,7 +320,7 @@ pub struct GenerateStoreLoginRecord {
 pub struct UpdateLoginRecord {
     pub title: Option<String>,
     pub username: Option<String>,
-    pub password: Option<String>,
+    pub password: Option<SecretBytes>,
     pub url: Option<Option<String>>,
     pub notes: Option<Option<String>>,
     pub folder: Option<Option<String>>,
@@ -347,10 +347,10 @@ pub struct UpdateSecureNoteRecord {
 pub struct NewCardRecord {
     pub title: String,
     pub cardholder_name: String,
-    pub number: String,
+    pub number: SecretBytes,
     pub expiry_month: String,
     pub expiry_year: String,
-    pub security_code: String,
+    pub security_code: SecretBytes,
     pub billing_zip: Option<String>,
     pub notes: Option<String>,
     pub folder: Option<String>,
@@ -361,10 +361,10 @@ pub struct NewCardRecord {
 pub struct UpdateCardRecord {
     pub title: Option<String>,
     pub cardholder_name: Option<String>,
-    pub number: Option<String>,
+    pub number: Option<SecretBytes>,
     pub expiry_month: Option<String>,
     pub expiry_year: Option<String>,
-    pub security_code: Option<String>,
+    pub security_code: Option<SecretBytes>,
     pub billing_zip: Option<Option<String>>,
     pub notes: Option<Option<String>>,
     pub folder: Option<Option<String>>,
@@ -526,7 +526,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Example".to_string(),
                 username: "jon@example.com".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: Some("https://example.com".to_string()),
                 notes: Some("phase-3 smoke".to_string()),
                 folder: Some("Personal".to_string()),
@@ -553,7 +553,7 @@ mod tests {
                 &item.id,
                 UpdateLoginRecord {
                     title: Some("Example Updated".to_string()),
-                    password: Some("Sup3r$ecret!#2".to_string()),
+                    password: Some("Sup3r$ecret!#2".to_string().into()),
                     folder: Some(Some("Primary".to_string())),
                     tags: Some(vec!["primary".to_string(), "email".to_string()]),
                     ..UpdateLoginRecord::default()
@@ -649,10 +649,10 @@ mod tests {
             .add_card(NewCardRecord {
                 title: "Primary Visa".to_string(),
                 cardholder_name: "Jon Bogaty".to_string(),
-                number: "4111111111111111".to_string(),
+                number: "4111111111111111".to_string().into(),
                 expiry_month: "08".to_string(),
                 expiry_year: "2031".to_string(),
-                security_code: "123".to_string(),
+                security_code: "123".to_string().into(),
                 billing_zip: Some("60601".to_string()),
                 notes: Some("travel card".to_string()),
                 folder: Some("Wallet".to_string()),
@@ -756,7 +756,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("source hosting".to_string()),
                 folder: Some("Work".to_string()),
@@ -767,7 +767,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Bank".to_string(),
                 username: "jon".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: Some("https://bank.example".to_string()),
                 notes: Some("monthly bills".to_string()),
                 folder: Some("Finance".to_string()),
@@ -786,10 +786,10 @@ mod tests {
             .add_card(NewCardRecord {
                 title: "Backup Mastercard".to_string(),
                 cardholder_name: "Jon Bogaty".to_string(),
-                number: "5555444433331111".to_string(),
+                number: "5555444433331111".to_string().into(),
                 expiry_month: "11".to_string(),
                 expiry_year: "2030".to_string(),
-                security_code: "999".to_string(),
+                security_code: "999".to_string().into(),
                 billing_zip: Some("73301".to_string()),
                 notes: Some("backup travel wallet".to_string()),
                 folder: Some("Travel".to_string()),
@@ -839,7 +839,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("source hosting".to_string()),
                 folder: Some("Work".to_string()),
@@ -850,7 +850,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitLab".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://gitlab.com".to_string()),
                 notes: Some("mirror".to_string()),
                 folder: Some("Work".to_string()),
@@ -861,10 +861,10 @@ mod tests {
             .add_card(NewCardRecord {
                 title: "Travel Card".to_string(),
                 cardholder_name: "Jon Bogaty".to_string(),
-                number: "5555444433331111".to_string(),
+                number: "5555444433331111".to_string().into(),
                 expiry_month: "11".to_string(),
                 expiry_year: "2030".to_string(),
-                security_code: "999".to_string(),
+                security_code: "999".to_string().into(),
                 billing_zip: None,
                 notes: Some("backup travel wallet".to_string()),
                 folder: Some("Travel".to_string()),
@@ -915,7 +915,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -926,7 +926,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitLab".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -937,7 +937,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Bank".to_string(),
                 username: "jon".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Finance".to_string()),
@@ -992,7 +992,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("source hosting".to_string()),
                 folder: Some("Work".to_string()),
@@ -1043,7 +1043,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1095,7 +1095,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Mnemonic Backup".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Recovery".to_string()),
@@ -1230,7 +1230,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1281,7 +1281,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -1329,7 +1329,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -1438,7 +1438,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1498,7 +1498,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1774,7 +1774,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "First Login".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1785,7 +1785,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Second Login".to_string(),
                 username: "octocat2".to_string(),
-                password: "hunter3".to_string(),
+                password: "hunter3".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1832,7 +1832,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "First Login".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1843,7 +1843,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Second Login".to_string(),
                 username: "octocat2".to_string(),
-                password: "hunter3".to_string(),
+                password: "hunter3".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1924,7 +1924,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Original Login One".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1935,7 +1935,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Original Login Two".to_string(),
                 username: "octocat2".to_string(),
-                password: "hunter3".to_string(),
+                password: "hunter3".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -2005,7 +2005,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Replacement Login".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -2048,7 +2048,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -2125,7 +2125,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Cert Login".to_string(),
                 username: "jon@example.com".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -2446,7 +2446,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Mnemonic Login".to_string(),
                 username: "jon@example.com".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -2685,7 +2685,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Device Login".to_string(),
                 username: "jon@example.com".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -3277,7 +3277,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Example".to_string(),
                 username: "jon@example.com".to_string(),
-                password: "Sup3r$ecret!".to_string(),
+                password: "Sup3r$ecret!".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Personal".to_string()),
@@ -3290,7 +3290,7 @@ mod tests {
                 &item.id,
                 UpdateLoginRecord {
                     title: Some("Example Updated".to_string()),
-                    password: Some("Sup3r$ecret!".to_string()),
+                    password: Some("Sup3r$ecret!".to_string().into()),
                     ..UpdateLoginRecord::default()
                 },
             )
@@ -3394,7 +3394,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("primary".to_string()),
                 folder: Some("Work".to_string()),

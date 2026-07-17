@@ -1187,7 +1187,7 @@ fn add_login(
         .add_login(NewLoginRecord {
             title: input.title.trim().to_string(),
             username: input.username.trim().to_string(),
-            password: input.password,
+            password: input.password.into(),
             url: None,
             notes: None,
             folder: input.folder,

@@ -8,7 +8,7 @@ impl App {
         let record = NewLoginRecord {
             title: self.add_login_form.title.trim().to_string(),
             username: self.add_login_form.username.trim().to_string(),
-            password: self.add_login_form.password.clone(),
+            password: self.add_login_form.password.clone().into(),
             url: normalize_optional_field(&self.add_login_form.url),
             notes: normalize_optional_field(&self.add_login_form.notes),
             folder: normalize_optional_field(&self.add_login_form.folder),
@@ -39,10 +39,10 @@ impl App {
         let record = NewCardRecord {
             title: self.card_form.title.trim().to_string(),
             cardholder_name: self.card_form.cardholder_name.trim().to_string(),
-            number: self.card_form.number.trim().to_string(),
+            number: self.card_form.number.trim().to_string().into(),
             expiry_month: self.card_form.expiry_month.trim().to_string(),
             expiry_year: self.card_form.expiry_year.trim().to_string(),
-            security_code: self.card_form.security_code.trim().to_string(),
+            security_code: self.card_form.security_code.trim().to_string().into(),
             billing_zip: normalize_optional_field(&self.card_form.billing_zip),
             notes: normalize_optional_field(&self.card_form.notes),
             folder: normalize_optional_field(&self.card_form.folder),
@@ -1039,9 +1039,9 @@ impl App {
             return;
         };
         let content = match payload {
-            VaultItemPayload::Login(login) => login.password.clone(),
+            VaultItemPayload::Login(login) => login.password.as_str().to_string(),
             VaultItemPayload::SecureNote(note) => note.content.clone(),
-            VaultItemPayload::Card(card) => card.number.clone(),
+            VaultItemPayload::Card(card) => card.number.as_str().to_string(),
             VaultItemPayload::Identity(identity) => identity
                 .email
                 .clone()
