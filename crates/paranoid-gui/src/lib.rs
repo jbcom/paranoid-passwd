@@ -172,12 +172,19 @@ impl Default for GuiRuntimeConfig {
     }
 }
 
-#[derive(Clone)]
 struct GuiState {
     #[cfg(not(target_arch = "wasm32"))]
     vault_path: PathBuf,
     #[cfg(not(target_arch = "wasm32"))]
     vault_secret: String,
+    /// Cached Argon2id-unlocked vault handle for the `(vault_path, vault_secret)`
+    /// pair currently loaded, so a chain of vault operations (unlock, mutate,
+    /// reload, rotate, ...) against the same vault pays the ~256 MiB Argon2id
+    /// derivation cost once instead of once per operation. Dropped (forcing a
+    /// fresh derivation) whenever the requested path or secret differs from
+    /// the cached session; see [`vault_session`].
+    #[cfg(not(target_arch = "wasm32"))]
+    unlocked_vault: Option<paranoid_vault::UnlockedVault>,
     #[cfg(not(target_arch = "wasm32"))]
     selected_login_id: Option<String>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -209,6 +216,17 @@ impl std::fmt::Debug for GuiState {
             .field(
                 "vault_secret",
                 &format_args!("<redacted> ({} bytes)", self.vault_secret.len()),
+            )
+            .field(
+                "unlocked_vault",
+                &format_args!(
+                    "{}",
+                    if self.unlocked_vault.is_some() {
+                        "<cached session>"
+                    } else {
+                        "<none>"
+                    }
+                ),
             )
             .field("selected_login_id", &self.selected_login_id)
             .field(
@@ -268,6 +286,7 @@ impl GuiState {
         Self {
             vault_path: default_vault_path(),
             vault_secret: String::new(),
+            unlocked_vault: None,
             selected_login_id: None,
             last_report: None,
             ops_audit_events: Vec::new(),
@@ -798,7 +817,7 @@ fn run_operator_automation(
     }
 
     state.record_vault_operation_policy("read_item", VaultOperationAccess::Decrypt)?;
-    let filtered = unlock_with_password(&automation.vault_path, secret.as_str())?
+    let filtered = vault_session(state, &automation.vault_path, secret.as_str())?
         .list_items_filtered(&VaultItemFilter {
             query: Some("GitHub".to_string()),
             kind: None,
@@ -816,13 +835,12 @@ fn run_operator_automation(
     state.record_vault_operation_policy("mutate_item", VaultOperationAccess::Mutate)?;
     rotate_selected_login(state, &automation.vault_path, secret.as_str(), 28)?;
     state.record_vault_operation_policy("read_item", VaultOperationAccess::Decrypt)?;
-    let rotated = unlock_with_password(&automation.vault_path, secret.as_str())?
-        .get_item(
-            state
-                .selected_login_id
-                .as_deref()
-                .ok_or_else(|| "rotation lost the selected login id".to_string())?,
-        )
+    let rotated_login_id = state
+        .selected_login_id
+        .clone()
+        .ok_or_else(|| "rotation lost the selected login id".to_string())?;
+    let rotated = vault_session(state, &automation.vault_path, secret.as_str())?
+        .get_item(rotated_login_id.as_str())
         .map_err(|error| error.to_string())?;
     match rotated.payload {
         VaultItemPayload::Login(login) if login.password != "hunter2" => {}
@@ -833,18 +851,20 @@ fn run_operator_automation(
     }
 
     state.record_vault_operation_policy("keyslot_lifecycle", VaultOperationAccess::Keyslot)?;
-    let mut vault = unlock_with_password(&automation.vault_path, secret.as_str())?;
+    let vault = vault_session(state, &automation.vault_path, secret.as_str())?;
     let enrollment = vault
         .add_mnemonic_keyslot(Some("paper-backup".to_string()))
         .map_err(|error| error.to_string())?;
     if enrollment.keyslot.label.as_deref() != Some("paper-backup") {
         return Err("mnemonic keyslot was enrolled with an unexpected label".to_string());
     }
+    let keyslot_summary = summarize_keyslots(vault.header());
     state.status =
         "Mnemonic recovery slot enrolled; phrase captured by automation memory only.".to_string();
-    state.keyslot_summary = summarize_keyslots(vault.header());
+    state.keyslot_summary = keyslot_summary;
 
     state.record_vault_operation_policy("export", VaultOperationAccess::Export)?;
+    let vault = vault_session(state, &automation.vault_path, secret.as_str())?;
     let written = vault
         .export_backup(&automation.backup_path)
         .map_err(|error| error.to_string())?;
@@ -1024,12 +1044,11 @@ fn enroll_mnemonic_from_ui(
     label: &SharedString,
 ) -> Result<(), String> {
     state.record_vault_operation_policy("keyslot_lifecycle", VaultOperationAccess::Keyslot)?;
-    let mut vault = unlock_with_password(Path::new(path.as_str()), secret.as_str())?;
+    let vault_path = Path::new(path.as_str());
+    let vault = vault_session(state, vault_path, secret.as_str())?;
     let enrollment = vault
         .add_mnemonic_keyslot(normalize_optional_field(label.as_str()))
         .map_err(|error| error.to_string())?;
-    state.vault_path = PathBuf::from(path.as_str());
-    state.vault_secret = secret.to_string();
     state.keyslot_summary = summarize_keyslots(vault.header());
     state.status = format!(
         "Mnemonic recovery slot {} enrolled. Capture the phrase offline before closing this screen.",
@@ -1054,7 +1073,8 @@ fn export_backup_from_ui(
     if output.is_empty() {
         return Err("backup output path is required".to_string());
     }
-    let vault = unlock_with_password(Path::new(path.as_str()), secret.as_str())?;
+    let vault_path = Path::new(path.as_str());
+    let vault = vault_session(state, vault_path, secret.as_str())?;
     let written = vault
         .export_backup(output)
         .map_err(|error| error.to_string())?;
@@ -1064,25 +1084,28 @@ fn export_backup_from_ui(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn load_vault(state: &mut GuiState, path: &Path, secret: &str) -> Result<(), String> {
-    let vault = unlock_with_password(path, secret)?;
+    let vault = vault_session(state, path, secret)?;
     let items = vault.list_items().map_err(|error| error.to_string())?;
-    state.vault_path = path.to_path_buf();
-    state.vault_secret = secret.to_string();
-    state.vault_items = summarize_items(items.as_slice());
-    state.vault_posture = summarize_posture(vault.header());
-    state.keyslot_summary = summarize_keyslots(vault.header());
-    if let Some(first_login) = items
+    let vault_posture = summarize_posture(vault.header());
+    let keyslot_summary = summarize_keyslots(vault.header());
+    let selected = if let Some(first_login) = items
         .iter()
         .find(|item| item.kind == VaultItemKind::Login)
         .or_else(|| items.first())
     {
-        state.selected_login_id =
+        let selected_login_id =
             (first_login.kind == VaultItemKind::Login).then(|| first_login.id.clone());
-        state.selected_item = summarize_selected_item(&vault.get_item(&first_login.id).ok());
+        let selected_item = summarize_selected_item(&vault.get_item(&first_login.id).ok());
+        (selected_login_id, selected_item)
     } else {
-        state.selected_login_id = None;
-        state.selected_item = "Vault is unlocked and empty.".to_string();
-    }
+        (None, "Vault is unlocked and empty.".to_string())
+    };
+
+    state.vault_items = summarize_items(items.as_slice());
+    state.vault_posture = vault_posture;
+    state.keyslot_summary = keyslot_summary;
+    state.selected_login_id = selected.0;
+    state.selected_item = selected.1;
     state.status = format!(
         "Vault unlocked. {} item(s) loaded from {}.",
         items.len(),
@@ -1111,6 +1134,37 @@ fn unlock_with_password(
     unlock_vault_for_options(&options).map_err(|error| error.to_string())
 }
 
+/// Returns an already-unlocked vault handle for `(path, secret)`, reusing
+/// `state`'s cached session when it was opened against the same path and
+/// secret instead of paying a fresh ~256 MiB Argon2id derivation.
+///
+/// The vault's on-disk contents can still change between calls (other
+/// operations write through the same connection, or an external process
+/// touches the file), so this only ever skips the *unlock derivation*; every
+/// call still round-trips through SQLite for up-to-date item data.
+#[cfg(not(target_arch = "wasm32"))]
+fn vault_session<'state>(
+    state: &'state mut GuiState,
+    path: &Path,
+    secret: &str,
+) -> Result<&'state mut paranoid_vault::UnlockedVault, String> {
+    let reuse = state
+        .unlocked_vault
+        .as_ref()
+        .is_some_and(|vault| vault.path() == path)
+        && state.vault_secret == secret;
+    if !reuse {
+        let vault = unlock_with_password(path, secret)?;
+        state.vault_path = path.to_path_buf();
+        state.vault_secret = secret.to_string();
+        state.unlocked_vault = Some(vault);
+    }
+    Ok(state
+        .unlocked_vault
+        .as_mut()
+        .expect("unlocked_vault was just populated above when absent or stale"))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 struct LoginInput {
@@ -1128,7 +1182,7 @@ fn add_login(
     secret: &str,
     input: LoginInput,
 ) -> Result<VaultItemSummary, String> {
-    let vault = unlock_with_password(path, secret)?;
+    let vault = vault_session(state, path, secret)?;
     let item = vault
         .add_login(NewLoginRecord {
             title: input.title.trim().to_string(),
@@ -1142,7 +1196,7 @@ fn add_login(
         .map_err(|error| error.to_string())?;
     state.selected_login_id = Some(item.id.clone());
     load_vault(state, path, secret)?;
-    let summary = unlock_with_password(path, secret)?
+    let summary = vault_session(state, path, secret)?
         .list_items()
         .map_err(|error| error.to_string())?
         .into_iter()
@@ -1177,7 +1231,7 @@ fn rotate_selected_login(
         },
         selected_frameworks: vec![FrameworkId::Nist],
     };
-    let vault = unlock_with_password(path, secret)?;
+    let vault = vault_session(state, path, secret)?;
     let (report, item) = vault
         .generate_and_store(
             &request,
