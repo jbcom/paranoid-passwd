@@ -2386,6 +2386,70 @@ mod tests {
         assert!(app.import_transfer_form.key_passphrase.is_empty());
     }
 
+    /// P9.6: the panic/quick-lock hotkey (Ctrl+L) must immediately drive any
+    /// unlocked screen to `UnlockBlocked`, purge every secret-bearing form
+    /// via `purge_secret_state_on_lock`, and clear the decrypted vault state
+    /// (`items`/`detail`/`header`) — from a representative unlocked screen
+    /// (`Vault`) and while a secret-bearing text field is mid-entry, proving
+    /// the hotkey is not swallowed by an in-progress edit.
+    #[test]
+    fn panic_lock_hotkey_purges_secrets_from_any_unlocked_screen() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(!app.items.is_empty());
+        assert!(app.detail.is_some());
+
+        // Simulate a secret mid-entry in a form the panic key must still
+        // scrub, proving the hotkey is not blocked by focus on a text field.
+        app.certificate_rewrap_form.key_passphrase =
+            SecretString::new("half-typed-secret".to_string());
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert!(!should_quit, "panic-lock must not quit the app");
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(app.items.is_empty());
+        assert!(app.detail.is_none());
+        assert!(app.header.is_none());
+        assert!(matches!(app.options.auth, VaultAuth::PasswordEnv(_)));
+        assert!(app.certificate_rewrap_form.key_passphrase.is_empty());
+        assert!(app.status.to_lowercase().contains("lock"));
+    }
+
+    /// The panic-lock hotkey must be a no-op (not crash, not change screen)
+    /// from pre-unlock screens that have no unlocked state to purge.
+    #[test]
+    fn panic_lock_hotkey_is_inert_before_unlock() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+
+        let mut app = App::new(password_only_options(&path));
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert!(!should_quit);
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
+    }
+
     #[test]
     fn generate_request_preview_rejects_unknown_frameworks() {
         let preview = generate_request_preview(&GenerateStoreForm {

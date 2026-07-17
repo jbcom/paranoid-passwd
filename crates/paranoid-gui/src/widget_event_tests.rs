@@ -291,3 +291,116 @@ fn export_backup_via_real_widgets_writes_backup_file() {
         "status should confirm the export, got: {status}"
     );
 }
+
+/// P9.6: real "Lock vault" button click from an unlocked, populated screen
+/// immediately scrubs every secret-bearing window property (vault items,
+/// selected item, keyslot summary, generated passwords, recovery-secret
+/// field text stays as typed in the widget itself — the underlying
+/// `GuiState.vault_secret` copy is what gets zeroized — but the
+/// vault-derived summaries must be gone) and reports the vault as locked.
+#[test]
+fn lock_vault_via_real_widgets_scrubs_secrets_from_unlocked_screen() {
+    let tmpdir = tempfile::tempdir().expect("temp dir for lock-vault test");
+    let vault_path = tmpdir.path().join("vault.sqlite");
+    let (window, state) = new_wired_shell();
+
+    type_into(
+        &window,
+        "vault-path-input",
+        vault_path.display().to_string(),
+    );
+    type_into(&window, "vault-secret", "correct horse battery staple");
+    click(&window, "init-vault-button");
+
+    type_into(&window, "login-title", "GitHub");
+    type_into(&window, "login-user", "octocat");
+    type_into(&window, "login-password", "hunter2");
+    click(&window, "add-login-button");
+
+    // Representative unlocked screen: a vault is unlocked with a decrypted
+    // item summarized in the window, and the cached session handle is set.
+    assert!(window.get_vault_items().to_string().contains("GitHub"));
+    assert!(state.borrow().unlocked_vault.is_some());
+
+    click(&window, "lock-vault-button");
+
+    let status = window.get_status().to_string();
+    assert!(
+        status.to_lowercase().contains("lock"),
+        "status should report the vault as locked, got: {status}"
+    );
+    assert!(
+        !window.get_vault_items().to_string().contains("GitHub"),
+        "vault-items property must not retain the decrypted item after lock, got: {}",
+        window.get_vault_items()
+    );
+    let selected_item = window.get_selected_item().to_string();
+    assert!(
+        !selected_item.contains("GitHub") && !selected_item.contains("octocat"),
+        "selected-item property must be scrubbed after lock, got: {selected_item}"
+    );
+    let state = state.borrow();
+    assert!(
+        state.unlocked_vault.is_none(),
+        "the cached unlocked-vault handle must be dropped on lock"
+    );
+    assert!(
+        state.vault_secret.is_empty(),
+        "the in-memory master-password copy must be cleared on lock"
+    );
+}
+
+/// P9.6: the `Control+L` keyboard accelerator (`PanicLockShortcut` in
+/// paranoid.slint) drives the exact same lock path as the button, even
+/// though the master-password `LineEdit` still holds simulated focus from
+/// typing into it — proving the panic key is not swallowed by a
+/// focused text field.
+#[test]
+fn ctrl_l_accelerator_locks_vault_while_a_text_field_has_focus() {
+    let tmpdir = tempfile::tempdir().expect("temp dir for ctrl-l test");
+    let vault_path = tmpdir.path().join("vault.sqlite");
+    let (window, state) = new_wired_shell();
+
+    type_into(
+        &window,
+        "vault-path-input",
+        vault_path.display().to_string(),
+    );
+    type_into(&window, "vault-secret", "correct horse battery staple");
+    click(&window, "init-vault-button");
+
+    type_into(&window, "login-title", "GitHub");
+    type_into(&window, "login-user", "octocat");
+    type_into(&window, "login-password", "hunter2");
+    click(&window, "add-login-button");
+    assert!(window.get_vault_items().to_string().contains("GitHub"));
+
+    // Give the login-password field simulated keyboard focus, mirroring a
+    // user mid-entry, then dispatch the raw Control+L key sequence at the
+    // window level exactly as a real keyboard would.
+    find_one(&window, "login-password").invoke_accessible_default_action();
+    let slint_window = window.window();
+    slint_window.dispatch_event(slint::platform::WindowEvent::KeyPressed {
+        text: slint::platform::Key::Control.into(),
+    });
+    slint_window.dispatch_event(slint::platform::WindowEvent::KeyPressed { text: "l".into() });
+    slint_window.dispatch_event(slint::platform::WindowEvent::KeyReleased { text: "l".into() });
+    slint_window.dispatch_event(slint::platform::WindowEvent::KeyReleased {
+        text: slint::platform::Key::Control.into(),
+    });
+
+    let status = window.get_status().to_string();
+    assert!(
+        status.to_lowercase().contains("lock"),
+        "Ctrl+L should have locked the vault, got status: {status}"
+    );
+    assert!(
+        !window.get_vault_items().to_string().contains("GitHub"),
+        "Ctrl+L must scrub the decrypted item from the window, got: {}",
+        window.get_vault_items()
+    );
+    assert!(
+        state.borrow().unlocked_vault.is_none(),
+        "Ctrl+L must drop the cached unlocked-vault handle"
+    );
+}

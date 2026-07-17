@@ -1570,20 +1570,7 @@ impl App {
         }
 
         if self.screen.is_unlocked_vault_screen() && self.session.should_auto_lock() {
-            let clipboard_cleared = match self.session.take_pending_clipboard_contents() {
-                Some(expected) => clear_clipboard_if_matches(expected.as_str()).unwrap_or(false),
-                None => false,
-            };
-            self.header = None;
-            self.items.clear();
-            self.selected_index = 0;
-            self.selected_keyslot_index = 0;
-            self.detail = None;
-            self.search_mode = false;
-            self.editing_item_id = None;
-            self.latest_mnemonic_enrollment = None;
-            self.screen = Screen::UnlockBlocked;
-            self.purge_secret_state_on_lock();
+            let clipboard_cleared = self.clear_decrypted_state_and_lock();
             self.session.note_activity();
             self.status = if clipboard_cleared {
                 format!(
@@ -1597,6 +1584,54 @@ impl App {
                 )
             };
         }
+    }
+
+    /// Immediately drives any unlocked-vault screen to `UnlockBlocked`,
+    /// clearing decrypted vault state and purging every secret-bearing form
+    /// (via [`Self::purge_secret_state_on_lock`]) and the armed clipboard
+    /// contents. Shared by idle auto-lock (`poll_hardening`) and the panic
+    /// / quick-lock hotkey (`Ctrl+L`, see `handle_key`) so both triggers run
+    /// the exact same scrub path. Returns whether an armed clipboard entry
+    /// was found and cleared.
+    fn clear_decrypted_state_and_lock(&mut self) -> bool {
+        let clipboard_cleared = match self.session.take_pending_clipboard_contents() {
+            Some(expected) => clear_clipboard_if_matches(expected.as_str()).unwrap_or(false),
+            None => false,
+        };
+        self.header = None;
+        self.items.clear();
+        self.selected_index = 0;
+        self.selected_keyslot_index = 0;
+        self.detail = None;
+        self.search_mode = false;
+        self.editing_item_id = None;
+        self.latest_mnemonic_enrollment = None;
+        self.screen = Screen::UnlockBlocked;
+        self.purge_secret_state_on_lock();
+        clipboard_cleared
+    }
+
+    /// Panic / quick-lock hotkey (P9.6): from any unlocked-vault screen,
+    /// `Ctrl+L` immediately runs the same lock-and-purge path as idle
+    /// auto-lock, then re-arms the idle timer so the freshly-shown unlock
+    /// screen does not itself appear to have triggered an auto-lock. A
+    /// no-op on pre-unlock screens (`EnvironmentApproval`/`UnlockBlocked`),
+    /// which have no unlocked state to purge.
+    ///
+    /// Documented as the TUI panic key in `docs/` (see
+    /// `docs/reference/panic-lock-hotkey.md`).
+    pub(crate) fn handle_panic_lock_hotkey(&mut self) -> bool {
+        if !self.screen.is_unlocked_vault_screen() {
+            return false;
+        }
+        let clipboard_cleared = self.clear_decrypted_state_and_lock();
+        self.session.note_activity();
+        self.status = if clipboard_cleared {
+            "Panic lock: vault locked immediately and the clipboard was cleared.".to_string()
+        } else {
+            "Panic lock: vault locked immediately.".to_string()
+        };
+        true
     }
 
     /// Purges every secret-bearing field reachable from an unlocked-vault
@@ -1617,6 +1652,17 @@ impl App {
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> bool {
+        // P9.6: the panic / quick-lock hotkey is checked before per-screen
+        // dispatch so it fires from ANY unlocked screen — including mid-edit
+        // in a secret-bearing text field — rather than only where a screen
+        // handler happens to leave 'l' unbound. `handle_panic_lock_hotkey`
+        // itself no-ops on pre-unlock screens, so this is safe to check
+        // unconditionally on every keypress.
+        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('l'))
+        {
+            self.handle_panic_lock_hotkey();
+            return false;
+        }
         match self.screen {
             Screen::EnvironmentApproval => self.handle_environment_approval_key(key),
             Screen::Vault | Screen::Keyslots => self.handle_vault_key(key),
