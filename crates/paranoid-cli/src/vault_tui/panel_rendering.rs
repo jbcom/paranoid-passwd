@@ -56,17 +56,17 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
     ) {
         frame.render_widget(right_panel(app), chunks[2]);
     } else {
+        // ia.md §1 rule 4: fixed two-pane skeleton (primary + detail) — no
+        // third panel. P8.V.9 removed the "Access" panel (raw vault path +
+        // unlock method) that used to sit above the primary pane; the
+        // primary pane now owns the full left column on every list-based
+        // screen (Vault, Keyslots).
         let body = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
             .split(chunks[2]);
-        let left = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(8), Constraint::Min(8)])
-            .split(body[0]);
 
-        frame.render_widget(keyslot_panel(app), left[0]);
-        frame.render_widget(item_list(app), left[1]);
+        frame.render_widget(item_list(app), body[0]);
         frame.render_widget(right_panel(app), body[1]);
     }
 
@@ -301,63 +301,6 @@ pub(crate) fn header_subtitle(screen: Screen) -> &'static str {
 
 pub(crate) fn footer_text(app: &App) -> &'static str {
     footer::contextual_footer(app)
-}
-
-pub(crate) fn keyslot_panel(app: &App) -> Paragraph<'static> {
-    let mut lines = vec![
-        Line::raw(format!("Vault path: {}", app.options.path.display())),
-        Line::raw(format!("Unlock: {}", app.options.unlock_description())),
-        Line::raw(""),
-    ];
-    if let Some(header) = &app.header {
-        let posture = header.recovery_posture();
-        lines.push(Line::styled(
-            format!("Ways in ({})", header.keyslots.len()),
-            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
-        ));
-        lines.push(Line::raw(format!(
-            "Recovery posture: recovery={} cert={} recommended={}",
-            posture.has_recovery_path,
-            posture.has_certificate_path,
-            posture.meets_recommended_posture
-        )));
-        lines.push(Line::raw(format!(
-            "Counts: password={} mnemonic={} device={} cert={}",
-            posture.password_recovery_slots,
-            posture.mnemonic_recovery_slots,
-            posture.device_bound_slots,
-            posture.certificate_wrapped_slots
-        )));
-        for recommendation in header.recovery_recommendations() {
-            lines.push(Line::styled(
-                format!("recommend: {recommendation}"),
-                Style::default().fg(AMBER),
-            ));
-        }
-        for slot in header.keyslots.iter().take(3) {
-            let label = slot.label.as_deref().unwrap_or("unlabeled");
-            lines.push(Line::raw(format!("{} · {}", slot.kind.as_str(), label)));
-        }
-        if header.keyslots.len() > 3 {
-            lines.push(Line::raw(format!(
-                "... {} more slot(s)",
-                header.keyslots.len() - 3
-            )));
-        }
-    } else {
-        lines.push(Line::raw(
-            "Ways in unavailable until the vault header can be read.",
-        ));
-    }
-    Paragraph::new(Text::from(lines))
-        .block(
-            Block::default()
-                .title("Access")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(BLUE))
-                .style(Style::default().bg(PANEL).fg(TEXT)),
-        )
-        .wrap(Wrap { trim: false })
 }
 
 pub(crate) fn item_list(app: &App) -> List<'static> {
@@ -641,10 +584,16 @@ pub(crate) fn capability_status_color(status: CapabilityProbeStatus) -> Color {
 }
 
 pub(crate) fn environment_approval_panel(app: &App) -> Paragraph<'static> {
-    let mut lines = vec![Line::raw(format!(
-        "Vault path: {}",
-        app.options.path.display()
-    ))];
+    // P8.V.9: the raw vault filesystem path and unlock method used to sit on
+    // every Home/steady-state screen as a permanent third "Access" panel,
+    // violating ia.md §1's fixed two-pane (primary + detail) skeleton. Both
+    // facts are real and occasionally useful, so they are relocated here —
+    // the one screen ia.md already treats as the disclosure surface for
+    // environment/posture detail — instead of being deleted outright.
+    let mut lines = vec![
+        Line::raw(format!("Vault path: {}", app.options.path.display())),
+        Line::raw(format!("Unlock: {}", app.options.unlock_description())),
+    ];
 
     let Some(report) = app.capability_report.as_ref() else {
         lines.push(Line::raw("Collecting capability evidence..."));
