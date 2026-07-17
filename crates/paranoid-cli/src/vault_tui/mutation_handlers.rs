@@ -1,6 +1,9 @@
 use crate::vault_tui::*;
 use arboard::Clipboard;
-use paranoid_vault::{NewCardRecord, NewIdentityRecord, NewLoginRecord, NewSecureNoteRecord};
+use paranoid_vault::{
+    NewCardRecord, NewIdentityRecord, NewLoginRecord, NewSecureNoteRecord,
+    set_clipboard_text_excluded,
+};
 use std::fs;
 
 impl App {
@@ -1054,7 +1057,9 @@ impl App {
             self.status = format!("Copy blocked: {error}");
             return;
         }
-        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(content.clone())) {
+        match Clipboard::new()
+            .and_then(|mut clipboard| set_clipboard_text_excluded(&mut clipboard, &content))
+        {
             Ok(()) => {
                 self.session.arm_clipboard_clear(content);
                 self.status = format!(
@@ -1073,9 +1078,9 @@ impl App {
             self.status = "No mnemonic phrase is available to copy.".to_string();
             return;
         };
-        match Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(enrollment.mnemonic.as_str().to_string()))
-        {
+        match Clipboard::new().and_then(|mut clipboard| {
+            set_clipboard_text_excluded(&mut clipboard, enrollment.mnemonic.as_str())
+        }) {
             Ok(()) => {
                 self.session
                     .arm_clipboard_clear(enrollment.mnemonic.as_str().to_string());

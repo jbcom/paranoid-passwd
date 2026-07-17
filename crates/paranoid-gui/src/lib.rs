@@ -16,6 +16,8 @@ use paranoid_ops::{
     FederalCryptoProviderEvidence, OpsPolicyContext, OpsProfile, VaultOperationAccess,
     evaluate_vault_operation,
 };
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+use paranoid_vault::set_clipboard_text_excluded;
 #[cfg(not(target_arch = "wasm32"))]
 use paranoid_vault::{
     GenerateStoreLoginRecord, NewLoginRecord, SecretString, VaultAuth, VaultHeader,
@@ -1286,7 +1288,7 @@ fn copy_primary_password(state: &GuiState) -> Result<(), String> {
             return Err("no generated password is available to copy".to_string());
         };
         Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(password))
+            .and_then(|mut clipboard| set_clipboard_text_excluded(&mut clipboard, &password))
             .map_err(|error| error.to_string())
     }
 }

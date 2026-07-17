@@ -4053,6 +4053,7 @@ dependencies = [
 name = "paranoid-vault"
 version = "3.7.0"
 dependencies = [
+ "arboard",
  "argon2",
  "bip39",
  "keyring",

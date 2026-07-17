@@ -76,6 +76,16 @@ On the results screen:
 
 Clipboard copies from the generator and vault views are cleared automatically after 30 seconds if the clipboard contents have not changed.
 
+Every secret copy also sets the platform clipboard-history-exclusion hint alongside the timed clear, so a *cooperating* history manager never stores it in the first place:
+
+| Platform | Hint set | Honored by |
+|---|---|---|
+| macOS | `org.nspasteboard.ConcealedType` (the [nspasteboard.org](http://nspasteboard.org/) community convention) | Maccy, Alfred, Raycast, and other nspasteboard-aware clipboard managers |
+| Linux (X11 and Wayland) | `x-kde-passwordManagerHint` MIME type set to `secret` | KDE Klipper and other cooperating managers that check the same convention |
+| Windows | `ExcludeClipboardContentFromMonitorProcessing` clipboard format | Windows Clipboard History (Win+V) and cloud clipboard sync |
+
+This is a hint, not an OS-enforced control: a history manager that does not check for it — an older Klipper version, a non-cooperating third-party tool, or anything that polls the clipboard directly instead of reading the documented API — still records the secret. The 30-second timed clear above is the actual backstop for every clipboard consumer, cooperating or not; the exclusion hint only reduces exposure to tools that respect it.
+
 ## Audit Model
 
 The audit still runs seven layers:

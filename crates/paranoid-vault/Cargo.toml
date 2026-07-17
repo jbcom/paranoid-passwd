@@ -21,6 +21,15 @@ serde_json.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
 
+# P9.4 clipboard-history-exclusion hints (crates/paranoid-vault/src/clipboard_hardening.rs)
+# call arboard's `SetExtApple`/`SetExtLinux`/`SetExtWindows` builder extensions. Gated
+# identically to paranoid-gui's own arboard dependency (target.'cfg(not(any(target_os =
+# "android", target_arch = "wasm32")))') so this crate stays wasm32/Android-clean: the
+# GUI's Android target excludes arboard entirely, and paranoid-vault is still compiled
+# (without a clipboard) as one of its dependencies.
+[target.'cfg(not(any(target_os = "android", target_arch = "wasm32")))'.dependencies]
+arboard.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
 libc.workspace = true

@@ -1,6 +1,8 @@
 mod native_access;
 
 mod backup_transfer;
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+mod clipboard_hardening;
 mod keyslots;
 mod lifecycle;
 mod lockout;
@@ -8,6 +10,8 @@ mod mem_hardening;
 mod recovery_posture;
 
 pub use backup_transfer::*;
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+pub use clipboard_hardening::set_clipboard_text_excluded;
 pub use keyslots::*;
 pub use lifecycle::*;
 pub use lockout::*;

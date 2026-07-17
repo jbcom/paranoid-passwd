@@ -593,6 +593,7 @@ cargo test -p paranoid-cli --locked --frozen --offline --test tui_scripted
 - encrypted transfer-package inspection and import coverage, including selective filters, certificate unwrap, and id remapping on conflict
 - invalid-backup and tampered-ciphertext fail-closed coverage
 - shared session-hardening coverage for clipboard auto-clear timing and idle-lock timing
+- clipboard-history-exclusion hint coverage (`clipboard_hardening` module): proves the hardened copy path writes plain-text readable back, overwrites prior clipboard contents, and (macOS/Linux/Windows-specific) exercises each platform's `arboard` exclusion-hint builder; gated behind a real, addressable system clipboard and serialized against a process-local mutex since concurrent OS-clipboard access from multiple threads is unsafe on some platforms
 
 `paranoid-gui` includes:
 
