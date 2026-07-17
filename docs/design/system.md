@@ -1,6 +1,6 @@
 # paranoid-passwd — Design System & Tokens
 
-This document turns [`brand.md`](brand.md) §5 (palette, type scale, iconography,
+This document turns [`brand.md`](./brand.md) §5 (palette, type scale, iconography,
 layout) into **concrete, named tokens** and **component specs** that three
 surfaces consume so they read as one product:
 
@@ -8,8 +8,8 @@ surfaces consume so they read as one product:
 - the **Slint** styles (GUI — `crates/paranoid-gui/ui/paranoid.slint`),
 - the **Sphinx** theme (docs/download site — `docs/_static/custom.css`).
 
-It is the single source of truth for *values*. [`brand.md`](brand.md) owns the
-*meaning* of each value; [`ia.md`](ia.md) owns *where* each component appears.
+It is the single source of truth for *values*. [`brand.md`](./brand.md) owns the
+*meaning* of each value; [`ia.md`](./ia.md) owns *where* each component appears.
 Nothing here is re-decided against brand.md — every token traces to brand.md §5,
 cited inline. Every token is **named by intent, not by appearance** (brand.md §5.2;
 research lens 0: "semantic color slots are named by function, not appearance").

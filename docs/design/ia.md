@@ -1,13 +1,13 @@
 # paranoid-passwd — Information Architecture & Flow
 
-This document turns the seven journeys in [`journeys.md`](journeys.md) into a
+This document turns the seven journeys in [`journeys.md`](./journeys.md) into a
 concrete **screen graph** for the CLI/TUI and the GUI scaffold. It inherits every
-decision from [`brand.md`](brand.md) — the persona (§1), the promise (§2), the
+decision from [`brand.md`](./brand.md) — the persona (§1), the promise (§2), the
 grave/precise voice (§3), the user-facing vocabulary (§4), and the austere visual
 identity (§5) — and does not re-decide any of them. Where a screen shows a string,
 it is the string brand.md or journeys.md already fixed.
 
-Downstream, [`system.md`](system.md) (PUX.4) supplies the tokens and component
+Downstream, [`system.md`](./system.md) (PUX.4) supplies the tokens and component
 specs that render these screens; PUX.5 folds both into P8's build items.
 
 ---

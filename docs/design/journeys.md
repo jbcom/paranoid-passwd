@@ -2,13 +2,13 @@
 
 This document storyboards the real end-to-end journeys of the **primary persona**
 — the targeted individual (activist, journalist, source, person under coercion or
-surveillance risk) — as defined in [`brand.md`](brand.md) §1. It inherits every
+surveillance risk) — as defined in [`brand.md`](./brand.md) §1. It inherits every
 decision made there: the one promise (§2), the grave/precise/respectful voice
 (§3), the user-facing vocabulary (§4), and the austere high-contrast visual
 identity (§5). It does not re-decide any of them; where a phrase appears here it
 is the phrase brand.md already fixed.
 
-Downstream, [`ia.md`](ia.md) (PUX.3) turns these storyboards into the screen graph
+Downstream, [`ia.md`](./ia.md) (PUX.3) turns these storyboards into the screen graph
 and the drill-down structure; the journeys are the *why* the screens exist.
 
 ## How to read a storyboard
