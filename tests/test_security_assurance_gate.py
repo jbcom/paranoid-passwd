@@ -5,11 +5,11 @@ The gate (`scripts/security_assurance_gate.py`) is only worth trusting if
 deleting a load-bearing piece of a shipped P9 hardening actually flips it
 from `pass` to `fail`. This script proves that for one representative P9
 requirement per hardening item (the zeroize wrapper's `Debug` impl for
-P9.1, and the `check_lockout` gate for P9.2) by mirroring just the small set
-of files that claim's `Requirement`s touch into an isolated temp directory,
-stripping the load-bearing string from one of them, and asserting the gate
-now reports that specific claim as failed. The real repository tree is
-never mutated.
+P9.1, the `check_lockout` gate for P9.2, and the `setrlimit(RLIMIT_CORE, 0)`
+call for P9.3) by mirroring just the small set of files that claim's
+`Requirement`s touch into an isolated temp directory, stripping the
+load-bearing string from one of them, and asserting the gate now reports
+that specific claim as failed. The real repository tree is never mutated.
 """
 
 from __future__ import annotations
@@ -127,6 +127,14 @@ def main() -> int:
         "vault.failed-unlock-lockout",
         "crates/paranoid-vault/src/lifecycle.rs",
         "check_lockout(path)?;",
+    )
+
+    # P9.3 representative: deleting the core-dump-disabling setrlimit call
+    # must flip vault.memory-hardening to fail.
+    assert_gate_catches_deletion(
+        "vault.memory-hardening",
+        "crates/paranoid-vault/src/mem_hardening.rs",
+        "let result = unsafe { libc::setrlimit(libc::RLIMIT_CORE, &limit) };",
     )
 
     print("security assurance gate negative-proof: all checks passed")
