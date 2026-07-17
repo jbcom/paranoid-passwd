@@ -31,6 +31,11 @@ orchestrator continuously mutates. There is NO "RELEASED" flip that stops the
 loop; there is no FINAL that ends work — FINAL just ships the current
 milestone PR, then the loop discovers the next.
 
+SINGLE SOURCE OF TRUTH: .agent-state/directive.md IS the task list. Do NOT
+maintain a separate harness TaskCreate/TaskUpdate list — that is duplicate
+state in a second format. Track everything (in-flight, wait-state, next,
+compressed-to-PILLARS) here in the directive only.
+
 NO FYIs / NO STATUS RELAYS (user 2026-07-17): do not pause to relay brand
 directions, journey storyboards, gap lists, or progress. Decide, execute,
 ship. The user reviews accumulated progress on their own schedule.
