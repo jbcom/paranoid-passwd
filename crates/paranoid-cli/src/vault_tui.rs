@@ -1686,7 +1686,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Temporary".to_string(),
-                content: "remove me".to_string(),
+                content: "remove me".to_string().into(),
                 folder: Some("Temp".to_string()),
                 tags: vec!["temp".to_string()],
             })
@@ -1767,7 +1767,7 @@ mod tests {
         source_vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Recovery".to_string(),
-                content: "paper copy in safe".to_string(),
+                content: "paper copy in safe".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["recovery".to_string()],
             })
@@ -2432,6 +2432,85 @@ mod tests {
         assert!(matches!(app.options.auth, VaultAuth::PasswordEnv(_)));
         assert!(app.certificate_rewrap_form.key_passphrase.is_empty());
         assert!(app.status.to_lowercase().contains("lock"));
+    }
+
+    /// P9.6 verify fix: `purge_secret_state_on_lock` must scrub EVERY
+    /// secret-bearing UI field, not just the unlock/recovery/certificate/
+    /// transfer forms. Before this fix, triggering the panic-lock hotkey
+    /// from mid-edit on an Add/Edit form (or with a decrypted item still
+    /// shown on the detail screen) left the plaintext password, card
+    /// number/CVV, and note content resident in `add_login_form`,
+    /// `card_form`, `note_form`, `identity_form`, and `self.detail` even
+    /// though the screen had already flipped to `UnlockBlocked`. This test
+    /// must fail before the fix and pass after.
+    #[test]
+    fn panic_lock_hotkey_scrubs_every_secret_bearing_form_and_detail() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(
+            app.detail.is_some(),
+            "a decrypted item must be resident to prove it gets scrubbed"
+        );
+
+        // Simulate mid-entry secrets in every form the panic key must scrub.
+        app.screen = Screen::EditLogin;
+        app.add_login_form.password = "half-typed-password".to_string();
+        app.card_form.number = "4111111111111111".to_string();
+        app.card_form.security_code = "123".to_string();
+        app.note_form.content = "recovery codes: AAAA-BBBB-CCCC".to_string();
+        app.identity_form.full_name = "Jane Doe".to_string();
+        app.identity_form.address = "123 Secret St".to_string();
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert!(!should_quit, "panic-lock must not quit the app");
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(
+            app.detail.is_none(),
+            "the decrypted detail item must be scrubbed from the panic-lock path"
+        );
+        assert!(
+            app.add_login_form.password.is_empty(),
+            "add_login_form.password must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.card_form.number.is_empty(),
+            "card_form.number must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.card_form.security_code.is_empty(),
+            "card_form.security_code must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.note_form.content.is_empty(),
+            "note_form.content must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.identity_form.full_name.is_empty(),
+            "identity_form.full_name must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.identity_form.address.is_empty(),
+            "identity_form.address must be scrubbed on panic-lock"
+        );
     }
 
     /// The panic-lock hotkey must be a no-op (not crash, not change screen)

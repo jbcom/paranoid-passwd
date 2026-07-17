@@ -736,7 +736,7 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                     Line::raw(""),
                     Line::raw(format!("id: {}", item.id)),
                     Line::raw(format!("title: {}", note.title)),
-                    Line::raw(format!("content: {}", note.content)),
+                    Line::raw(format!("content: {}", note.content.as_str())),
                     Line::raw(format!("folder: {}", note.folder.as_deref().unwrap_or(""))),
                     Line::raw(format!(
                         "tags: {}",

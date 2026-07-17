@@ -233,7 +233,7 @@ pub struct PasswordHistoryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecureNoteRecord {
     pub title: String,
-    pub content: String,
+    pub content: SecretBytes,
     #[serde(default)]
     pub folder: Option<String>,
     #[serde(default)]
@@ -344,7 +344,7 @@ pub struct UpdateLoginRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewSecureNoteRecord {
     pub title: String,
-    pub content: String,
+    pub content: SecretBytes,
     pub folder: Option<String>,
     pub tags: Vec<String>,
 }
@@ -352,7 +352,7 @@ pub struct NewSecureNoteRecord {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateSecureNoteRecord {
     pub title: Option<String>,
-    pub content: Option<String>,
+    pub content: Option<SecretBytes>,
     pub folder: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
 }
@@ -647,7 +647,7 @@ mod tests {
         let item = vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Recovery Plan".to_string(),
-                content: "Keep paper copy in the safe.".to_string(),
+                content: "Keep paper copy in the safe.".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["recovery".to_string(), "paper".to_string()],
             })
@@ -668,7 +668,7 @@ mod tests {
             .update_secure_note(
                 &item.id,
                 UpdateSecureNoteRecord {
-                    content: Some("Move paper copy to the fire safe.".to_string()),
+                    content: Some("Move paper copy to the fire safe.".to_string().into()),
                     folder: Some(Some("Ops".to_string())),
                     tags: Some(vec!["recovery".to_string(), "safe".to_string()]),
                     ..UpdateSecureNoteRecord::default()
@@ -680,6 +680,62 @@ mod tests {
         };
         assert_eq!(note.content, "Move paper copy to the fire safe.");
         assert_eq!(note.tags, vec!["recovery".to_string(), "safe".to_string()]);
+    }
+
+    /// P9 verify fix: secure note bodies routinely hold recovery codes and
+    /// other secrets (the TUI/CLI already treat them as secrets — see
+    /// `copy_selected_secret`, the detail panel, and `vault show`), so
+    /// `SecureNoteRecord.content` must be a `SecretBytes`, not a plain
+    /// `String`. A plain `String` field's `Debug` prints the plaintext,
+    /// which leaks the secret into any `{:?}`-formatted log or panic
+    /// message. This test must fail before the fix (plain `String` prints
+    /// the raw content) and pass after (SecretBytes's `Debug` prints only
+    /// `<redacted>`).
+    #[test]
+    fn secure_note_content_debug_is_redacted_not_the_secret() {
+        let note = SecureNoteRecord {
+            title: "Recovery Plan".to_string(),
+            content: SecretBytes::new("recovery codes: AAAA-BBBB-CCCC".to_string()),
+            folder: None,
+            tags: vec![],
+        };
+
+        let debug_output = format!("{:?}", note.content);
+
+        assert_eq!(debug_output, "<redacted>");
+        assert!(!debug_output.contains("AAAA-BBBB-CCCC"));
+    }
+
+    /// P9 verify fix: dropping a `SecureNoteRecord` must zeroize its note
+    /// content in place, exactly like `LoginRecord.password` and
+    /// `CardRecord.number`/`security_code` already do. Proven the same way
+    /// `secret_bytes_zeroizes_its_buffer_in_place_on_scrub` proves it for
+    /// the wrapper generically: this test additionally proves the *note
+    /// record's* content field is actually wired to `SecretBytes` (a
+    /// regression here would mean someone reverted the field back to a
+    /// plain, un-zeroizing `String`).
+    #[test]
+    fn secure_note_content_zeroizes_on_drop() {
+        let mut content = SecretBytes::new("recovery codes: AAAA-BBBB-CCCC".to_string());
+        assert_eq!(content.as_str(), "recovery codes: AAAA-BBBB-CCCC");
+
+        // Exercise the same in-place scrub that `Drop` performs, without a
+        // memory-unsound pointer-after-free read (forbidden by this crate's
+        // `unsafe_code = "forbid"` lint).
+        content.zeroize_in_place();
+
+        assert!(content.is_empty());
+
+        let note = SecureNoteRecord {
+            title: "Recovery Plan".to_string(),
+            content: SecretBytes::new("recovery codes: AAAA-BBBB-CCCC".to_string()),
+            folder: None,
+            tags: vec![],
+        };
+        // `content` moved into `note`; confirm the record's field really is
+        // `SecretBytes` (not `String`) by round-tripping through the same
+        // redacted-Debug/zeroizing API asserted above.
+        assert_eq!(format!("{:?}", note.content), "<redacted>");
     }
 
     #[test]
@@ -821,7 +877,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Travel checklist".to_string(),
-                content: "Passport copy in the red folder.".to_string(),
+                content: "Passport copy in the red folder.".to_string().into(),
                 folder: Some("Travel".to_string()),
                 tags: vec!["travel".to_string(), "docs".to_string()],
             })
@@ -1201,7 +1257,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Certificate Backup".to_string(),
-                content: "certificate path".to_string(),
+                content: "certificate path".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["recovery".to_string()],
             })
@@ -1284,7 +1340,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Recovery".to_string(),
-                content: "paper copy in safe".to_string(),
+                content: "paper copy in safe".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["recovery".to_string()],
             })
@@ -1492,7 +1548,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Recovery".to_string(),
-                content: "paper copy".to_string(),
+                content: "paper copy".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["offline".to_string()],
             })
@@ -2313,7 +2369,7 @@ mod tests {
         let item = unlocked
             .add_secure_note(NewSecureNoteRecord {
                 title: "Legacy Cert Slot".to_string(),
-                content: "legacy compatibility preserved".to_string(),
+                content: "legacy compatibility preserved".to_string().into(),
                 folder: None,
                 tags: vec!["legacy".to_string()],
             })

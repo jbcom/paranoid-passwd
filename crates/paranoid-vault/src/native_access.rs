@@ -148,8 +148,12 @@ impl SecretBytes {
     /// so tests can observe the same in-place scrub that `Drop` performs,
     /// without resorting to memory-unsound pointer-after-free reads (which
     /// this crate's `unsafe_code = "forbid"` lint disallows) to prove it.
+    /// `pub(crate)` (rather than private) so record-level tests elsewhere in
+    /// this crate (e.g. `lib.rs`'s `secure_note_content_zeroizes_on_drop`)
+    /// can prove a specific record field is really wired to `SecretBytes`
+    /// and not a plain, non-zeroizing `String`.
     #[cfg(test)]
-    fn zeroize_in_place(&mut self) {
+    pub(crate) fn zeroize_in_place(&mut self) {
         self.0.zeroize();
     }
 }

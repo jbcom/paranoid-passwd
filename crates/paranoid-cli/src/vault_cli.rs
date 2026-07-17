@@ -1704,7 +1704,8 @@ fn parse_update_note(args: &[String]) -> anyhow::Result<VaultCommand> {
                 update.content = Some(
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--content requires a value"))?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 );
             }
             "--folder" => {
@@ -2566,7 +2567,9 @@ fn parse_secure_note_record(args: &[String]) -> anyhow::Result<NewSecureNoteReco
 
     Ok(NewSecureNoteRecord {
         title: title.ok_or_else(|| anyhow::anyhow!("vault add-note requires --title"))?,
-        content: content.ok_or_else(|| anyhow::anyhow!("vault add-note requires --content"))?,
+        content: content
+            .ok_or_else(|| anyhow::anyhow!("vault add-note requires --content"))?
+            .into(),
         folder,
         tags,
     })
@@ -2888,7 +2891,7 @@ fn print_item(
         }
         paranoid_vault::VaultItemPayload::SecureNote(note) => {
             println!("title: {}", note.title);
-            println!("content: {}", note.content);
+            println!("content: {}", note.content.as_str());
             println!("folder: {}", note.folder.as_deref().unwrap_or(""));
             println!("tags: {}", note.tags.join(","));
         }

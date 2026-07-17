@@ -407,9 +407,26 @@ CLAIMS: tuple[Claim, ...] = (
                 "CardRecord security_code field is SecretBytes, not a plain String",
             ),
             Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "pub struct SecureNoteRecord {\n    pub title: String,\n    pub content: SecretBytes,",
+                "SecureNoteRecord content field is SecretBytes, not a plain String "
+                "(note bodies routinely hold recovery codes)",
+                True,
+            ),
+            Requirement(
                 "crates/paranoid-vault/src/native_access.rs",
                 "secret_bytes_debug_renders_redacted_not_the_secret",
                 "test proves SecretBytes Debug never leaks the secret",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "secure_note_content_debug_is_redacted_not_the_secret",
+                "test proves SecureNoteRecord.content Debug never leaks the note body",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "secure_note_content_zeroizes_on_drop",
+                "test proves SecureNoteRecord.content zeroizes on drop",
             ),
             Requirement(
                 "crates/paranoid-vault/src/native_access.rs",
@@ -785,6 +802,14 @@ CLAIMS: tuple[Claim, ...] = (
                 "crates/paranoid-cli/src/vault_tui.rs",
                 "fn panic_lock_hotkey_purges_secrets_from_any_unlocked_screen() {",
                 "test proves the TUI hotkey purges secrets from an unlocked screen",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui.rs",
+                "fn panic_lock_hotkey_scrubs_every_secret_bearing_form_and_detail() {",
+                "test proves the purge is COMPLETE: every secret-bearing form "
+                "(add_login_form, card_form, note_form, identity_form) plus "
+                "the decrypted detail item is empty after the panic-lock "
+                "hotkey fires, not merely that a handler exists",
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_tui.rs",

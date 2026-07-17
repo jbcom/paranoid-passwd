@@ -27,7 +27,7 @@ impl App {
     pub(crate) fn submit_note_form(&mut self) {
         let record = NewSecureNoteRecord {
             title: self.note_form.title.trim().to_string(),
-            content: self.note_form.content.trim().to_string(),
+            content: self.note_form.content.trim().to_string().into(),
             folder: normalize_optional_field(&self.note_form.folder),
             tags: parse_tags_csv(&self.note_form.tags),
         };
@@ -1043,7 +1043,7 @@ impl App {
         };
         let content = match payload {
             VaultItemPayload::Login(login) => login.password.as_str().to_string(),
-            VaultItemPayload::SecureNote(note) => note.content.clone(),
+            VaultItemPayload::SecureNote(note) => note.content.as_str().to_string(),
             VaultItemPayload::Card(card) => card.number.as_str().to_string(),
             VaultItemPayload::Identity(identity) => identity
                 .email

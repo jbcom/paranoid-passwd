@@ -1638,13 +1638,27 @@ impl App {
     /// screen once auto-lock (or an explicit lock) fires. `options.auth`
     /// is reset to a non-secret `PasswordEnv` placeholder that forces
     /// re-entry on the next unlock attempt, and every form that can hold a
-    /// `SecretString` is reset to its default so the zeroizing drop scrubs
-    /// the old plaintext immediately instead of leaving it resident until
-    /// the next time that form happens to be reused.
+    /// `SecretString` (or a plaintext secret in a plain `String` field, e.g.
+    /// `add_login_form.password`, `card_form.number`/`security_code`,
+    /// `note_form.content`) is reset to its default so the zeroizing drop
+    /// (or, for the plain-`String` add/edit forms, simple replacement of the
+    /// old heap buffer) scrubs the old plaintext immediately instead of
+    /// leaving it resident until the next time that form happens to be
+    /// reused. `self.detail` — the decrypted item shown on the detail
+    /// screen — is cleared here too so the panic-lock hotkey scrubs it even
+    /// though `clear_decrypted_state_and_lock` also clears it independently;
+    /// this method must be a complete purge on its own so a caller that
+    /// invokes it directly (as the P9 gate's pinned test now does) can't be
+    /// fooled by a partial scrub landing green.
     pub(crate) fn purge_secret_state_on_lock(&mut self) {
         self.options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
         self.options.mnemonic_phrase = None;
+        self.detail = None;
         self.unlock_form = UnlockForm::default();
+        self.add_login_form = AddLoginForm::default();
+        self.note_form = NoteForm::default();
+        self.card_form = CardForm::default();
+        self.identity_form = IdentityForm::default();
         self.recovery_secret_form = RecoverySecretForm::default();
         self.certificate_rewrap_form = CertificateRewrapForm::default();
         self.export_transfer_form = ExportTransferForm::default();
@@ -2750,7 +2764,7 @@ impl App {
             self.detail.as_ref().map(|item| &item.payload)
         {
             self.note_form.title = note.title.clone();
-            self.note_form.content = note.content.clone();
+            self.note_form.content = note.content.as_str().to_string();
             self.note_form.folder = note.folder.clone().unwrap_or_default();
             self.note_form.tags = note.tags.join(", ");
         }
@@ -2898,7 +2912,7 @@ impl App {
                 self.note_form = NoteForm {
                     focus_index: 0,
                     title: note.title.clone(),
-                    content: note.content.clone(),
+                    content: note.content.as_str().to_string(),
                     folder: note.folder.clone().unwrap_or_default(),
                     tags: note.tags.join(", "),
                 };

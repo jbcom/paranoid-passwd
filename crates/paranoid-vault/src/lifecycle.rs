@@ -1131,7 +1131,7 @@ fn validate_secure_note_record(record: &NewSecureNoteRecord) -> Result<(), Vault
             "vault secure note title must not be empty".to_string(),
         ));
     }
-    if record.content.trim().is_empty() {
+    if record.content.as_str().trim().is_empty() {
         return Err(VaultError::InvalidArguments(
             "vault secure note content must not be empty".to_string(),
         ));
@@ -1240,7 +1240,7 @@ pub(crate) fn item_summary(item: &VaultItem, duplicate_password_count: usize) ->
             id: item.id.clone(),
             kind: item.kind.clone(),
             title: note.title.clone(),
-            subtitle: secure_note_preview(&note.content),
+            subtitle: secure_note_preview(note.content.as_str()),
             location: None,
             folder: note.folder.clone(),
             updated_at_epoch: item.updated_at_epoch,
@@ -1476,7 +1476,7 @@ fn item_matches_query(item: &VaultItem, normalized_query: &str) -> bool {
             }
             VaultItemPayload::SecureNote(note) => {
                 field_matches(&note.title, normalized_query)
-                    || field_matches(&note.content, normalized_query)
+                    || field_matches(note.content.as_str(), normalized_query)
                     || note
                         .folder
                         .as_deref()
