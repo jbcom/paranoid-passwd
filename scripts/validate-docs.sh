@@ -102,7 +102,7 @@ workspace_version="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^\s*version\s*=\s
 # purpose (e.g. "v3.7.0 did not include an MSI") and must not be flagged just
 # because the workspace version has since moved on. Exclude those lines before
 # checking for stale pins.
-stale_pins="$(grep -rnE "paranoid-passwd-v[0-9]+\.[0-9]+\.[0-9]+" "$REPO_ROOT/docs" | grep -v -F "docs-version-history" | grep -vE "paranoid-passwd-v${workspace_version}([^0-9.]|\$)" || true)"
+stale_pins="$(grep -rnIE --exclude-dir=_build --exclude-dir=api "paranoid-passwd-v[0-9]+\.[0-9]+\.[0-9]+" "$REPO_ROOT/docs" | grep -v -F "docs-version-history" | grep -vE "paranoid-passwd-v${workspace_version}([^0-9.]|\$)" || true)"
 if [ -n "$stale_pins" ]; then
   echo "docs/ contains version pins that do not match workspace version $workspace_version:" >&2
   echo "$stale_pins" >&2
@@ -132,7 +132,7 @@ fi
 # Concatenated markdown corpus for the coverage checks below. Built with
 # find+cat instead of grep --include, which busybox grep (the CI builder
 # image) does not support.
-docs_md_corpus="$(find "$REPO_ROOT/docs" -type f -name '*.md' -exec cat {} +)"
+docs_md_corpus="$(find "$REPO_ROOT/docs" -type f -name '*.md' -not -path '*/_build/*' -exec cat {} +)"
 if [ -z "$docs_md_corpus" ]; then
   echo "failed to read any markdown files under $REPO_ROOT/docs" >&2
   exit 1
