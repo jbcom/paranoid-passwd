@@ -1006,6 +1006,9 @@ impl App {
     }
 
     pub(crate) fn reload_detail(&mut self) {
+        // Selection moved: any previous reveal no longer applies to the item
+        // now selected (ia.md §5 S7 "re-masks on leave"; P8.V.1).
+        self.secret_revealed = false;
         let Some(item_id) = self
             .items
             .get(self.selected_index)

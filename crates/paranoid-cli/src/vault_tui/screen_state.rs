@@ -37,6 +37,13 @@ pub(crate) enum Screen {
     Verified,
     EnvironmentApproval,
     Vault,
+    /// S7 (ia.md §5) — one selected item, masked by default. Reached from
+    /// `Vault` (H, the vault list) via `⏎`; the only door to secret reveal.
+    /// This is a distinct screen, not an always-visible pane on H, so a
+    /// shoulder-surfer glancing at the list screen never sees a raw secret
+    /// and the `⏎ open` the H footer promises actually navigates somewhere
+    /// (P8.V.2).
+    ItemDetail,
     Keyslots,
     UnlockBlocked,
     AddLogin,
@@ -1242,6 +1249,12 @@ pub(crate) struct App {
     pub(crate) selected_index: usize,
     pub(crate) selected_keyslot_index: usize,
     pub(crate) detail: Option<VaultItem>,
+    /// S7 mask/reveal state (ia.md §5, P8.V.1): `false` (masked) is the
+    /// entry default on every `ItemDetail` visit and on any lock — never
+    /// sticky across a re-open. Not itself a secret, but it gates whether
+    /// `detail_panel` is permitted to render one, so it is reset alongside
+    /// `detail` everywhere the item selection changes or the vault locks.
+    pub(crate) secret_revealed: bool,
     pub(crate) filters: VaultFilterState,
     pub(crate) search_mode: bool,
     pub(crate) capability_report: Option<CapabilityReport>,
@@ -1296,6 +1309,7 @@ impl App {
             selected_index: 0,
             selected_keyslot_index: 0,
             detail: None,
+            secret_revealed: false,
             filters: VaultFilterState::default(),
             search_mode: false,
             capability_report: None,
@@ -1809,6 +1823,11 @@ impl App {
             // --- secret-bearing: MUST be scrubbed ---
             options,
             detail,
+            // Not itself a secret, but it gates whether `detail_panel` is
+            // permitted to render an unmasked S7 secret (P8.V.1). Scrubbed
+            // alongside `detail` so a panic-lock/idle-lock can never leave a
+            // vault re-opened mid-reveal; re-entering S7 always re-masks.
+            secret_revealed,
             latest_mnemonic_enrollment,
             unlock_form,
             add_login_form,
@@ -1870,6 +1889,7 @@ impl App {
         options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
         options.mnemonic_phrase = None;
         *detail = None;
+        *secret_revealed = false;
         *latest_mnemonic_enrollment = None;
         *unlock_form = UnlockForm::default();
         *add_login_form = AddLoginForm::default();
@@ -1922,6 +1942,7 @@ impl App {
             Screen::Verified => self.handle_verified_key(key),
             Screen::EnvironmentApproval => self.handle_environment_approval_key(key),
             Screen::Vault | Screen::Keyslots => self.handle_vault_key(key),
+            Screen::ItemDetail => self.handle_item_detail_key(key),
             Screen::UnlockBlocked => self.handle_unlock_blocked_key(key),
             Screen::AddLogin | Screen::EditLogin => self.handle_add_login_key(key),
             Screen::AddNote | Screen::EditNote => self.handle_note_key(key),
@@ -2202,6 +2223,12 @@ impl App {
                 self.copy_selected_secret();
                 false
             }
+            // P8.V.2: `⏎` on the vault list opens the S7 item-detail screen
+            // — the footer has always promised this; it now navigates.
+            KeyCode::Enter if matches!(self.screen, Screen::Vault) => {
+                self.open_item_detail();
+                false
+            }
             KeyCode::Char('k') if matches!(self.screen, Screen::Vault) => {
                 self.open_keyslots();
                 false
@@ -2270,6 +2297,42 @@ impl App {
                     self.selected_keyslot_index += 1;
                     self.pending_keyslot_removal_confirmation = None;
                 }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// S7 (ia.md §5) key handling: `⏎ copy  r reveal  e edit  ? all keys
+    /// ⎋ back` — deliberately does NOT include `d` in the footer (delete is
+    /// a severe-tier action that lives behind `?`, ia.md §5), but the key
+    /// itself still works here for muscle-memory parity with the vault list,
+    /// same as `open_delete_confirm`'s existing behavior from `Screen::Vault`.
+    pub(crate) fn handle_item_detail_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Esc => {
+                self.leave_item_detail();
+                false
+            }
+            KeyCode::Enter => {
+                self.copy_selected_secret();
+                false
+            }
+            KeyCode::Char('c') => {
+                self.copy_selected_secret();
+                false
+            }
+            KeyCode::Char('r') => {
+                self.toggle_secret_reveal();
+                false
+            }
+            KeyCode::Char('e') => {
+                self.open_edit_item();
+                false
+            }
+            KeyCode::Char('d') => {
+                self.open_delete_confirm();
                 false
             }
             _ => false,
@@ -2893,6 +2956,42 @@ impl App {
                 false
             }
         }
+    }
+
+    /// S7 (ia.md §5): `⏎` from H (the vault list) opens one selected item on
+    /// its own screen, masked by default (P8.V.1/P8.V.2). No-ops with a
+    /// status message when nothing is selected, mirroring the other
+    /// item-scoped `open_*` guards (`open_edit_item`, `open_delete_confirm`).
+    pub(crate) fn open_item_detail(&mut self) {
+        if self.detail.is_none() {
+            self.status = "No vault item selected to open.".to_string();
+            return;
+        }
+        self.secret_revealed = false;
+        self.screen = Screen::ItemDetail;
+        self.status =
+            "Item opened. The secret stays masked until you choose to reveal it.".to_string();
+    }
+
+    /// `⎋` back from S7 to H. Re-masks unconditionally (ia.md §5 "re-masks
+    /// on leave") — a persona who reveals, then backs out, then re-opens the
+    /// same item is shown the mask again, never a sticky reveal.
+    pub(crate) fn leave_item_detail(&mut self) {
+        self.secret_revealed = false;
+        self.screen = Screen::Vault;
+        self.status = "Returned to the vault item view.".to_string();
+    }
+
+    /// S7 `r reveal` toggle (ia.md §5, P8.V.1). Toggling back to masked is
+    /// always available from the same key — the action is a toggle, not a
+    /// one-way reveal.
+    pub(crate) fn toggle_secret_reveal(&mut self) {
+        self.secret_revealed = !self.secret_revealed;
+        self.status = if self.secret_revealed {
+            "Revealed. Press r again, or leave this item, to mask it.".to_string()
+        } else {
+            "Masked again.".to_string()
+        };
     }
 
     pub(crate) fn open_add_login(&mut self) {

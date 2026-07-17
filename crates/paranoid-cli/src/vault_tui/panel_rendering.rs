@@ -1,7 +1,9 @@
 use crate::theme::{self, ICON_ACTION, ICON_CAUTION, ICON_LOCKED, ICON_VERIFIED};
 use crate::vault_tui::*;
 use paranoid_ops::CapabilityProbeStatus;
-use paranoid_vault::{VaultBackupSummary, VaultItemKind, VaultItemPayload, VaultTransferSummary};
+use paranoid_vault::{
+    VaultBackupSummary, VaultItem, VaultItemKind, VaultItemPayload, VaultTransferSummary,
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -50,7 +52,7 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
     // — there is no list to browse before trust is established.
     if matches!(
         app.screen,
-        Screen::TrustGate | Screen::Verifying | Screen::Verified
+        Screen::TrustGate | Screen::Verifying | Screen::Verified | Screen::ItemDetail
     ) {
         frame.render_widget(right_panel(app), chunks[2]);
     } else {
@@ -190,6 +192,7 @@ pub(crate) fn header_title(screen: Screen) -> &'static str {
         Screen::Verified => "Verified",
         Screen::EnvironmentApproval => "Create vault",
         Screen::Vault => "Vault",
+        Screen::ItemDetail => "Item",
         Screen::Keyslots => "Ways in",
         Screen::UnlockBlocked => "Vault",
         Screen::AddLogin => "Add Login",
@@ -231,6 +234,7 @@ pub(crate) fn header_subtitle(screen: Screen) -> &'static str {
             "Make the container and the way to open it. Ways in and hardware protection come later."
         }
         Screen::Vault => "Native vault list/detail view with the same builder-owned trust model.",
+        Screen::ItemDetail => "One item. Masked by default; use it safely.",
         Screen::Keyslots => {
             "The keys and phrases that can open this vault. Add a recovery phrase, bind a device, or remove a way in you no longer trust."
         }
@@ -487,6 +491,7 @@ pub(crate) fn right_panel(app: &App) -> Paragraph<'static> {
         Screen::Verified => verified_panel(app),
         Screen::EnvironmentApproval => environment_approval_panel(app),
         Screen::Vault => detail_panel(app),
+        Screen::ItemDetail => item_detail_panel(app),
         Screen::UnlockBlocked => unlock_blocked_panel(app),
         Screen::AddLogin | Screen::EditLogin => add_login_panel(app),
         Screen::AddNote | Screen::EditNote => add_note_panel(app),
@@ -838,190 +843,43 @@ pub(crate) fn unlock_blocked_panel(app: &App) -> Paragraph<'static> {
         .wrap(Wrap { trim: false })
 }
 
+/// H's detail pane (ia.md §5 "detail pane: empty until sel."). This is a
+/// preview only — it never shows a secret in cleartext and never dumps
+/// internal fields (P8.V.1, P8.V.3). Opening the item (`⏎`) is the only way
+/// to reach the full S7 `item_detail_panel`, which itself still masks by
+/// default (rule 2, "progressive disclosure of evidence").
 pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
     let lines = match app.screen {
         Screen::UnlockBlocked => unreachable!("unlock blocked uses a dedicated panel"),
         Screen::Vault => match &app.detail {
-            Some(item) => match &item.payload {
-                VaultItemPayload::Login(login) => {
-                    let duplicate_password_count = app
-                        .items
-                        .iter()
-                        .find(|summary| summary.id == item.id)
-                        .map(|summary| summary.duplicate_password_count)
-                        .unwrap_or(0);
-                    vec![
-                        Line::styled(
-                            "Selected login",
-                            Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
-                        ),
-                        Line::raw(""),
-                        Line::raw(format!("id: {}", item.id)),
-                        Line::raw(format!("title: {}", login.title)),
-                        Line::raw(format!("username: {}", login.username)),
-                        Line::raw(format!("password: {}", login.password.as_str())),
-                        Line::raw(format!(
-                            "duplicate passwords elsewhere: {duplicate_password_count}"
-                        )),
-                        Line::raw(format!("url: {}", login.url.as_deref().unwrap_or(""))),
-                        Line::raw(format!("notes: {}", login.notes.as_deref().unwrap_or(""))),
-                        Line::raw(format!("folder: {}", login.folder.as_deref().unwrap_or(""))),
-                        Line::raw(format!(
-                            "tags: {}",
-                            if login.tags.is_empty() {
-                                String::new()
-                            } else {
-                                login.tags.join(", ")
-                            }
-                        )),
-                        Line::raw(format!(
-                            "password history entries: {}",
-                            login.password_history.len()
-                        )),
-                        Line::raw(format!(
-                            "recent history: {}",
-                            if login.password_history.is_empty() {
-                                String::new()
-                            } else {
-                                login
-                                    .password_history
-                                    .iter()
-                                    .rev()
-                                    .take(3)
-                                    .map(|entry| {
-                                        format!(
-                                            "{} @ {}",
-                                            entry.password.as_str(),
-                                            entry.changed_at_epoch
-                                        )
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(" | ")
-                            }
-                        )),
-                        Line::raw(""),
-                        Line::raw(format!("updated_at_epoch: {}", item.updated_at_epoch)),
-                        Line::raw(""),
-                        Line::raw(
-                            "Press a to add, e to edit, d to delete, or g to generate-and-store.",
-                        ),
-                        Line::raw("Press k to inspect or enroll vault keyslots natively."),
-                        Line::raw("Press x to export a backup package or u to restore one."),
-                    ]
-                }
-                VaultItemPayload::SecureNote(note) => vec![
+            Some(item) => {
+                let (kind_label, subtitle) = match &item.payload {
+                    VaultItemPayload::Login(login) => ("Login", login.username.clone()),
+                    VaultItemPayload::SecureNote(_) => ("Secure note", String::new()),
+                    VaultItemPayload::Card(card) => {
+                        ("Card", format!("{} ••••", card.cardholder_name))
+                    }
+                    VaultItemPayload::Identity(identity) => {
+                        ("Identity", identity.full_name.clone())
+                    }
+                };
+                let title = match &item.payload {
+                    VaultItemPayload::Login(login) => login.title.clone(),
+                    VaultItemPayload::SecureNote(note) => note.title.clone(),
+                    VaultItemPayload::Card(card) => card.title.clone(),
+                    VaultItemPayload::Identity(identity) => identity.title.clone(),
+                };
+                vec![
                     Line::styled(
-                        "Selected secure note",
+                        title,
                         Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
                     ),
+                    Line::raw(kind_label),
+                    Line::raw(subtitle),
                     Line::raw(""),
-                    Line::raw(format!("id: {}", item.id)),
-                    Line::raw(format!("title: {}", note.title)),
-                    Line::raw(format!("content: {}", note.content.as_str())),
-                    Line::raw(format!("folder: {}", note.folder.as_deref().unwrap_or(""))),
-                    Line::raw(format!(
-                        "tags: {}",
-                        if note.tags.is_empty() {
-                            String::new()
-                        } else {
-                            note.tags.join(", ")
-                        }
-                    )),
-                    Line::raw(""),
-                    Line::raw(format!("updated_at_epoch: {}", item.updated_at_epoch)),
-                    Line::raw(""),
-                    Line::raw(
-                        "Press a to add login, n to add secure note, v to add card, e to edit, or d to delete.",
-                    ),
-                    Line::raw(
-                        "Use c to copy the full note content into the clipboard when needed.",
-                    ),
-                ],
-                VaultItemPayload::Card(card) => vec![
-                    Line::styled(
-                        "Selected card",
-                        Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
-                    ),
-                    Line::raw(""),
-                    Line::raw(format!("id: {}", item.id)),
-                    Line::raw(format!("title: {}", card.title)),
-                    Line::raw(format!("cardholder: {}", card.cardholder_name)),
-                    Line::raw(format!("number: {}", card.number.as_str())),
-                    Line::raw(format!(
-                        "expiry: {}/{}",
-                        card.expiry_month, card.expiry_year
-                    )),
-                    Line::raw(format!("security code: {}", card.security_code.as_str())),
-                    Line::raw(format!(
-                        "billing zip: {}",
-                        card.billing_zip.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!("notes: {}", card.notes.as_deref().unwrap_or(""))),
-                    Line::raw(format!("folder: {}", card.folder.as_deref().unwrap_or(""))),
-                    Line::raw(format!(
-                        "tags: {}",
-                        if card.tags.is_empty() {
-                            String::new()
-                        } else {
-                            card.tags.join(", ")
-                        }
-                    )),
-                    Line::raw(""),
-                    Line::raw(format!("updated_at_epoch: {}", item.updated_at_epoch)),
-                    Line::raw(""),
-                    Line::raw(
-                        "Press a to add login, n to add secure note, v to add card, i to add identity, e to edit, or d to delete.",
-                    ),
-                    Line::raw("Use c to copy the full card number into the clipboard when needed."),
-                ],
-                VaultItemPayload::Identity(identity) => vec![
-                    Line::styled(
-                        "Selected identity",
-                        Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
-                    ),
-                    Line::raw(""),
-                    Line::raw(format!("id: {}", item.id)),
-                    Line::raw(format!("title: {}", identity.title)),
-                    Line::raw(format!("full name: {}", identity.full_name)),
-                    Line::raw(format!(
-                        "email: {}",
-                        identity.email.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!(
-                        "phone: {}",
-                        identity.phone.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!(
-                        "address: {}",
-                        identity.address.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!(
-                        "notes: {}",
-                        identity.notes.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!(
-                        "folder: {}",
-                        identity.folder.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!(
-                        "tags: {}",
-                        if identity.tags.is_empty() {
-                            String::new()
-                        } else {
-                            identity.tags.join(", ")
-                        }
-                    )),
-                    Line::raw(""),
-                    Line::raw(format!("updated_at_epoch: {}", item.updated_at_epoch)),
-                    Line::raw(""),
-                    Line::raw(
-                        "Press a to add login, n to add secure note, v to add card, i to add identity, e to edit, or d to delete.",
-                    ),
-                    Line::raw(
-                        "Use c to copy the preferred contact value (email, phone, or full name).",
-                    ),
-                ],
-            },
+                    Line::raw("⏎ open"),
+                ]
+            }
             None => vec![
                 Line::styled(
                     "Vault detail",
@@ -1029,10 +887,6 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                 ),
                 Line::raw(""),
                 Line::raw("No item is selected yet."),
-                Line::raw(
-                    "Press a to add a login, n to add a secure note, v to add a card, i to add an identity, or g to generate and store one.",
-                ),
-                Line::raw("Use x to export the encrypted vault state or u to restore a backup."),
             ],
         },
         _ => unreachable!("detail panel only renders vault screens"),
@@ -1047,6 +901,132 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                 .style(Style::default().bg(PANEL).fg(TEXT)),
         )
         .wrap(Wrap { trim: false })
+}
+
+/// S7 (ia.md §5) — one selected item, safe to use. Masked by default
+/// (P8.V.1): a password/note/card-number/etc is rendered as `masked_value`
+/// (the same `•`-per-character mask the unlock/export secret fields already
+/// use) unless `app.secret_revealed` is `true`, toggled only by the explicit
+/// `r reveal` action and re-masked on every re-entry (ia.md §5, journeys.md
+/// invariant 1 — no coercion/shoulder-surfer cleartext-by-default leak).
+///
+/// No raw internal fields (`id:`, `updated_at_epoch:`, `duplicate passwords
+/// elsewhere:`, `password history entries:`) are shown on this primary
+/// surface at all (P8.V.3) — this is the "box of data with no answer to
+/// what do I do next" antipattern journeys.md names as the defect PUX exists
+/// to fix. There is currently no drill-down leaf for these counts; they are
+/// omitted rather than fabricated a home that doesn't exist yet in ia.md.
+pub(crate) fn item_detail_panel(app: &App) -> Paragraph<'static> {
+    let Some(item) = &app.detail else {
+        return Paragraph::new(Text::from(vec![
+            Line::styled(
+                "Item",
+                Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+            ),
+            Line::raw(""),
+            Line::raw("No item is selected."),
+        ]))
+        .block(
+            Block::default()
+                .title("Detail")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false });
+    };
+
+    let reveal = app.secret_revealed;
+    let mask_or = |secret: &str| -> String {
+        if reveal {
+            secret.to_string()
+        } else {
+            masked_value(secret)
+        }
+    };
+
+    let mut lines = Vec::new();
+    let title = match &item.payload {
+        VaultItemPayload::Login(login) => login.title.clone(),
+        VaultItemPayload::SecureNote(note) => note.title.clone(),
+        VaultItemPayload::Card(card) => card.title.clone(),
+        VaultItemPayload::Identity(identity) => identity.title.clone(),
+    };
+    lines.push(Line::styled(
+        title,
+        Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+    ));
+    lines.push(Line::raw(""));
+
+    match &item.payload {
+        VaultItemPayload::Login(login) => {
+            lines.push(Line::raw(format!("User    {}", login.username)));
+            lines.push(Line::raw(format!(
+                "Pass    {}",
+                mask_or(login.password.as_str())
+            )));
+            if let Some(url) = login.url.as_deref().filter(|value| !value.is_empty()) {
+                lines.push(Line::raw(format!("URL     {url}")));
+            }
+        }
+        VaultItemPayload::SecureNote(note) => {
+            lines.push(Line::raw(format!(
+                "Note    {}",
+                mask_or(note.content.as_str())
+            )));
+        }
+        VaultItemPayload::Card(card) => {
+            lines.push(Line::raw(format!("Holder  {}", card.cardholder_name)));
+            lines.push(Line::raw(format!(
+                "Number  {}",
+                mask_or(card.number.as_str())
+            )));
+            lines.push(Line::raw(format!(
+                "Expiry  {}/{}",
+                card.expiry_month, card.expiry_year
+            )));
+            lines.push(Line::raw(format!(
+                "CVV     {}",
+                mask_or(card.security_code.as_str())
+            )));
+        }
+        VaultItemPayload::Identity(identity) => {
+            lines.push(Line::raw(format!("Name    {}", identity.full_name)));
+            if let Some(email) = identity.email.as_deref().filter(|value| !value.is_empty()) {
+                lines.push(Line::raw(format!("Email   {email}")));
+            }
+            if let Some(phone) = identity.phone.as_deref().filter(|value| !value.is_empty()) {
+                lines.push(Line::raw(format!("Phone   {phone}")));
+            }
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        "▸ Copy password",
+        Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+    ));
+    lines.push(Line::raw(if reveal { "Mask" } else { "Reveal" }));
+    lines.push(Line::raw("Edit"));
+
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title(item_title_for_block(item))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
+}
+
+fn item_title_for_block(item: &VaultItem) -> String {
+    match &item.payload {
+        VaultItemPayload::Login(login) => login.title.clone(),
+        VaultItemPayload::SecureNote(note) => note.title.clone(),
+        VaultItemPayload::Card(card) => card.title.clone(),
+        VaultItemPayload::Identity(identity) => identity.title.clone(),
+    }
 }
 
 pub(crate) fn keyslot_detail_panel(app: &App) -> Paragraph<'static> {

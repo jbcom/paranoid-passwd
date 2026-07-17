@@ -23,6 +23,10 @@ pub(crate) fn contextual_footer(app: &App) -> &'static str {
                 "↑↓ move  ⏎ open  n new  / find  ? all keys  q quit"
             }
         }
+        // S7 (ia.md §5), verbatim: differs from the list footer — the
+        // footer re-renders on focus change (rule 3). Destructive actions
+        // (delete) are deliberately absent here; they live behind `?`.
+        Screen::ItemDetail => "⏎ copy  r reveal  e edit  ? all keys  ⎋ back",
         Screen::Keyslots => "↑↓ move  a add  x remove  ? all keys  ⎋ back",
         // ia.md §5 S14 vs S15: a just-locked screen (panic-lock or idle
         // auto-lock) shows the minimal footer — "in a locked state the only
@@ -72,6 +76,7 @@ pub(crate) fn help_key_active(screen: Screen) -> bool {
             | Screen::Verified
             | Screen::EnvironmentApproval
             | Screen::Vault
+            | Screen::ItemDetail
             | Screen::Keyslots
             | Screen::UnlockBlocked
     )
@@ -85,6 +90,7 @@ pub(crate) fn overlay_heading(app: &App) -> &'static str {
         Screen::TrustGate | Screen::Verifying | Screen::Verified => "Keys · Trust gate",
         Screen::EnvironmentApproval => "Keys · Create vault",
         Screen::Vault => "Keys · Vault list",
+        Screen::ItemDetail => "Keys · Item",
         Screen::Keyslots => "Keys · Ways in",
         Screen::UnlockBlocked => "Keys · Unlock",
         _ => "Keys · This screen",
@@ -104,6 +110,11 @@ pub(crate) fn overlay_lines(app: &App) -> Vec<&'static str> {
             "Backup         x export   u import    t transfer  p receive",
             "Generate       g generate one and store it",
             "System         r refresh  q quit",
+        ],
+        Screen::ItemDetail => vec![
+            "Use            ⏎ copy     r reveal / mask   e edit",
+            "Item           d delete (typed confirm)",
+            "System         ⎋ back  q quit",
         ],
         Screen::Keyslots => vec![
             "Add a way in   m recovery phrase   b this device   c trusted contact",

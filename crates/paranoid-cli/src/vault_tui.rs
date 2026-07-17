@@ -829,6 +829,7 @@ mod tests {
             selected_index: 0,
             selected_keyslot_index: 0,
             detail: Some(item),
+            secret_revealed: false,
             filters: VaultFilterState::default(),
             search_mode: false,
             capability_report: None,
@@ -855,11 +856,206 @@ mod tests {
             editing_item_id: None,
             session: NativeSessionHardening::default(),
         };
+        // H (Screen::Vault) is a preview only (P8.V.1/.3): no raw field
+        // dump, no cleartext secret. `⏎` (Screen::ItemDetail) is the only
+        // door to the full masked/reveal card — see
+        // `item_detail_screen_masks_password_by_default` below.
         let rendered = render_to_string(&app);
         assert!(rendered.contains("Vault"));
         assert!(rendered.contains("GitHub"));
-        assert!(rendered.contains("folder: Work"));
-        assert!(rendered.contains("Press a to add, e to edit, d to delete"));
+        assert!(rendered.contains("octocat"));
+        assert!(!rendered.contains("hunter2"));
+        assert!(!rendered.contains("folder: Work"));
+        assert!(!rendered.contains("id: "));
+        assert!(!rendered.contains("updated_at_epoch"));
+    }
+
+    /// P8.V.2: `⏎` on the vault list navigates to the S7 item-detail screen
+    /// — the footer has always promised `⏎ open`; before this change the
+    /// key had no `Screen::Vault` handler at all.
+    #[test]
+    fn enter_on_vault_list_opens_item_detail_screen() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::ItemDetail));
+
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("GitHub"));
+    }
+
+    /// P8.V.1: S7 masks the password by default — the exact coercion /
+    /// shoulder-surfer defect the visual-verify pass flagged (cleartext by
+    /// default). No raw internal fields (`id:`, `updated_at_epoch:`) either
+    /// (P8.V.3).
+    #[test]
+    fn item_detail_screen_masks_password_by_default() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::ItemDetail));
+        assert!(!app.secret_revealed);
+
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("octocat"));
+        assert!(rendered.contains("••••••"));
+        assert!(!rendered.contains("hunter2"));
+        assert!(!rendered.contains("id: "));
+        assert!(!rendered.contains("updated_at_epoch"));
+        assert!(!rendered.contains("duplicate passwords elsewhere"));
+        assert!(!rendered.contains("password history entries"));
+    }
+
+    /// P8.V.1: `r` toggles reveal on, and toggles back to masked — an
+    /// explicit, reversible action, not a one-way reveal.
+    #[test]
+    fn item_detail_reveal_toggles_password_visibility() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        press_key(&mut app, KeyCode::Enter);
+        assert!(!app.secret_revealed);
+
+        press_key(&mut app, KeyCode::Char('r'));
+        assert!(app.secret_revealed);
+        let revealed = render_to_string(&app);
+        assert!(revealed.contains("hunter2"));
+
+        press_key(&mut app, KeyCode::Char('r'));
+        assert!(!app.secret_revealed);
+        let masked_again = render_to_string(&app);
+        assert!(!masked_again.contains("hunter2"));
+    }
+
+    /// P8.V.1: leaving S7 (`⎋`) always re-masks — a persona who reveals,
+    /// backs out, then re-opens the same item is shown the mask again, never
+    /// a sticky reveal.
+    #[test]
+    fn item_detail_remasks_on_leave_and_reentry() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        press_key(&mut app, KeyCode::Enter);
+        press_key(&mut app, KeyCode::Char('r'));
+        assert!(app.secret_revealed);
+
+        press_key(&mut app, KeyCode::Esc);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(!app.secret_revealed);
+
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::ItemDetail));
+        assert!(!app.secret_revealed, "re-entering S7 must start masked");
+        let rendered = render_to_string(&app);
+        assert!(!rendered.contains("hunter2"));
+    }
+
+    /// P9 re-verify: panic-lock/idle-lock scrubs a live reveal, not just the
+    /// decrypted `detail` item — `secret_revealed` gates whether
+    /// `item_detail_panel` is permitted to render a secret in cleartext, so
+    /// it must be false after any lock path, same as every other
+    /// secret-adjacent field the exhaustive `purge_secret_state_on_lock`
+    /// destructure covers.
+    #[test]
+    fn panic_lock_hotkey_remasks_a_revealed_item_detail_secret() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        press_key(&mut app, KeyCode::Enter);
+        press_key(&mut app, KeyCode::Char('r'));
+        assert!(app.secret_revealed);
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(!should_quit);
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(
+            !app.secret_revealed,
+            "panic-lock must clear a live secret reveal"
+        );
+        assert!(app.detail.is_none());
     }
 
     #[test]
@@ -1390,9 +1586,14 @@ mod tests {
                 .any(|summary| summary.duplicate_password_count == 1)
         );
 
+        // P8.V.3: the duplicate-password signal is real and stays visible on
+        // the item list itself (`[dup:1]`, ia.md rule 2 progressive
+        // disclosure — the summary marker, not the raw
+        // "duplicate passwords elsewhere: 1" dump the detail pane used to
+        // print unconditionally).
         let rendered = render_to_string(&app);
         assert!(rendered.contains("[dup:1]"));
-        assert!(rendered.contains("duplicate passwords elsewhere: 1"));
+        assert!(!rendered.contains("duplicate passwords elsewhere"));
     }
 
     #[test]
@@ -2281,6 +2482,7 @@ mod tests {
             selected_index: 0,
             selected_keyslot_index: 0,
             detail: None,
+            secret_revealed: false,
             filters: VaultFilterState::default(),
             search_mode: false,
             capability_report: None,
