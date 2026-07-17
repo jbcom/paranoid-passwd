@@ -29,7 +29,7 @@ use std::{
     time::Duration,
 };
 
-use crate::theme::{AMBER, BG, BLUE, GREEN, PANEL, RED, TEXT};
+use crate::theme::{self, AMBER, BG, BLUE, GREEN, ICON_ACTION, PANEL, RED, TEXT};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Screen {
@@ -561,6 +561,18 @@ fn render(frame: &mut Frame<'_>, app: &App) {
     }
 }
 
+/// A non-selectable group heading inside the configure list — mirrors
+/// `vault_tui`'s section-header convention (e.g. Ways-in's relationship
+/// groups) so a 20+ field surface reads as named groups the persona can scan,
+/// not one undifferentiated list (ia.md rule 1, "one job per screen" applied
+/// within a screen as "one job per group").
+fn section_header(label: &str) -> ListItem<'static> {
+    ListItem::new(Line::styled(
+        label.to_string(),
+        Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+    ))
+}
+
 fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -573,8 +585,8 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
     render_header(
         frame,
         chunks[0],
-        "Configure",
-        "Configure the local generator and audit before any password is shown.",
+        "Generate a password",
+        "Shape it, then generate — the randomness check runs automatically and its evidence is one screen away.",
     );
 
     let body = Layout::default()
@@ -582,9 +594,9 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
         .split(chunks[1]);
 
-    let order = app.focus_order();
     let options = app.charset_options();
     let mut items = vec![
+        section_header("Shape"),
         field_item(
             &FocusField::Length,
             app,
@@ -600,6 +612,7 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
             app,
             format!("Audit batch size: {}", app.request.batch_size),
         ),
+        section_header("Character set"),
         field_item(
             &FocusField::Lowercase,
             app,
@@ -637,6 +650,7 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
             ),
         ),
     ];
+    items.push(section_header("Compliance frameworks (optional)"));
     for (index, framework) in paranoid_core::frameworks().iter().enumerate() {
         items.push(field_item(
             &FocusField::Framework(index),
@@ -648,6 +662,7 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
             ),
         ));
     }
+    items.push(section_header("Manual minimums (optional)"));
     items.extend([
         field_item(
             &FocusField::MinLowercase,
@@ -682,17 +697,19 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
                     .unwrap_or_else(|| "off".to_string())
             ),
         ),
-        field_item(
-            &FocusField::Launch,
-            app,
-            "Generate + Run 7-Layer Audit".to_string(),
-        ),
     ]);
+    items.push(section_header(" "));
+    items.push(field_item_styled(
+        &FocusField::Launch,
+        app,
+        format!("{ICON_ACTION} Generate"),
+        theme::accent_action(),
+    ));
 
     let list = List::new(items)
         .block(
             Block::default()
-                .title("Wizard")
+                .title("Configure")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(BLUE))
                 .style(Style::default().bg(PANEL).fg(TEXT)),
@@ -742,19 +759,12 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Line::raw(""),
         Line::styled(validation, validation_style),
         Line::raw(""),
-        Line::from("Controls"),
-        Line::from("  Up/Down: move"),
-        Line::from("  Left/Right: adjust"),
-        Line::from("  Space: toggle"),
-        Line::from("  Enter: edit/run"),
-        Line::from("  q: quit"),
-        Line::raw(""),
         Line::styled(app.status.as_str(), Style::default().fg(AMBER)),
     ]);
     let detail = Paragraph::new(detail_text)
         .block(
             Block::default()
-                .title("Audit Preview")
+                .title("What this produces")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(GREEN))
                 .style(Style::default().bg(PANEL).fg(TEXT)),
@@ -762,20 +772,41 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .wrap(Wrap { trim: false });
     frame.render_widget(detail, body[1]);
 
-    let footer = format!(
-        "Selected field: {} of {}{}",
-        app.focus_index + 1,
-        order.len(),
-        if app.editing_custom_charset {
-            "  — editing custom charset"
-        } else {
-            ""
-        }
-    );
+    // ia.md §1 rule 3: the contextual footer names the 3-5 keys valid here,
+    // not a raw "Selected field: N of M" position readout (P8.V.8).
+    let footer = if app.editing_custom_charset {
+        "type the charset  ⏎/⎋ done  Ctrl-u clear".to_string()
+    } else {
+        "↑↓ move  ←→ adjust  Space toggle  ⏎ edit/run  q quit".to_string()
+    };
     frame.render_widget(
         Paragraph::new(footer).style(Style::default().fg(TEXT).bg(BG)),
         chunks[2],
     );
+}
+
+/// Like `field_item`, but with an explicit override style for the row when
+/// selected AND unselected — used for the single `▸ Generate` accent action
+/// so it reads as `color.accent.action` regardless of focus, distinguishing
+/// it from the ordinary field rows above it (system.md §4.2: exactly one
+/// element per screen may carry the accent-action style).
+fn field_item_styled(
+    field: &FocusField,
+    app: &App,
+    text: String,
+    style: Style,
+) -> ListItem<'static> {
+    let selected = &app.selected_field() == field;
+    let prefix = if selected { "› " } else { "  " };
+    let style = if selected {
+        style.add_modifier(Modifier::BOLD)
+    } else {
+        style
+    };
+    ListItem::new(Line::from(vec![
+        Span::styled(prefix.to_string(), style),
+        Span::styled(text, style),
+    ]))
 }
 
 fn render_audit(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -791,8 +822,8 @@ fn render_audit(frame: &mut Frame<'_>, area: Rect, app: &App) {
     render_header(
         frame,
         chunks[0],
-        "Generate & Audit",
-        "Running the seven-layer audit on a native Rust core.",
+        "Checking the result",
+        "Confirming this password came from a verified-uniform source before it's shown.",
     );
 
     let progress = stage_progress(app.current_stage);
@@ -854,7 +885,7 @@ fn render_audit(frame: &mut Frame<'_>, area: Rect, app: &App) {
     );
 
     frame.render_widget(
-        Paragraph::new(app.status.clone())
+        Paragraph::new(format!("{}  q quit", app.status))
             .style(Style::default().fg(TEXT).bg(BG))
             .wrap(Wrap { trim: false }),
         chunks[3],
@@ -875,7 +906,7 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Length(7),
+            Constraint::Length(9),
             Constraint::Length(3),
             Constraint::Min(10),
             Constraint::Length(3),
@@ -919,6 +950,8 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
             "Additional passwords: {}",
             report.passwords.len().saturating_sub(1)
         )),
+        Line::raw(""),
+        Line::styled(format!("{ICON_ACTION} Copy"), theme::accent_action()),
     ]))
     .block(
         Block::default()
@@ -1281,7 +1314,65 @@ mod tests {
         let app = App::default();
         let rendered = render_to_string(&app);
         assert!(rendered.contains("Configure"));
-        assert!(rendered.contains("Generate + Run 7-Layer Audit"));
+        // P8.V.8: the launch action reads as a plain product verb with the
+        // single accent-action glyph, not the old "Generate + Run 7-Layer
+        // Audit" engineer-speak thrust onto the primary surface.
+        assert!(rendered.contains("Generate"));
+        assert!(!rendered.contains("7-Layer Audit"));
+        // The old flat "Selected field: N of M" footer is gone in favor of
+        // the contextual footer naming only the keys valid here (ia.md §1
+        // rule 3) — this screen has no hidden capability wall behind it, so
+        // there is no `?` overlay to advertise.
+        assert!(!rendered.contains("Selected field:"));
+        assert!(rendered.contains("q quit"));
+    }
+
+    /// P8.V.8: the configure list groups fields under named sections
+    /// (Shape / Character set / Compliance frameworks / Manual minimums)
+    /// instead of one flat 21-field list — ia.md rule 1 applied within a
+    /// screen.
+    #[test]
+    fn configure_screen_groups_fields_under_named_sections() {
+        let app = App::default();
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("Shape"));
+        assert!(rendered.contains("Character set"));
+        assert!(rendered.contains("Compliance frameworks"));
+        assert!(rendered.contains("Manual minimums"));
+    }
+
+    /// P8.V.8: the results screen shows an explicit "▸ Copy" accent action
+    /// on the primary-password panel, matching journeys.md J2's designed-
+    /// state wireframe verbatim (not just a footer key hint).
+    #[test]
+    fn results_screen_shows_the_copy_accent_action() {
+        let app = App {
+            report: Some(
+                execute_request(&ParanoidRequest::default(), true, |_| {}).expect("report"),
+            ),
+            screen: Screen::Results,
+            detail_tab: 0,
+            ..App::default()
+        };
+
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("Copy"));
+    }
+
+    /// P8.V.8: the audit-in-progress screen must never claim a key works
+    /// that the handler doesn't actually bind — `handle_audit_key` only
+    /// recognizes `q`, so the footer/subtitle must not promise an Esc
+    /// cancel that silently does nothing (brand.md §3 rule 4).
+    #[test]
+    fn audit_screen_only_advertises_keys_the_handler_actually_binds() {
+        let app = App {
+            screen: Screen::Audit,
+            current_stage: Some(AuditStage::ChiSquared),
+            ..App::default()
+        };
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("q quit"));
+        assert!(!rendered.contains("Esc"));
     }
 
     #[test]

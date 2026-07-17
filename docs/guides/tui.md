@@ -13,37 +13,40 @@ flow direct:
 
 ## Configure
 
-The left column exposes the generation inputs:
+The left column groups the generation inputs under named sections instead of
+one flat list:
 
-- password length
-- password count
-- audit batch size
-- lowercase / uppercase / digits / symbols toggles
-- extended printable ASCII toggle
-- ambiguous-character exclusion
-- compliance framework selection
-- minimum lowercase / uppercase / digit / symbol requirements
-- custom charset override
+- **Shape** — password length, password count, audit batch size
+- **Character set** — lowercase / uppercase / digits / symbols toggles,
+  extended printable ASCII toggle, ambiguous-character exclusion
+- **Compliance frameworks (optional)** — framework selection
+- **Manual minimums (optional)** — minimum lowercase / uppercase / digit /
+  symbol requirements, custom charset override
+- a single `▸ Generate` accent action at the bottom
 
-The right column shows the current validation state, effective charset size, and framework constraints.
+The right column ("What this produces") shows the current validation state, effective charset size, and framework constraints.
 
 ## Render Capture
 
 The TUI keeps the same branded three-step flow, but it now runs entirely on the native Rust core. A typical configure screen looks like this:
 
 ```text
-paranoid-passwd · Configure
-Configure the local generator and audit before any password is shown.
+paranoid-passwd · Generate a password
+Shape it, then generate — the randomness check runs automatically and its evidence is one screen away.
 
-Wizard                                  Audit Preview
-› Password length: 32                  Mission  local secrets, verifiable trust.
-  Number of passwords: 1
-  Audit batch size: 500                Effective charset: 72 characters
-  Lowercase [a-z]: ON                  Manual requirements: 4 total constrained characters
-  Uppercase [A-Z]: ON                  Frameworks: nist, pci_dss
+Configure                               What this produces
+Shape                                   Mission  local secrets, verifiable trust.
+› Password length: 32
+  Number of passwords: 1                Effective charset: 72 characters
+  Audit batch size: 500                 Manual requirements: 4 total constrained characters
+Character set                           Frameworks: nist, pci_dss
+  Lowercase [a-z]: ON
+  Uppercase [A-Z]: ON                   Ready: 72 chars, 1 passwords, 197.18 bits of entropy...
   Digits [0-9]: ON
-  Symbols: ON                          Ready: 72 chars, 1 passwords, 197.18 bits of entropy...
-  ...                                  (footer) Controls  Up/Down: move  Left/Right: adjust  Space: toggle  Enter: edit/run  q: quit
+  Symbols: ON
+  ...
+  ▸ Generate
+(footer) ↑↓ move  ←→ adjust  Space toggle  ⏎ edit/run  q quit
 ```
 
 The results screen leads with the password and its verdict, in the voice
@@ -61,15 +64,26 @@ primary
 ✓ Randomness check: passed
 Selected frameworks: nist
 Additional passwords: 2
+
+▸ Copy
 ```
 
 ## Controls
 
+The footer shows only the keys valid on the current screen (no separate
+`Controls:` block).
+
+Configure screen:
+
 - `↑ / ↓`: move between fields
 - `← / →`: adjust values
 - `Space`: toggle the current boolean or framework
-- `Enter`: edit the custom charset or start the audit
+- `Enter`: edit the custom charset or start generation
 - `q`: quit
+
+Checking-the-result screen (in progress):
+
+- `q`: quit (there is no cancel-back-to-configure key on this screen)
 
 On the results screen:
 
