@@ -31,6 +31,10 @@ orchestrator continuously mutates. There is NO "RELEASED" flip that stops the
 loop; there is no FINAL that ends work — FINAL just ships the current
 milestone PR, then the loop discovers the next.
 
+NO FYIs / NO STATUS RELAYS (user 2026-07-17): do not pause to relay brand
+directions, journey storyboards, gap lists, or progress. Decide, execute,
+ship. The user reviews accumulated progress on their own schedule.
+
 ZEROTH LAW — never block on the user. AskUserQuestion is BANNED under this
 mandate. Every design/architecture/scope/priority call is the agent's to make
 against the quality standards; record the decision + why in the directive and
