@@ -1,8 +1,9 @@
-use crate::theme::{self, ICON_ACTION, ICON_CAUTION, ICON_LOCKED, ICON_VERIFIED};
+use crate::theme::{self, ICON_ACTION, ICON_CAUTION, ICON_DRILL_DOWN, ICON_LOCKED, ICON_VERIFIED};
 use crate::vault_tui::*;
 use paranoid_ops::CapabilityProbeStatus;
 use paranoid_vault::{
-    VaultBackupSummary, VaultItem, VaultItemKind, VaultItemPayload, VaultTransferSummary,
+    VaultBackupSummary, VaultItem, VaultItemKind, VaultItemPayload, VaultKeyslotKind,
+    VaultTransferSummary,
 };
 use ratatui::{
     Frame,
@@ -320,9 +321,14 @@ pub(crate) fn item_list(app: &App) -> List<'static> {
     }
 
     let items = if app.items.is_empty() {
+        // P8.V.7: this used to be a relocated prose hotkey wall ("Press a to
+        // add login, n to add secure note, v to add card, i to add
+        // identity, or g to generate and store one") — the same 40-key
+        // Controls wall in a new spot. The contextual footer (`n new`) and
+        // the `?` overlay already carry the full add-item keymap.
         vec![ListItem::new(Line::styled(
             if !app.filters.is_active() {
-                "No vault items yet. Press a to add a login, n to add a secure note, v to add a card, i to add an identity, or g to generate and store one."
+                "No vault items yet."
             } else {
                 "No vault items match the current filter. Press / to refine or clear it."
             },
@@ -379,7 +385,29 @@ pub(crate) fn item_list(app: &App) -> List<'static> {
     )
 }
 
+/// S10 row naming (ia.md §5, brand.md §4, journeys.md J5 step 1, P8.V.4):
+/// rows are named by *relationship* — who or what can open the vault — never
+/// the internal `VaultKeyslotKind` enum (`password_recovery`, etc). Both
+/// `PasswordRecovery` and `MnemonicRecovery` are, from the persona's side,
+/// the same relationship ("a phrase you hold"); the design docs draw no
+/// distinction between them (brand.md §4's table has one `recovery keyslot`
+/// row, not two), so both map to "recovery phrase" here.
+pub(crate) fn keyslot_relationship_label(kind: &VaultKeyslotKind) -> &'static str {
+    match kind {
+        VaultKeyslotKind::PasswordRecovery | VaultKeyslotKind::MnemonicRecovery => {
+            "recovery phrase"
+        }
+        VaultKeyslotKind::DeviceBound => "this device",
+        VaultKeyslotKind::CertificateWrapped => "trusted contact",
+    }
+}
+
 pub(crate) fn keyslot_list(app: &App) -> List<'static> {
+    let count = app
+        .header
+        .as_ref()
+        .map(|header| header.keyslots.len())
+        .unwrap_or_default();
     let items = match &app.header {
         Some(header) if !header.keyslots.is_empty() => header
             .keyslots
@@ -405,10 +433,14 @@ pub(crate) fn keyslot_list(app: &App) -> List<'static> {
                 } else {
                     Style::default().fg(TEXT)
                 };
-                let label = slot.label.as_deref().unwrap_or("unlabeled");
+                let relationship = keyslot_relationship_label(&slot.kind);
+                let row = match &slot.label {
+                    Some(label) if !label.is_empty() => format!("{relationship} · {label}"),
+                    _ => relationship.to_string(),
+                };
                 ListItem::new(Line::from(vec![
                     Span::styled(prefix.to_string(), style),
-                    Span::styled(format!("{} · {}", slot.kind.as_str(), label), style),
+                    Span::styled(row, style),
                 ]))
             })
             .collect::<Vec<_>>(),
@@ -420,7 +452,7 @@ pub(crate) fn keyslot_list(app: &App) -> List<'static> {
 
     List::new(items).block(
         Block::default()
-            .title("Ways in")
+            .title(format!("Ways in ({count})"))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(GREEN))
             .style(Style::default().bg(PANEL).fg(TEXT)),
@@ -826,7 +858,9 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                     Line::raw(kind_label),
                     Line::raw(subtitle),
                     Line::raw(""),
-                    Line::raw("⏎ open"),
+                    // ia.md rule 5: every screen names one clear next
+                    // action with the `▸ accent.action` marker.
+                    Line::styled(format!("{ICON_ACTION} Open"), theme::accent_action()),
                 ]
             }
             None => vec![
@@ -836,6 +870,11 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                 ),
                 Line::raw(""),
                 Line::raw("No item is selected yet."),
+                Line::raw(""),
+                Line::styled(
+                    format!("{ICON_ACTION} Add your first item"),
+                    theme::accent_action(),
+                ),
             ],
         },
         _ => unreachable!("detail panel only renders vault screens"),
@@ -978,89 +1017,112 @@ fn item_title_for_block(item: &VaultItem) -> String {
     }
 }
 
+/// S10 detail pane (ia.md §5, brand.md §3a/§4, P8.V.4/P8.V.7/P8.V.9). Leads
+/// with the relationship name and the audit-question body copy
+/// (journeys.md J5 step 1, verbatim), not a field dump: `id`, `kind`,
+/// `wrap`, and device-bound/certificate mechanics are gated behind the
+/// explicit S10d `k show the mechanics` drill-down (`keyslot_mechanics_revealed`)
+/// instead of sitting inline on the intent-first surface. The relocated
+/// "Press m to add..., b to..., ..." prose hotkey wall is removed — the
+/// contextual footer and `?` overlay are the sole source of the keymap now.
 pub(crate) fn keyslot_detail_panel(app: &App) -> Paragraph<'static> {
     let lines = match selected_keyslot(app) {
         Some(slot) => {
+            let relationship = keyslot_relationship_label(&slot.kind);
             let mut lines = vec![
                 Line::styled(
-                    "Selected keyslot",
+                    relationship,
                     Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
                 ),
                 Line::raw(""),
-                Line::raw(format!("id: {}", slot.id)),
-                Line::raw(format!("kind: {}", slot.kind.as_str())),
-                Line::raw(format!("label: {}", slot.label.as_deref().unwrap_or(""))),
-                Line::raw(format!("wrap: {}", slot.wrap_algorithm)),
-                Line::raw(format!(
+            ];
+            if let Some(label) = slot.label.as_deref().filter(|value| !value.is_empty()) {
+                lines.push(Line::raw(format!("Label   {label}")));
+            }
+
+            if app.keyslot_mechanics_revealed {
+                lines.push(Line::raw(""));
+                lines.push(Line::styled(
+                    "Mechanics",
+                    Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+                ));
+                lines.push(Line::raw(format!("id: {}", slot.id)));
+                lines.push(Line::raw(format!("kind: {}", slot.kind.as_str())));
+                lines.push(Line::raw(format!("wrap: {}", slot.wrap_algorithm)));
+                lines.push(Line::raw(format!(
                     "device-bound: {}",
                     if slot.wrapped_by_os_keystore {
                         "yes"
                     } else {
                         "no"
                     }
-                )),
-            ];
-            if let Some(fingerprint) = &slot.certificate_fingerprint_sha256 {
-                lines.push(Line::raw(format!("fingerprint: {fingerprint}")));
-            }
-            if let Some(subject) = &slot.certificate_subject {
-                lines.push(Line::raw(format!("subject: {subject}")));
-            }
-            if let Some(not_before) = &slot.certificate_not_before {
-                lines.push(Line::raw(format!("valid from: {not_before}")));
-            }
-            if let Some(not_after) = &slot.certificate_not_after {
-                lines.push(Line::raw(format!("valid until: {not_after}")));
-            }
-            if let Some(language) = &slot.mnemonic_language {
-                lines.push(Line::raw(format!(
-                    "mnemonic: {} words ({language})",
-                    slot.mnemonic_words.unwrap_or_default()
                 )));
-            }
-            if let Some(service) = &slot.device_service {
-                lines.push(Line::raw(format!("device service: {service}")));
-            }
-            if let Some(account) = &slot.device_account {
-                lines.push(Line::raw(format!("device account: {account}")));
-            }
-            if let Some(header) = &app.header
-                && let Ok(health) = header.assess_keyslot_health(slot.id.as_str())
-            {
-                lines.push(Line::raw(format!("healthy: {}", health.healthy)));
-                for warning in health.warnings {
-                    lines.push(Line::styled(
-                        format!("health warning: {warning}"),
-                        Style::default().fg(AMBER),
-                    ));
+                if let Some(fingerprint) = &slot.certificate_fingerprint_sha256 {
+                    lines.push(Line::raw(format!("fingerprint: {fingerprint}")));
                 }
-            }
-            if let Some(header) = &app.header
-                && let Ok(impact) = header.assess_keyslot_removal(slot.id.as_str())
-            {
-                lines.push(Line::raw(""));
-                lines.push(Line::raw(format!(
-                    "removal requires confirmation: {}",
-                    impact.requires_explicit_confirmation
-                )));
-                if impact.warnings.is_empty() {
-                    lines.push(Line::raw("removal impact: no posture downgrade detected."));
-                } else {
-                    for warning in impact.warnings {
+                if let Some(subject) = &slot.certificate_subject {
+                    lines.push(Line::raw(format!("subject: {subject}")));
+                }
+                if let Some(not_before) = &slot.certificate_not_before {
+                    lines.push(Line::raw(format!("valid from: {not_before}")));
+                }
+                if let Some(not_after) = &slot.certificate_not_after {
+                    lines.push(Line::raw(format!("valid until: {not_after}")));
+                }
+                if let Some(language) = &slot.mnemonic_language {
+                    lines.push(Line::raw(format!(
+                        "mnemonic: {} words ({language})",
+                        slot.mnemonic_words.unwrap_or_default()
+                    )));
+                }
+                if let Some(service) = &slot.device_service {
+                    lines.push(Line::raw(format!("device service: {service}")));
+                }
+                if let Some(account) = &slot.device_account {
+                    lines.push(Line::raw(format!("device account: {account}")));
+                }
+                if let Some(header) = &app.header
+                    && let Ok(health) = header.assess_keyslot_health(slot.id.as_str())
+                {
+                    lines.push(Line::raw(format!("healthy: {}", health.healthy)));
+                    for warning in health.warnings {
                         lines.push(Line::styled(
-                            format!("warning: {warning}"),
+                            format!("health warning: {warning}"),
                             Style::default().fg(AMBER),
                         ));
                     }
                 }
-            }
-            lines.push(Line::raw(""));
-            lines.push(Line::raw(
-                "Press m to add mnemonic recovery, b to add device-bound, c to add certificate-wrapped, w to rewrap the selected certificate slot, l to relabel the selected keyslot, o to rotate the selected mnemonic slot, p to rotate the recovery secret, d to remove the selected non-recovery slot, or r to rebind the selected device slot.",
-            ));
-            if app.pending_keyslot_removal_confirmation.as_deref() == Some(slot.id.as_str()) {
+                if let Some(header) = &app.header
+                    && let Ok(impact) = header.assess_keyslot_removal(slot.id.as_str())
+                {
+                    lines.push(Line::raw(""));
+                    lines.push(Line::raw(format!(
+                        "removal requires confirmation: {}",
+                        impact.requires_explicit_confirmation
+                    )));
+                    if impact.warnings.is_empty() {
+                        lines.push(Line::raw("removal impact: no posture downgrade detected."));
+                    } else {
+                        for warning in impact.warnings {
+                            lines.push(Line::styled(
+                                format!("warning: {warning}"),
+                                Style::default().fg(AMBER),
+                            ));
+                        }
+                    }
+                }
+            } else {
+                lines.push(Line::raw(""));
                 lines.push(Line::styled(
-                    "Removal confirmation armed for this slot. Press d again to proceed.",
+                    format!("{ICON_DRILL_DOWN} Show the mechanics"),
+                    Style::default().fg(TEXT),
+                ));
+            }
+
+            if app.pending_keyslot_removal_confirmation.as_deref() == Some(slot.id.as_str()) {
+                lines.push(Line::raw(""));
+                lines.push(Line::styled(
+                    "Removal confirmation armed for this slot. Press x again to proceed.",
                     Style::default().fg(RED).add_modifier(Modifier::BOLD),
                 ));
             }
@@ -1068,13 +1130,18 @@ pub(crate) fn keyslot_detail_panel(app: &App) -> Paragraph<'static> {
         }
         None => vec![
             Line::styled(
-                "Keyslot detail",
+                "Ways in",
                 Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
             ),
             Line::raw(""),
-            Line::raw("No keyslot is currently selectable."),
+            // brand.md §3a / journeys.md J5 step 1, verbatim.
             Line::raw(
-                "Press m, b, or c to enroll a new unlock or recovery path, or p to rotate the recovery secret.",
+                "The keys and phrases that can open this vault. Add a recovery phrase, bind a device, or remove a way in you no longer trust.",
+            ),
+            Line::raw(""),
+            Line::styled(
+                format!("{ICON_ACTION} Add a way in"),
+                theme::accent_action(),
             ),
         ],
     };

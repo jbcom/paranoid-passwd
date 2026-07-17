@@ -27,7 +27,7 @@ pub(crate) fn contextual_footer(app: &App) -> &'static str {
         // footer re-renders on focus change (rule 3). Destructive actions
         // (delete) are deliberately absent here; they live behind `?`.
         Screen::ItemDetail => "⏎ copy  r reveal  e edit  ? all keys  ⎋ back",
-        Screen::Keyslots => "↑↓ move  a add  x remove  ? all keys  ⎋ back",
+        Screen::Keyslots => "↑↓ move  k mechanics  x remove  ? all keys  ⎋ back",
         // ia.md §5 S14 vs S15: a just-locked screen (panic-lock or idle
         // auto-lock) shows the minimal footer — "in a locked state the only
         // valid acts are unlock or quit," no `?` recovery-paths door. Any
@@ -118,6 +118,7 @@ pub(crate) fn overlay_lines(app: &App) -> Vec<&'static str> {
         ],
         Screen::Keyslots => vec![
             "Add a way in   m recovery phrase   b this device   c trusted contact",
+            "Evidence       k show the mechanics for the selected way in",
             "Manage         l relabel  o rotate phrase  p rotate recovery",
             "Certificate    w replace the held key",
             "Device         r rebind to this device's secure hardware",

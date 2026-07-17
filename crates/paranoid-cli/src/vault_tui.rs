@@ -830,6 +830,7 @@ mod tests {
             selected_keyslot_index: 0,
             detail: Some(item),
             secret_revealed: false,
+            keyslot_mechanics_revealed: false,
             filters: VaultFilterState::default(),
             search_mode: false,
             capability_report: None,
@@ -1237,7 +1238,9 @@ mod tests {
         assert_eq!(app.items[0].title, "GitHub");
         assert!(app.status.contains("Vault filters locked"));
 
-        press_key(&mut app, KeyCode::Char('k'));
+        // P8.V.5: the working ways-in key is `w`, matching every footer/`?`
+        // overlay advertisement (it used to be the un-advertised `k`).
+        press_key(&mut app, KeyCode::Char('w'));
         assert!(matches!(app.screen, Screen::Keyslots));
         press_key(&mut app, KeyCode::Char('m'));
         assert!(matches!(app.screen, Screen::AddMnemonicSlot));
@@ -2483,6 +2486,7 @@ mod tests {
             selected_keyslot_index: 0,
             detail: None,
             secret_revealed: false,
+            keyslot_mechanics_revealed: false,
             filters: VaultFilterState::default(),
             search_mode: false,
             capability_report: None,

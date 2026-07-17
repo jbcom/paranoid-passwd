@@ -1255,6 +1255,13 @@ pub(crate) struct App {
     /// `detail_panel` is permitted to render one, so it is reset alongside
     /// `detail` everywhere the item selection changes or the vault locks.
     pub(crate) secret_revealed: bool,
+    /// S10d "Show the mechanics" drill-down toggle (ia.md §5, P8.V.4/P8.V.7):
+    /// keyslot mechanics (`kind`, `wrap`, device-bound) stay off the S10
+    /// intent-first surface until explicitly requested, mirroring
+    /// `secret_revealed`'s off-by-default/reset-on-navigate pattern. Reset
+    /// whenever `Screen::Keyslots` is (re-)entered or the selected keyslot
+    /// changes, so mechanics never leak forward onto a different way in.
+    pub(crate) keyslot_mechanics_revealed: bool,
     pub(crate) filters: VaultFilterState,
     pub(crate) search_mode: bool,
     pub(crate) capability_report: Option<CapabilityReport>,
@@ -1310,6 +1317,7 @@ impl App {
             selected_keyslot_index: 0,
             detail: None,
             secret_revealed: false,
+            keyslot_mechanics_revealed: false,
             filters: VaultFilterState::default(),
             search_mode: false,
             capability_report: None,
@@ -1858,6 +1866,12 @@ impl App {
             items: _,
             selected_index: _,
             selected_keyslot_index: _,
+            // S10d reveal gate for keyslot *mechanics* (kind/wrap/device-bound
+            // — not secret material; the wrapped key bytes themselves live in
+            // the vault file, never in this in-memory struct), so it belongs
+            // beside the other acknowledged non-secret UI-state fields, not
+            // the scrub list above.
+            keyslot_mechanics_revealed: _,
             filters: _,
             search_mode: _,
             capability_report: _,
@@ -2144,6 +2158,7 @@ impl App {
             }
             KeyCode::Esc if matches!(self.screen, Screen::Keyslots) => {
                 self.pending_keyslot_removal_confirmation = None;
+                self.keyslot_mechanics_revealed = false;
                 self.screen = Screen::Vault;
                 self.status = "Returned to the vault item view.".to_string();
                 false
@@ -2229,8 +2244,20 @@ impl App {
                 self.open_item_detail();
                 false
             }
-            KeyCode::Char('k') if matches!(self.screen, Screen::Vault) => {
+            // P8.V.5: every footer/`?`-overlay advertisement for this action
+            // says `w ways in` — the working key used to be `k`, silently
+            // out of sync with what was on screen. Rebound to `w` so the
+            // advertised key is the real one (no free `w` binding existed on
+            // `Screen::Vault` to collide with).
+            KeyCode::Char('w') if matches!(self.screen, Screen::Vault) => {
                 self.open_keyslots();
+                false
+            }
+            // S10d "Show the mechanics" drill-down toggle (ia.md §5,
+            // P8.V.4/P8.V.7): keyslot `kind`/`wrap`/device-bound stay off the
+            // relationship-named S10 surface until this is pressed.
+            KeyCode::Char('k') if matches!(self.screen, Screen::Keyslots) => {
+                self.toggle_keyslot_mechanics();
                 false
             }
             KeyCode::Char('m') if matches!(self.screen, Screen::Keyslots) => {
@@ -2284,6 +2311,9 @@ impl App {
                 if self.selected_keyslot_index > 0 {
                     self.selected_keyslot_index -= 1;
                     self.pending_keyslot_removal_confirmation = None;
+                    // Mechanics never leak forward onto a different way in
+                    // (S10d re-masks on selection change, same rule as S7).
+                    self.keyslot_mechanics_revealed = false;
                 }
                 false
             }
@@ -2296,6 +2326,7 @@ impl App {
                 if self.selected_keyslot_index + 1 < len {
                     self.selected_keyslot_index += 1;
                     self.pending_keyslot_removal_confirmation = None;
+                    self.keyslot_mechanics_revealed = false;
                 }
                 false
             }
@@ -2994,6 +3025,19 @@ impl App {
         };
     }
 
+    /// S10d "Show the mechanics" toggle (ia.md §5, P8.V.4/P8.V.7). Mirrors
+    /// `toggle_secret_reveal`'s off-by-default/toggle-back pattern: keyslot
+    /// mechanics (`kind`, `wrap`, device-bound) are a drill-down, not an
+    /// inline fact on the relationship-named S10 surface.
+    pub(crate) fn toggle_keyslot_mechanics(&mut self) {
+        self.keyslot_mechanics_revealed = !self.keyslot_mechanics_revealed;
+        self.status = if self.keyslot_mechanics_revealed {
+            "Showing the mechanics for the selected way in.".to_string()
+        } else {
+            "Mechanics hidden again.".to_string()
+        };
+    }
+
     pub(crate) fn open_add_login(&mut self) {
         self.add_login_form = AddLoginForm::default();
         self.editing_item_id = None;
@@ -3013,6 +3057,9 @@ impl App {
 
     pub(crate) fn open_keyslots(&mut self) {
         self.pending_keyslot_removal_confirmation = None;
+        // S10d re-masks on entry, same rule as S7 (P8.V.4): mechanics never
+        // arrive pre-revealed from a prior visit.
+        self.keyslot_mechanics_revealed = false;
         self.screen = Screen::Keyslots;
         self.status =
             "Keyslot view active. Inspect access slots or enroll a new mnemonic, device, or certificate slot."
