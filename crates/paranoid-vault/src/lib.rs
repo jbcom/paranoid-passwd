@@ -1714,6 +1714,156 @@ mod tests {
     }
 
     #[test]
+    fn restore_leaves_no_temp_sibling_after_failure() {
+        let dir = tempdir().expect("tempdir");
+        let backup = dir.path().join("invalid-backup.ppv.json");
+        let restored = dir.path().join("restored.sqlite");
+        fs::write(
+            &backup,
+            r#"{"backup_format_version":999,"vault_format_version":1,"header":{"format_version":1,"created_at_epoch":0,"migration_state":"clean","kdf":{"algorithm":"argon2id","memory_cost_kib":65536,"iterations":3,"parallelism":1,"derived_key_len":32},"keyslots":[]},"items":[]}"#,
+        )
+        .expect("write invalid backup");
+
+        restore_vault_backup(&backup, &restored, false).expect_err("restore fails");
+        assert!(!restored.exists());
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .expect("read dir")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name())
+            .filter(|name| name != "invalid-backup.ppv.json")
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "restore must not leave temp siblings behind: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn mid_restore_failure_leaves_original_vault_intact_and_unlockable() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        let backup = dir.path().join("vault-backup.ppv.json");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "Original Login One".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string(),
+                url: None,
+                notes: None,
+                folder: Some("Work".to_string()),
+                tags: vec!["work".to_string()],
+            })
+            .expect("add login");
+        vault
+            .add_login(NewLoginRecord {
+                title: "Original Login Two".to_string(),
+                username: "octocat2".to_string(),
+                password: "hunter3".to_string(),
+                url: None,
+                notes: None,
+                folder: Some("Work".to_string()),
+                tags: vec!["work".to_string()],
+            })
+            .expect("add login");
+        vault.export_backup(&backup).expect("export backup");
+
+        let mut package: VaultBackupPackage =
+            serde_json::from_slice(&fs::read(&backup).expect("read backup")).expect("parse backup");
+        assert_eq!(package.items.len(), 2, "sanity: two items exported");
+        package.items.insert(
+            1,
+            VaultBackupItem {
+                id: "malformed-late-item".to_string(),
+                kind: "login".to_string(),
+                created_at_epoch: 0,
+                updated_at_epoch: 0,
+                nonce_hex: "not-valid-hex".to_string(),
+                tag_hex: "00".repeat(16),
+                ciphertext_hex: "00".repeat(16),
+            },
+        );
+        fs::write(
+            &backup,
+            serde_json::to_vec(&package).expect("serialize tampered backup"),
+        )
+        .expect("write tampered backup");
+
+        drop(vault);
+        let error = restore_vault_backup(&backup, &path, true).expect_err("restore fails closed");
+        assert!(!matches!(error, VaultError::VaultExists(_)));
+
+        assert!(path.exists(), "original vault must still exist");
+        let siblings: Vec<_> = fs::read_dir(dir.path())
+            .expect("read dir")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name())
+            .filter(|name| name != "vault.sqlite" && name != "vault-backup.ppv.json")
+            .collect();
+        assert!(
+            siblings.is_empty(),
+            "no temp sibling should remain after failed restore: {siblings:?}"
+        );
+
+        let reopened = unlock_vault(&path, "correct horse battery staple")
+            .expect("original vault still unlockable after failed restore");
+        let items = reopened.list_items().expect("list items");
+        assert_eq!(
+            items.len(),
+            2,
+            "failed restore must not leave the destination with a partially-imported item set"
+        );
+        assert!(items.iter().any(|item| item.title == "Original Login One"));
+        assert!(items.iter().any(|item| item.title == "Original Login Two"));
+    }
+
+    #[test]
+    fn successful_restore_replaces_destination_atomically() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        let backup = dir.path().join("vault-backup.ppv.json");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "Replacement Login".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string(),
+                url: None,
+                notes: None,
+                folder: Some("Work".to_string()),
+                tags: vec!["work".to_string()],
+            })
+            .expect("add login");
+        vault.export_backup(&backup).expect("export backup");
+
+        drop(vault);
+        fs::write(&path, b"stale vault contents that must be replaced").expect("stomp target");
+
+        restore_vault_backup(&backup, &path, true).expect("restore succeeds");
+
+        let siblings: Vec<_> = fs::read_dir(dir.path())
+            .expect("read dir")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name())
+            .filter(|name| name != "vault.sqlite" && name != "vault-backup.ppv.json")
+            .collect();
+        assert!(
+            siblings.is_empty(),
+            "no temp sibling should remain after successful restore: {siblings:?}"
+        );
+
+        let restored_vault =
+            unlock_vault(&path, "correct horse battery staple").expect("unlock restored vault");
+        let items = restored_vault.list_items().expect("list items");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "Replacement Login");
+    }
+
+    #[test]
     fn tampered_item_ciphertext_fails_closed_on_list() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("vault.sqlite");

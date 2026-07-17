@@ -2965,7 +2965,7 @@ impl App {
         self.import_backup_form = ImportBackupForm {
             focus_index: 0,
             path: default_backup_export_path(&self.options.path),
-            overwrite: self.options.path.exists(),
+            overwrite: false,
         };
         self.screen = Screen::ImportBackup;
         self.status =

@@ -157,8 +157,12 @@ PARANOID_MASTER_PASSWORD="current recovery secret" \
 ```
 
 Use `import-backup --force` only when you have intentionally chosen to overwrite the target vault
-path. Treat a same-device device-bound unlock after restore as a convenience check, not as proof that
-the backup is portable.
+path. Restore is atomic: the replacement vault is built and validated in a same-directory temp file
+first, and only a fully validated build is renamed over the destination, so a malformed backup or a
+mid-restore failure leaves a pre-existing vault at that path untouched and unlockable instead of
+partially overwritten. The TUI's import-backup screen defaults to overwrite off even when the target
+vault already exists; enable it explicitly when you intend to replace that path. Treat a same-device
+device-bound unlock after restore as a convenience check, not as proof that the backup is portable.
 
 ## Transfer Packages
 

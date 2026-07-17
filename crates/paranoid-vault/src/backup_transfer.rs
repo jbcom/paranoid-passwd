@@ -1,7 +1,7 @@
 use crate::{
     BACKUP_FORMAT_VERSION, CERTIFICATE_TRANSFER_KEY_AAD, CERTIFICATE_WRAP_ALGORITHM,
     CertificateWrappedSecret, DEFAULT_ITERATIONS, DEFAULT_MEMORY_COST_KIB, DEFAULT_PARALLELISM,
-    EncryptedBlob, FORMAT_VERSION, MASTER_KEY_LEN, PASSWORD_WRAP_ALGORITHM,
+    EncryptedBlob, FORMAT_VERSION, MASTER_KEY_LEN, PASSWORD_WRAP_ALGORITHM, SQLITE_APPLICATION_ID,
     TRANSFER_FORMAT_VERSION, TRANSFER_KEY_AAD, TRANSFER_PAYLOAD_AAD, UnlockedVault, VaultError,
     VaultHeader, VaultItem, VaultItemFilter, VaultItemKind, VaultKdfParams, VaultKeyslotKind,
     VaultRecoveryPosture, certificate_fingerprint_hex, certificate_keyslot_metadata,
@@ -521,6 +521,70 @@ pub(crate) struct VaultTransferPayload {
     pub(crate) items: Vec<VaultItem>,
 }
 
+fn build_restored_vault_at(
+    temp_path: &Path,
+    package: &VaultBackupPackage,
+) -> Result<(), VaultError> {
+    let conn = Connection::open(temp_path)?;
+    configure_connection(&conn)?;
+    create_schema(&conn)?;
+    conn.execute(
+        "INSERT INTO metadata (key, value) VALUES ('header_json', ?1)",
+        params![serde_json::to_string(&package.header)?],
+    )?;
+    for item in &package.items {
+        conn.execute(
+            "INSERT INTO items (id, kind, created_at_epoch, updated_at_epoch, nonce, tag, ciphertext)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                item.id,
+                item.kind,
+                item.created_at_epoch,
+                item.updated_at_epoch,
+                hex_decode(item.nonce_hex.as_str())?,
+                hex_decode(item.tag_hex.as_str())?,
+                hex_decode(item.ciphertext_hex.as_str())?,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_restored_vault(temp_path: &Path, expected_item_count: usize) -> Result<(), VaultError> {
+    let conn = Connection::open(temp_path)?;
+    configure_connection(&conn)?;
+    read_restored_header(&conn)?;
+    let actual_item_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))?;
+    if actual_item_count as usize != expected_item_count {
+        return Err(VaultError::InvalidArguments(format!(
+            "restored vault item count mismatch: expected {expected_item_count}, found {actual_item_count}"
+        )));
+    }
+    Ok(())
+}
+
+fn read_restored_header(conn: &Connection) -> Result<VaultHeader, VaultError> {
+    let application_id: i64 = conn.query_row("PRAGMA application_id", [], |row| row.get(0))?;
+    let user_version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if application_id != SQLITE_APPLICATION_ID {
+        return Err(VaultError::InvalidArguments(format!(
+            "unexpected vault application_id: {application_id}"
+        )));
+    }
+    if user_version != i64::from(FORMAT_VERSION) {
+        return Err(VaultError::InvalidArguments(format!(
+            "unsupported vault schema version: {user_version}"
+        )));
+    }
+    let header_json: String = conn.query_row(
+        "SELECT value FROM metadata WHERE key = 'header_json'",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(serde_json::from_str(header_json.as_str())?)
+}
+
 pub fn restore_vault_backup(
     input_path: impl AsRef<Path>,
     output_path: impl AsRef<Path>,
@@ -549,38 +613,45 @@ pub fn restore_vault_backup(
         )));
     }
 
-    if output_path.exists() {
-        if !overwrite {
-            return Err(VaultError::VaultExists(output_path.display().to_string()));
-        }
-        fs::remove_file(output_path)?;
+    if output_path.exists() && !overwrite {
+        return Err(VaultError::VaultExists(output_path.display().to_string()));
     }
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)?;
+    let parent = output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    let temp_dir = match parent {
+        Some(parent) => {
+            fs::create_dir_all(parent)?;
+            parent.to_path_buf()
+        }
+        None => PathBuf::from("."),
+    };
+    let file_name = output_path.file_name().ok_or_else(|| {
+        VaultError::InvalidArguments(format!(
+            "restore output path {} has no file name",
+            output_path.display()
+        ))
+    })?;
+    let temp_name = format!(
+        ".{}.{}.{}.tmp",
+        file_name.to_string_lossy(),
+        std::process::id(),
+        random_hex_id(8)?
+    );
+    let temp_path = temp_dir.join(temp_name);
+
+    let build_result = build_restored_vault_at(&temp_path, &package)
+        .and_then(|()| validate_restored_vault(&temp_path, package.items.len()));
+    if let Err(error) = build_result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error);
     }
 
-    let conn = Connection::open(output_path)?;
-    configure_connection(&conn)?;
-    create_schema(&conn)?;
-    conn.execute(
-        "INSERT INTO metadata (key, value) VALUES ('header_json', ?1)",
-        params![serde_json::to_string(&package.header)?],
-    )?;
-    for item in &package.items {
-        conn.execute(
-            "INSERT INTO items (id, kind, created_at_epoch, updated_at_epoch, nonce, tag, ciphertext)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                item.id,
-                item.kind,
-                item.created_at_epoch,
-                item.updated_at_epoch,
-                hex_decode(item.nonce_hex.as_str())?,
-                hex_decode(item.tag_hex.as_str())?,
-                hex_decode(item.ciphertext_hex.as_str())?,
-            ],
-        )?;
+    if let Err(error) = fs::rename(&temp_path, output_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.into());
     }
+
     Ok(package.header)
 }
 

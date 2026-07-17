@@ -138,8 +138,29 @@ P6.0 CI research + two-tier trust design.
   green, AGENTS.md/CLAUDE.md accurate to the post-P1 module map.
 - [ ] P4.V live-site verification (post-#146 merge) — WebFetch the deployed
   Pages site; spot-check contributing/compliance-frameworks/testing/ci-design.
-- [ ] P7.1 Atomic backup restore — temp-sibling DB + atomic replace
-  (mutation_handlers.rs:418, #146 review).
+- [x] P7.1 Atomic backup restore — temp-sibling DB + atomic replace
+  (mutation_handlers.rs:418, #146 review). `restore_vault_backup`
+  (crates/paranoid-vault/src/backup_transfer.rs) no longer `remove_file`s the
+  destination up front: it builds the full restored vault (schema, header
+  row, every item row) in a same-directory `.{name}.{pid}.{random-hex}.tmp`
+  sibling, validates that build in a fresh connection (application_id +
+  user_version pragmas, header JSON round-trip, and an item-count check
+  against the backup package), and only then `fs::rename`s the validated
+  temp file over the destination; any build/validation failure removes the
+  temp file and leaves the destination untouched. `overwrite`/`--force` now
+  only lifts the pre-flight `VaultError::VaultExists` check and no longer
+  pre-emptively deletes the target. TUI's `open_import_backup`
+  (vault_tui/screen_state.rs) now defaults `overwrite: false` unconditionally
+  instead of preselecting `true` whenever the target vault exists. Five new
+  tests: `mid_restore_failure_leaves_original_vault_intact_and_unlockable`
+  and `successful_restore_replaces_destination_atomically` in
+  paranoid-vault/src/lib.rs (plus a temp-sibling-cleanup regression test),
+  `open_import_backup_defaults_to_no_overwrite_when_target_exists` in
+  paranoid-cli/src/vault_tui.rs. cargo test -p paranoid-vault -p paranoid-cli
+  clean (79 + 103 tests); fmt+clippy -D warnings clean on both crates;
+  scripts/validate-docs.sh clean. docs/reference/vault-format.md and
+  docs/guides/recovery-operations.md updated with the atomic-restore
+  guarantee and the new TUI default.
 - [x] P7.2 Auto-lock hardening — never on EnvironmentApproval; purge
   options.auth + secret forms on lock (screen_state.rs:1584).
 - [x] P7.3 Export safety — reject source==destination; temp-file atomic

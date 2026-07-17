@@ -1639,6 +1639,24 @@ mod tests {
     }
 
     #[test]
+    fn open_import_backup_defaults_to_no_overwrite_when_target_exists() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(path.exists());
+        app.open_import_backup();
+
+        assert!(
+            !app.import_backup_form.overwrite,
+            "import backup must not preselect overwrite even when the target vault exists"
+        );
+    }
+
+    #[test]
     fn import_backup_restores_previous_encrypted_state() {
         let tempdir = tempdir().expect("tempdir");
         let path = tempdir.path().join("vault.sqlite");
