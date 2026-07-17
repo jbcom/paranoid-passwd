@@ -2475,12 +2475,18 @@ mod tests {
             !enrollment_debug.contains(phrase.as_str()),
             "Debug output for MnemonicRecoveryEnrollment must not contain the phrase"
         );
-        for word in phrase.split_whitespace() {
+        // Single mnemonic words can legitimately collide with other Debug
+        // text (e.g. a keyslot label that is itself a dictionary word), so
+        // leak detection checks consecutive word pairs instead.
+        let words: Vec<&str> = phrase.split_whitespace().collect();
+        for pair in words.windows(2) {
+            let bigram = pair.join(" ");
             assert!(
-                !enrollment_debug.contains(word),
-                "Debug output leaked mnemonic word {word:?}"
+                !enrollment_debug.contains(bigram.as_str()),
+                "Debug output leaked mnemonic bigram {bigram:?}"
             );
         }
+        assert!(enrollment_debug.contains("redacted"));
         assert!(!field_debug.contains(phrase.as_str()));
         assert!(field_debug.contains("redacted"));
     }
