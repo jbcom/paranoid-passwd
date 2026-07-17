@@ -813,6 +813,20 @@ CLAIMS: tuple[Claim, ...] = (
             ),
             Requirement(
                 "crates/paranoid-cli/src/vault_tui.rs",
+                "fn purge_secret_state_on_lock_directly_scrubs_the_armed_clipboard_buffer() {",
+                "test enforces that purge scrubs the in-memory armed-clipboard "
+                "buffer (a plaintext copy of the last-copied secret) directly, "
+                "not only via its caller (P9 re-verify LEAK-D)",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui/screen_state.rs",
+                "} = self;",
+                "purge_secret_state_on_lock destructures App with an exhaustive "
+                "(no `..`) field list, so adding a new field fails the build "
+                "until it is triaged as secret-to-scrub or acknowledged non-secret",
+            ),
+            Requirement(
+                "crates/paranoid-cli/src/vault_tui.rs",
                 "fn purge_secret_state_on_lock_directly_scrubs_the_master_recovery_mnemonic() {",
                 "test enforces the purge CONTRACT by calling "
                 "purge_secret_state_on_lock directly (not via the hotkey "

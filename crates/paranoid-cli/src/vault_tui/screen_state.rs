@@ -1650,22 +1650,76 @@ impl App {
     /// invokes it directly (as the P9 gate's pinned test now does) can't be
     /// fooled by a partial scrub landing green.
     pub(crate) fn purge_secret_state_on_lock(&mut self) {
-        self.options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
-        self.options.mnemonic_phrase = None;
-        self.detail = None;
-        // Holds the 24-word vault master recovery phrase (SecretString). Cleared
-        // here so purge is a complete scrub on its own — a direct caller must not
-        // be able to leave the recovery phrase resident (P9 re-verify LEAK-C).
-        self.latest_mnemonic_enrollment = None;
-        self.unlock_form = UnlockForm::default();
-        self.add_login_form = AddLoginForm::default();
-        self.note_form = NoteForm::default();
-        self.card_form = CardForm::default();
-        self.identity_form = IdentityForm::default();
-        self.recovery_secret_form = RecoverySecretForm::default();
-        self.certificate_rewrap_form = CertificateRewrapForm::default();
-        self.export_transfer_form = ExportTransferForm::default();
-        self.import_transfer_form = ImportTransferForm::default();
+        // FAIL-CLOSED EXHAUSTIVENESS (P9 re-verify): destructure `self` with an
+        // explicit `..`-free field list so adding ANY new App field breaks this
+        // build until it is triaged here as either a secret to scrub or an
+        // acknowledged non-secret. Three prior leaks (form fields, the master
+        // recovery mnemonic, its clipboard copy) all came from a purge that
+        // silently omitted a field; the compiler now catches the next one.
+        let Self {
+            // --- secret-bearing: MUST be scrubbed ---
+            options,
+            detail,
+            latest_mnemonic_enrollment,
+            unlock_form,
+            add_login_form,
+            note_form,
+            card_form,
+            identity_form,
+            recovery_secret_form,
+            certificate_rewrap_form,
+            export_transfer_form,
+            import_transfer_form,
+            // `session` holds the armed clipboard buffer (a plaintext copy of the
+            // last-copied secret, incl. the master recovery mnemonic). Its
+            // in-memory residency is scrubbed here; the OS clipboard wipe stays
+            // with the caller that owns the arboard handle (LEAK-D).
+            session,
+            // --- non-secret: acknowledged, intentionally not scrubbed. NO `..`:
+            // adding an App field breaks this destructure until it is triaged
+            // here, which is the fail-closed guarantee. If any of these gains a
+            // secret field, convert it and move it above.
+            profile: _,
+            audit_jsonl: _,
+            require_audit_sink: _,
+            audit_sink_health: _,
+            ops_audit_events: _, // redacted by construction (P0.4)
+            screen: _,
+            status: _,
+            header: _,
+            items: _,
+            selected_index: _,
+            selected_keyslot_index: _,
+            filters: _,
+            search_mode: _,
+            capability_report: _,
+            environment_approval: _,
+            mnemonic_slot_form: _,
+            device_slot_form: _,
+            certificate_slot_form: _,
+            keyslot_label_form: _,
+            pending_keyslot_removal_confirmation: _,
+            generate_store_form: _,
+            export_backup_form: _,
+            export_backup_preview: _,
+            import_backup_form: _,
+            editing_item_id: _,
+        } = self;
+
+        options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
+        options.mnemonic_phrase = None;
+        *detail = None;
+        *latest_mnemonic_enrollment = None;
+        *unlock_form = UnlockForm::default();
+        *add_login_form = AddLoginForm::default();
+        *note_form = NoteForm::default();
+        *card_form = CardForm::default();
+        *identity_form = IdentityForm::default();
+        *recovery_secret_form = RecoverySecretForm::default();
+        *certificate_rewrap_form = CertificateRewrapForm::default();
+        *export_transfer_form = ExportTransferForm::default();
+        *import_transfer_form = ImportTransferForm::default();
+        session.clear_clipboard_tracking();
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> bool {

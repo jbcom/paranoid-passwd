@@ -2544,6 +2544,33 @@ mod tests {
         );
     }
 
+    /// The armed clipboard buffer holds a plaintext copy of the last-copied
+    /// secret (including the master recovery mnemonic). `purge_secret_state_on_lock`
+    /// must scrub that in-memory residency ON ITS OWN — not only when reached
+    /// through `clear_decrypted_state_and_lock` (P9 re-verify LEAK-D: the
+    /// caller-vs-contract split, one layer down from the mnemonic itself).
+    #[test]
+    fn purge_secret_state_on_lock_directly_scrubs_the_armed_clipboard_buffer() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        // Arm the clipboard buffer with a plaintext secret, as a copy would.
+        app.session
+            .arm_clipboard_clear("PLANTED-CLIPBOARD-SECRET".to_string());
+
+        // Call the purge contract DIRECTLY, not via the hotkey/lock wrapper.
+        app.purge_secret_state_on_lock();
+
+        assert!(
+            app.session.take_pending_clipboard_contents().is_none(),
+            "purge_secret_state_on_lock must scrub the armed clipboard buffer on its own"
+        );
+    }
+
     /// The panic-lock hotkey must be a no-op (not crash, not change screen)
     /// from pre-unlock screens that have no unlocked state to purge.
     #[test]
