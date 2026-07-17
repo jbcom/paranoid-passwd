@@ -116,10 +116,31 @@ Current GUI platform coverage is explicit:
 
 | GUI surface | Current gate | What it proves |
 | --- | --- | --- |
-| Desktop Slint | `make test-gui-e2e` or `make test-gui-e2e-emulate` | Runs the real GUI binary through the operator workflow, validates durable audit evidence, and captures a rendered screenshot. |
+| Desktop Slint | `make test-gui-e2e` or `make test-gui-e2e-emulate` | Runs the real GUI binary through the operator workflow (see below), validates durable audit evidence, and captures a rendered screenshot. |
 | Desktop viewport classes | `make test-gui-visual-regression` or `make test-gui-visual-regression-emulate` | Replays the real GUI workflow at desktop, tablet, and narrow/mobile-class viewport sizes and rejects blank or low-information screenshots. |
 | Android Slint | `make test-gui-android-check` | Compile-checks the Rust-native Slint library against the configured Android NDK while preserving native core/vault linkage. Runtime emulator/Maestro coverage remains the next Android gate. |
 | WASM Slint | `make test-gui-wasm-check` | Compile-checks the gated non-secret Slint WASM surface. Secret-handling WASM is not supported until target storage, crypto, and runtime validation are threat-modeled. |
+
+### GUI Automation Environment Variables
+
+The desktop GUI e2e and visual-regression gates drive the real `paranoid-passwd-gui` binary
+headlessly through four environment variables, read once at startup on non-WASM builds:
+
+- `PARANOID_GUI_AUTOMATION_SCENARIO` — the scenario to run. Only `operator` and
+  `operator-workflow` are accepted (both select the same operator-workflow scenario); any other
+  value fails startup with an "unknown GUI automation scenario" error.
+- `PARANOID_GUI_AUTOMATION_VAULT_PATH` — path to the vault the scenario operates against. Required
+  whenever the scenario variable is set.
+- `PARANOID_GUI_AUTOMATION_BACKUP_PATH` — path the scenario exports an encrypted backup to.
+  Required whenever the scenario variable is set.
+- `PARANOID_GUI_AUTOMATION_OUTPUT_PATH` — path the scenario writes its outcome file to. Required
+  whenever the scenario variable is set.
+
+`PARANOID_GUI_AUTOMATION_SCENARIO` unset means the GUI runs normally with no automation. When set,
+the scenario runs and writes a plain-text outcome file to `PARANOID_GUI_AUTOMATION_OUTPUT_PATH`
+with one `key=value` line per field: `status` (`pass` or `fail`), `scenario`, `vault`, `backup`,
+and `message`. The GUI e2e and visual-regression harnesses parse this file to assert the operator
+workflow actually completed rather than just checking the process exit code.
 
 ### Android and WASM Checks Are Local-Only
 

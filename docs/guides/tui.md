@@ -150,9 +150,9 @@ The current vault TUI supports the first native vault workflows:
 - selected-identity detail shows preferred contact metadata and profile notes
 - dedicated keyslot view via `k`
 - first-run environment approval screen with capability evidence and a suggested initial configuration, reachable again anytime via `E`
-- mnemonic recovery-slot enrollment with one-time phrase reveal
-- device-bound keyslot enrollment
-- certificate-wrapped keyslot enrollment from a PEM path
+- mnemonic recovery-slot enrollment via `m`, with one-time phrase reveal
+- device-bound keyslot enrollment via `b`
+- certificate-wrapped keyslot enrollment via `c` (keyslot view only) from a PEM path
 - selected certificate-slot rewrap to a replacement PEM via `w`, with optional replacement key path and passphrase fields to keep an active certificate-authenticated session aligned after rotation
 - certificate-slot detail now includes subject and validity so cert rotation pressure is visible without leaving the native UI
 - the add/rewrap certificate forms now preview the PEM path before mutation so a wrong recipient certificate can be caught before enrollment or rewrap
@@ -186,6 +186,6 @@ The backup flows follow the same pattern as the rest of the vault TUI: `x` opens
 
 Selective transfer flows now live beside backup/restore in the same native vault surface: `t` opens an export form that writes only the currently filtered decrypted item payloads into a separate encrypted transfer package, and `p` opens an import form that brings one of those packages into the unlocked local vault using either the package recovery secret or a certificate keypair.
 
-When the vault is unlocked in either native interactive surface, inactivity now triggers an automatic lock after 5 minutes and clears the cached decrypted list/detail state before returning to the unlock view.
+When the vault is unlocked in either native interactive surface, inactivity now triggers an automatic lock after 5 minutes: it clears the cached decrypted list/detail state, resets vault auth to a non-secret placeholder that forces re-entry on the next unlock attempt, clears any loaded mnemonic phrase, and resets the unlock, recovery-secret rotation, certificate rewrap, export-transfer, and import-transfer forms to their zeroizing defaults, before returning to the unlock view.
 
 The GUI now mirrors the same native keyslot inspection, recovery-posture reporting, shared keyslot recommendations, enrollment, mnemonic rotation, certificate rewrap, relabel, recovery-secret rotation, posture-aware removal confirmation, and rebind flows, direct unlock model, folder-plus-tag organization model, backup and transfer export/import flows, clipboard auto-clear, and idle auto-lock behavior, so mnemonic, device-bound, certificate-wrapped recovery, and encrypted vault exchange no longer depend on CLI-only administration.

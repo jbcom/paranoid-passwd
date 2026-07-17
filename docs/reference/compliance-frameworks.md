@@ -7,8 +7,12 @@ title: Supported Compliance Frameworks
 `--framework ID` (repeatable or comma-separated) checks generated passwords against one or more
 built-in policy presets. Each preset is a fixed set of length, entropy, and character-class
 requirements defined in `crates/paranoid-core/src/lib.rs` (`FrameworkId`, `ComplianceFramework`,
-`FRAMEWORKS`). Selecting a framework does not change how passwords are generated; it adds a
-per-password and batch-level pass/fail check against that preset's requirements.
+`FRAMEWORKS`). Selecting a framework can change how passwords are generated: the effective length
+is raised to the framework's minimum length when it exceeds `--length`, and the framework's
+character-class requirements (mixed case, digits, symbols) are folded into the generation
+requirements alongside a per-password and batch-level pass/fail check against that preset's
+requirements. For example, `--length 8 --framework iso27001` generates a 12-character password
+because ISO 27001's minimum length is 12.
 
 ## Frameworks
 
@@ -41,8 +45,9 @@ paranoid-passwd vault generate-store --title GitHub --username jon@example.com -
 ```
 
 Passing multiple frameworks requires the generated password to satisfy every selected framework's
-requirements, not just one. `--json` and `--audit-jsonl` output report per-framework and combined
-`selected_frameworks_pass` results alongside the rest of the audit.
+requirements, not just one. `--json` output reports per-framework and combined
+`selected_frameworks_pass` results alongside the rest of the audit. `--audit-jsonl` output is
+limited to operational audit events and does not include framework compliance results.
 
 None of these presets are an authorization, certification, or compliance claim for the named
 standard — they are password-strength policy presets modeled on each standard's published password

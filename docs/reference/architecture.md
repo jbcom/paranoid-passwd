@@ -82,7 +82,8 @@ correlation identifiers, not authentication tokens or cryptographic nonces.
   without it because none of them cross a process boundary today, and it stays out of the default
   dependency graph rather than shipping as dead public API. Its integration tests
   (`crates/paranoid-ops/tests/mtls_transport.rs`) run under `make test`/`make ci` via
-  `make test-ops-mtls-transport`, which invokes `cargo test -p paranoid-ops --features mtls-transport`
+  `make test-ops-mtls-transport`, which invokes
+  `bash scripts/cargo_test.sh -p paranoid-ops --locked --frozen --offline --features mtls-transport`
   so the transport keeps full coverage without adding runtime surface to a shipped binary. The
   intended consumer is a future remote-ops surface: a headless agent or service endpoint that
   accepts typed `OpsCommandEnvelope`s over mTLS from a separately authenticated operator or

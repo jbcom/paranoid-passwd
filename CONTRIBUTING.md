@@ -79,14 +79,15 @@ make ci
 1. `cargo fmt --check`
 2. `cargo clippy --workspace --all-targets --locked --frozen --offline -- -D warnings`
 3. `bash scripts/cargo_test.sh --workspace --locked --frozen --offline` (the full workspace test suite)
-4. `make test-cli-contract` (builds the CLI, runs `tests/test_cli.sh` against it)
-5. `make test-tui-e2e` (builds the CLI, runs `tests/test_tui_e2e.py` — a real PTY-driven TUI harness)
-6. the platform GUI e2e target, when the host is Linux (`test-gui-e2e`) — skipped on other hosts
-7. `make test-gui-host-check` (compile-check the host Slint GUI surface)
-8. `make test-vault-e2e` (builds the CLI, runs `tests/test_vault_cli.sh`)
-9. `make test-platform-signing-boundary` (`tests/test_platform_signing_verify.sh`)
-10. `make verify-assurance` (hallucination checks, supply-chain checks, AI review inventory, security assurance gate — see below)
-11. `python3 -m tox -e docs,docs-linkcheck` (build the Sphinx docs site and check outbound links)
+4. `make test-ops-mtls-transport` (`bash scripts/cargo_test.sh -p paranoid-ops --locked --frozen --offline --features mtls-transport`)
+5. `make test-cli-contract` (builds the CLI, runs `tests/test_cli.sh` against it)
+6. `make test-tui-e2e` (builds the CLI, runs `tests/test_tui_e2e.py` — a real PTY-driven TUI harness)
+7. the platform GUI e2e target, when the host is Linux (`test-gui-e2e`) — skipped on other hosts
+8. `make test-gui-host-check` (compile-check the host Slint GUI surface)
+9. `make test-vault-e2e` (builds the CLI, runs `tests/test_vault_cli.sh`)
+10. `make test-platform-signing-boundary` (`tests/test_platform_signing_verify.sh`)
+11. `make verify-assurance` (hallucination checks, supply-chain checks, AI review inventory, security assurance gate — see below)
+12. `python3 -m tox -e docs,docs-linkcheck` (build the Sphinx docs site and check outbound links)
 
 Run this before opening a PR. It is what CI itself runs.
 
@@ -175,8 +176,9 @@ rejection sampling, inverted p-value logic) this codebase has been burned by bef
 | Platform signing boundary | Release platform-signing verifier contract | `make test-platform-signing-boundary` (runs [`tests/test_platform_signing_verify.sh`](tests/test_platform_signing_verify.sh)) |
 | Assurance gate | Hallucination checks, supply-chain checks, AI review inventory, security assurance protocol wiring | `make verify-assurance` |
 
-`make ci` runs unit, CLI contract, TUI PTY e2e, the platform-appropriate GUI e2e, the GUI host
-check, vault e2e, platform signing boundary, and the assurance gate, plus the docs build. `make
+`make ci` runs unit, the paranoid-ops mTLS transport integration tests, CLI contract, TUI PTY e2e,
+the platform-appropriate GUI e2e, the GUI host check, vault e2e, platform signing boundary, and
+the assurance gate, plus the docs build. `make
 quality` adds the full `test-gui-targets` matrix (host + Android + WASM) and GUI visual
 regression. See [`docs/reference/testing.md`](docs/reference/testing.md) for the complete,
 current breakdown of what every test file and Make target covers.

@@ -133,7 +133,7 @@ P6.0 CI research + two-tier trust design.
   vendoring cargo-nextest (precedent: sphinx-rustdocgen) vs make-level
   parallel per-crate test runs; before/after CI timing evidence required;
   linker findings into ci-design.md rejected-options.
-- [ ] P4.S docs-currency sweep (user-elevated) — both-directions pass over
+- [x] P4.S docs-currency sweep (user-elevated) — both-directions pass over
   every docs page vs code (haiku fan-out + sonnet fixes), Sphinx+linkcheck
   green, AGENTS.md/CLAUDE.md accurate to the post-P1 module map.
 - [ ] P4.V live-site verification (post-#146 merge) — WebFetch the deployed

@@ -17,7 +17,7 @@ The current shipped surface includes two native binaries:
 - `paranoid-passwd`, which contains the scriptable CLI, the default interactive TUI, and the `vault` command namespace
 - `paranoid-passwd-gui`, which contains the dedicated desktop application surface
 
-`install.sh` and package-manager distribution remain scoped to `paranoid-passwd`. The GUI is distributed as a direct artifact until native installers land on every platform; macOS GUI archives unpack to a `Paranoid Passwd.app` bundle and macOS also publishes native `.dmg` images, Linux GUI archives include both `share/applications/paranoid-passwd-gui.desktop` and `share/metainfo/paranoid-passwd-gui.appdata.xml`, and Linux publishes `.deb` packages for both binaries.
+`install.sh` and package-manager distribution remain scoped to `paranoid-passwd`. macOS GUI archives unpack to a `Paranoid Passwd.app` bundle and macOS also publishes native `.dmg` images, Windows also publishes a native `.msi` installer for the GUI alongside the `.zip` archive, Linux GUI archives include both `share/applications/paranoid-passwd-gui.desktop` and `share/metainfo/paranoid-passwd-gui.appdata.xml`, and Linux publishes `.deb` packages for both binaries.
 
 ## Archive Matrix
 
@@ -37,6 +37,7 @@ Release assets use the current naming scheme:
 - `paranoid-passwd-gui-<version>-darwin-amd64.dmg`
 - `paranoid-passwd-gui-<version>-darwin-arm64.dmg`
 - `paranoid-passwd-gui-<version>-windows-amd64.zip`
+- `paranoid-passwd-gui-<version>-windows-amd64.msi`
 - `paranoid-passwd-gui_<version>_amd64.deb`
 - `paranoid-passwd-gui_<version>_arm64.deb`
 
