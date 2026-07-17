@@ -1,15 +1,15 @@
 use crate::{
-    AES_GCM_NONCE_LEN, AES_GCM_TAG_LEN, CERTIFICATE_MASTER_KEY_AAD, CardRecord,
-    CertificateKeyslotWrapMode, CertificateWrappedSecret, DEFAULT_ITERATIONS,
-    DEFAULT_MEMORY_COST_KIB, DEFAULT_PARALLELISM, DEVICE_AAD_PREFIX, DEVICE_CHECK_PLAINTEXT,
-    FORMAT_VERSION, GenerateStoreLoginRecord, ITEM_AAD_PREFIX, IdentityRecord, LockedSecretBuffer,
-    LoginRecord, MASTER_KEY_AAD, MASTER_KEY_LEN, MNEMONIC_AAD_PREFIX, NewCardRecord,
-    NewIdentityRecord, NewLoginRecord, NewSecureNoteRecord, NormalizedVaultItemFilter,
-    PASSWORD_WRAP_ALGORITHM, PasswordHistoryEntry, SQLITE_APPLICATION_ID, SecureNoteRecord,
-    UpdateCardRecord, UpdateIdentityRecord, UpdateLoginRecord, UpdateSecureNoteRecord, VaultError,
-    VaultHeader, VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary,
-    VaultKdfParams, VaultKeyslot, VaultKeyslotKind, certificate_keyslot_metadata, check_lockout,
-    clear_lockout, decode_certificate_slot_hex, load_certificate, load_private_key,
+    AES_GCM_NONCE_LEN, AES_GCM_TAG_LEN, CERTIFICATE_MASTER_KEY_AAD, CalibrationOutcome, CardRecord,
+    CertificateKeyslotWrapMode, CertificateWrappedSecret, DEFAULT_KDF_CALIBRATION_TARGET,
+    DEFAULT_MEMORY_COST_KIB, DEVICE_AAD_PREFIX, DEVICE_CHECK_PLAINTEXT, FORMAT_VERSION,
+    GenerateStoreLoginRecord, ITEM_AAD_PREFIX, IdentityRecord, LockedSecretBuffer, LoginRecord,
+    MASTER_KEY_AAD, MASTER_KEY_LEN, MNEMONIC_AAD_PREFIX, NewCardRecord, NewIdentityRecord,
+    NewLoginRecord, NewSecureNoteRecord, NormalizedVaultItemFilter, PASSWORD_WRAP_ALGORITHM,
+    PasswordHistoryEntry, SQLITE_APPLICATION_ID, SecureNoteRecord, UpdateCardRecord,
+    UpdateIdentityRecord, UpdateLoginRecord, UpdateSecureNoteRecord, VaultError, VaultHeader,
+    VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary, VaultKdfParams,
+    VaultKeyslot, VaultKeyslotKind, calibrate_kdf_params, certificate_keyslot_metadata,
+    check_lockout, clear_lockout, decode_certificate_slot_hex, load_certificate, load_private_key,
     mnemonic_entropy_from_phrase, record_failed_unlock, select_device_keyslot,
     select_mnemonic_keyslot, unwrap_legacy_secret_with_certificate, unwrap_secret_with_certificate,
     validate_certificate_keyslot_metadata, validate_mnemonic_keyslot_metadata,
@@ -616,13 +616,24 @@ pub fn init_vault_unlocked(
     let salt_bytes = random_bytes(16)?;
     let salt = SaltString::encode_b64(salt_bytes.as_slice())
         .map_err(|error| VaultError::Argon2(error.to_string()))?;
-    let params = VaultKdfParams {
-        algorithm: "argon2id".to_string(),
-        memory_cost_kib: DEFAULT_MEMORY_COST_KIB,
-        iterations: DEFAULT_ITERATIONS,
-        parallelism: DEFAULT_PARALLELISM,
-        derived_key_len: MASTER_KEY_LEN,
-    };
+    // P9.5: calibrate Argon2id params to this host's wall-clock cost rather
+    // than always writing the fixed DEFAULT_* constants. `calibrate_kdf_params`
+    // clamps memory_cost_kib to MEMORY_COST_FLOOR_KIB (== DEFAULT_MEMORY_COST_KIB)
+    // on every path, including its own fallback, so this can only ever
+    // strengthen the params relative to the old fixed default, never weaken
+    // them. On a constrained host where the floor-memory benchmark itself
+    // fails, calibration falls back to the fixed defaults and that fallback
+    // is surfaced here rather than silently swallowed.
+    let calibration = calibrate_kdf_params(DEFAULT_KDF_CALIBRATION_TARGET, MASTER_KEY_LEN);
+    if calibration.outcome == CalibrationOutcome::FallbackToDefaults {
+        eprintln!(
+            "warning: Argon2id runtime calibration failed on this host; falling back to \
+             the fixed default KDF parameters (memory_cost_kib={}, iterations={})",
+            calibration.params.memory_cost_kib, calibration.params.iterations
+        );
+    }
+    let params = calibration.params;
+    debug_assert!(params.memory_cost_kib >= DEFAULT_MEMORY_COST_KIB);
     let kek = derive_key(master_password, &salt, &params)?;
     let master_key = random_bytes(MASTER_KEY_LEN)?;
     let wrapped = encrypt_blob(kek.as_slice(), MASTER_KEY_AAD, master_key.as_slice())?;

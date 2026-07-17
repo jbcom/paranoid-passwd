@@ -3,6 +3,7 @@ mod native_access;
 mod backup_transfer;
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 mod clipboard_hardening;
+mod kdf_calibration;
 mod keyslots;
 mod lifecycle;
 mod lockout;
@@ -12,6 +13,7 @@ mod recovery_posture;
 pub use backup_transfer::*;
 #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 pub use clipboard_hardening::set_clipboard_text_excluded;
+pub use kdf_calibration::*;
 pub use keyslots::*;
 pub use lifecycle::*;
 pub use lockout::*;
@@ -524,6 +526,36 @@ mod tests {
         let vault = unlock_vault(&path, "correct horse battery staple")
             .expect("legacy-params vault must still unlock");
         assert_eq!(vault.list_items().expect("list").len(), 0);
+    }
+
+    #[test]
+    fn calibrated_kdf_params_persist_and_are_honored_on_fresh_unlock() {
+        // P9.5: vault creation calibrates Argon2id params to this host
+        // rather than always writing the fixed DEFAULT_* constants, and
+        // unlock must use whatever ended up in the header — not the fixed
+        // defaults — since a calibrated host can land on a different
+        // iteration count. Read the header back independently (not the
+        // handle returned by init) and unlock with a freshly opened
+        // connection to prove the persisted params, not an in-memory
+        // value, are what makes unlock succeed.
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let persisted_header = read_vault_header(&path).expect("read header");
+        assert!(persisted_header.kdf.memory_cost_kib >= DEFAULT_MEMORY_COST_KIB);
+        assert!(persisted_header.kdf.iterations >= 1);
+
+        let vault = unlock_vault(&path, "correct horse battery staple")
+            .expect("unlock must honor the persisted calibrated kdf params");
+        assert_eq!(
+            vault.header().kdf.memory_cost_kib,
+            persisted_header.kdf.memory_cost_kib
+        );
+        assert_eq!(
+            vault.header().kdf.iterations,
+            persisted_header.kdf.iterations
+        );
     }
 
     #[test]
