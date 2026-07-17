@@ -140,7 +140,7 @@ P6.0 CI research + two-tier trust design.
   Pages site; spot-check contributing/compliance-frameworks/testing/ci-design.
 - [ ] P7.1 Atomic backup restore — temp-sibling DB + atomic replace
   (mutation_handlers.rs:418, #146 review).
-- [ ] P7.2 Auto-lock hardening — never on EnvironmentApproval; purge
+- [x] P7.2 Auto-lock hardening — never on EnvironmentApproval; purge
   options.auth + secret forms on lock (screen_state.rs:1584).
 - [ ] P7.3 Export safety — reject source==destination; temp-file atomic
   rename (backup_transfer.rs:210).

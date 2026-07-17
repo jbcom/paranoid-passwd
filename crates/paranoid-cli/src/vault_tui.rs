@@ -2302,6 +2302,73 @@ mod tests {
     }
 
     #[test]
+    fn idle_timeout_does_not_fire_on_environment_approval() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+
+        let mut app = App::new(password_only_options(&path));
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
+        assert!(!app.environment_approval.resolved);
+
+        app.session = NativeSessionHardening::with_timeouts(
+            Duration::from_millis(10),
+            Duration::from_millis(10),
+        );
+        thread::sleep(Duration::from_millis(15));
+        app.poll_hardening();
+
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
+        assert!(!app.environment_approval.resolved);
+        assert!(!app.status.contains("auto-locked"));
+    }
+
+    #[test]
+    fn idle_timeout_purges_auth_and_secret_bearing_forms() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+
+        app.options.auth = VaultAuth::Password(SecretString::new(
+            "correct horse battery staple".to_string(),
+        ));
+        app.unlock_form.password = SecretString::new("unlock-secret".to_string());
+        app.unlock_form.mnemonic_phrase = SecretString::new("mnemonic-secret".to_string());
+        app.unlock_form.key_passphrase = SecretString::new("unlock-key-pass".to_string());
+        app.recovery_secret_form.new_secret = SecretString::new("recovery-new".to_string());
+        app.recovery_secret_form.confirm_secret = SecretString::new("recovery-confirm".to_string());
+        app.certificate_rewrap_form.key_passphrase = SecretString::new("rewrap-pass".to_string());
+        app.export_transfer_form.package_password =
+            SecretString::new("export-package-pass".to_string());
+        app.import_transfer_form.package_password =
+            SecretString::new("import-package-pass".to_string());
+        app.import_transfer_form.key_passphrase = SecretString::new("import-key-pass".to_string());
+
+        app.session = NativeSessionHardening::with_timeouts(
+            Duration::from_millis(10),
+            Duration::from_millis(10),
+        );
+        thread::sleep(Duration::from_millis(15));
+        app.poll_hardening();
+
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(matches!(app.options.auth, VaultAuth::PasswordEnv(_)));
+        assert!(app.unlock_form.password.is_empty());
+        assert!(app.unlock_form.mnemonic_phrase.is_empty());
+        assert!(app.unlock_form.key_passphrase.is_empty());
+        assert!(app.recovery_secret_form.new_secret.is_empty());
+        assert!(app.recovery_secret_form.confirm_secret.is_empty());
+        assert!(app.certificate_rewrap_form.key_passphrase.is_empty());
+        assert!(app.export_transfer_form.package_password.is_empty());
+        assert!(app.import_transfer_form.package_password.is_empty());
+        assert!(app.import_transfer_form.key_passphrase.is_empty());
+    }
+
+    #[test]
     fn generate_request_preview_rejects_unknown_frameworks() {
         let preview = generate_request_preview(&GenerateStoreForm {
             frameworks: "unknown".to_string(),

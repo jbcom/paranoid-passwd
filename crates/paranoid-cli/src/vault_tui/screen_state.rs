@@ -52,6 +52,19 @@ pub(crate) enum Screen {
     DeleteConfirm,
 }
 
+impl Screen {
+    /// `true` for every screen reachable only after a successful vault
+    /// unlock. `EnvironmentApproval` and `UnlockBlocked` are pre-unlock
+    /// screens and must never be idle auto-locked: `EnvironmentApproval`
+    /// would otherwise let an idle timeout silently accept vault
+    /// initialization without the user ever confirming the suggested
+    /// configuration, and `UnlockBlocked` has no unlocked state left to
+    /// clear.
+    pub(crate) fn is_unlocked_vault_screen(self) -> bool {
+        !matches!(self, Self::EnvironmentApproval | Self::UnlockBlocked)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VaultFilterField {
     Query,
@@ -1556,7 +1569,7 @@ impl App {
             }
         }
 
-        if !matches!(self.screen, Screen::UnlockBlocked) && self.session.should_auto_lock() {
+        if self.screen.is_unlocked_vault_screen() && self.session.should_auto_lock() {
             let clipboard_cleared = match self.session.take_pending_clipboard_contents() {
                 Some(expected) => clear_clipboard_if_matches(expected.as_str()).unwrap_or(false),
                 None => false,
@@ -1570,6 +1583,7 @@ impl App {
             self.editing_item_id = None;
             self.latest_mnemonic_enrollment = None;
             self.screen = Screen::UnlockBlocked;
+            self.purge_secret_state_on_lock();
             self.session.note_activity();
             self.status = if clipboard_cleared {
                 format!(
@@ -1583,6 +1597,23 @@ impl App {
                 )
             };
         }
+    }
+
+    /// Purges every secret-bearing field reachable from an unlocked-vault
+    /// screen once auto-lock (or an explicit lock) fires. `options.auth`
+    /// is reset to a non-secret `PasswordEnv` placeholder that forces
+    /// re-entry on the next unlock attempt, and every form that can hold a
+    /// `SecretString` is reset to its default so the zeroizing drop scrubs
+    /// the old plaintext immediately instead of leaving it resident until
+    /// the next time that form happens to be reused.
+    pub(crate) fn purge_secret_state_on_lock(&mut self) {
+        self.options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
+        self.options.mnemonic_phrase = None;
+        self.unlock_form = UnlockForm::default();
+        self.recovery_secret_form = RecoverySecretForm::default();
+        self.certificate_rewrap_form = CertificateRewrapForm::default();
+        self.export_transfer_form = ExportTransferForm::default();
+        self.import_transfer_form = ImportTransferForm::default();
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> bool {
