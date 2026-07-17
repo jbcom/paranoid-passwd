@@ -659,6 +659,44 @@ mod tests {
         assert!(normal_footer.contains("other ways in"));
     }
 
+    /// P8.V.11: panic-lock must render the ia.md §5 S14 centered "⊘ Locked."
+    /// state, distinct in shape and title from S15's ordinary two-pane
+    /// unlock form — evidence.md's finding #1 was that `Ctrl+L` dropped
+    /// straight into `unlock_blocked_panel` (the everyday wrong-password
+    /// screen) with the title bar still reading "Vault". Pins the actual
+    /// rendered frame, not just the state flags.
+    #[test]
+    fn panic_lock_renders_the_centered_s14_locked_state_distinct_from_ordinary_unlock() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(app.just_locked);
+
+        let locked_rendered = render_to_string(&app);
+        assert!(locked_rendered.contains("Locked"));
+        assert!(locked_rendered.contains("Unlock"));
+        // The just-locked S14 render must NOT show the S15 unlock form's
+        // field prompts — the two must not be confusable by shape (P8.V.11,
+        // journeys.md J6b "speed is the safety property").
+        assert!(!locked_rendered.contains("Unlock mode"));
+        assert!(!locked_rendered.contains("Recovery secret"));
+
+        // Any interaction beyond quitting reverts to the ordinary S15
+        // two-pane unlock form, which DOES show the field prompts.
+        press_key(&mut app, KeyCode::Char('p'));
+        assert!(!app.just_locked);
+        let unlocked_rendered = render_to_string(&app);
+        assert!(unlocked_rendered.contains("Unlock mode"));
+    }
+
     /// P8.5 (b) monochrome-pass regression: system.md §1.1 "the test" — a
     /// state must remain distinguishable by symbol + word alone with all
     /// color stripped. Every `UnlockBlocked` visit (S14 just-locked and

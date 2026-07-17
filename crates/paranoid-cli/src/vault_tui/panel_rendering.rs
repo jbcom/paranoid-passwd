@@ -7,7 +7,7 @@ use paranoid_vault::{
 };
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
@@ -28,8 +28,8 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
     render_header(
         frame,
         chunks[0],
-        header_title(app.screen),
-        header_subtitle(app.screen),
+        header_title(app),
+        header_subtitle(app),
         header_state_token(app),
     );
 
@@ -38,6 +38,12 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
             .style(
                 Style::default()
                     .fg(match app.screen {
+                        // S14 (ia.md §5): locking is the safe state, not a
+                        // failure — `color.text.muted`, matching the `⊘`
+                        // token's own color rule (never danger red for a
+                        // successful lock; P8.V.11). S15's ordinary
+                        // failed-unlock status keeps red.
+                        Screen::UnlockBlocked if app.just_locked => theme::TEXT_MUTED,
                         Screen::UnlockBlocked => RED,
                         _ => AMBER,
                     })
@@ -58,7 +64,8 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
             | Screen::Verified
             | Screen::TrustFingerprint
             | Screen::ItemDetail
-    ) {
+    ) || (matches!(app.screen, Screen::UnlockBlocked) && app.just_locked)
+    {
         frame.render_widget(right_panel(app), chunks[2]);
     } else {
         // ia.md §1 rule 4: fixed two-pane skeleton (primary + detail) — no
@@ -190,8 +197,8 @@ pub(crate) fn header_state_token(app: &App) -> Option<(&'static str, Color)> {
     }
 }
 
-pub(crate) fn header_title(screen: Screen) -> &'static str {
-    match screen {
+pub(crate) fn header_title(app: &App) -> &'static str {
+    match app.screen {
         Screen::TrustGate => "Verify this copy",
         Screen::Verifying => "Verifying…",
         Screen::Verified => "Verified",
@@ -200,6 +207,9 @@ pub(crate) fn header_title(screen: Screen) -> &'static str {
         Screen::Vault => "Vault",
         Screen::ItemDetail => "Item",
         Screen::Keyslots => "Ways in",
+        // ia.md §5 S14: the just-locked title reads "Locked", distinct from
+        // S15's ordinary "Vault" unlock-prompt title (P8.V.11).
+        Screen::UnlockBlocked if app.just_locked => "Locked",
         Screen::UnlockBlocked => "Vault",
         Screen::AddLogin => "Add Login",
         Screen::EditLogin => "Edit Login",
@@ -227,8 +237,8 @@ pub(crate) fn header_title(screen: Screen) -> &'static str {
     }
 }
 
-pub(crate) fn header_subtitle(screen: Screen) -> &'static str {
-    match screen {
+pub(crate) fn header_subtitle(app: &App) -> &'static str {
+    match app.screen {
         Screen::TrustGate => {
             "Before you trust this program with anything, confirm it is the genuine, unmodified release."
         }
@@ -247,6 +257,10 @@ pub(crate) fn header_subtitle(screen: Screen) -> &'static str {
         Screen::Keyslots => {
             "The keys and phrases that can open this vault. Add a recovery phrase, bind a device, or remove a way in you no longer trust."
         }
+        // ia.md §5 S14 (brand.md §3 micro-example, verbatim): a minimal,
+        // reassurance-free subtitle — the product states the fact and stops,
+        // never "you're safe" (brand.md §3 rule 4).
+        Screen::UnlockBlocked if app.just_locked => "Nothing is readable until you unlock again.",
         Screen::UnlockBlocked => {
             "Unlock uses the same password, mnemonic, device, and certificate paths as the CLI, now with direct native input."
         }
@@ -476,6 +490,11 @@ pub(crate) fn right_panel(app: &App) -> Paragraph<'static> {
         Screen::EnvironmentApproval => environment_approval_panel(app),
         Screen::Vault => detail_panel(app),
         Screen::ItemDetail => item_detail_panel(app),
+        // S14 vs S15 (ia.md §5): a just-locked visit renders the centered
+        // `⊘ Locked.` state (`locked_panel`), never the ordinary two-pane
+        // unlock form — the two are visually distinct so a panic-lock is
+        // never confusable with an everyday unlock prompt (P8.V.11).
+        Screen::UnlockBlocked if app.just_locked => locked_panel(app),
         Screen::UnlockBlocked => unlock_blocked_panel(app),
         Screen::AddLogin | Screen::EditLogin => add_login_panel(app),
         Screen::AddNote | Screen::EditNote => add_note_panel(app),
@@ -798,6 +817,41 @@ pub(crate) fn environment_approval_panel(app: &App) -> Paragraph<'static> {
                 .title("Environment Approval")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
+}
+
+/// S14 (ia.md §5, P8.V.11): the centered "⊘ Locked." state a panic-lock or
+/// idle auto-lock transitions to. Deliberately NOT the two-pane unlock form
+/// `unlock_blocked_panel` renders for S15 — a shoulder-surfer or coercive
+/// third party must not be able to tell "panic-locked" from "an ordinary
+/// wrong-password screen" by shape alone (journeys.md J6b, "speed is the
+/// safety property"; brand.md §2.3), and the persona under duress benefits
+/// from an unambiguous, unmistakable "it worked" signal. Copy is the
+/// brand.md §3 micro-example verbatim, carried in `app.status` (set by
+/// `handle_panic_lock_hotkey`/idle auto-lock) — never "you're safe"
+/// (brand.md §3 rule 4).
+pub(crate) fn locked_panel(_app: &App) -> Paragraph<'static> {
+    let lines = vec![
+        Line::raw(""),
+        Line::styled(
+            format!("{ICON_LOCKED}  Locked."),
+            theme::locked().add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(""),
+        Line::styled(
+            format!("{ICON_ACTION} Unlock"),
+            theme::accent_action(),
+        ),
+    ];
+    Paragraph::new(Text::from(lines))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .title("Locked")
+                .borders(Borders::ALL)
+                .border_style(theme::locked())
                 .style(Style::default().bg(PANEL).fg(TEXT)),
         )
         .wrap(Wrap { trim: false })
