@@ -98,9 +98,13 @@ answer:
 
 For UI-sensitive changes, the disposition must also cite rendered screenshot artifacts from
 `make test-gui-visual-regression` on Linux or `make test-gui-visual-regression-emulate` on macOS.
-The viewport classes are desktop, tablet, and narrow/mobile-class. The default artifact set is
-`dist/release/gui-e2e-desktop.png`, `dist/release/gui-e2e-tablet.png`, and
-`dist/release/gui-e2e-mobile.png`.
+That harness captures one screenshot per named screen in the GUI's screen graph, for both a real
+vault pass and a decoy vault pass, into `tests/baseline/gui/` (the committed baseline). The default
+artifact set includes `tests/baseline/gui/00-real-trust-gate.png`,
+`tests/baseline/gui/02-real-vault-list.png`, `tests/baseline/gui/07-real-locked.png`, and their
+`decoy`-pass counterparts — cite the specific screen(s) the change touches, plus the matching
+`decoy` frame when the change is anywhere near the real/decoy skeleton-identity invariant
+(journeys.md invariant 5).
 
 ## Closeout Rules
 

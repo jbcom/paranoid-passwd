@@ -37,6 +37,7 @@ docs/api/crates/
 *.png
 !vendor/**
 !docs/design/evidence/*.png
+!tests/baseline/gui/*.png
 
 # Claude Code project settings (local, not committed)
 .claude/

@@ -442,6 +442,8 @@ fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
     let runtime_config = GuiRuntimeConfig::from_launch_options(&options);
     let state = Rc::new(RefCell::new(GuiState::with_runtime_config(runtime_config)));
 
+    let mut screen_sequence: Option<ScreenSequence> = None;
+
     if let Ok(Some(automation)) = configured_gui_automation() {
         let result = run_operator_automation(&mut state.borrow_mut(), &automation);
         match result {
@@ -473,6 +475,13 @@ fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
                         .borrow_mut()
                         .set_error("GUI automation outcome write failed", error);
                 }
+                // P8.5: the visual-regression harness needs one screenshot
+                // PER SCREEN (ia.md §6's screen graph), not the single
+                // end-of-run frame this scenario captured before — see
+                // docs/design/evidence.md's "GUI e2e harness only ever
+                // captures one end-of-run screenshot" finding. Configured
+                // only by the harness, never by a real launch.
+                screen_sequence = configured_screen_sequence();
             }
             Err(error) => {
                 state.borrow_mut().automation_status = "Automation failed".to_string();
@@ -510,9 +519,151 @@ fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
     // correct order.
     window.show()?;
     apply_requested_window_size(&window);
+
+    // P8.5: keeps the timer alive for the duration of the event loop; a
+    // `Timer` dropped early stops firing.
+    let _screen_sequence_timer =
+        screen_sequence.map(|sequence| drive_screen_sequence(&window, sequence));
+
     slint::run_event_loop()?;
     window.hide()?;
     Ok(())
+}
+
+/// P8.5 multi-screen capture sequence: an ordered walk of every named
+/// `screen` in `paranoid.slint`'s screen graph (ia.md §2/§6), each held
+/// stable long enough for an external screenshot tool (the Xvfb harness in
+/// `tests/test_gui_e2e.sh`) to capture it before advancing. Two full passes
+/// run back to back — one against the real unlocked vault the automation
+/// just populated, one against a synthetic "decoy" run with
+/// `PARANOID_GUI_AUTOMATION_DECOY_LABEL` overlaid on the vault path shown in
+/// the header — so the harness can diff the two frame-by-frame and assert
+/// the skeleton (title/content/action-bar regions) is byte-identical outside
+/// the label text itself (journeys.md invariant 5, ia.md §1 rule 4).
+#[cfg(not(target_arch = "wasm32"))]
+struct ScreenSequence {
+    marker_dir: PathBuf,
+    real_vault_label: String,
+    decoy_vault_label: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn configured_screen_sequence() -> Option<ScreenSequence> {
+    let marker_dir = env::var_os("PARANOID_GUI_AUTOMATION_SCREEN_SEQUENCE_DIR")?;
+    let real_vault_label =
+        env::var("PARANOID_GUI_AUTOMATION_REAL_LABEL").unwrap_or_else(|_| "vault".to_string());
+    let decoy_vault_label =
+        env::var("PARANOID_GUI_AUTOMATION_DECOY_LABEL").unwrap_or_else(|_| "decoy".to_string());
+    Some(ScreenSequence {
+        marker_dir: PathBuf::from(marker_dir),
+        real_vault_label,
+        decoy_vault_label,
+    })
+}
+
+/// The ordered screen graph P8.5 (a) requires every capture mode to walk:
+/// every named `screen` value `paranoid.slint`'s `if root.screen == "..."`
+/// chain recognizes (ia.md §2 "The screen graph" / §6 "GUI layout specs"),
+/// in traversal order (trust gate first, locked last).
+#[cfg(not(target_arch = "wasm32"))]
+const SCREEN_SEQUENCE: &[&str] = &[
+    "trust-gate",
+    "verified",
+    "vault-list",
+    "add-item",
+    "item-detail",
+    "generate",
+    "ways-in",
+    "locked",
+];
+
+/// Drives `window` through [`SCREEN_SEQUENCE`] twice — once labeled "real",
+/// once labeled "decoy" — writing a `<pass>-<NN>-<screen>.ready` marker file
+/// each time a frame is stable and waiting for the harness to remove it
+/// (rename to `.captured` observed via absence) before advancing, then
+/// writes a final `sequence.done` marker and quits the event loop. Runs
+/// entirely off `Timer` polling — never blocks the event loop thread, per
+/// ia.md §6 "non-blocking is a GUI contract too."
+#[cfg(not(target_arch = "wasm32"))]
+fn drive_screen_sequence(
+    window: &slint_shell::ParanoidPasswdShell,
+    sequence: ScreenSequence,
+) -> Rc<slint::Timer> {
+    let _ = fs::create_dir_all(&sequence.marker_dir);
+    let weak = window.as_weak();
+    let steps: Vec<(&'static str, &'static str, String)> = [
+        ("real", sequence.real_vault_label),
+        ("decoy", sequence.decoy_vault_label),
+    ]
+    .into_iter()
+    .flat_map(|(pass, label)| {
+        SCREEN_SEQUENCE
+            .iter()
+            .map(move |screen| (pass, *screen, label.clone()))
+    })
+    .collect();
+    let state = Rc::new(RefCell::new(ScreenSequenceState {
+        steps,
+        index: 0,
+        marker_dir: sequence.marker_dir,
+        awaiting_capture: false,
+    }));
+    let timer = Rc::new(slint::Timer::default());
+    let timer_handle = Rc::clone(&timer);
+    timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(50),
+        move || {
+            let Some(window) = weak.upgrade() else {
+                timer_handle.stop();
+                return;
+            };
+            let mut state = state.borrow_mut();
+            if state.awaiting_capture {
+                let ready_path = state.ready_marker_path();
+                if !ready_path.exists() {
+                    // Harness consumed (removed) the marker: advance.
+                    state.awaiting_capture = false;
+                    state.index += 1;
+                }
+                return;
+            }
+            if state.index >= state.steps.len() {
+                let _ = fs::write(state.marker_dir.join("sequence.done"), b"done\n");
+                timer_handle.stop();
+                let _ = slint::quit_event_loop();
+                return;
+            }
+            let (pass, screen, label) = state.steps[state.index].clone();
+            window.set_screen(screen.into());
+            window.set_vault_path(label.clone().into());
+            window.set_vault_unlocked(screen != "trust-gate" && screen != "verified");
+            let marker_path = state.ready_marker_path();
+            let _ = fs::write(
+                &marker_path,
+                format!("pass={pass}\nscreen={screen}\nindex={}\n", state.index),
+            );
+            state.awaiting_capture = true;
+        },
+    );
+    timer
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ScreenSequenceState {
+    steps: Vec<(&'static str, &'static str, String)>,
+    index: usize,
+    marker_dir: PathBuf,
+    awaiting_capture: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ScreenSequenceState {
+    fn ready_marker_path(&self) -> PathBuf {
+        let (pass, screen, _label) = &self.steps[self.index];
+        self.marker_dir
+            .join(format!("{:02}-{pass}-{screen}.ready", self.index))
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

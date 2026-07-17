@@ -38,7 +38,15 @@ else
   pass "no ad hoc randomness helpers detected"
 fi
 
-if rg -n '\bunsafe\b' \
+# Matches the Rust `unsafe` KEYWORD in actual code position (`unsafe fn`,
+# `unsafe impl`, `unsafe trait`, `unsafe {`, `unsafe extern`) — not the
+# English word "unsafe" appearing in a doc comment's prose (e.g.
+# "...which is honest rather than unsafe."). A prior version of this check
+# matched `\bunsafe\b` unconditionally, which false-positived on any comment
+# using the word and made this gate permanently red regardless of whether
+# real `unsafe` code existed — the exact "every warning is real signal"
+# failure mode this repo's standing doctrine exists to catch.
+if rg -n -P '^(?!\s*(///|//)).*\bunsafe\s+(fn|impl|trait|extern)\b|^(?!\s*(///|//)).*\bunsafe\s*\{' \
   "$REPO_ROOT/crates/paranoid-core/src" \
   "$REPO_ROOT/crates/paranoid-cli/src" \
   --glob '*.rs' >/dev/null 2>&1; then

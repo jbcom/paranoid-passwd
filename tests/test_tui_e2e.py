@@ -32,6 +32,82 @@ def normalize_match(text: str) -> str:
     return "".join(text.split())
 
 
+# ratatui's crossterm backend is a diff renderer: each `terminal.draw()` only
+# re-emits the cells that changed since the last frame, using CSI cursor
+# positioning (`\x1b[row;colH`) to jump to each changed run rather than
+# repainting the whole screen. `clean_screen`'s naive "strip ANSI, concat
+# bytes" approach is correct for content a screen writes fresh every frame,
+# but SILENTLY DROPS unchanged cells that share a prefix with a prior
+# screen's content at the same position (e.g. two footers that both start
+# with "↑↓ move  ⏎ " — ratatui leaves those columns alone, so the raw byte
+# stream never re-emits them for the new screen, even though they are still
+# genuinely on screen). A naive substring match against the raw stream can
+# therefore report a false "not found" for text that IS visibly rendered.
+#
+# `TerminalGrid` replays the byte stream against a real character grid
+# (cursor position + erase-display only — the only CSI kinds ratatui's
+# CrosstermBackend emits, per an empirical capture of every screen this
+# harness visits) so footer/state-token assertions (P8.5 (b)/(c)) check
+# what is actually on screen, not an artifact of the diff-encoding.
+# The optional `?` prefix marks a DEC private-mode sequence (e.g. `\x1b[?25l`
+# / `\x1b[?25h` to hide/show the cursor, which crossterm's CrosstermBackend
+# emits around every draw). Without matching (and discarding) the `?`, those
+# 6 literal bytes fall through to `_write()` as if they were printable
+# characters, silently corrupting the cursor-column tracking for the rest of
+# that escape run — this was a real bug caught while re-baselining P8.5 (see
+# git history for the `⊘` glyph false-negative it produced).
+CSI_RE = re.compile(r"\x1b\[\??([0-9;]*)([A-Za-z])")
+
+
+class TerminalGrid:
+    def __init__(self, rows: int = 40, cols: int = 120):
+        self.rows = rows
+        self.cols = cols
+        self.grid = [[" "] * cols for _ in range(rows)]
+        self.cursor_row = 0
+        self.cursor_col = 0
+
+    def feed(self, raw: bytes):
+        text = raw.decode("utf-8", errors="ignore").replace("\r", "")
+        pos = 0
+        for match in CSI_RE.finditer(text):
+            # Plain text between the previous escape sequence and this one.
+            self._write(text[pos : match.start()])
+            params, kind = match.group(1), match.group(2)
+            if kind == "H":
+                parts = params.split(";") if params else []
+                row = int(parts[0]) if len(parts) > 0 and parts[0] else 1
+                col = int(parts[1]) if len(parts) > 1 and parts[1] else 1
+                self.cursor_row = max(0, min(self.rows - 1, row - 1))
+                self.cursor_col = max(0, min(self.cols - 1, col - 1))
+            elif kind == "J":
+                # ED — erase in display. `2`/absent-before-CSI-2J clears the
+                # whole screen; ratatui issues this once on `terminal.clear()`
+                # at startup. Any mode value clears the whole grid here —
+                # conservative, and this harness never needs partial-erase
+                # fidelity.
+                self.grid = [[" "] * self.cols for _ in range(self.rows)]
+            # `m` (SGR) and any other CSI kind carry no grid-position effect
+            # for this harness's purposes; skip silently.
+            pos = match.end()
+        self._write(text[pos:])
+
+    def _write(self, text: str):
+        for char in text:
+            if char == "\n":
+                self.cursor_row = min(self.rows - 1, self.cursor_row + 1)
+                self.cursor_col = 0
+                continue
+            if self.cursor_row >= self.rows:
+                continue
+            if self.cursor_col < self.cols:
+                self.grid[self.cursor_row][self.cursor_col] = char
+                self.cursor_col += 1
+
+    def render_text(self) -> str:
+        return "\n".join("".join(row) for row in self.grid)
+
+
 class PtySession:
     def __init__(self, argv, env=None):
         self.argv = argv
@@ -39,6 +115,16 @@ class PtySession:
         self.pid = None
         self.fd = None
         self.buffer = bytearray()
+        # P8.5: a live terminal-grid replay of the same byte stream, so
+        # footer/state-token assertions see the true current screen content
+        # instead of the raw-byte-concat artifacts `clean_screen` produces
+        # for cells ratatui's diff renderer left unchanged (see
+        # `TerminalGrid`'s docstring). `_grid_consumed` tracks how much of
+        # `self.buffer` has already been fed in, so re-feeding is O(new
+        # bytes) even though `read_available`/`wait_for` keep appending to
+        # the same growing `self.buffer`.
+        self.grid = TerminalGrid()
+        self._grid_consumed = 0
 
     def __enter__(self):
         pid, fd = pty.fork()
@@ -104,7 +190,39 @@ class PtySession:
 
     def checkpoint(self):
         self.read_available()
+        self.sync_grid()
         self.buffer.clear()
+        self._grid_consumed = 0
+
+    def sync_grid(self):
+        """Feeds any bytes appended to `self.buffer` since the last sync
+        into `self.grid`, so `self.grid.render_text()` reflects the true
+        current screen. Idempotent — safe to call as often as needed."""
+        if self._grid_consumed < len(self.buffer):
+            self.grid.feed(bytes(self.buffer[self._grid_consumed :]))
+            self._grid_consumed = len(self.buffer)
+
+    def wait_for_screen_text(self, needle: str, timeout: float = 10.0) -> str:
+        """Like `wait_for`, but matches against the replayed terminal grid
+        (`self.grid.render_text()`) instead of the raw concatenated byte
+        stream — see `TerminalGrid`'s docstring for why this matters for
+        content ratatui's diff renderer left un-re-emitted. Use this (not
+        `wait_for`) for footer/state-token assertions; `wait_for` remains
+        correct and unchanged for the freshly-written content every other
+        flow in this file already asserts on."""
+        deadline = time.time() + timeout * TIMEOUT_SCALE
+        normalized_needle = normalize_match(needle)
+        while time.time() < deadline:
+            self.read_available()
+            self.sync_grid()
+            haystack = self.grid.render_text()
+            if normalized_needle in normalize_match(haystack):
+                return haystack
+            select.select([self.fd], [], [], 0.1)
+        raise AssertionError(
+            f"timed out waiting for {needle!r} on the terminal grid\n\n"
+            f"Grid tail:\n{self.grid.render_text()[-4000:]}"
+        )
 
     def wait_for(self, needle: str, timeout: float = 10.0):
         # Slow shared CI runners stretch debug-build latencies (Argon2id at
@@ -144,6 +262,29 @@ class PtySession:
         raise AssertionError(
             f"process did not exit before timeout\n\nTranscript tail:\n{clean_screen(self.buffer)[-4000:]}"
         )
+
+
+def assert_footer(session: "PtySession", expected: str, timeout: float = 5.0):
+    """P8.5 (c): the footer's exact contextual text must appear verbatim in
+    the current screen (ia.md §5 per-screen footer strings), asserted
+    against the real ratatui render captured through the PTY — replayed onto
+    a terminal grid (`wait_for_screen_text`) rather than matched against the
+    raw byte stream, since ratatui's diff renderer does not re-emit cells
+    that are unchanged from the previous screen (e.g. two footers sharing a
+    "↑↓ move  ⏎ " prefix), which a naive substring match over the raw stream
+    would miss. See `assert_status_token_present` for the (b) monochrome-
+    glyph pairing check."""
+    session.wait_for_screen_text(expected, timeout=timeout)
+
+
+def assert_status_token_present(session: "PtySession", glyph: str, timeout: float = 5.0):
+    """P8.5 (b) monochrome-pass: `TerminalGrid.render_text()` reconstructs
+    the true on-screen content with all ANSI (including color) already
+    stripped, so a successful match here proves the state token survives
+    with zero color — exactly system.md §1.1 "the test" ("strip all color —
+    the product must remain fully usable... if a state reads only by its
+    color, that is a defect")."""
+    session.wait_for_screen_text(glyph, timeout=timeout)
 
 
 def cross_trust_gate(session: "PtySession"):
@@ -209,6 +350,13 @@ def vault_flow(binary: Path):
         with PtySession([str(binary), "vault", "--path", str(vault_path)], env=env) as session:
             cross_trust_gate(session)
             session.wait_for("Vault open", timeout=10)
+
+            # P8.5 (c): the H (vault list) footer must match ia.md §5's
+            # list-pane footer string exactly (crates/paranoid-cli/src/
+            # vault_tui/footer.rs `contextual_footer` for `Screen::Vault`
+            # outside search mode) — asserted against the real ratatui
+            # render, not the unit-level string constant.
+            assert_footer(session, "↑↓ move  ⏎ open  n new  / find  ? all keys  q quit")
 
             session.send_text("a")
             session.wait_for("Required:title,username,password.", timeout=10)
@@ -387,6 +535,9 @@ def recovery_secret_rotation_flow(binary: Path):
 
             session.send_text("k")
             session.wait_for("Ways in", timeout=5)
+
+            # P8.5 (c): S10 (ia.md "Ways in") footer, exact string.
+            assert_footer(session, "↑↓ move  a add  x remove  ? all keys  ⎋ back")
             session.checkpoint()
 
             session.send_text("p")
@@ -435,6 +586,65 @@ def recovery_secret_rotation_flow(binary: Path):
             )
 
 
+def panic_lock_footer_and_monochrome_flow(binary: Path):
+    """P8.5 (b) + (c): fires the real Ctrl+L panic-lock hotkey through the
+    PTY and asserts, against the actual ratatui render (not the Rust unit
+    constant):
+
+      - S14 (just-locked) shows the ia.md §5 minimal footer verbatim and
+        the `⊘` locked state token — with color already stripped by
+        `clean_screen`, so a passing match IS the monochrome-pass proof
+        (system.md §1.1 "the test").
+      - Any further interaction reverts to the ordinary S15 footer
+        (recovery paths reachable again via `?`), and the `⊘` token stays
+        present — the screen (not just the just-locked transient) carries
+        the token.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir_root:
+        tmpdir = Path(tmpdir_root)
+        vault_path = tmpdir / "vault.sqlite"
+        env = os.environ.copy()
+        env["PARANOID_MASTER_PASSWORD"] = "correct horse battery staple"
+        env["PARANOID_TEST_DEVICE_STORE_DIR"] = str(tmpdir / "device-store")
+        env["PARANOID_TEST_TRUST_MARKER_DIR"] = str(tmpdir / "trust-marker")
+
+        run_checked(
+            [str(binary), "vault", "--cli", "--path", str(vault_path), "init"],
+            env,
+        )
+
+        with PtySession([str(binary), "vault", "--path", str(vault_path)], env=env) as session:
+            cross_trust_gate(session)
+            session.wait_for("Vault open", timeout=10)
+            session.checkpoint()
+
+            # Ctrl+L: the panic / quick-lock hotkey (form-feed byte 0x0c;
+            # crossterm raw mode maps this to KeyCode::Char('l') +
+            # KeyModifiers::CONTROL — see docs/guides/tui.md "Panic / quick-
+            # lock hotkey").
+            session.send(b"\x0c")
+            session.wait_for("Locked.", timeout=10)
+
+            # S14: the minimal footer, no `?` recovery door, right after the
+            # lock event — ia.md §5.
+            assert_footer(session, "⏎ unlock  q quit")
+            # ia.md §1's title-region state token; system.md §1.1's
+            # monochrome test — the glyph, not a color, marks "locked."
+            assert_status_token_present(session, "⊘")
+            session.checkpoint()
+
+            # Any interaction (Tab moves off the mode selector) clears
+            # just_locked and restores the ordinary S15 footer.
+            session.send_tab()
+            assert_footer(session, "⏎ unlock  ? other ways in  ⎋ back")
+            assert_status_token_present(session, "⊘")
+
+            session.send_text("q")
+            exit_code = session.wait_exit(timeout=5)
+            if exit_code != 0:
+                raise AssertionError(f"panic-lock footer TUI exited with {exit_code}")
+
+
 def main():
     if len(sys.argv) != 2:
         print(f"usage: {sys.argv[0]} <path-to-paranoid-passwd>", file=sys.stderr)
@@ -453,7 +663,9 @@ def main():
     print("  PASS  wrong-password unlock blocked, then recovered")
     recovery_secret_rotation_flow(binary)
     print("  PASS  recovery-secret rotation flow")
-    print("\n4 passed, 0 failed")
+    panic_lock_footer_and_monochrome_flow(binary)
+    print("  PASS  panic-lock footer + monochrome state-token flow")
+    print("\n5 passed, 0 failed")
     return 0
 
 

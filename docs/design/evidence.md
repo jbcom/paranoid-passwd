@@ -375,3 +375,21 @@ evidence pass doesn't rediscover it.
 This is the punch-list P8.2 (TUI: findings 1, 2, 3, 4, 5, 6, 7, 8), P8.3
 (GUI: finding 10, plus Finding G0's harness gap), and P8.4 (copy pass across
 every string surfaced in every screenshot above) implement.
+
+---
+
+## P8.5 addendum — re-baseline against the redesigned output
+
+The GUI harness gap this doc originally flagged ("the GUI e2e harness only
+ever captures one end-of-run screenshot") is fixed: `tests/
+test_gui_visual_regression.sh` now captures one screenshot per named GUI
+screen (trust-gate, verified, vault-list, add-item, item-detail, generate,
+ways-in, locked), for both a real vault pass and a decoy vault pass, into
+`tests/baseline/gui/` — the new committed baseline, superseding the
+single end-of-run frame this doc's finding 10/G0 was working around. See
+`.agent-state/directive.md`'s P8.5 entry for the full acceptance-criteria
+breakdown, including a real pre-P8.5 defect it caught and fixed (S14/S15's
+missing `⊘` state token in the TUI) and a real spec/implementation gap it
+surfaced but did not silently resolve (ia.md §5's S7 distinct detail-pane
+footer has no counterpart in the single-screen `Screen::Vault` architecture
+P8.2 actually built).

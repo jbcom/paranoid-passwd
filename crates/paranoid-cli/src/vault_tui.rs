@@ -600,6 +600,110 @@ mod tests {
         assert!(normal_footer.contains("other ways in"));
     }
 
+    /// P8.5 (b) monochrome-pass regression: system.md §1.1 "the test" — a
+    /// state must remain distinguishable by symbol + word alone with all
+    /// color stripped. Every `UnlockBlocked` visit (S14 just-locked and
+    /// S15 ordinary unlock prompt) must carry the `⊘` title-region state
+    /// token (ia.md §1) so a monochrome terminal still shows "locked,"
+    /// never relying on the red/muted color alone to convey it. Asserted
+    /// against the real `render()` pipeline output (`render_to_string`),
+    /// not just the `header_state_token` plumbing function — GATE
+    /// COMPLETENESS (directive P0-META): pinning that the function returns
+    /// a value is not pinning that the renderer actually draws it.
+    #[test]
+    fn unlock_blocked_screen_carries_the_locked_state_token_with_color_stripped() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert_eq!(header_state_token(&app), None);
+
+        // S14: immediately after the panic-lock hotkey fires.
+        app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        let (glyph, _color) =
+            header_state_token(&app).expect("UnlockBlocked must carry a state token");
+        assert_eq!(glyph, "\u{2298}", "S14 locked screen must show the ⊘ glyph");
+        assert!(
+            render_to_string(&app).contains('\u{2298}'),
+            "the rendered S14 frame must contain the ⊘ glyph"
+        );
+
+        // S15: after interacting with the unlock form, still UnlockBlocked,
+        // still must carry the token — the screen (not just the
+        // just-locked transient) carries it.
+        press_key(&mut app, KeyCode::Char('p'));
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        let (glyph, _color) =
+            header_state_token(&app).expect("S15 unlock prompt must also carry a state token");
+        assert_eq!(glyph, "\u{2298}");
+        assert!(
+            render_to_string(&app).contains('\u{2298}'),
+            "the rendered S15 frame must contain the ⊘ glyph"
+        );
+    }
+
+    #[derive(Clone, Default)]
+    struct SharedWriteBuf(std::sync::Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for SharedWriteBuf {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("shared write buf mutex")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// P8.5 (b): regression-pins the ⊘ glyph across a real incremental
+    /// `CrosstermBackend` diff (Vault screen drawn first, then
+    /// `UnlockBlocked` drawn on the SAME `Terminal`, exactly like the real
+    /// `run_app` loop) — a `CrosstermBackend<Vec<u8>>`-equivalent write
+    /// target is used so the assertion checks the actual bytes a real
+    /// terminal receives, not just the abstract `Buffer` cell grid. Added
+    /// while re-baselining the P8.5 visual-regression harness after a false
+    /// negative traced back to a test-harness CSI-parsing gap (see
+    /// `tests/test_tui_e2e.py`'s `TerminalGrid` docstring), to permanently
+    /// cover the code path that false negative exercised.
+    #[test]
+    fn crossterm_backend_bytes_carry_locked_glyph_across_an_incremental_screen_transition() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+
+        let shared = SharedWriteBuf::default();
+        let backend = CrosstermBackend::new(shared.clone());
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        // Frame 1: Vault screen (no state token) — establishes the "prior
+        // frame" the diff renderer compares frame 2 against.
+        terminal.draw(|frame| render(frame, &app)).expect("draw1");
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+
+        // Frame 2: UnlockBlocked, incremental draw on the same `Terminal`.
+        terminal.draw(|frame| render(frame, &app)).expect("draw2");
+
+        let written = shared.0.lock().expect("shared write buf mutex");
+        let text = String::from_utf8_lossy(&written);
+        assert!(
+            text.contains('\u{2298}'),
+            "CrosstermBackend output must contain the ⊘ glyph bytes; got: {text:?}"
+        );
+    }
+
     #[test]
     fn help_overlay_opens_and_closes_without_changing_the_underlying_screen() {
         let tempdir = tempdir().expect("tempdir");

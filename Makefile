@@ -1,4 +1,4 @@
-.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-widgets test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e test-platform-signing-boundary test-ops-mtls-transport verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check e2e-ci e2e-local ci quality quality-emulate builder-image _builder-image ci-emulate _ci-emulate _quality-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
+.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-widgets test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate _test-gui-visual-regression-emulate test-vault-e2e test-platform-signing-boundary test-ops-mtls-transport verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release verify-token-drift docs-build docs-linkcheck docs-check e2e-ci e2e-local ci quality quality-emulate builder-image _builder-image ci-emulate _ci-emulate _quality-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -31,6 +31,7 @@ HOST_GUI_DEB_ARTIFACT := $(DIST_DIR)/paranoid-passwd-gui_$(RELEASE_VERSION)_$(HO
 GUI_E2E_SCREENSHOT ?= $(DIST_DIR)/gui-e2e.png
 GUI_E2E_VIEWPORTS ?= desktop=1280x1024
 GUI_E2E_VISUAL_VIEWPORTS ?= desktop=1280x1024 tablet=900x700 mobile=420x800
+GUI_VISUAL_BASELINE_DIR ?= tests/baseline/gui
 GUI_E2E_TARGET_VOLUME ?= paranoid-passwd-cargo-target-gui-e2e
 GUI_E2E_CLEAN ?= 0
 CI_EMULATE_TARGET_VOLUME ?= paranoid-passwd-cargo-target-ci-emulate
@@ -113,17 +114,17 @@ test-gui-e2e: ## Run the real GUI workflow harness under Xvfb and capture a scre
 	cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline
 	bash tests/test_gui_e2e.sh "$(CLI_DEBUG_BIN)" "$(GUI_DEBUG_BIN)" "$(GUI_E2E_SCREENSHOT)"
 
-test-gui-visual-regression: ## Run GUI workflow screenshots across desktop, tablet, and narrow viewport classes
+test-gui-visual-regression: ## Re-baseline the per-screen GUI visual regression harness (ia.md screen graph, real vs decoy)
 	cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline
-	bash tests/test_gui_e2e.sh "$(CLI_DEBUG_BIN)" "$(GUI_DEBUG_BIN)" "$(GUI_E2E_SCREENSHOT)" "$(GUI_E2E_VISUAL_VIEWPORTS)"
+	bash tests/test_gui_visual_regression.sh "$(CLI_DEBUG_BIN)" "$(GUI_DEBUG_BIN)" "$(GUI_VISUAL_BASELINE_DIR)"
 
 test-gui-e2e-emulate: ## Run the Linux GUI workflow harness through the custom builder image
 	@bash scripts/configure_local_toolchain.sh --quiet
 	@$(MAKE) _test-gui-e2e-emulate
 
-test-gui-visual-regression-emulate: ## Run the multi-viewport GUI screenshot harness through the custom builder image
+test-gui-visual-regression-emulate: ## Run the Linux per-screen GUI visual regression harness through the custom builder image
 	@bash scripts/configure_local_toolchain.sh --quiet
-	@$(MAKE) _test-gui-e2e-emulate GUI_E2E_VIEWPORTS="$(GUI_E2E_VISUAL_VIEWPORTS)"
+	@$(MAKE) _test-gui-visual-regression-emulate
 
 _test-gui-e2e-emulate: _builder-image
 	mkdir -p "$(DIST_DIR)"
@@ -134,6 +135,17 @@ _test-gui-e2e-emulate: _builder-image
 		-w /github/workspace \
 		"$(BUILDER_IMAGE)" \
 		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0; cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline && bash tests/test_gui_e2e.sh /cargo-target/debug/paranoid-passwd /cargo-target/debug/paranoid-passwd-gui \"$(GUI_E2E_SCREENSHOT)\" \"$(GUI_E2E_VIEWPORTS)\"'"
+	@if [ "$(GUI_E2E_CLEAN)" = "1" ]; then PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(GUI_E2E_TARGET_VOLUME)" >/dev/null 2>&1 || true; fi
+
+_test-gui-visual-regression-emulate: _builder-image
+	mkdir -p "$(GUI_VISUAL_BASELINE_DIR)"
+	@if [ "$(GUI_E2E_CLEAN)" = "1" ]; then PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(GUI_E2E_TARGET_VOLUME)" >/dev/null 2>&1 || true; fi
+	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" run --rm --platform "$(BUILDER_PLATFORM)" --user root --entrypoint bash \
+		-v "$$(pwd)":/github/workspace \
+		--mount type=volume,source="$(GUI_E2E_TARGET_VOLUME)",target=/cargo-target \
+		-w /github/workspace \
+		"$(BUILDER_IMAGE)" \
+		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0; cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline && bash tests/test_gui_visual_regression.sh /cargo-target/debug/paranoid-passwd /cargo-target/debug/paranoid-passwd-gui \"$(GUI_VISUAL_BASELINE_DIR)\"'"
 	@if [ "$(GUI_E2E_CLEAN)" = "1" ]; then PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(GUI_E2E_TARGET_VOLUME)" >/dev/null 2>&1 || true; fi
 
 test-vault-e2e: ## Run the headless vault CLI end-to-end suite against the debug CLI binary
@@ -155,6 +167,10 @@ verify-assurance: ## Run deterministic security assurance protocol gates
 	bash scripts/verify_ai_review_inventory.sh
 	python3 scripts/security_assurance_gate.py
 	python3 tests/test_security_assurance_gate.py
+	$(MAKE) verify-token-drift
+
+verify-token-drift: ## Fail if a raw design-token value (hex color, px/rem size) is reintroduced outside the token modules (system.md §7)
+	bash scripts/check_token_drift.sh
 
 verify-deep: ## Run local-only static/dependency/secret quality checks before pushing
 	cargo run -p xtask --locked --frozen --offline -- verify-deep

@@ -1,4 +1,4 @@
-use crate::theme::{self, ICON_ACTION, ICON_CAUTION, ICON_VERIFIED};
+use crate::theme::{self, ICON_ACTION, ICON_CAUTION, ICON_LOCKED, ICON_VERIFIED};
 use crate::vault_tui::*;
 use paranoid_ops::CapabilityProbeStatus;
 use paranoid_vault::{VaultBackupSummary, VaultItemKind, VaultItemPayload, VaultTransferSummary};
@@ -27,6 +27,7 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
         chunks[0],
         header_title(app.screen),
         header_subtitle(app.screen),
+        header_state_token(app),
     );
 
     frame.render_widget(
@@ -127,13 +128,36 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         .split(vertical[1])[1]
 }
 
-pub(crate) fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str, subtitle: &str) {
-    frame.render_widget(
-        Paragraph::new(Text::from(vec![
-            Line::styled(
-                format!("paranoid-passwd · {title}"),
+pub(crate) fn render_header(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    subtitle: &str,
+    state_token: Option<(&'static str, Color)>,
+) {
+    let title_line = match state_token {
+        // ia.md §1: "title region... state token: ✓ ! ⊘" — the fixed
+        // skeleton's single global state indicator, right-aligned on the
+        // title row. system.md §1.1 "the test": the glyph, not just a
+        // color, is what survives a monochrome/no-color terminal.
+        Some((glyph, color)) => Line::from(vec![
+            Span::styled(
+                format!("paranoid-passwd · {title}  "),
                 Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
             ),
+            Span::styled(
+                glyph,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        None => Line::styled(
+            format!("paranoid-passwd · {title}"),
+            Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+        ),
+    };
+    frame.render_widget(
+        Paragraph::new(Text::from(vec![
+            title_line,
             Line::styled(subtitle, Style::default().fg(TEXT)),
         ]))
         .block(
@@ -144,6 +168,19 @@ pub(crate) fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str, subt
         ),
         area,
     );
+}
+
+/// The single global state token ia.md §1 requires in the title region:
+/// `⊘` (locked, `text.muted` per theme.rs — deliberately not danger red,
+/// since locking is the safe state) for `UnlockBlocked` (S14/S15); no token
+/// on every other screen (trust-gate/verified already carry their own `!`/
+/// `✓` in the body per ia.md §5 S1-S3, which are single-purpose screens
+/// where the body-level glyph IS the title-region token).
+pub(crate) fn header_state_token(app: &App) -> Option<(&'static str, Color)> {
+    match app.screen {
+        Screen::UnlockBlocked => Some((ICON_LOCKED, theme::TEXT_MUTED)),
+        _ => None,
+    }
 }
 
 pub(crate) fn header_title(screen: Screen) -> &'static str {

@@ -593,24 +593,80 @@ P6.0 CI research + two-tier trust design.
   §3/CLIG (ia.md §4.3, journeys.md invariant 4): no code path accepts a
   passphrase or recovery secret as a CLI arg — stdin/prompt/file only; this
   is a code-review gate on this item, not a copy-only check.
-- [ ] P8.5 Visual regression — re-baseline `test-gui-visual-regression` (and
-  the TUI snapshot harness) against the P8.0–P8.4 output, asserting on
-  meaning tied to ia.md/system.md rather than exact pixel strings where
-  possible: (a) skeleton geometry assertions — title/primary/detail/status/
-  footer regions occupy the same fixed positions (ia.md §1) across every
-  captured mode, INCLUDING a decoy vault opened side-by-side with a real
-  vault — the harness asserts zero pixel/string difference in framing
-  between the two beyond the content the owner's passphrase unlocked
-  (journeys.md invariant 5; brand.md §4 hard rule 1); (b) monochrome-pass
-  assertion — re-run the capture with color stripped/forced-ANSI-off and
-  assert every status (`✓`/`✗`/`!`/`⊘`) is still distinguishable by symbol +
-  word alone (system.md §1.1 "the test"; brand.md §5.1); (c) footer
-  assertions per screen match the ia.md §5 per-pane footer strings exactly
-  (H/S7/S10/S15/S14 as enumerated in P8.2); (d) token-drift regression — a
-  static check (grep or lint) that fails the build if a raw hex/px value is
-  reintroduced outside `theme.rs`/`paranoid-tokens.slint`, preventing the
-  system.md §7 drift from recurring. Screenshots captured under this item
-  become the new baseline referenced by future e2e runs.
+- [x] P8.5 Visual regression — re-baselined `test-gui-visual-regression`
+  (rebuilt: it now drives every named GUI screen — trust-gate, verified,
+  vault-list, add-item, item-detail, generate, ways-in, locked — through a
+  real vault pass AND a decoy vault pass via a new Rust-side Timer-driven
+  screen-sequence in `paranoid-gui/src/lib.rs`, capturing 16 committed
+  baseline PNGs under `tests/baseline/gui/`) and the TUI PTY e2e harness:
+  (a) DONE — the GUI harness crops and diffs the action-bar region between
+  every real/decoy screen pair and fails on any pixel difference
+  (`tests/test_gui_visual_regression.sh`); verified visually (both captures
+  identical outside vault-path text, which itself is not rendered on the
+  compared screens). (b) DONE for the TUI (the surface where monochrome
+  assertion is meaningful — glyphs are literal text, testable without OCR):
+  added `TerminalGrid`, a real cursor-position-aware VT100 replay, to
+  `tests/test_tui_e2e.py` (the naive raw-byte-concat `clean_screen` silently
+  dropped content ratatui's diff-renderer left unchanged between frames —
+  a real false-negative bug, fixed) and a PTY flow asserting the `⊘` state
+  token survives on both the S14 (just-locked) and S15 (ordinary unlock
+  prompt) screens with all ANSI stripped. This caught and fixed a REAL
+  pre-existing defect: `UnlockBlocked` never rendered `ICON_LOCKED` (`⊘`) at
+  all — system.md §1.1's "the test" was failing. Fixed in
+  `panel_rendering.rs` (`render_header`/`header_state_token`), with Rust
+  unit + PTY e2e + an incremental-`CrosstermBackend`-diff regression test
+  pinning the fix. GUI locked screen already showed `⊘` correctly (verified
+  in the captured baseline). (c) DONE for H (Vault list) and S10 (Ways in) —
+  exact ia.md §5 footer strings asserted via the new grid against the real
+  PTY render — and S14/S15 (UnlockBlocked just-locked vs ordinary) via the
+  new panic-lock flow. S7 (item detail) has NO distinct footer in the
+  current architecture: ia.md §5 assumed independently-focusable list/
+  detail panes, but P8.2 built one unified `Screen::Vault` screen where both
+  panes are always visible and the full keymap (`e`/`d`/`⏎`/etc.) is bound
+  regardless of "focus" — there is no S7-specific footer state to assert.
+  This is a real spec/implementation gap, not silently papered over;
+  flagged here as a forward P8.x item (differentiate list-vs-detail focus
+  and footer, or revise ia.md §5 to match the single-screen model — an
+  architecture decision for that item, not this one). (d) DONE —
+  `scripts/check_token_drift.sh` (new `verify-token-drift` Make target,
+  wired into `verify-assurance`) greps every tracked `crates/**/*.rs` and
+  `crates/**/*.slint` file for raw hex color literals outside
+  `theme.rs`/`paranoid-tokens.slint`, and every `docs/_static/*.css` file
+  outside `custom.css`; verified it both passes clean today and fails on an
+  injected violation. Also fixed two pre-existing, unrelated red gates
+  discovered while running the full P8.5 gate sequence (both confirmed red
+  on unmodified HEAD before this item started): `scripts/
+  hallucination_check.sh`'s unsafe-Rust grep false-positived on the English
+  word "unsafe" inside a doc comment (`screen_state.rs:3445`) — tightened to
+  match the Rust keyword in code position only, verified it still catches
+  real `unsafe fn`/`unsafe {`; and the assurance-pinned GUI-screenshot-
+  evidence claim's Makefile/doc string set, updated consistently across
+  `security_assurance_gate.py`, `verify_ai_review_inventory.sh`,
+  `docs/reference/ai-review.md`, `docs/reference/testing.md`,
+  `.github/agents/paranoid-security-auditor.md`, and `.github/instructions/
+  security-assurance.instructions.md` to describe the new per-screen
+  baseline instead of the old multi-viewport smoke paths (which
+  `test-gui-visual-regression` no longer produces — `test-gui-e2e`/
+  `test-gui-e2e-emulate` with `GUI_E2E_VISUAL_VIEWPORTS` still can, if that
+  specific smoke check is ever wanted again). Full gate green: `cargo fmt
+  --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo
+  test --workspace` (all crates, zero failures), `make test-tui-e2e`,
+  `make verify-assurance` (P9 exhaustive-purge and every other pinned claim
+  still pass — no hardening regression), `bash scripts/validate-docs.sh`,
+  `python3 -m tox -e docs`, `make e2e-ci`, `make ci`.
+
+- [ ] P8.6 S7 detail-pane footer/architecture reconciliation (surfaced by
+  P8.5's footer-assertion pass) — ia.md §5 specifies a distinct S7 item-
+  detail footer (`⏎ copy   r reveal   e edit   ? all keys   ⎋ back`)
+  independent from the H list-pane footer, implying independently-
+  focusable list/detail panes; P8.2 built one unified `Screen::Vault` with
+  both panes always visible and one shared keymap, so there is no S7-
+  specific footer state today. Decide (agent's call, record why): (i) add
+  real list/detail focus tracking to `vault_tui` and differentiate the
+  footer per ia.md §5, or (ii) revise ia.md §5 to describe the single-
+  screen model actually built and drop the S7-footer distinction. Either
+  way, land the matching PTY e2e assertion this item's P8.5 work left
+  unable to cover.
 
 - [ ] FINAL: full gate (make ci + quality + e2e-ci + e2e-local on this
   machine), docs both-directions sweep, open the single PR, babysit to
