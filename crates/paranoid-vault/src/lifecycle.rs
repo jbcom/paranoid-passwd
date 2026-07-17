@@ -8,9 +8,10 @@ use crate::{
     PasswordHistoryEntry, SQLITE_APPLICATION_ID, SecureNoteRecord, UpdateCardRecord,
     UpdateIdentityRecord, UpdateLoginRecord, UpdateSecureNoteRecord, VaultError, VaultHeader,
     VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary, VaultKdfParams,
-    VaultKeyslot, VaultKeyslotKind, certificate_keyslot_metadata, decode_certificate_slot_hex,
-    load_certificate, load_private_key, mnemonic_entropy_from_phrase, select_device_keyslot,
-    select_mnemonic_keyslot, unwrap_legacy_secret_with_certificate, unwrap_secret_with_certificate,
+    VaultKeyslot, VaultKeyslotKind, certificate_keyslot_metadata, check_lockout, clear_lockout,
+    decode_certificate_slot_hex, load_certificate, load_private_key, mnemonic_entropy_from_phrase,
+    record_failed_unlock, select_device_keyslot, select_mnemonic_keyslot,
+    unwrap_legacy_secret_with_certificate, unwrap_secret_with_certificate,
     validate_certificate_keyslot_metadata, validate_mnemonic_keyslot_metadata,
 };
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::SaltString};
@@ -683,6 +684,13 @@ pub fn unlock_vault(
     master_password: &str,
 ) -> Result<UnlockedVault, VaultError> {
     let path = path.as_ref();
+    check_lockout(path)?;
+    let result = unlock_vault_inner(path, master_password);
+    record_unlock_outcome(path, &result)?;
+    result
+}
+
+fn unlock_vault_inner(path: &Path, master_password: &str) -> Result<UnlockedVault, VaultError> {
     if !path.exists() {
         return Err(VaultError::VaultNotFound(path.display().to_string()));
     }
@@ -728,6 +736,23 @@ pub fn unlock_vault_with_certificate(
     private_key_passphrase: Option<&str>,
 ) -> Result<UnlockedVault, VaultError> {
     let path = path.as_ref();
+    check_lockout(path)?;
+    let result = unlock_vault_with_certificate_inner(
+        path,
+        certificate_pem,
+        private_key_pem,
+        private_key_passphrase,
+    );
+    record_unlock_outcome(path, &result)?;
+    result
+}
+
+fn unlock_vault_with_certificate_inner(
+    path: &Path,
+    certificate_pem: &[u8],
+    private_key_pem: &[u8],
+    private_key_passphrase: Option<&str>,
+) -> Result<UnlockedVault, VaultError> {
     if !path.exists() {
         return Err(VaultError::VaultNotFound(path.display().to_string()));
     }
@@ -786,6 +811,17 @@ pub fn unlock_vault_with_mnemonic(
     slot_id: Option<&str>,
 ) -> Result<UnlockedVault, VaultError> {
     let path = path.as_ref();
+    check_lockout(path)?;
+    let result = unlock_vault_with_mnemonic_inner(path, mnemonic_phrase, slot_id);
+    record_unlock_outcome(path, &result)?;
+    result
+}
+
+fn unlock_vault_with_mnemonic_inner(
+    path: &Path,
+    mnemonic_phrase: &str,
+    slot_id: Option<&str>,
+) -> Result<UnlockedVault, VaultError> {
     if !path.exists() {
         return Err(VaultError::VaultNotFound(path.display().to_string()));
     }
@@ -821,6 +857,16 @@ pub fn unlock_vault_with_device(
     slot_id: Option<&str>,
 ) -> Result<UnlockedVault, VaultError> {
     let path = path.as_ref();
+    check_lockout(path)?;
+    let result = unlock_vault_with_device_inner(path, slot_id);
+    record_unlock_outcome(path, &result)?;
+    result
+}
+
+fn unlock_vault_with_device_inner(
+    path: &Path,
+    slot_id: Option<&str>,
+) -> Result<UnlockedVault, VaultError> {
     if !path.exists() {
         return Err(VaultError::VaultNotFound(path.display().to_string()));
     }
@@ -837,6 +883,23 @@ pub fn unlock_vault_with_device(
         header,
         master_key,
     })
+}
+
+/// Records the lockout outcome of one unlock attempt: a successful unlock
+/// clears any durable lockout record, and a failed one records a new failed
+/// attempt — EXCEPT `VaultNotFound` and a lockout error that was already
+/// surfaced by the caller's own `check_lockout` above, neither of which
+/// represents a wrong-credential guess against an existing vault and so
+/// must not itself feed the backoff counter.
+fn record_unlock_outcome(
+    path: &Path,
+    result: &Result<UnlockedVault, VaultError>,
+) -> Result<(), VaultError> {
+    match result {
+        Ok(_) => clear_lockout(path),
+        Err(VaultError::VaultNotFound(_) | VaultError::LockedOut { .. }) => Ok(()),
+        Err(_) => record_failed_unlock(path),
+    }
 }
 
 pub(crate) fn read_verified_device_keyslot_secret(

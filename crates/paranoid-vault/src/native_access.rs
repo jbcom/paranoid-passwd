@@ -146,8 +146,8 @@ impl SecretBytes {
 
     /// Zeroizes this instance's buffer in place without dropping it. Exposed
     /// so tests can observe the same in-place scrub that `Drop` performs,
-    /// without resorting to `unsafe` pointer-after-free reads (which this
-    /// crate's `unsafe_code = "forbid"` lint disallows) to prove it.
+    /// without resorting to memory-unsound pointer-after-free reads (which
+    /// this crate's `unsafe_code = "forbid"` lint disallows) to prove it.
     #[cfg(test)]
     fn zeroize_in_place(&mut self) {
         self.0.zeroize();
@@ -579,7 +579,8 @@ mod tests {
 
         // Exercises the exact in-place scrub that `Drop` performs on the
         // inner `Zeroizing<String>` (delegated to `zeroize::Zeroize`, not a
-        // re-allocate-and-abandon), without unsafe pointer-after-free reads.
+        // re-allocate-and-abandon), without memory-unsound
+        // pointer-after-free reads.
         secret.zeroize_in_place();
 
         assert!(secret.as_str().is_empty());

@@ -366,6 +366,191 @@ CLAIMS: tuple[Claim, ...] = (
         ),
     ),
     Claim(
+        "vault.zeroized-payload-secrets",
+        "Zeroize-on-drop decrypted item payload secrets",
+        "vault-security",
+        (
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "pub struct SecretBytes(Zeroizing<String>);",
+                "SecretBytes wraps payload secrets in a zeroize-on-drop buffer",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                r"impl fmt::Debug for SecretBytes \{\n    fn fmt\(&self, f: &mut fmt::Formatter<'_>\) -> fmt::Result \{\n        f\.write_str\(\"<redacted>\"\)",
+                "SecretBytes Debug renders <redacted>, never the secret",
+                True,
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "impl Serialize for SecretBytes",
+                "SecretBytes has a transparent Serialize impl preserving the wire format",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "impl<'de> Deserialize<'de> for SecretBytes",
+                "SecretBytes has a transparent Deserialize impl preserving the wire format",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "pub password: SecretBytes,",
+                "LoginRecord password field is SecretBytes, not a plain String",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "pub number: SecretBytes,",
+                "CardRecord number field is SecretBytes, not a plain String",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "pub security_code: SecretBytes,",
+                "CardRecord security_code field is SecretBytes, not a plain String",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "secret_bytes_debug_renders_redacted_not_the_secret",
+                "test proves SecretBytes Debug never leaks the secret",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "secret_bytes_zeroizes_its_buffer_in_place_on_scrub",
+                "test proves SecretBytes zeroizes its buffer on scrub/drop",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "secret_bytes_clone_is_an_independent_zeroizing_copy",
+                "test proves cloning SecretBytes no longer forks an un-scrubbed copy",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/native_access.rs",
+                "secret_bytes_serde_round_trips_to_the_same_json_a_plain_string_would",
+                "test proves the SecretBytes wire format is unchanged from a plain String field",
+            ),
+            Requirement(
+                "docs/reference/vault-format.md",
+                "`SecretBytes`, a zeroize-on-drop wrapper",
+                "vault format docs describe the zeroize-on-drop payload secret wrapper",
+            ),
+            Requirement(
+                "docs/reference/architecture.md",
+                "SecretBytes` zeroize-on-drop wrapper",
+                "architecture docs describe the zeroize-on-drop payload secret wrapper",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.zeroized-payload-secrets` | `enforced`",
+                "assurance claim enforces the zeroized payload secrets disposition",
+            ),
+        ),
+    ),
+    Claim(
+        "vault.failed-unlock-lockout",
+        "Persisted cross-restart failed-unlock lockout",
+        "vault-security",
+        (
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "pub struct LockoutRecord {",
+                "a durable LockoutRecord model exists",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "pub fn lockout_state_path(vault_path: impl AsRef<Path>) -> PathBuf {",
+                "the lockout record path is a sibling of the vault path",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "pub(crate) fn check_lockout(vault_path: impl AsRef<Path>) -> Result<(), VaultError> {",
+                "a check_lockout gate exists ahead of Argon2id",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "pub(crate) fn record_failed_unlock(vault_path: impl AsRef<Path>) -> Result<(), VaultError> {",
+                "failed unlock attempts are recorded durably",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "pub(crate) fn clear_lockout(vault_path: impl AsRef<Path>) -> Result<(), VaultError> {",
+                "a successful unlock clears the durable lockout record",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "LockedOut { retry_after_secs: i64 },",
+                "VaultError carries a positive retry-after duration when locked out",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lifecycle.rs",
+                "check_lockout(path)?;",
+                "unlock_vault checks the durable lockout before deriving the KEK",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lifecycle.rs",
+                "fn record_unlock_outcome(",
+                "every unlock_vault* entry point records its lockout outcome",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "fn backoff_secs_for_attempt_count(failed_attempt_count: u32) -> i64 {",
+                "backoff is exponential in the failed-attempt count",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "const MAX_BACKOFF_SECS: i64 = 24 * 60 * 60;",
+                "backoff growth is capped",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "backoff_grows_exponentially_with_attempt_count_and_is_capped",
+                "test proves backoff grows exponentially and saturates at the cap",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lockout.rs",
+                "lockout_persists_across_a_fresh_process_handle_restart",
+                "test proves the lockout module's own state survives a fresh handle",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "repeated_failed_unlocks_persist_a_cross_restart_lockout",
+                "test proves unlock_vault itself refuses with LockedOut after a restart",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "a_successful_unlock_clears_a_prior_lockout_record",
+                "test proves a successful unlock clears the durable lockout record",
+            ),
+            Requirement(
+                "crates/paranoid-vault/src/lib.rs",
+                "lockout_state_lives_outside_the_encrypted_vault_rows",
+                "test proves the lockout record is plaintext and separate from the vault file",
+            ),
+            Requirement(
+                "docs/reference/vault-format.md",
+                "## Failed-Unlock Lockout State",
+                "vault format docs describe the lockout state sibling file",
+            ),
+            Requirement(
+                "docs/reference/architecture.md",
+                "VaultError::LockedOut",
+                "architecture docs describe the durable lockout gate on every unlock entry point",
+            ),
+            Requirement(
+                "docs/reference/assurance-claims.md",
+                "`vault.failed-unlock-lockout` | `enforced`",
+                "assurance claim enforces the failed-unlock lockout disposition",
+            ),
+            Requirement(
+                "tests/test_security_assurance_gate.py",
+                "assert_gate_catches_deletion(",
+                "a negative-proof test demonstrates the gate catches deletion of P9 hardening evidence",
+            ),
+            Requirement(
+                "Makefile",
+                "python3 tests/test_security_assurance_gate.py",
+                "verify-assurance runs the negative-proof gate test",
+            ),
+        ),
+    ),
+    Claim(
         "ops.shared-policy-boundary",
         "Shared ops policy boundary",
         "ops-security",

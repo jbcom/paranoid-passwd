@@ -124,6 +124,8 @@ Keyslot removal is no longer a blind mutation. The header now supports a shared 
 
 Item payloads now carry folder plus tag metadata inside ciphertext, so local organization and decrypted summary search can evolve without exposing a plaintext folder index in SQLite.
 
+Decrypted item payload secret fields (login password, password-history password, card number, card security code) hold their plaintext in `SecretBytes`, a zeroize-on-drop wrapper, rather than a plain `String`. `SecretBytes` has a transparent `Serialize`/`Deserialize` implementation, so it serializes to and deserializes from exactly the JSON a plain `String` field would have produced — the on-disk/wire format of an encrypted item's plaintext JSON payload is unchanged; only the in-process representation gained zeroize-on-drop and clone-safety.
+
 Generator-driven password rotation reuses the same login item id and appends the previous password to encrypted history instead of creating a parallel shadow record format for rotated credentials.
 
 ## Why SQLite
@@ -147,6 +149,12 @@ Those engines are attractive for simple encrypted blobs, but the roadmap is alre
 ### Ad hoc files
 
 Raw JSON, CBOR, or custom binary containers would force the project to reinvent indexing, migrations, integrity handling, and crash recovery. That is the wrong place to spend complexity.
+
+## Failed-Unlock Lockout State
+
+A durable, path-bound lockout record sits next to the vault as a plaintext sibling file: `<vault-file-name>.lock-state` (for `vault.sqlite`, that is `vault.sqlite.lock-state`). It carries only `failed_attempt_count`, `first_failure_epoch`, and `locked_until_epoch` — no secret material, no key or password data — because it must be readable and writable **before** the vault is unlocked; that is the entire point of it. It deliberately does not live inside the AEAD-encrypted `items` rows or the vault's own `metadata` table, since either would require an unlock to read it in the first place.
+
+Every `unlock_vault*` entry point checks this record before running Argon2id, refuses the attempt with a positive remaining-lockout duration while one is in force, records a new failed attempt with exponential backoff (capped) on any credential failure, and clears the record on a successful unlock. Because the check happens first, a locked-out attempt costs an offline attacker nothing extra in wall-clock compute — the whole point is denying the legitimate fast retry and making the wait explicit, not adding attacker-side cost on top of Argon2id.
 
 ## Recovery Direction
 

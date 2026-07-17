@@ -56,7 +56,14 @@ make verify-assurance
 ```
 
 That command verifies the hallucination checks, supply-chain checks, AI review inventory, and
-security assurance protocol wiring.
+security assurance protocol wiring. It also runs
+[`tests/test_security_assurance_gate.py`](../../../tests/test_security_assurance_gate.py), a
+negative-proof test that mirrors the small file set a P9 hardening claim's requirements touch
+into an isolated temp directory, strips a load-bearing string (the zeroize wrapper's redacting
+`Debug` impl for `vault.zeroized-payload-secrets`, the pre-Argon2id `check_lockout` call for
+`vault.failed-unlock-lockout`), and asserts the gate actually flips that claim to `fail` —
+proving the gate would catch someone deleting the hardening later, not just that its
+`Requirement` strings currently happen to match.
 
 ## Local Release-Candidate Quality Gate
 

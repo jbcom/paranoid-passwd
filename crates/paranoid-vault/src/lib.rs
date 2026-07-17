@@ -3,11 +3,13 @@ mod native_access;
 mod backup_transfer;
 mod keyslots;
 mod lifecycle;
+mod lockout;
 mod recovery_posture;
 
 pub use backup_transfer::*;
 pub use keyslots::*;
 pub use lifecycle::*;
+pub use lockout::*;
 pub use recovery_posture::*;
 
 pub use native_access::{
@@ -86,6 +88,10 @@ pub enum VaultError {
     VaultNotFound(String),
     #[error("vault unlock failed")]
     UnlockFailed,
+    #[error(
+        "vault locked out after too many failed unlock attempts; retry after {retry_after_secs}s"
+    )]
+    LockedOut { retry_after_secs: i64 },
     #[error("vault item not found: {0}")]
     ItemNotFound(String),
     #[error("export destination {0} resolves to the source vault path; refusing to overwrite it")]
@@ -2078,6 +2084,92 @@ mod tests {
         init_vault(&path, "correct horse battery staple").expect("init");
         let error = unlock_vault(&path, "wrong").expect_err("unlock should fail");
         assert!(matches!(error, VaultError::UnlockFailed));
+    }
+
+    /// Repeated wrong-password attempts through the real `unlock_vault`
+    /// entry point (not the lower-level `lockout` module directly) must
+    /// eventually be refused with `VaultError::LockedOut` before Argon2id
+    /// even runs, and that refusal must persist against a brand-new
+    /// `Connection`/process handle — i.e. survive a restart, since nothing
+    /// but the on-disk `.lock-state` sibling file carries the state across
+    /// these calls.
+    #[test]
+    fn repeated_failed_unlocks_persist_a_cross_restart_lockout() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        // The first several wrong attempts stay within the free allowance
+        // and must each fail with the ordinary wrong-credential error, not
+        // a lockout.
+        let mut last_error = None;
+        for _ in 0..8 {
+            match unlock_vault(&path, "wrong") {
+                Err(VaultError::LockedOut { retry_after_secs }) => {
+                    assert!(retry_after_secs > 0);
+                    last_error = Some(VaultError::LockedOut { retry_after_secs });
+                    break;
+                }
+                Err(VaultError::UnlockFailed) => {}
+                other => panic!("unexpected unlock_vault result: {other:?}"),
+            }
+        }
+
+        let error = last_error.expect("enough failed attempts must eventually lock out");
+        assert!(matches!(error, VaultError::LockedOut { .. }));
+
+        // Simulate a restart: a fresh call against the same path (no shared
+        // in-memory state at all) must still be refused.
+        let error_after_restart = unlock_vault(&path, "correct horse battery staple")
+            .expect_err("even the correct password must be refused while locked out");
+        match error_after_restart {
+            VaultError::LockedOut { retry_after_secs } => assert!(retry_after_secs > 0),
+            other => panic!("expected LockedOut after restart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_successful_unlock_clears_a_prior_lockout_record() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        // A couple of wrong attempts (within the free allowance) leave a
+        // lockout record on disk, but not yet an active lockout.
+        for _ in 0..2 {
+            let error = unlock_vault(&path, "wrong").expect_err("unlock should fail");
+            assert!(matches!(error, VaultError::UnlockFailed));
+        }
+        assert!(
+            lockout_state_path(&path).exists(),
+            "a failed attempt must persist a lockout record"
+        );
+
+        unlock_vault(&path, "correct horse battery staple").expect("correct password unlocks");
+
+        assert!(
+            !lockout_state_path(&path).exists(),
+            "a successful unlock must clear the durable lockout record"
+        );
+    }
+
+    #[test]
+    fn lockout_state_lives_outside_the_encrypted_vault_rows() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+
+        let _ = unlock_vault(&path, "wrong");
+
+        // The lockout record must be readable without ever unlocking the
+        // vault: it is required precisely because unlock hasn't succeeded
+        // yet, so it cannot live inside the AEAD-encrypted item rows or
+        // depend on the master key in any way.
+        let lock_state_path = lockout_state_path(&path);
+        let raw = fs::read_to_string(&lock_state_path).expect("read lockout state as plaintext");
+        let record: LockoutRecord =
+            serde_json::from_str(&raw).expect("lockout state is plain, unencrypted JSON");
+        assert_eq!(record.failed_attempt_count, 1);
     }
 
     #[test]

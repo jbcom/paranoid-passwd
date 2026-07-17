@@ -154,6 +154,7 @@ verify-assurance: ## Run deterministic security assurance protocol gates
 	bash scripts/supply_chain_verify.sh
 	bash scripts/verify_ai_review_inventory.sh
 	python3 scripts/security_assurance_gate.py
+	python3 tests/test_security_assurance_gate.py
 
 verify-deep: ## Run local-only static/dependency/secret quality checks before pushing
 	cargo run -p xtask --locked --frozen --offline -- verify-deep
