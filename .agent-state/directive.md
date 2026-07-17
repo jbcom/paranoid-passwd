@@ -31,6 +31,14 @@ orchestrator continuously mutates. There is NO "RELEASED" flip that stops the
 loop; there is no FINAL that ends work — FINAL just ships the current
 milestone PR, then the loop discovers the next.
 
+WORKTREE ISOLATION (hard, learned 2026-07-17): NEVER run two workflows that
+write to the SAME worktree concurrently — their uncommitted edits interleave
+on shared files and corrupt both. At most ONE writing workflow per worktree at
+a time. Parallel implementation streams each get their own git worktree cut
+from the branch head (Agent isolation: "worktree" / a dedicated e2e-wt-N), and
+the orchestrator merges the branch heads. Design/docs workflows that touch
+only disjoint new files may overlap, but anything editing crates/ runs solo.
+
 SINGLE SOURCE OF TRUTH: .agent-state/directive.md IS the task list. Do NOT
 maintain a separate harness TaskCreate/TaskUpdate list — that is duplicate
 state in a second format. Track everything (in-flight, wait-state, next,
