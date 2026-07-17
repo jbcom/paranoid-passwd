@@ -14,6 +14,8 @@ import termios
 import time
 from pathlib import Path
 
+TIMEOUT_SCALE = max(1.0, float(os.environ.get("PARANOID_E2E_TIMEOUT_SCALE", "1")))
+
 
 ANSI_RE = re.compile(
     r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[@-Z\\-_])"
@@ -105,7 +107,11 @@ class PtySession:
         self.buffer.clear()
 
     def wait_for(self, needle: str, timeout: float = 10.0):
-        deadline = time.time() + timeout
+        # Slow shared CI runners stretch debug-build latencies (Argon2id at
+        # 256 MiB, SQLite fsyncs) past wall-clock budgets tuned on dev
+        # machines; PARANOID_E2E_TIMEOUT_SCALE stretches every wait uniformly
+        # without loosening what must render.
+        deadline = time.time() + timeout * TIMEOUT_SCALE
         normalized_needle = normalize_match(needle)
         while time.time() < deadline:
             self.read_available()
@@ -123,7 +129,7 @@ class PtySession:
         )
 
     def wait_exit(self, timeout: float = 5.0) -> int:
-        deadline = time.time() + timeout
+        deadline = time.time() + timeout * TIMEOUT_SCALE
         while time.time() < deadline:
             self.read_available()
             pid, status = os.waitpid(self.pid, os.WNOHANG)

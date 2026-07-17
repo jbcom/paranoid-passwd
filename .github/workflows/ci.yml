@@ -19,6 +19,11 @@ env:
   # cache-hit-or-cold-build CI job, and Swatinem/rust-cache recommends
   # disabling them explicitly rather than caching them.
   CARGO_INCREMENTAL: "0"
+  # Shared 2-core hosted runners stretch debug-binary latencies (256 MiB
+  # Argon2id derivations, SQLite fsyncs under contention) well past the PTY
+  # harness budgets tuned on developer machines; scale every wait uniformly
+  # instead of loosening individual assertions.
+  PARANOID_E2E_TIMEOUT_SCALE: "4"
 
 jobs:
   fmt:
