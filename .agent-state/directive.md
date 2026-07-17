@@ -31,6 +31,16 @@ orchestrator continuously mutates. There is NO "RELEASED" flip that stops the
 loop; there is no FINAL that ends work — FINAL just ships the current
 milestone PR, then the loop discovers the next.
 
+GATE COMPLETENESS (learned 2026-07-17, P9 verify): pinning that a function
+EXISTS is not pinning that it is COMPLETE. An assurance claim that a
+scrub/redact/validate function is present passes green even when the function
+misses cases — the panic-lock gate was green over a live secret leak because
+its test asserted the screen transition, not that every form was scrubbed.
+Every security-property claim's test must assert the PROPERTY (no secret
+survives), enumerated exhaustively, not the mechanism's presence. Adversarial
+verify (opus, try-to-break) is mandatory before any hardening merges — unit
+tests and the gate both missed this; only the break-it pass caught it.
+
 WORKTREE ISOLATION (hard, learned 2026-07-17): NEVER run two workflows that
 write to the SAME worktree concurrently — their uncommitted edits interleave
 on shared files and corrupt both. At most ONE writing workflow per worktree at
