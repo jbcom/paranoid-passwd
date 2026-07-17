@@ -324,6 +324,10 @@ impl GuiState {
         window.set_keyslot_summary(self.keyslot_summary.clone().into());
         window.set_selected_item(self.selected_item.clone().into());
         window.set_automation_status(self.automation_status.clone().into());
+        #[cfg(not(target_arch = "wasm32"))]
+        window.set_vault_unlocked(self.unlocked_vault.is_some());
+        #[cfg(target_arch = "wasm32")]
+        window.set_vault_unlocked(false);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -436,6 +440,19 @@ fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
         match result {
             Ok(message) => {
                 state.borrow_mut().automation_status = "Automation passed".to_string();
+                // The operator-automation scenario drives `GuiState` (unlock,
+                // add-login, rotate, enroll, export) directly, bypassing the
+                // screen-graph navigation callbacks (`verify-copy`,
+                // `continue`, `unlock-vault-clicked`, ...) that a real click
+                // path fires. Land the shell where that path would have left
+                // it — the vault-list home (ia.md §2 "H") with the trust
+                // gate already cleared — so the window a screenshot/operator
+                // sees after automation matches the state it actually holds,
+                // instead of a stale S1 trust-gate frame claiming
+                // unverified while the action bar already offers "Lock
+                // vault" for an unlocked session.
+                window.set_copy_code_verified(true);
+                window.set_screen("vault-list".into());
                 if let Err(error) = write_gui_automation_outcome(
                     &automation.output_path,
                     "pass",
@@ -473,7 +490,22 @@ fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
 
     wire_callbacks(&window, Rc::clone(&state));
     state.borrow().apply_to(&window);
-    window.run()
+
+    // `ComponentHandle::run()` is `show()` + `run_event_loop()` + `hide()`
+    // collapsed into one call. The window's native platform surface is not
+    // created until `show()` maps it, so `apply_requested_window_size`
+    // (called on the still-unshown `window` above) has nothing to resize
+    // yet under most windowing backends — it silently no-ops rather than
+    // erroring, which made this look like a working test/dev affordance
+    // when it was not actually reaching the mapped window. Show explicitly,
+    // re-apply the requested size to the now-real native window, then drive
+    // the event loop directly instead of `run()` so both steps land in the
+    // correct order.
+    window.show()?;
+    apply_requested_window_size(&window);
+    slint::run_event_loop()?;
+    window.hide()?;
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -752,6 +784,35 @@ fn apply_wasm_gate(state: &mut GuiState, operation: &str, message: &str) {
     state.automation_status = "WASM gate enforced".to_string();
 }
 
+/// Resizes the window to `PARANOID_GUI_WINDOW_SIZE` (`WIDTHxHEIGHT`,
+/// logical pixels) when set. Bare `Xvfb` (as `tests/test_gui_e2e.sh` runs
+/// under) has no window manager to clamp a top-level window to the
+/// display's geometry, so the shell's own `preferred-width`/
+/// `preferred-height` would otherwise render past the edge of a narrower
+/// viewport (e.g. the visual-regression harness's `mobile=420x800` class)
+/// with no way to observe the responsive layout at that size. A malformed
+/// or absent value is a no-op — this is a test/dev affordance, never a
+/// user-facing option, so it fails open rather than erroring the launch.
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_requested_window_size(window: &slint_shell::ParanoidPasswdShell) {
+    let Ok(raw) = env::var("PARANOID_GUI_WINDOW_SIZE") else {
+        return;
+    };
+    let Some((width, height)) = raw.split_once('x') else {
+        return;
+    };
+    let (Ok(width), Ok(height)) = (width.trim().parse::<f32>(), height.trim().parse::<f32>())
+    else {
+        return;
+    };
+    if width <= 0.0 || height <= 0.0 {
+        return;
+    }
+    window
+        .window()
+        .set_size(slint::LogicalSize::new(width, height));
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn configured_gui_automation() -> Result<Option<GuiAutomation>, String> {
     let Some(raw_scenario) = env::var_os("PARANOID_GUI_AUTOMATION_SCENARIO") else {
@@ -925,6 +986,19 @@ fn run_operator_automation(
     Ok(state.status.clone())
 }
 
+/// P8.3: the GUI's `operation-in-progress`/`progress-label` properties
+/// (`ia.md` §6 "Non-blocking is a GUI contract too") exist and are wired
+/// through to `GenerateScreen`'s `ProgressAffordance`, but this callback —
+/// like every other vault/generator callback in this module — still runs
+/// fully synchronously on the UI event-loop thread, exactly as the P8.2 TUI
+/// polish item found and deferred for `vault_tui`'s Argon2id derivation
+/// ("vault_tui is currently fully synchronous by design; this is an
+/// architecture change deserving its own item, not bundled into TUI
+/// copy/layout work"). Threading generation/derivation/backup work off
+/// this thread — and having callers actually set `operation-in-progress`
+/// true for the duration — is the matching follow-up item for the GUI;
+/// claiming it done here would be exactly the "pinning existence, not
+/// completeness" failure mode called out in the P0-META directive.
 #[cfg(not(target_arch = "wasm32"))]
 fn run_generator_audit(
     state: &mut GuiState,

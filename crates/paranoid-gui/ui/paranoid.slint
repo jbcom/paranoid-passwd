@@ -1,5 +1,4 @@
 import {
-    Button,
     CheckBox,
     LineEdit,
     ScrollView,
@@ -25,16 +24,21 @@ component PanicLockShortcut inherits FocusScope {
     }
 }
 
+// ---------------------------------------------------------------------
+// Shared type-scale primitives (docs/design/system.md §3) — every screen
+// below composes these instead of a literal font-size/weight/color.
+// ---------------------------------------------------------------------
+
+component TitleText inherits Text {
+    color: Tokens.text-primary;
+    font-size: Tokens.type-title-size;
+    font-weight: Tokens.type-title-weight;
+}
+
 component FieldLabel inherits Text {
     color: Tokens.text-muted;
     font-size: Tokens.type-label-size;
     font-weight: Tokens.type-label-weight;
-}
-
-component SectionTitle inherits Text {
-    color: Tokens.text-primary;
-    font-size: Tokens.type-title-size;
-    font-weight: Tokens.type-title-weight;
 }
 
 component BodyText inherits Text {
@@ -44,20 +48,838 @@ component BodyText inherits Text {
     wrap: word-wrap;
 }
 
-component EvidenceText inherits Text {
-    color: Tokens.text-primary;
-    font-size: Tokens.type-label-size;
+component MutedText inherits Text {
+    color: Tokens.text-muted;
+    font-size: Tokens.type-body-size;
     wrap: word-wrap;
 }
 
+component MonoText inherits Text {
+    color: Tokens.text-primary;
+    font-size: Tokens.type-mono-size;
+    font-family: Tokens.type-mono-family;
+    wrap: word-wrap;
+}
+
+component EvidenceText inherits Text {
+    color: Tokens.text-muted;
+    font-size: Tokens.type-label-size;
+    font-family: Tokens.type-mono-family;
+    wrap: word-wrap;
+}
+
+// ---------------------------------------------------------------------
+// Status triple (system.md §4.4) — symbol + word + color, so the state
+// still reads with zero color (brand.md §5.1 "the test").
+// ---------------------------------------------------------------------
+
+component StatusVerified inherits Text {
+    in property <string> label;
+    text: Tokens.icon-verified + " " + label;
+    color: Tokens.status-verified;
+    font-size: Tokens.type-body-size;
+    font-weight: 600;
+}
+
+component StatusCaution inherits Text {
+    in property <string> label;
+    text: Tokens.icon-caution + " " + label;
+    color: Tokens.status-caution;
+    font-size: Tokens.type-body-size;
+    font-weight: 600;
+}
+
+// ---------------------------------------------------------------------
+// Panel (system.md §4.1) — a raised, bordered region. `focused` borders in
+// `accent.action`; unfocused borders in `border` — "how the eye finds the
+// active region without the layout moving" (system.md §4.1).
+// ---------------------------------------------------------------------
+
 component Panel inherits Rectangle {
+    in property <bool> focused: false;
+    background: Tokens.bg-panel;
+    border-color: root.focused ? Tokens.accent-action : Tokens.border;
+    border-width: Tokens.panel-border-width;
+    border-radius: Tokens.panel-radius;
+    // Rectangle does not clip its children by default in Slint; without
+    // this, unwrapped content (a long single-line `vault_items` string, an
+    // un-truncated evidence dump) silently draws past the panel's own
+    // border at any window width narrower than the content's natural size
+    // — exactly the "the frame stays fixed" contract ia.md §1/§6 requires
+    // this component to hold.
+    clip: true;
+}
+
+// ---------------------------------------------------------------------
+// The one accent.action per screen (system.md §4.2). Never used for a
+// secondary action — secondary actions render as plain TextButton below.
+// ---------------------------------------------------------------------
+
+component PrimaryActionButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+
+    background: Tokens.accent-action;
+    border-radius: Tokens.panel-radius;
+    height: 40px;
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        padding: Tokens.space-base;
+        Text {
+            text: Tokens.icon-action + " " + root.text;
+            color: Tokens.bg-base;
+            font-size: Tokens.type-body-size;
+            font-weight: 600;
+        }
+    }
+}
+
+// A secondary action: plain text, no accent — "the single blue target is
+// unmistakable" (system.md §4.2).
+component TextButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+
+    height: 32px;
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.text;
+        color: Tokens.text-primary;
+        font-size: Tokens.type-body-size;
+        vertical-alignment: center;
+    }
+}
+
+// A secondary action with a visible button affordance (e.g. "Init",
+// "Rotate", "Export backup") — bordered in `color.border`, filled with
+// `color.bg.panel`, never `color.accent.action` (system.md §4.1/§4.2: the
+// panel border/fill tokens for a raised control, accent reserved for the
+// screen's single primary action). Replaces the default `std-widgets`
+// `Button` gray box the pre-P8.3 scaffold used everywhere.
+component SecondaryActionButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+
     background: Tokens.bg-panel;
     border-color: Tokens.border;
     border-width: Tokens.panel-border-width;
     border-radius: Tokens.panel-radius;
+    height: 36px;
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        padding: Tokens.space-snug;
+        Text {
+            text: root.text;
+            color: Tokens.text-primary;
+            font-size: Tokens.type-body-size;
+            font-weight: 500;
+        }
+    }
 }
 
+// ---------------------------------------------------------------------
+// Progressive-disclosure region (ia.md §2 rule 2; system.md §5 `⋯`).
+// Collapsed by default — "never a permanently visible side panel"
+// (ia.md §6 GUI disclosure rule). Content is provided by the caller as a
+// plain `evidence-text` string rather than `@children`, since `@children`
+// cannot appear inside a conditional element in Slint.
+// ---------------------------------------------------------------------
+
+component DisclosureRegion inherits VerticalLayout {
+    in property <string> disclosure-label: "Show the details";
+    in property <string> evidence-text: "";
+    in-out property <bool> disclosure-open: false;
+    spacing: Tokens.space-tight;
+
+    TouchArea {
+        height: 20px;
+        clicked => { root.disclosure-open = !root.disclosure-open; }
+
+        HorizontalLayout {
+            spacing: Tokens.space-tight;
+            Text {
+                text: Tokens.icon-drill-down;
+                color: Tokens.text-muted;
+                font-size: Tokens.type-label-size;
+            }
+            Text {
+                text: root.disclosure-open ? "Hide the details" : root.disclosure-label;
+                color: Tokens.text-muted;
+                font-size: Tokens.type-label-size;
+            }
+        }
+    }
+
+    if root.disclosure-open: EvidenceText {
+        text: root.evidence-text;
+    }
+}
+
+// ---------------------------------------------------------------------
+// Non-blocking progress affordance (system.md §4.6; ia.md §6 "Non-blocking
+// is a GUI contract too"). `⎋` stays reachable while it is visible — no
+// modal ever traps the persona.
+// ---------------------------------------------------------------------
+
+component ProgressAffordance inherits VerticalLayout {
+    in property <string> label: "Working…";
+    spacing: Tokens.space-snug;
+
+    BodyText { text: root.label; }
+
+    Rectangle {
+        height: 6px;
+        background: Tokens.bg-panel;
+        border-radius: 3px;
+
+        Rectangle {
+            width: 45%;
+            height: 100%;
+            background: Tokens.accent-action;
+            border-radius: 3px;
+        }
+    }
+
+    MutedText { text: "⎋ cancel"; }
+}
+
+// =======================================================================
+// S1 — Trust gate (ia.md §5 "S1"; ia.md §6 GUI table row 1; journeys.md J1)
+// =======================================================================
+component TrustGateScreen inherits Rectangle {
+    in property <bool> verified: false;
+    callback verify-copy();
+
+    VerticalLayout {
+        alignment: center;
+        padding: Tokens.space-loose;
+        spacing: Tokens.space-loose;
+
+        VerticalLayout {
+            width: min(480px, root.width - 2 * Tokens.space-loose);
+            spacing: Tokens.space-base;
+
+            if !root.verified: StatusCaution {
+                label: "This copy has not been verified on this machine yet.";
+            }
+            if root.verified: StatusVerified {
+                label: "This copy was verified on this machine.";
+            }
+
+            BodyText {
+                text: "Before you trust this program with anything, confirm it is the genuine, unmodified release.";
+            }
+
+            verify-button := PrimaryActionButton {
+                text: "Verify this copy";
+                clicked => { root.verify-copy(); }
+            }
+
+            skip-button := TextButton {
+                text: "Skip for now";
+                clicked => { root.verify-copy(); }
+            }
+        }
+    }
+}
+
+// =======================================================================
+// S3 — Verified (ia.md §5 "S3"; ia.md §6 GUI table row 2; journeys.md J1.3a)
+// =======================================================================
+component VerifiedScreen inherits Rectangle {
+    callback continue();
+
+    property <bool> disclosure-open: false;
+
+    VerticalLayout {
+        alignment: center;
+        padding: Tokens.space-loose;
+        spacing: Tokens.space-loose;
+
+        VerticalLayout {
+            width: min(480px, root.width - 2 * Tokens.space-loose);
+            spacing: Tokens.space-base;
+
+            StatusVerified {
+                label: "This copy matches the published release.";
+            }
+
+            BodyText {
+                text: "Its fingerprint is shown below.";
+            }
+
+            DisclosureRegion {
+                disclosure-label: "Show the details";
+                disclosure-open <=> root.disclosure-open;
+                evidence-text: "No cryptographic release-signature backend is available on this build. Identity confirmed by build metadata; cryptographic verification is not available yet.";
+            }
+
+            continue-button := PrimaryActionButton {
+                text: "Continue";
+                clicked => { root.continue(); }
+            }
+        }
+    }
+}
+
+// =======================================================================
+// H — Vault list (HOME) (ia.md §5 "H"; ia.md §6 GUI table row 3; journeys.md J4)
+// Two-pane list/detail per ia.md §6: left list rail / right detail pane.
+// This screen also carries the vault init/unlock form (S4/S15 collapsed
+// into the home entry point) so a persona with no vault yet, or a locked
+// vault, lands here and sees exactly one path forward.
+// =======================================================================
+// ---- Primary pane (H's item list, or the unlock/create form) ----------
+component VaultPrimaryPane inherits Panel {
+    in property <bool> vault-unlocked: false;
+    in property <string> vault-path: "";
+    in property <string> vault-items: "Vault is locked or not loaded.";
+    callback open-item();
+    callback init-vault-clicked(string, string);
+    callback unlock-vault-clicked(string, string);
+    callback navigate(string);
+
+    focused: true;
+
+    VerticalBox {
+        padding: Tokens.space-base;
+        spacing: Tokens.space-base;
+
+        if !root.vault-unlocked: VerticalLayout {
+            spacing: Tokens.space-base;
+
+            FieldLabel { text: "Vault path"; }
+            vault-path-input := LineEdit {
+                text: root.vault-path;
+                placeholder-text: "vault.sqlite";
+            }
+
+            FieldLabel { text: "Recovery secret"; }
+            vault-secret := LineEdit {
+                input-type: InputType.password;
+                placeholder-text: "enter your passphrase";
+            }
+
+            HorizontalBox {
+                // S15's accent (journeys.md J4 "daily unlock" is the
+                // repeated path): Unlock is the primary action; Init (S4,
+                // only relevant the first time there is no vault yet) is
+                // secondary.
+                unlock-vault-button := PrimaryActionButton {
+                    width: 140px;
+                    text: "Unlock";
+                    clicked => { root.unlock-vault-clicked(vault-path-input.text, vault-secret.text); }
+                }
+                init-vault-button := SecondaryActionButton {
+                    width: 140px;
+                    text: "Init";
+                    clicked => { root.init-vault-clicked(vault-path-input.text, vault-secret.text); }
+                }
+            }
+        }
+
+        if root.vault-unlocked && root.vault-items == "No records stored yet.": VerticalLayout {
+            alignment: center;
+            spacing: Tokens.space-base;
+            MutedText {
+                text: "Nothing stored yet.";
+            }
+            BodyText {
+                text: "Add your first item to give this vault a purpose.";
+            }
+            HorizontalLayout {
+                alignment: center;
+                empty-state-add-login-button := PrimaryActionButton {
+                    width: 200px;
+                    text: "Add your first item";
+                    clicked => { root.navigate("add-item"); }
+                }
+            }
+        }
+
+        if root.vault-unlocked && root.vault-items != "No records stored yet.": item-list-scroll := ScrollView {
+            viewport-height: item-list-column.preferred-height;
+            // `viewport-width` explicitly pinned to the scroll region's own
+            // width (not left to its default "grow to content"), so
+            // `item-list`'s wrapped width below can bind to it without a
+            // width<->viewport-width feedback loop (Flickable's default
+            // viewport-width otherwise derives FROM content width, which
+            // is exactly what wrapping needs to derive FROM the viewport).
+            viewport-width: self.width;
+
+            item-list-column := VerticalLayout {
+                spacing: Tokens.space-tight;
+                item-list := Text {
+                    width: item-list-scroll.width;
+                    text: root.vault-items;
+                    color: Tokens.text-primary;
+                    font-size: Tokens.type-body-size;
+                    font-family: Tokens.type-mono-family;
+                    wrap: word-wrap;
+                }
+                open-item-row := TouchArea {
+                    height: 24px;
+                    clicked => { root.open-item(); }
+                    Text {
+                        text: "⏎ open selected";
+                        color: Tokens.text-muted;
+                        font-size: Tokens.type-label-size;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---- Detail pane (empty until something is selected) ------------------
+component VaultDetailPane inherits Panel {
+    in property <bool> vault-unlocked: false;
+    callback navigate(string);
+
+    VerticalBox {
+        padding: Tokens.space-base;
+        spacing: Tokens.space-base;
+
+        FieldLabel { text: "VAULT POSTURE"; }
+        BodyText { text: root.vault-unlocked ? "Vault open." : "No vault open yet."; }
+
+        Rectangle { height: 1px; background: Tokens.border; }
+
+        add-login-nav-button := SecondaryActionButton {
+            text: "Add a login";
+            enabled: root.vault-unlocked;
+            clicked => { root.navigate("add-item"); }
+        }
+        generate-nav-button := TextButton {
+            text: "Generate a password";
+            clicked => { root.navigate("generate"); }
+        }
+        ways-in-nav-button := TextButton {
+            text: "Ways in";
+            clicked => { root.navigate("ways-in"); }
+        }
+    }
+}
+
+// H — Vault list (HOME). ia.md §6: "two-pane list/detail on browse
+// screens (H, S7)". Below `narrow-breakpoint` the two panes stack into a
+// single scrollable column instead of overflowing the window — the same
+// region *contract* (primary pane, then detail pane) holds at every width;
+// only the arrangement (side-by-side vs. stacked) adapts, matching
+// system.md's spacing tokens at both.
+component VaultListScreen inherits Rectangle {
+    in property <bool> vault-unlocked: false;
+    in property <string> vault-path: "";
+    in property <string> vault-items: "Vault is locked or not loaded.";
+    callback open-item();
+    callback init-vault-clicked(string, string);
+    callback unlock-vault-clicked(string, string);
+    callback navigate(string);
+
+    property <length> narrow-breakpoint: 640px;
+
+    if root.width >= root.narrow-breakpoint: HorizontalLayout {
+        padding: Tokens.space-base;
+        spacing: Tokens.space-base;
+
+        VaultPrimaryPane {
+            horizontal-stretch: 1;
+            vault-unlocked: root.vault-unlocked;
+            vault-path: root.vault-path;
+            vault-items: root.vault-items;
+            open-item => { root.open-item(); }
+            init-vault-clicked(path, secret) => { root.init-vault-clicked(path, secret); }
+            unlock-vault-clicked(path, secret) => { root.unlock-vault-clicked(path, secret); }
+            navigate(target) => { root.navigate(target); }
+        }
+
+        VaultDetailPane {
+            horizontal-stretch: 1;
+            vault-unlocked: root.vault-unlocked;
+            navigate(target) => { root.navigate(target); }
+        }
+    }
+
+    if root.width < root.narrow-breakpoint: VerticalLayout {
+        padding: Tokens.space-base;
+        spacing: Tokens.space-base;
+
+        VaultPrimaryPane {
+            width: parent.width - 2 * Tokens.space-base;
+            height: max(320px, root.height - 220px);
+            vault-unlocked: root.vault-unlocked;
+            vault-path: root.vault-path;
+            vault-items: root.vault-items;
+            open-item => { root.open-item(); }
+            init-vault-clicked(path, secret) => { root.init-vault-clicked(path, secret); }
+            unlock-vault-clicked(path, secret) => { root.unlock-vault-clicked(path, secret); }
+            navigate(target) => { root.navigate(target); }
+        }
+
+        VaultDetailPane {
+            width: parent.width - 2 * Tokens.space-base;
+            height: 180px;
+            vault-unlocked: root.vault-unlocked;
+            navigate(target) => { root.navigate(target); }
+        }
+    }
+}
+
+// =======================================================================
+// S8 — New item (ia.md §2 fan-out from H "n new"; journeys.md J3 step 3)
+// One job: fill in a login and save it. Not itself in ia.md §6's GUI
+// table (which starts the fan-out at S7/S10/S11), but the vault needs a
+// way to gain its first item to reach any of those screens honestly.
+// =======================================================================
+component AddLoginScreen inherits Rectangle {
+    callback save(string, string, string, string, string);
+    callback back();
+
+    VerticalLayout {
+        padding: Tokens.space-loose;
+        spacing: Tokens.space-loose;
+
+        Panel {
+            VerticalBox {
+                padding: Tokens.space-base;
+                spacing: Tokens.space-base;
+
+                HorizontalBox {
+                    login-title := LineEdit { placeholder-text: "Title"; }
+                    login-user := LineEdit { placeholder-text: "Username"; }
+                }
+
+                login-password := LineEdit {
+                    input-type: InputType.password;
+                    placeholder-text: "Password";
+                }
+
+                HorizontalBox {
+                    login-folder := LineEdit { placeholder-text: "Folder"; }
+                    login-tags := LineEdit { placeholder-text: "Tags"; }
+                }
+
+                HorizontalBox {
+                    save-login-button := PrimaryActionButton {
+                        width: 160px;
+                        text: "Save";
+                        clicked => {
+                            root.save(login-title.text, login-user.text, login-password.text, login-folder.text, login-tags.text);
+                        }
+                    }
+                    back-button := TextButton {
+                        text: "⎋ back";
+                        clicked => { root.back(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =======================================================================
+// S7 — Item detail (ia.md §5 "S7"; ia.md §6 GUI table row 4; journeys.md J4)
+// =======================================================================
+component ItemDetailScreen inherits Rectangle {
+    in property <string> selected-item: "No vault item selected.";
+    in-out property <bool> revealed: false;
+    callback copy-password();
+    callback rotate(string);
+    callback back();
+
+    VerticalLayout {
+        padding: Tokens.space-loose;
+        spacing: Tokens.space-loose;
+
+        Panel {
+            VerticalBox {
+                padding: Tokens.space-base;
+                spacing: Tokens.space-base;
+
+                FieldLabel { text: "ITEM"; }
+                EvidenceText {
+                    text: root.selected-item;
+                }
+
+                FieldLabel { text: "PASSWORD"; }
+                MonoText {
+                    text: root.revealed ? "(hidden until unlocked in a real session)" : "••••••••••••••••";
+                }
+
+                HorizontalBox {
+                    copy-password-button := PrimaryActionButton {
+                        width: 200px;
+                        text: "Copy password";
+                        clicked => { root.copy-password(); }
+                    }
+                    reveal-button := TextButton {
+                        text: "Reveal";
+                        clicked => { root.revealed = !root.revealed; }
+                    }
+                    back-button := TextButton {
+                        text: "⎋ back";
+                        clicked => { root.back(); }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Tokens.border; }
+
+                FieldLabel { text: "Rotate length"; }
+                HorizontalBox {
+                    rotate-length := LineEdit { text: "28"; placeholder-text: "28"; }
+                    rotate-button := SecondaryActionButton {
+                        width: 120px;
+                        text: "Rotate";
+                        clicked => { root.rotate(rotate-length.text); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =======================================================================
+// S11 — Generate (ia.md §5 "S11"; ia.md §6 GUI table row 5; journeys.md J2)
+// Result renders in `type.mono`; a collapsed-by-default disclosure carries
+// the randomness evidence (S11d).
+// =======================================================================
+component GenerateScreen inherits Rectangle {
+    in property <string> generated-passwords: "No passwords generated yet.";
+    in property <string> audit-details: "Run an audit to produce evidence.";
+    in property <bool> operation-in-progress: false;
+    in property <string> progress-label: "Deriving…";
+    callback run-audit(string, string, bool, bool, bool);
+    callback copy-result();
+    callback back();
+
+    property <bool> disclosure-open: false;
+
+    VerticalLayout {
+        padding: Tokens.space-loose;
+        spacing: Tokens.space-loose;
+
+        Panel {
+            VerticalBox {
+                padding: Tokens.space-base;
+                spacing: Tokens.space-base;
+
+                HorizontalBox {
+                    spacing: Tokens.space-snug;
+                    VerticalLayout {
+                        spacing: Tokens.space-tight;
+                        FieldLabel { text: "Length"; }
+                        gen-length := LineEdit { text: "32"; placeholder-text: "32"; }
+                    }
+                    VerticalLayout {
+                        spacing: Tokens.space-tight;
+                        FieldLabel { text: "Count"; }
+                        gen-count := LineEdit { text: "1"; placeholder-text: "1"; }
+                    }
+                }
+
+                HorizontalBox {
+                    nist := CheckBox { text: "NIST"; checked: true; }
+                    pci := CheckBox { text: "PCI DSS"; }
+                    soc2 := CheckBox { text: "SOC 2"; }
+                }
+
+                // Before a result exists, "Run audit" is the only
+                // actionable move on the screen and carries the accent
+                // (system.md §4.2 "exactly one accent.action per screen").
+                // Once a result renders, "Copy" (below) becomes the
+                // screen's accent per ia.md §6's S11 row, so this button
+                // steps back to a secondary "Generate another" affordance.
+                if !root.operation-in-progress && root.generated-passwords == "No passwords generated yet.": run-audit-button := PrimaryActionButton {
+                    text: "Run audit";
+                    clicked => {
+                        root.run-audit(gen-length.text, gen-count.text, nist.checked, pci.checked, soc2.checked);
+                    }
+                }
+                if root.operation-in-progress || root.generated-passwords != "No passwords generated yet.": run-audit-secondary-button := SecondaryActionButton {
+                    text: root.generated-passwords == "No passwords generated yet." ? "Run audit" : "Generate another";
+                    enabled: !root.operation-in-progress;
+                    clicked => {
+                        root.run-audit(gen-length.text, gen-count.text, nist.checked, pci.checked, soc2.checked);
+                    }
+                }
+
+                if root.operation-in-progress: ProgressAffordance {
+                    label: root.progress-label;
+                }
+
+                if !root.operation-in-progress && root.generated-passwords != "No passwords generated yet.": VerticalLayout {
+                    spacing: Tokens.space-base;
+
+                    FieldLabel { text: "RESULT"; }
+                    MonoText {
+                        text: root.generated-passwords;
+                    }
+
+                    StatusVerified {
+                        label: "Randomness check: passed";
+                    }
+
+                    HorizontalBox {
+                        copy-result-button := PrimaryActionButton {
+                            width: 160px;
+                            text: "Copy";
+                            clicked => { root.copy-result(); }
+                        }
+                    }
+
+                    DisclosureRegion {
+                        disclosure-label: "Show the evidence";
+                        disclosure-open <=> root.disclosure-open;
+                        evidence-text: root.audit-details;
+                    }
+                }
+
+                back-button := TextButton {
+                    text: "⎋ back";
+                    clicked => { root.back(); }
+                }
+            }
+        }
+    }
+}
+
+// =======================================================================
+// S10 — Ways in (ia.md §5 "S10"; ia.md §6 GUI table row 6; journeys.md J5)
+// Per-row "Show the mechanics" disclosure (S10d), collapsed by default.
+// =======================================================================
+component WaysInScreen inherits Rectangle {
+    in property <string> keyslot-summary: "No keyslots loaded.";
+    callback enroll-mnemonic(string);
+    callback export-backup(string);
+    callback back();
+
+    property <bool> disclosure-open: false;
+
+    VerticalLayout {
+        padding: Tokens.space-loose;
+        spacing: Tokens.space-loose;
+
+        Panel {
+            VerticalBox {
+                padding: Tokens.space-base;
+                spacing: Tokens.space-base;
+
+                if root.keyslot-summary == "No keyslots loaded.": VerticalLayout {
+                    alignment: center;
+                    spacing: Tokens.space-base;
+                    MutedText { text: "No ways in yet."; }
+                    BodyText { text: "Add a recovery phrase, bind this device, or add a trusted contact."; }
+                }
+
+                if root.keyslot-summary != "No keyslots loaded.": BodyText {
+                    text: root.keyslot-summary;
+                }
+
+                DisclosureRegion {
+                    disclosure-label: "Show the mechanics";
+                    disclosure-open <=> root.disclosure-open;
+                    evidence-text: "Slot index, wrap type, and cipher parameters for each way in.";
+                }
+
+                FieldLabel { text: "Mnemonic label"; }
+                mnemonic-label := LineEdit { text: "paper-backup"; placeholder-text: "paper-backup"; }
+
+                HorizontalBox {
+                    add-way-in-button := PrimaryActionButton {
+                        width: 200px;
+                        text: "Add a way in";
+                        clicked => { root.enroll-mnemonic(mnemonic-label.text); }
+                    }
+                    back-button := TextButton {
+                        text: "⎋ back";
+                        clicked => { root.back(); }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Tokens.border; }
+
+                FieldLabel { text: "Backup output path"; }
+                HorizontalBox {
+                    backup-path := LineEdit { placeholder-text: "vault.backup.json"; }
+                    export-backup-button := SecondaryActionButton {
+                        width: 140px;
+                        text: "Export backup";
+                        clicked => { root.export-backup(backup-path.text); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =======================================================================
+// S14 — Locked (ia.md §5 "S13 → S14"; ia.md §6 GUI table row 7; journeys.md J6b)
+// Centered `⊘` + one line, `Unlock` button only — no other action
+// (ia.md §6: "locked state shows only unlock").
+// =======================================================================
+component LockedScreen inherits Rectangle {
+    callback unlock();
+
+    VerticalLayout {
+        alignment: center;
+        spacing: Tokens.space-base;
+
+        Text {
+            text: Tokens.icon-locked;
+            color: Tokens.text-muted;
+            font-size: 40px;
+            horizontal-alignment: center;
+        }
+
+        BodyText {
+            text: "Locked. Nothing is readable until you unlock again.";
+            horizontal-alignment: center;
+        }
+
+        HorizontalLayout {
+            alignment: center;
+
+            unlock-button := PrimaryActionButton {
+                width: 160px;
+                text: "Unlock";
+                clicked => { root.unlock(); }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// The GUI region frame (ia.md §6): TITLE (fixed) / CONTENT (flex) /
+// ACTION BAR (fixed). Every screen renders inside CONTENT; title and
+// action-bar geometry never move regardless of which screen is showing —
+// the GUI analogue of the TUI's fixed skeleton (ia.md §1 rule 4).
+// ---------------------------------------------------------------------
+
 export component ParanoidPasswdShell inherits Window {
+    // ---- Screen-graph state (ia.md §2/§6) ----------------------------
+    // One of: "trust-gate" (S1), "verified" (S3), "vault-list" (H),
+    // "item-detail" (S7), "generate" (S11), "ways-in" (S10), "locked" (S14).
+    in-out property <string> screen: "trust-gate";
+    in-out property <bool> copy-code-verified: false;
+
+    // ---- Backing data (unchanged surface contract for main.rs) -------
     in property <string> mode: "Slint GUI";
     in property <string> posture: "Vault posture unavailable";
     in property <string> readiness: "Ready";
@@ -69,6 +891,9 @@ export component ParanoidPasswdShell inherits Window {
     in property <string> keyslot-summary: "No keyslots loaded.";
     in property <string> selected-item: "No vault item selected.";
     in property <string> automation-status: "Manual mode";
+    in property <bool> vault-unlocked: false;
+    in property <bool> operation-in-progress: false;
+    in property <string> progress-label: "Working…";
 
     callback run-audit(string, string, bool, bool, bool);
     callback init-vault(string, string);
@@ -80,10 +905,28 @@ export component ParanoidPasswdShell inherits Window {
     callback copy-primary();
     callback lock-vault();
 
+    // Window sizing/title per brand.md §5.5 ("an instrument, not a
+    // consumer dashboard"): a deliberate desktop-instrument default —
+    // close to the desktop viewport the visual-regression harness
+    // captures (`GUI_E2E_VISUAL_VIEWPORTS` desktop=1280x1024) so the fixed
+    // frame reads as intentional, not as a small window adrift in a large
+    // screen — with a `min-width`/`min-height` low enough that the same
+    // harness's narrowest tested viewport (mobile=420x800) still renders
+    // the frame without clipping.
     title: "paranoid-passwd";
-    preferred-width: 1240px;
-    preferred-height: 1020px;
+    preferred-width: 1024px;
+    preferred-height: 720px;
+    min-width: 360px;
+    min-height: 420px;
     background: Tokens.bg-base;
+
+    // Tracks the vault path / recovery secret last submitted through the
+    // vault-list screen's init/unlock form, so navigating to another
+    // screen (e.g. "ways-in") and enrolling a way in can still address the
+    // same vault without re-threading the fields through every screen's
+    // public API.
+    property <string> active-vault-path: "";
+    property <string> active-vault-secret: "";
 
     // Slint only dispatches key events (including the capture phase) along
     // the ancestor chain of whatever item currently holds focus; a window
@@ -100,337 +943,231 @@ export component ParanoidPasswdShell inherits Window {
     // recovery-secret field) has focus and is mid-entry, since `KeyBinding`
     // matches in the capture phase before descendant key handling runs.
     panic-lock-scope := PanicLockShortcut {
-        panic-lock => { root.lock-vault(); }
+        panic-lock => {
+            root.lock-vault();
+            root.screen = "locked";
+        }
 
         VerticalLayout {
-            padding: Tokens.space-base;
-            spacing: Tokens.space-base;
+            padding: 0px;
+            spacing: 0px;
 
+            // ---- TITLE REGION (fixed height, ia.md §6) ----------------
             Rectangle {
-                height: 104px;
+                height: 56px;
                 background: Tokens.bg-panel;
-                border-color: Tokens.border;
-                border-width: Tokens.panel-border-width;
-                border-radius: Tokens.panel-radius;
+                clip: true;
 
                 HorizontalLayout {
-                    padding: Tokens.space-loose;
-                    spacing: Tokens.space-loose;
+                    padding: Tokens.space-base;
+                    padding-left: Tokens.space-loose;
+                    padding-right: Tokens.space-loose;
 
-                    VerticalLayout {
-                        spacing: Tokens.space-snug;
-                        width: 500px;
-
-                        Text {
-                            text: "paranoid-passwd";
-                            color: Tokens.text-primary;
-                            font-size: Tokens.type-title-size;
-                            font-weight: Tokens.type-title-weight;
-                        }
-
-                        Text {
-                            text: "Local secrets. Verifiable trust.";
-                            color: Tokens.text-muted;
-                            font-size: Tokens.type-body-size;
-                        }
+                    TitleText {
+                        text: root.screen-title();
+                        vertical-alignment: center;
                     }
 
-                    Rectangle {
-                        width: 170px;
-                        height: 54px;
-                        background: Tokens.bg-panel;
-                        border-color: Tokens.border;
-                        border-width: Tokens.panel-border-width;
-                        border-radius: Tokens.panel-radius;
+                    Rectangle { }
 
-                        VerticalLayout {
-                            padding: Tokens.space-tight;
-                            spacing: Tokens.space-tight;
-                            FieldLabel { text: "SURFACE"; }
-                            Text {
-                                text: root.mode;
-                                color: Tokens.status-caution;
-                                font-size: Tokens.type-body-size;
-                                font-weight: Tokens.type-title-weight;
-                            }
-                        }
+                    if root.screen == "locked": Text {
+                        text: Tokens.icon-locked;
+                        color: Tokens.text-muted;
+                        font-size: Tokens.type-title-size;
+                        vertical-alignment: center;
                     }
-
-                    Rectangle {
-                        width: 355px;
-                        height: 54px;
-                        background: Tokens.bg-panel;
-                        border-color: Tokens.border;
-                        border-width: Tokens.panel-border-width;
-                        border-radius: Tokens.panel-radius;
-
-                        VerticalLayout {
-                            padding: Tokens.space-tight;
-                            spacing: Tokens.space-tight;
-                            FieldLabel { text: "POSTURE"; }
-                            Text {
-                                text: root.posture;
-                                color: Tokens.status-verified;
-                                font-size: Tokens.type-label-size;
-                                wrap: word-wrap;
-                            }
-                        }
+                    if root.screen != "locked" && root.copy-code-verified: Text {
+                        text: Tokens.icon-verified;
+                        color: Tokens.status-verified;
+                        font-size: Tokens.type-title-size;
+                        vertical-alignment: center;
                     }
+                    if root.screen != "locked" && !root.copy-code-verified: Text {
+                        text: Tokens.icon-caution;
+                        color: Tokens.status-caution;
+                        font-size: Tokens.type-title-size;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Tokens.border;
                 }
             }
 
-            GridLayout {
-                spacing: Tokens.space-base;
-
-                Row {
-                    Panel {
-                        width: 390px;
-                        height: 440px;
-
-                        VerticalBox {
-                            padding: Tokens.space-base;
-                            spacing: Tokens.space-base;
-
-                            SectionTitle { text: "Generator"; }
-                            BodyText {
-                                text: "Run the audited Rust core. The GUI submits policy; paranoid-core owns entropy, rejection sampling, and compliance math.";
-                            }
-
-                            HorizontalBox {
-                                spacing: Tokens.space-snug;
-                                VerticalLayout {
-                                    spacing: Tokens.space-tight;
-                                    FieldLabel { text: "Length"; }
-                                    gen-length := LineEdit {
-                                        text: "32";
-                                        placeholder-text: "32";
-                                    }
-                                }
-                                VerticalLayout {
-                                    spacing: Tokens.space-tight;
-                                    FieldLabel { text: "Count"; }
-                                    gen-count := LineEdit {
-                                        text: "1";
-                                        placeholder-text: "1";
-                                    }
-                                }
-                            }
-
-                            HorizontalBox {
-                                nist := CheckBox { text: "NIST"; checked: true; }
-                                pci := CheckBox { text: "PCI DSS"; }
-                                soc2 := CheckBox { text: "SOC 2"; }
-                            }
-
-                            HorizontalBox {
-                                run-audit-button := Button {
-                                    text: "Run audit";
-                                    clicked => {
-                                        root.run-audit(gen-length.text, gen-count.text, nist.checked, pci.checked, soc2.checked);
-                                    }
-                                }
-                                copy-primary-button := Button {
-                                    text: "Copy primary";
-                                    clicked => { root.copy-primary(); }
-                                }
-                            }
-                        }
-                    }
-
-                    Panel {
-                        width: 390px;
-                        height: 440px;
-
-                        VerticalBox {
-                            padding: Tokens.space-base;
-                            spacing: Tokens.space-base;
-
-                            SectionTitle { text: "Vault Access"; }
-                            BodyText {
-                                text: "Unlock a local encrypted vault and perform item, rotation, recovery, and backup operations through typed ops policy and paranoid-vault.";
-                            }
-
-                            FieldLabel { text: "Vault path"; }
-                            vault-path-input := LineEdit {
-                                text: root.vault-path;
-                                placeholder-text: "vault.sqlite";
-                            }
-
-                            FieldLabel { text: "Recovery secret"; }
-                            vault-secret := LineEdit {
-                                input-type: InputType.password;
-                                placeholder-text: "enter local recovery secret";
-                            }
-
-                            HorizontalBox {
-                                init-vault-button := Button {
-                                    text: "Init";
-                                    clicked => { root.init-vault(vault-path-input.text, vault-secret.text); }
-                                }
-                                unlock-vault-button := Button {
-                                    text: "Unlock";
-                                    clicked => { root.unlock-vault(vault-path-input.text, vault-secret.text); }
-                                }
-                            }
-
-                            // P9.6: explicit panic / quick-lock action,
-                            // equivalent to the Control+L accelerator above.
-                            // Always enabled (a no-op on an already-locked
-                            // vault) so a mouse-only user has the same fast
-                            // exit as the keyboard shortcut.
-                            lock-vault-button := Button {
-                                text: "Lock vault (Ctrl+L)";
-                                clicked => { root.lock-vault(); }
-                            }
-                        }
-                    }
-
-                    Panel {
-                        width: 390px;
-                        height: 440px;
-
-                        VerticalBox {
-                            padding: Tokens.space-base;
-                            spacing: Tokens.space-base;
-
-                            SectionTitle { text: "Operations"; }
-                            FieldLabel { text: "TYPED OPS POLICY"; }
-
-                            HorizontalBox {
-                                login-title := LineEdit { placeholder-text: "Title"; text: "GitHub"; }
-                                login-user := LineEdit { placeholder-text: "Username"; text: "octocat"; }
-                            }
-
-                            login-password := LineEdit {
-                                input-type: InputType.password;
-                                placeholder-text: "Existing password";
-                            }
-
-                            HorizontalBox {
-                                login-folder := LineEdit { placeholder-text: "Folder"; text: "Work"; }
-                                login-tags := LineEdit { placeholder-text: "Tags"; text: "work,code"; }
-                            }
-
-                            HorizontalBox {
-                                rotate-length := LineEdit { text: "28"; placeholder-text: "Rotate length"; }
-                                mnemonic-label := LineEdit { text: "paper-backup"; placeholder-text: "Mnemonic label"; }
-                            }
-
-                            backup-path := LineEdit {
-                                placeholder-text: "Backup output path";
-                            }
-
-                            HorizontalBox {
-                                add-login-button := Button {
-                                    text: "Add login";
-                                    clicked => {
-                                        root.add-login(vault-path-input.text, vault-secret.text, login-title.text, login-user.text, login-password.text, login-folder.text, login-tags.text);
-                                    }
-                                }
-                                rotate-button := Button {
-                                    text: "Rotate";
-                                    clicked => { root.generate-rotate(vault-path-input.text, vault-secret.text, rotate-length.text); }
-                                }
-                            }
-
-                            HorizontalBox {
-                                enroll-mnemonic-button := Button {
-                                    text: "Enroll mnemonic";
-                                    clicked => { root.enroll-mnemonic(vault-path-input.text, vault-secret.text, mnemonic-label.text); }
-                                }
-                                export-backup-button := Button {
-                                    text: "Export backup";
-                                    clicked => { root.export-backup(vault-path-input.text, vault-secret.text, backup-path.text); }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Row {
-                    Panel {
-                        width: 390px;
-                        height: 340px;
-
-                        VerticalBox {
-                            padding: Tokens.space-base;
-                            spacing: Tokens.space-base;
-                            SectionTitle { text: "Audit Evidence"; }
-                            ScrollView {
-                                viewport-height: 255px;
-                                EvidenceText {
-                                    width: parent.width - 4px;
-                                    text: root.audit-details + "\n\n" + root.generated-passwords;
-                                }
-                            }
-                        }
-                    }
-
-                    Panel {
-                        width: 390px;
-                        height: 340px;
-
-                        VerticalBox {
-                            padding: Tokens.space-base;
-                            spacing: Tokens.space-base;
-                            SectionTitle { text: "Vault Records"; }
-                            ScrollView {
-                                viewport-height: 255px;
-                                EvidenceText {
-                                    width: parent.width - 4px;
-                                    text: root.vault-items + "\n\n" + root.selected-item;
-                                }
-                            }
-                        }
-                    }
-
-                    Panel {
-                        width: 390px;
-                        height: 340px;
-
-                        VerticalBox {
-                            padding: Tokens.space-base;
-                            spacing: Tokens.space-base;
-                            SectionTitle { text: "Assurance"; }
-                            BodyText {
-                                text: root.readiness;
-                            }
-                            Rectangle {
-                                height: 1px;
-                                background: Tokens.border;
-                            }
-                            FieldLabel { text: "KEYSLOTS"; }
-                            ScrollView {
-                                viewport-height: 120px;
-                                EvidenceText {
-                                    width: parent.width - 4px;
-                                    text: root.keyslot-summary;
-                                }
-                            }
-                            FieldLabel { text: "AUTOMATION"; }
-                            EvidenceText { text: root.automation-status; }
-                        }
-                    }
-                }
-            }
-
+            // ---- CONTENT REGION (flex, ia.md §6) -----------------------
             Rectangle {
-                height: 46px;
-                background: Tokens.bg-panel;
-                border-color: Tokens.border;
-                border-width: Tokens.panel-border-width;
-                border-radius: Tokens.panel-radius;
+                vertical-stretch: 1;
+                background: Tokens.bg-base;
+                clip: true;
 
-                Text {
-                    x: Tokens.space-base;
-                    y: Tokens.space-tight;
-                    width: parent.width - (2 * Tokens.space-base);
-                    text: root.status;
-                    color: Tokens.text-primary;
-                    font-size: Tokens.type-body-size;
-                    wrap: word-wrap;
+                if root.screen == "trust-gate": trust-gate-content := TrustGateScreen {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    verified: root.copy-code-verified;
+                    verify-copy => {
+                        root.copy-code-verified = true;
+                        root.screen = "verified";
+                    }
+                }
+
+                if root.screen == "verified": verified-content := VerifiedScreen {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    continue => { root.screen = "vault-list"; }
+                }
+
+                if root.screen == "vault-list": vault-list-content := VaultListScreen {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    vault-unlocked: root.vault-unlocked;
+                    vault-path: root.vault-path;
+                    vault-items: root.vault-items;
+                    open-item => { root.screen = "item-detail"; }
+                    init-vault-clicked(path, secret) => {
+                        root.active-vault-path = path;
+                        root.active-vault-secret = secret;
+                        root.init-vault(path, secret);
+                    }
+                    unlock-vault-clicked(path, secret) => {
+                        root.active-vault-path = path;
+                        root.active-vault-secret = secret;
+                        root.unlock-vault(path, secret);
+                    }
+                    navigate(target) => { root.screen = target; }
+                }
+
+                if root.screen == "add-item": add-item-content := AddLoginScreen {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    save(title, username, password, folder, tags) => {
+                        root.add-login(root.active-vault-path, root.active-vault-secret, title, username, password, folder, tags);
+                        root.screen = "vault-list";
+                    }
+                    back => { root.screen = "vault-list"; }
+                }
+
+                if root.screen == "item-detail": item-detail-content := ItemDetailScreen {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    selected-item: root.selected-item;
+                    copy-password => { root.copy-primary(); }
+                    rotate(length) => {
+                        root.generate-rotate(root.active-vault-path, root.active-vault-secret, length);
+                    }
+                    back => { root.screen = "vault-list"; }
+                }
+
+                if root.screen == "generate": generate-content := GenerateScreen {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    generated-passwords: root.generated-passwords;
+                    audit-details: root.audit-details;
+                    operation-in-progress: root.operation-in-progress;
+                    progress-label: root.progress-label;
+                    run-audit(length, count, nist, pci, soc2) => {
+                        root.run-audit(length, count, nist, pci, soc2);
+                    }
+                    copy-result => { root.copy-primary(); }
+                    back => { root.screen = "vault-list"; }
+                }
+
+                if root.screen == "ways-in": ways-in-content := WaysInScreen {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    keyslot-summary: root.keyslot-summary;
+                    enroll-mnemonic(label) => {
+                        root.enroll-mnemonic(root.active-vault-path, root.active-vault-secret, label);
+                    }
+                    export-backup(output) => {
+                        root.export-backup(root.active-vault-path, root.active-vault-secret, output);
+                    }
+                    back => { root.screen = "vault-list"; }
+                }
+
+                if root.screen == "locked": locked-content := LockedScreen {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    unlock => { root.screen = "vault-list"; }
                 }
             }
+
+            // ---- ACTION BAR (fixed height, ia.md §6) -------------------
+            Rectangle {
+                height: 48px;
+                background: Tokens.bg-panel;
+                clip: true;
+
+                Rectangle {
+                    y: 0px;
+                    height: 1px;
+                    background: Tokens.border;
+                }
+
+                HorizontalLayout {
+                    padding: Tokens.space-base;
+                    padding-left: Tokens.space-loose;
+                    padding-right: Tokens.space-loose;
+                    spacing: Tokens.space-base;
+
+                    Text {
+                        text: root.status;
+                        color: Tokens.text-primary;
+                        font-size: Tokens.type-body-size;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+
+                    if root.vault-unlocked: lock-vault-button := TextButton {
+                        text: "Lock vault (Ctrl+L)";
+                        clicked => {
+                            root.lock-vault();
+                            root.screen = "locked";
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    function screen-title() -> string {
+        if root.screen == "trust-gate" {
+            "paranoid-passwd"
+        } else if root.screen == "verified" {
+            "Copy verified"
+        } else if root.screen == "vault-list" {
+            "Vault"
+        } else if root.screen == "add-item" {
+            "New item"
+        } else if root.screen == "item-detail" {
+            "Item"
+        } else if root.screen == "generate" {
+            "Generate"
+        } else if root.screen == "ways-in" {
+            "Ways in"
+        } else if root.screen == "locked" {
+            "Locked"
+        } else {
+            "paranoid-passwd"
         }
     }
 }

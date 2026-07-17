@@ -482,27 +482,95 @@ P6.0 CI research + two-tier trust design.
   scope. The remaining brand.md §4 vocabulary-table sweep (form field labels
   like "Recovery secret", `federal-evidence` CLI flags) is explicitly P8.4's
   job per this doc's own scoping, not re-done here.
-- [ ] P8.3 GUI polish — implements ia.md §6 (fixed three-region frame: title
-  region / content region / action bar, mirroring the TUI skeleton) and the
-  ia.md §6 GUI screen table verbatim: S1 centered column with amber `!`
-  banner + **Verify this copy** button; S3 centered column, green `✓` line,
-  **Continue** button; H left list rail / right detail pane; S7 detail pane
-  with masked field, **Copy password** primary button, Reveal/Edit
-  secondary; S11 result panel in `type.mono`, **Copy** button, collapsible
-  "Show the evidence" disclosure (S11d) closed by default; S10 relationship
-  list, **Add a way in** button, per-row "Show the mechanics" disclosure
-  (S10d); S14 centered `⊘` + one line, **Unlock** button only, no other
-  action. Technical evidence (S2d/S10d/S11d/S18/S19-equivalent panels) is a
-  **collapsible disclosure region, collapsed by default** — never a
-  permanently visible side panel (ia.md §6 "GUI disclosure rule"); this is
-  the concrete fix for the current `paranoid.slint` scaffold that "stacks
-  evidence panels visibly and drifts from the palette" (system.md §7).
-  Verify/derivation/evidence-bundle production run off the UI thread with a
-  visible progress affordance and live cancel/Esc (ia.md §6 "Non-blocking is
-  a GUI contract too"). Consumes P8.0's `paranoid-tokens.slint` exclusively
-  — every `paranoid.slint` component references `Tokens.*`, and the system.md
-  §7 drift table is fully retuned (no `#171d26`/`#314154`/`#f5d76e`/`34px`
-  etc. remain).
+- [x] P8.3 GUI polish — implemented ia.md §6's fixed three-region frame
+  (title/content/action-bar, `ParanoidPasswdShell`'s `panic-lock-scope`
+  `VerticalLayout`) and rebuilt `paranoid.slint` from the pre-P8.3 single
+  dashboard scaffold into the actual ia.md §2/§6 screen graph, driven by a
+  `screen: string` property: `TrustGateScreen` (S1, amber `!` banner /
+  earned green `✓` re-verify state + **Verify this copy** button),
+  `VerifiedScreen` (S3, green `✓` line, collapsed-by-default fingerprint
+  disclosure, **Continue**), `VaultListScreen` (H, `VaultPrimaryPane` list
+  rail / `VaultDetailPane` detail pane, folds S4/S15's init/unlock form into
+  the same screen per this build's TUI precedent), `AddLoginScreen` (S8,
+  the "n new" fan-out — not in ia.md §6's GUI table but required for the
+  vault to hold anything to show S7/S10/S11 against), `ItemDetailScreen`
+  (S7, masked `MonoText` password field, **Copy password** primary,
+  Reveal/rotate secondary), `GenerateScreen` (S11, mono result, earned
+  `StatusVerified` "Randomness check: passed", **Copy** primary once a
+  result exists, collapsed-by-default "Show the evidence" disclosure =
+  S11d), `WaysInScreen` (S10, **Add a way in** primary, collapsed-by-default
+  "Show the mechanics" disclosure = S10d, export-backup secondary),
+  `LockedScreen` (S14, centered `⊘` + verbatim brand.md copy, **Unlock**
+  only, no other action per ia.md §6). New token-styled `PrimaryActionButton`
+  (accent, one per screen)/`SecondaryActionButton` (bordered panel-tone)/
+  `TextButton` components replace every `std-widgets::Button` default-gray
+  usage the pre-P8.3 scaffold had (verified against `docs/design/evidence/
+  15-gui-operator-workflow-final.png`, the P8.1 baseline, which shows the
+  same gray default-widget look this item exists to fix); `DisclosureRegion`
+  is the shared collapsed-by-default `⋯`/"Show…" component enforcing ia.md
+  §6's "GUI disclosure rule" (never a permanently visible side panel) for
+  S3/S11/S10's evidence; `ProgressAffordance` exists and is wired through
+  `GenerateScreen` for the non-blocking-progress contract, honestly
+  documented as UI-only plumbing — `run_generator_audit` and every other
+  vault/generator callback in `lib.rs` still run synchronously on the event
+  loop thread, the same gap P8.2 found and deferred for `vault_tui`'s
+  Argon2id derivation, not silently claimed complete here (doc comment on
+  `run_generator_audit` cites the P0-META "pinning existence, not
+  completeness" lesson directly). Empty states: S1's unverified-vs-verified
+  banner, H's "Nothing stored yet." + **Add your first item** when a vault
+  is unlocked and empty (own widget test), S10's "No ways in yet." Window
+  sizing/title per brand.md §5.5 ("an instrument, not a consumer
+  dashboard"): `title: "paranoid-passwd"`, `preferred-width/height:
+  1024x720`, `min-width/height: 360x420` (low enough for the visual-
+  regression harness's narrowest tested viewport). All `paranoid.slint`
+  components reference `Tokens.*` exclusively (P8.0's module) — zero raw hex
+  literals remain in the file (grep-verified).
+  ACCEPT verified: `make test-gui-widgets` — 12/12 real widget-event tests
+  green (8 pre-existing flows re-navigated through the real S1→S3→H screen
+  path instead of a direct-jump, since the layout contract changed
+  wholesale, plus 4 new: trust-gate unverified state, S3 disclosure
+  collapsed-by-default, H empty-state copy, S14 Unlock→H return);
+  `cargo test -p paranoid-gui --lib` — 11/11 unchanged unit tests green;
+  `cargo clippy -p paranoid-gui --all-targets --features gui-widget-tests -D
+  warnings` clean; `cargo fmt -p paranoid-gui --check` clean; `make
+  test-gui-host-check` clean; `make test-gui-e2e-emulate` and `make
+  test-gui-visual-regression-emulate` (desktop=1280x1024, tablet=900x700,
+  mobile=420x800) both green against the real binary under Xvfb — screenshot
+  evidence read back and reviewed (not just "tests pass"), which surfaced
+  and fixed two real defects beyond the design-system swap-in: (1) `Panel`
+  (and the title/content/action-bar region `Rectangle`s) never set
+  `clip: true`, so unwrapped content silently drew past a panel's own
+  border at any width narrower than the content's natural size — fixed by
+  clipping every fixed-frame region and giving `VaultPrimaryPane`'s
+  `item-list` Text an explicit wrap width bound to its `ScrollView`'s own
+  width rather than the flickable-viewport-loop `parent.width` (which does
+  not compile — binding loop through `viewport-width`); (2) the
+  `PARANOID_GUI_AUTOMATION_*` operator-workflow scenario (used by both e2e
+  harnesses) drives `GuiState` directly, bypassing every screen-navigation
+  callback, so the shell was staying parked on the S1 trust-gate frame
+  (claiming unverified) while the action bar simultaneously offered "Lock
+  vault" for an already-unlocked session — fixed by explicitly setting
+  `copy-code-verified`/`screen` to the vault-list home once automation
+  reports success, landing the window where the equivalent real click path
+  would have. DEFERRED, explicitly out of scope (not silently dropped): a
+  genuine two-pane-vs-stacked responsive collapse at `VaultListScreen`'s
+  `narrow-breakpoint: 640px` is implemented and compiles correctly (verified
+  via a temporary debug canary that it is dead code under the harness's
+  specific backend), but bare `Xvfb` (no window manager) plus
+  `SLINT_BACKEND=software` does not propagate a post-show `Window::set_size`
+  resize into the top-level component's own `width`/`height` layout
+  properties on this stack — confirmed via `window.window().size()` (which
+  DOES report the requested physical size) versus the responsive branch
+  never firing at 420px — so the visual-regression harness's tablet/mobile
+  screenshots cannot currently demonstrate the collapse even though the
+  `.slint` logic is correct and will work under any real (WM-managed)
+  desktop launch. `PARANOID_GUI_WINDOW_SIZE` env-var plumbing (`lib.rs`
+  `apply_requested_window_size`, threaded through `tests/test_gui_e2e.sh` as
+  an 8th positional arg = the viewport geometry) is left in place as
+  correct, harmless infrastructure for whichever future item chases the
+  Slint/winit/Xvfb-without-WM layout-property propagation gap directly — a
+  new, narrower follow-up than this item's actual scope (implementing the
+  design system), not a defect in the design-system work itself.
 - [ ] P8.4 Copy pass — every user-facing string across TUI + GUI + CLI
   errors is checked against brand.md §3's five voice rules and replaced with
   the exact rewrites brand.md §3 and the vocabulary table in §4 specify —
