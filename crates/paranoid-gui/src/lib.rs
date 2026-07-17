@@ -418,6 +418,13 @@ pub fn cli_main() -> Result<(), slint::PlatformError> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
+    // P9.3: disable core dumps and deny same-user debugger/crash-dump
+    // attachment before any secret material (master password, derived KEK,
+    // vault master key) is ever read into memory. Best-effort — see
+    // `paranoid_vault::harden_process_memory` for the per-platform outcome
+    // semantics; a sandboxed environment that can't apply this still runs.
+    paranoid_vault::harden_process_memory();
+
     let window = slint_shell::ParanoidPasswdShell::new()?;
     let runtime_config = GuiRuntimeConfig::from_launch_options(&options);
     let state = Rc::new(RefCell::new(GuiState::with_runtime_config(runtime_config)));

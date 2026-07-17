@@ -2,16 +2,16 @@ use crate::{
     AES_GCM_NONCE_LEN, AES_GCM_TAG_LEN, CERTIFICATE_MASTER_KEY_AAD, CardRecord,
     CertificateKeyslotWrapMode, CertificateWrappedSecret, DEFAULT_ITERATIONS,
     DEFAULT_MEMORY_COST_KIB, DEFAULT_PARALLELISM, DEVICE_AAD_PREFIX, DEVICE_CHECK_PLAINTEXT,
-    FORMAT_VERSION, GenerateStoreLoginRecord, ITEM_AAD_PREFIX, IdentityRecord, LoginRecord,
-    MASTER_KEY_AAD, MASTER_KEY_LEN, MNEMONIC_AAD_PREFIX, NewCardRecord, NewIdentityRecord,
-    NewLoginRecord, NewSecureNoteRecord, NormalizedVaultItemFilter, PASSWORD_WRAP_ALGORITHM,
-    PasswordHistoryEntry, SQLITE_APPLICATION_ID, SecureNoteRecord, UpdateCardRecord,
-    UpdateIdentityRecord, UpdateLoginRecord, UpdateSecureNoteRecord, VaultError, VaultHeader,
-    VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary, VaultKdfParams,
-    VaultKeyslot, VaultKeyslotKind, certificate_keyslot_metadata, check_lockout, clear_lockout,
-    decode_certificate_slot_hex, load_certificate, load_private_key, mnemonic_entropy_from_phrase,
-    record_failed_unlock, select_device_keyslot, select_mnemonic_keyslot,
-    unwrap_legacy_secret_with_certificate, unwrap_secret_with_certificate,
+    FORMAT_VERSION, GenerateStoreLoginRecord, ITEM_AAD_PREFIX, IdentityRecord, LockedSecretBuffer,
+    LoginRecord, MASTER_KEY_AAD, MASTER_KEY_LEN, MNEMONIC_AAD_PREFIX, NewCardRecord,
+    NewIdentityRecord, NewLoginRecord, NewSecureNoteRecord, NormalizedVaultItemFilter,
+    PASSWORD_WRAP_ALGORITHM, PasswordHistoryEntry, SQLITE_APPLICATION_ID, SecureNoteRecord,
+    UpdateCardRecord, UpdateIdentityRecord, UpdateLoginRecord, UpdateSecureNoteRecord, VaultError,
+    VaultHeader, VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary,
+    VaultKdfParams, VaultKeyslot, VaultKeyslotKind, certificate_keyslot_metadata, check_lockout,
+    clear_lockout, decode_certificate_slot_hex, load_certificate, load_private_key,
+    mnemonic_entropy_from_phrase, record_failed_unlock, select_device_keyslot,
+    select_mnemonic_keyslot, unwrap_legacy_secret_with_certificate, unwrap_secret_with_certificate,
     validate_certificate_keyslot_metadata, validate_mnemonic_keyslot_metadata,
 };
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::SaltString};
@@ -29,13 +29,12 @@ use std::{
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
-use zeroize::Zeroizing;
 
 pub struct UnlockedVault {
     pub(crate) path: PathBuf,
     pub(crate) conn: Connection,
     pub(crate) header: VaultHeader,
-    pub(crate) master_key: Zeroizing<Vec<u8>>,
+    pub(crate) master_key: LockedSecretBuffer,
 }
 
 impl std::fmt::Debug for UnlockedVault {
@@ -665,7 +664,7 @@ pub fn init_vault_unlocked(
         path: path.to_path_buf(),
         conn,
         header,
-        master_key: Zeroizing::new(master_key),
+        master_key: LockedSecretBuffer::new(master_key),
     })
 }
 
@@ -725,7 +724,7 @@ fn unlock_vault_inner(path: &Path, master_password: &str) -> Result<UnlockedVaul
         path: path.to_path_buf(),
         conn,
         header,
-        master_key: Zeroizing::new(master_key),
+        master_key: LockedSecretBuffer::new(master_key),
     })
 }
 
@@ -801,7 +800,7 @@ fn unlock_vault_with_certificate_inner(
         path: path.to_path_buf(),
         conn,
         header,
-        master_key: Zeroizing::new(master_key),
+        master_key: LockedSecretBuffer::new(master_key),
     })
 }
 
@@ -848,7 +847,7 @@ fn unlock_vault_with_mnemonic_inner(
         path: path.to_path_buf(),
         conn,
         header,
-        master_key: Zeroizing::new(master_key),
+        master_key: LockedSecretBuffer::new(master_key),
     })
 }
 
@@ -904,7 +903,7 @@ fn record_unlock_outcome(
 
 pub(crate) fn read_verified_device_keyslot_secret(
     keyslot: &VaultKeyslot,
-) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+) -> Result<LockedSecretBuffer, VaultError> {
     let service = keyslot.device_service.as_deref().ok_or_else(|| {
         VaultError::InvalidArguments(format!(
             "device keyslot {} has no service metadata",
@@ -917,7 +916,7 @@ pub(crate) fn read_verified_device_keyslot_secret(
             keyslot.id
         ))
     })?;
-    let master_key = Zeroizing::new(device_store_get_secret(service, account)?);
+    let master_key = LockedSecretBuffer::new(device_store_get_secret(service, account)?);
     if master_key.len() != MASTER_KEY_LEN {
         return Err(VaultError::UnlockFailed);
     }
@@ -1014,7 +1013,7 @@ pub(crate) fn derive_key(
     master_password: &str,
     salt: &SaltString,
     params: &VaultKdfParams,
-) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+) -> Result<LockedSecretBuffer, VaultError> {
     let argon_params = Params::new(
         params.memory_cost_kib,
         params.iterations,
@@ -1023,7 +1022,13 @@ pub(crate) fn derive_key(
     )
     .map_err(|error| VaultError::Argon2(error.to_string()))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon_params);
-    let mut derived = Zeroizing::new(vec![0_u8; params.derived_key_len]);
+    // Locked from the moment it exists: the Argon2id-derived KEK is, along
+    // with the master key itself, the highest-value secret buffer in the
+    // process (whoever holds it can unwrap the master key and every vault
+    // item). `mlock`ing it here (P9.3) means the kernel never swaps or
+    // hibernates it to disk for the entire time it's resident, not just
+    // after some later wrapping step.
+    let mut derived = LockedSecretBuffer::new(vec![0_u8; params.derived_key_len]);
     argon
         .hash_password_into(
             master_password.as_bytes(),

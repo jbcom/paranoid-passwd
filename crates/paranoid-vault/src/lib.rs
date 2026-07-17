@@ -4,12 +4,14 @@ mod backup_transfer;
 mod keyslots;
 mod lifecycle;
 mod lockout;
+mod mem_hardening;
 mod recovery_posture;
 
 pub use backup_transfer::*;
 pub use keyslots::*;
 pub use lifecycle::*;
 pub use lockout::*;
+pub use mem_hardening::*;
 pub use recovery_posture::*;
 
 pub use native_access::{
@@ -589,7 +591,7 @@ mod tests {
         let debug_output = format!("{vault:?}");
 
         assert!(debug_output.contains("<redacted>"));
-        let key_hex = hex_encode(&vault.master_key);
+        let key_hex = hex_encode(vault.master_key.as_slice());
         assert!(!debug_output.contains(&key_hex));
         assert!(
             !debug_output

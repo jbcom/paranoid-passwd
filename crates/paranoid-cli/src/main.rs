@@ -79,6 +79,12 @@ impl Default for CliOptions {
 }
 
 fn main() {
+    // P9.3: disable core dumps and deny same-user debugger/crash-dump
+    // attachment before any secret material (master password, derived KEK,
+    // vault master key) is ever read into memory. Best-effort — see
+    // `paranoid_vault::harden_process_memory` for the per-platform outcome
+    // semantics; a sandboxed environment that can't apply this still runs.
+    paranoid_vault::harden_process_memory();
     let raw_args = std::env::args_os().collect::<Vec<_>>();
     let exit_code = match try_main(raw_args) {
         Ok(code) => code,

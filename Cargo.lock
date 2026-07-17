@@ -4056,6 +4056,7 @@ dependencies = [
  "argon2",
  "bip39",
  "keyring",
+ "libc",
  "openssl",
  "paranoid-core",
  "paranoid-seal",
@@ -4064,6 +4065,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "windows-sys 0.60.2",
  "zeroize",
 ]
 
