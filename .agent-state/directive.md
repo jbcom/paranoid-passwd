@@ -349,13 +349,13 @@ P6.0 CI research + two-tier trust design.
   each as a storyboard with intent/emotion per step and the "what should I do
   next" always answered. Name the moments that currently dead-end in a box of
   data. Deliverable: docs/design/journeys.md with per-journey storyboards.
-- [ ] PUX.3 Information architecture & flow — from the journeys, redesign the
+- [x] PUX.3 Information architecture & flow — from the journeys, redesign the
   screen graph: what each screen is FOR (one job), progressive disclosure of
   the technical evidence (audit math, seal posture, attestation) behind
   intent-first surfaces, guided first-run instead of a menu of hotkeys.
   Deliverable: docs/design/ia.md + annotated wireframes (ASCII/text
   storyboards fine for TUI; layout specs for GUI).
-- [ ] PUX.4 Design system → tokens — turn PUX.1 into concrete shared tokens
+- [x] PUX.4 Design system → tokens — turn PUX.1 into concrete shared tokens
   (color/space/type/component specs) consumable by ratatui theme + .slint
   styles + Sphinx theme, so all three surfaces read as one product.
   Deliverable: crates-level theme module + docs/design/system.md.
