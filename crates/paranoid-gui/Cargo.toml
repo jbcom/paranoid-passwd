@@ -17,6 +17,15 @@ path = "src/main.rs"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
+[features]
+# Compiles and runs the real widget-event test suite in `src/widget_event_tests.rs`
+# against the compiled `.slint` tree via `i-slint-backend-testing`. Kept out of the
+# default feature set because `ElementHandle::find_by_element_id` requires the Slint
+# compiler to have emitted element debug info (`SLINT_EMIT_DEBUG_INFO=1` at build
+# time, wired by `make test-gui-widgets`), which the ordinary `make test` / `cargo
+# test --workspace` build does not set.
+gui-widget-tests = []
+
 [dependencies]
 slint.workspace = true
 
@@ -39,6 +48,7 @@ getrandom = { version = "0.2.17", features = ["js"] }
 slint-build.workspace = true
 
 [dev-dependencies]
+i-slint-backend-testing.workspace = true
 openssl.workspace = true
 tempfile.workspace = true
 

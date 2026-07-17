@@ -26,6 +26,7 @@ anyhow = "1.0.102"
 argon2 = "0.5.3"
 arboard = "3.6.1"
 crossterm = "0.29.0"
+i-slint-backend-testing = { version = "=1.16.1", default-features = false }
 lexopt = "0.3.2"
 openssl = { version = "0.10.81", features = ["vendored"] }
 paranoid-audit = { path = "crates/paranoid-audit" }

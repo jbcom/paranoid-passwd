@@ -231,6 +231,16 @@ message instead of touching secrets. Both builds wire the same callback set:
 - `on_export_backup` — writes an encrypted vault backup to the given output path
 - `on_copy_primary` — copies the primary generated/stored secret to the clipboard with auto-clear
 
+Every named widget in `crates/paranoid-gui/ui/paranoid.slint` (every `LineEdit` input and
+`Button`) is directly addressable by real widget-event tests: `make test-gui-widgets` links the
+compiled `ParanoidPasswdShell` widget tree into a `paranoid-gui` test binary and drives it through
+`i-slint-backend-testing`'s synthetic pointer/accessible-value events — the init-vault,
+add-login, generate-and-rotate, enroll-mnemonic, and export-backup flows are each exercised
+through the real inputs and the real `clicked` callbacks, asserting on window property state
+rather than the `PARANOID_GUI_AUTOMATION_*` side-channel. See
+[Real Widget-Event Tests](./testing.md#real-widget-event-tests) for the mechanism and coverage
+list.
+
 ## Local Vault
 
 `paranoid-vault` is the encrypted local vault crate boundary.

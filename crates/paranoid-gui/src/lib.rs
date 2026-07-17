@@ -1411,6 +1411,9 @@ pub extern "C" fn paranoid_passwd_wasm_entrypoint() {
     }
 }
 
+#[cfg(all(test, feature = "gui-widget-tests", not(target_arch = "wasm32")))]
+mod widget_event_tests;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;

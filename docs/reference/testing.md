@@ -152,10 +152,61 @@ Current GUI platform coverage is explicit:
 
 | GUI surface | Current gate | What it proves |
 | --- | --- | --- |
+| Widget-event unit coverage | `make test-gui-widgets` | Drives the real compiled `paranoid.slint` widget tree in-process through synthetic pointer/accessible-value events (see below) and asserts on window property state. No display server, no `SLINT_BACKEND`, no `xvfb-run`. |
 | Desktop Slint | `make test-gui-e2e` or `make test-gui-e2e-emulate` | Runs the real GUI binary through the operator workflow (see below), validates durable audit evidence, and captures a rendered screenshot. |
 | Desktop viewport classes | `make test-gui-visual-regression` or `make test-gui-visual-regression-emulate` | Replays the real GUI workflow at desktop, tablet, and narrow/mobile-class viewport sizes and rejects blank or low-information screenshots. |
 | Android Slint | `make test-gui-android-check` | Compile-checks the Rust-native Slint library against the configured Android NDK while preserving native core/vault linkage. Runtime emulator/Maestro coverage remains the next Android gate. |
 | WASM Slint | `make test-gui-wasm-check` | Compile-checks the gated non-secret Slint WASM surface. Secret-handling WASM is not supported until target storage, crypto, and runtime validation are threat-modeled. |
+
+### Real Widget-Event Tests
+
+`make test-gui-widgets` is the in-process counterpart to the `test-gui-e2e` process harness below:
+instead of launching the compiled `paranoid-passwd-gui` binary and driving it through the
+`PARANOID_GUI_AUTOMATION_*` side-channel under `xvfb-run`, it links the `slint_shell` module
+directly into a `paranoid-gui` test binary and drives the real generated
+`ParanoidPasswdShell` widget tree with `i-slint-backend-testing`'s synthetic pointer and
+accessible-value events — the same code paths a real mouse click or keystroke exercises. A
+`LineEdit`'s compiled `accessible-action-set-value` handler assigns `text-input.text` and fires
+`edited`, exactly as a real keystroke would; a `Button`'s synthetic pointer press/release exercises
+the same `TouchArea` a real mouse click would.
+
+`i_slint_backend_testing::init_no_event_loop()` installs a null-rendering testing platform with
+real Slint layout math but no actual pixel rendering, so element positions used by
+`single_click`/`mock_single_click` are geometrically accurate against the compiled `.slint` tree
+without any display server. This is why the target needs no `SLINT_BACKEND` and no `xvfb-run`,
+unlike `test-gui-e2e`.
+
+The vendored `slint` crate (`1.16.1`) does not carry its own testing module; the synthetic-event
+API lives in the separate `i-slint-backend-testing` crate (same pinned `=1.16.1` version,
+default features only — no `mcp`/`system-testing`/`internal`), added as a `paranoid-gui`
+dev-dependency and vendored under `vendor/i-slint-backend-testing`. `ElementHandle::find_by_element_id`
+requires the Slint compiler to have emitted element debug info, so `paranoid-gui`'s test tree only
+compiles the `widget_event_tests` module behind the `gui-widget-tests` Cargo feature, and `make
+test-gui-widgets` builds with `SLINT_EMIT_DEBUG_INFO=1 --features gui-widget-tests`; plain `make
+test` / `cargo test --workspace` never sets either, so the ordinary test build stays unaffected.
+
+Coverage, asserting on window property state (status text, item/keyslot counts, vault-items and
+selected-item summaries) rather than the automation side-channel:
+
+- init-vault: types a vault path and recovery secret into the real `vault-path-input`/
+  `vault-secret` inputs and clicks the real "Init" button; asserts the vault file exists and the
+  status/vault-items properties reflect an unlocked, empty vault
+- add-login: types a title/username/password/folder/tags into the real Operations panel inputs
+  and clicks the real "Add login" button; asserts the vault-items property gains exactly one entry
+  and never echoes the typed password
+- generate-and-rotate: types a rotate length into the real input and clicks the real "Rotate"
+  button; asserts the status confirms rotation and the selected item's password-history grew
+- enroll-mnemonic: types a mnemonic label into the real input and clicks the real "Enroll
+  mnemonic" button; asserts the keyslot-summary property gains a mnemonic entry and the
+  selected-item pane surfaces the recovery phrase
+- export-backup: types a backup output path into the real input and clicks the real "Export
+  backup" button; asserts the backup file was written and the status reflects the export
+
+Run directly with:
+
+```bash
+SLINT_EMIT_DEBUG_INFO=1 cargo test -p paranoid-gui --locked --frozen --offline --features gui-widget-tests --lib widget_event_tests::
+```
 
 ### GUI Automation Environment Variables
 
@@ -431,6 +482,12 @@ cargo test -p paranoid-cli --locked --frozen --offline --test tui_scripted
 - a comprehensive operator workflow test that crosses the generator and vault
   surfaces in one run, covering audit completion, vault CRUD, generate-and-rotate,
   keyslot navigation, mnemonic enrollment, backup export, and transfer export/import
+- real widget-event tests (`make test-gui-widgets`, gated behind the `gui-widget-tests`
+  Cargo feature) that drive the compiled `ParanoidPasswdShell` widget tree in-process
+  through `i-slint-backend-testing` synthetic pointer/accessible-value events — typing
+  into the real `LineEdit`s and clicking the real `Button`s — covering init-vault,
+  add-login, generate-and-rotate, enroll-mnemonic, and export-backup against window
+  property state, headless with no display server
 - a real GUI-binary operator harness that launches the desktop app under Xvfb,
   drives the same native update path used by interactive controls, attests the
   workflow result to disk, and captures a rendered screenshot artifact

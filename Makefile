@@ -1,4 +1,4 @@
-.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e test-platform-signing-boundary test-ops-mtls-transport verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality quality-emulate builder-image _builder-image ci-emulate _ci-emulate _quality-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
+.PHONY: help configure bootstrap-local show-config build build-cli build-gui test lint test-cli-contract test-tui-e2e test-gui-host-check test-gui-widgets test-gui-android-check _test-gui-android-check test-gui-wasm-check _test-gui-wasm-check test-gui-targets test-gui-e2e test-gui-visual-regression test-gui-e2e-emulate test-gui-visual-regression-emulate _test-gui-e2e-emulate test-vault-e2e test-platform-signing-boundary test-ops-mtls-transport verify-security verify-assurance verify-deep verify-ai-review verify-branch-protection verify-published-release docs-build docs-linkcheck docs-check ci quality quality-emulate builder-image _builder-image ci-emulate _ci-emulate _quality-emulate package-release smoke-release release-validate release-emulate _release-emulate clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -70,6 +70,7 @@ build-gui: ## Build the GUI app in release mode
 test: ## Run the Rust test suites
 	bash scripts/cargo_test.sh --workspace --locked --frozen --offline
 	$(MAKE) test-ops-mtls-transport
+	$(MAKE) test-gui-widgets
 
 lint: ## Run formatting and clippy gates
 	cargo fmt --check
@@ -85,6 +86,10 @@ test-tui-e2e: ## Run the real PTY-driven TUI binary workflow harness
 
 test-gui-host-check: ## Compile-check the host Slint GUI surface
 	cargo check -p paranoid-gui --locked --frozen --offline
+
+test-gui-widgets: ## Run real widget-event tests against the compiled Slint tree (headless, no display server)
+	cargo clippy -p paranoid-gui --all-targets --locked --frozen --offline --features gui-widget-tests -- -D warnings
+	SLINT_EMIT_DEBUG_INFO=1 cargo test -p paranoid-gui --locked --frozen --offline --features gui-widget-tests --lib widget_event_tests::
 
 test-gui-android-check: ## Compile-check the Slint GUI library for Android using the configured NDK
 	@bash scripts/configure_local_toolchain.sh --quiet
@@ -181,6 +186,7 @@ ci: ## Run the local equivalent of the repository CI gates
 	$(MAKE) test-tui-e2e
 	$(if $(CI_GUI_E2E_TARGET),$(MAKE) $(CI_GUI_E2E_TARGET))
 	$(MAKE) test-gui-host-check
+	$(MAKE) test-gui-widgets
 	$(MAKE) test-vault-e2e
 	$(MAKE) test-platform-signing-boundary
 	$(MAKE) verify-assurance

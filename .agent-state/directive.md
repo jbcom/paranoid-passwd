@@ -227,7 +227,7 @@ P6.0 CI research + two-tier trust design.
   introduced or worsened here.
 - [x] P7.5 Zeroize MnemonicRecoveryEnrollment (SecretString + redacted
   Debug, keyslots.rs:98) — completes the P0 sweep.
-- [ ] P2.4 vendored slint-testing + real widget-event GUI tests.
+- [x] P2.4 vendored slint-testing + real widget-event GUI tests.
 - [ ] P2.6 make e2e-ci / e2e-local split (real mouse/keyboard local GUI
   runs), wired into make ci; testing.md documents platform conditions.
 - [ ] P4.1 GUI parity overclaim fixes (re-checked against post-P2.4 truth).
