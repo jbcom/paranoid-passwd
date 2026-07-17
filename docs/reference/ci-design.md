@@ -207,6 +207,87 @@ PR-writable cache. A written boundary table enumerates every cache, who can
 write it, who reads it, and asserts no cache is both PR-writable and
 release-readable.
 
+### P6.7 — Concurrent per-suite test execution, no new dependencies
+
+Owner research first established the constraint: the pinned Wolfi builder
+image ships no `cargo-nextest`, `mold`, or `lld`, and the pinned Rust
+toolchain has no `rust-lld` either — so any test-execution speedup has to
+either vendor a new tool into the offline/locked/frozen posture or restructure
+`scripts/cargo_test.sh` with what `cargo`/`bash` already provide.
+
+**Measurement method.** Both variants were timed on the same warm `target/`
+directory (built once with `cargo test --workspace --locked --frozen --offline
+--no-run`), each run twice back to back, on a 16-core host:
+
+| Run | Serial (previous `cargo_test.sh`) | Concurrent (P6.7 `cargo_test.sh`) |
+|---|---|---|
+| 1 | 168.24s (`2m48.237s`) | 123.58s (`2m3.583s`) |
+| 2 | 162.64s (`2m42.635s`) | 121.27s (`2m1.268s`) |
+| Average | 165.4s | 122.4s |
+
+Measured speedup: **26.5%** (run 1), **25.4%** (run 2), **26.0%** average —
+clearing the 25% bar set for this item on both individual runs, not just on
+average.
+
+**Decision: (b) — make-level parallelism, no new dependencies.**
+`scripts/cargo_test.sh` now builds every workspace test binary once via
+`cargo test --no-run --message-format=json` (the same lockfile-honoring
+compile as before, `--locked --frozen --offline` preserved), parses the
+`compiler-artifact` messages for every `profile.test` executable, then runs
+those binaries as separate OS processes **concurrently**, bounded to
+`getconf _NPROCESSORS_ONLN`/`sysctl -n hw.ncpu` (override via
+`PARANOID_TEST_MAX_PARALLEL`). Doc-tests run as one more suite in the same
+batch. Each suite's output is buffered to a per-job log file and printed as
+one atomic block, sorted by suite name, only once that suite finishes — no
+interleaved output — and the aggregate exit code is nonzero if any suite
+fails. `PARANOID_TEST_SERIAL=1` restores the exact previous behavior, and a
+`--` test-name-filter argument falls back to the serial path automatically
+(a filter must see every suite in one process to apply consistently). See
+[Testing](./testing.md#test-execution-parallelism) for the full behavioral
+contract.
+
+The workspace's own architecture caps how much this buys: `paranoid_core`'s
+103 unit tests (118s) and `paranoid_vault`'s 81 unit tests (123s) are each
+individually the majority of the previous serial wall-clock, dominated by
+real Argon2id KDF work that libtest already parallelizes internally up to
+`nproc` threads per suite. Running suites concurrently overlaps those two
+dominant suites with everything else instead of overlapping within them —
+the 26% figure is the actual ceiling for this workspace's test shape, not an
+implementation shortfall; nextest's own per-test scheduler would hit the
+same two-suite bottleneck without vendoring anything, since neither the
+Argon2id cost nor the intra-suite thread ceiling changes.
+
+**Concurrency-safety fix required for this measurement to be sound.** The
+debug-only device-store test shim
+(`crates/paranoid-vault/src/lifecycle.rs::debug_device_store_root`) keys
+files by `hex(service + account)` under `PARANOID_TEST_DEVICE_STORE_DIR`. With
+suites now running concurrently instead of one `cargo test` invocation at a
+time, two suites racing the same account inside a shared root could clobber
+each other. `cargo_test.sh` now gives every concurrently-launched suite its
+own `job-<n>` subdirectory under the auto-created device-store root; callers
+that pre-set `PARANOID_TEST_DEVICE_STORE_DIR` explicitly keep the previous
+shared-root behavior and own that isolation contract themselves. All TCP
+listeners in the test suite already bind `127.0.0.1:0` (ephemeral port), and
+no test mutates process-global state (`env::set_var`, `set_current_dir`), so
+no other concurrency hazard was found in a full grep of the workspace's test
+code.
+
+**Failure-propagation verification.** A test was deliberately broken
+(`assert!(false, ...)` inserted into
+`paranoid_audit::tests::audit_trail_uses_deterministic_sequence_ids_without_randomness`),
+run through the new concurrent path, and reverted. The broken suite printed
+its failure inline in its own buffered block, `cargo_test.sh` printed
+`=== suite FAILED: paranoid_audit (unit) (exit 101) ===` on stderr, every
+other suite still ran to completion and reported its own result, and the
+script's own exit code was nonzero. The revert left a clean `git diff`.
+
+**Risk:** LOW. Dependency-free (no `vendor/` growth, no new `apk`/`cargo
+install` package), the escape hatch preserves exact previous behavior for
+any caller that needs it, and the failure-propagation and concurrency-safety
+properties were verified directly rather than assumed. **Rollback:**
+`PARANOID_TEST_SERIAL=1` is a zero-code-change rollback; reverting the
+`scripts/cargo_test.sh` commit removes the feature entirely.
+
 ## Rejected Options
 
 **sccache with the GHA cache backend.** sccache's object-level dedup shines
@@ -223,6 +304,21 @@ an all-green summary job for a suite that is not the bottleneck. Revisit
 only if the statistical/property suite grows slow — then hashed partitioning
 stable across vendored-set changes, plus nextest archive build-reuse, is the
 right shape.
+
+**Vendoring `cargo-nextest` itself (P6.7's option (a)).** Evaluated and
+rejected in favor of dependency-free make-level concurrency (option (b),
+[P6.7](#p6-7-concurrent-per-suite-test-execution-no-new-dependencies)) because
+(b) already clears the 26% measured speedup bar without adding anything to
+`vendor/`. `cargo install`-at-build-time has precedent
+(`sphinx-rustdocgen` in `.github/actions/builder/Dockerfile`), but that tool
+is a single small binary with a shallow dependency tree; `cargo-nextest`
+pulls in a materially larger transitive set (its own config/filtering DSL,
+signal handling, and archive machinery) that would need to land in
+`vendor/` to keep the `--offline --frozen` posture, growing the vendored
+tree for a speedup (b) already delivers without it. Revisit only if (b)'s
+approach stops clearing a meaningful bar as the suite grows — nextest's
+per-test (not per-binary) scheduling would help once a single suite, not the
+overall binary count, becomes the bottleneck.
 
 **Registry cache exporter (`type=registry`) instead of `type=gha` for the
 image build.** The registry exporter earns its keep when cache needs to

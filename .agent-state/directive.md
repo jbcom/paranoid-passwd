@@ -128,11 +128,24 @@ P6.0 CI research + two-tier trust design.
   table written to docs/reference/ci-design.md's "P6.6" section. Verified:
   actionlint clean, python3 yaml parse clean on all 7 workflow files,
   scripts/validate-docs.sh clean.
-- [ ] P6.7 test-execution parallelism (owner research: Wolfi ships no
-  cargo-nextest/mold/lld; rust-lld absent from pinned toolchain) — evaluate
-  vendoring cargo-nextest (precedent: sphinx-rustdocgen) vs make-level
-  parallel per-crate test runs; before/after CI timing evidence required;
-  linker findings into ci-design.md rejected-options.
+- [x] P6.7 test-execution parallelism (owner research: Wolfi ships no
+  cargo-nextest/mold/lld; rust-lld absent from pinned toolchain) — measured
+  serial `scripts/cargo_test.sh` at 165.4s avg (2 runs, warm target dir) vs.
+  concurrent per-suite execution at 122.4s avg (26.0% speedup, both runs
+  individually clearing 25%); shipped make-level parallelism (option (b),
+  dependency-free) rather than vendoring cargo-nextest (option (a)) since (b)
+  cleared the bar. `scripts/cargo_test.sh` now builds every test binary once
+  via `cargo test --no-run --message-format=json`, then runs suites
+  concurrently (bounded to nproc, `PARANOID_TEST_MAX_PARALLEL` override),
+  buffered per-suite output printed atomically sorted by suite name,
+  nonzero aggregate exit on any suite failure (verified via a
+  deliberately-broken-then-reverted test). `PARANOID_TEST_SERIAL=1` escape
+  hatch and automatic serial fallback for `--` test-filter args preserved.
+  Fixed a latent concurrency hazard in the debug device-store test shim
+  (per-suite subdirectories instead of one shared root) surfaced by this
+  work. Findings written to ci-design.md's "P6.7" section and the
+  "Rejected Options" nextest-vendoring entry; behavioral contract documented
+  in testing.md.
 - [x] P4.S docs-currency sweep (user-elevated) — both-directions pass over
   every docs page vs code (haiku fan-out + sonnet fixes), Sphinx+linkcheck
   green, AGENTS.md/CLAUDE.md accurate to the post-P1 module map.

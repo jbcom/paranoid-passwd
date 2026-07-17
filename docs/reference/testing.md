@@ -13,6 +13,42 @@ The closed AI review disposition surface is tracked separately in
 The repository enforces that inventory with `scripts/verify_ai_review_inventory.sh` and the
 claim-led gate in `scripts/security_assurance_gate.py`.
 
+## Test-Execution Parallelism
+
+`scripts/cargo_test.sh` — the entry point behind `make test` and `make ci` — builds every
+workspace test binary once with `cargo test --no-run --message-format=json` (a single
+lockfile-honoring compile, `--locked --frozen --offline` preserved), then runs the resulting
+per-crate/per-suite test binaries **concurrently** as separate OS processes, bounded to the
+host's CPU count (`getconf _NPROCESSORS_ONLN` / `sysctl -n hw.ncpu`, override with
+`PARANOID_TEST_MAX_PARALLEL`). Doc-tests (`cargo test --doc`) run as one more suite in the same
+batch, since `--no-run` cannot pre-build them. Each suite's stdout/stderr is buffered to a
+per-job log file and printed as one atomic block, sorted by suite name, only after that suite
+finishes — no interleaved output. The aggregate exit code is nonzero if any suite fails, and
+each failing suite is called out with `=== suite FAILED: <name> (exit <code>) ===` on stderr.
+
+This is dependency-free by design — no `cargo-nextest`, `mold`, or `lld` — because the pinned
+Wolfi builder image ships none of them and the workspace has no vendored path to add them
+without a meaningful `vendor/` size increase (see the P6.7 section of
+[CI Design](./ci-design.md#p6-7-concurrent-per-suite-test-execution-no-new-dependencies) for the
+measured numbers and the rejected `cargo-nextest` vendoring alternative).
+
+Two escape hatches:
+
+- `PARANOID_TEST_SERIAL=1` restores the previous behavior: a single `cargo test` invocation
+  running every suite serially in-process, exactly as before P6.7.
+- A `--` test-name-filter argument (e.g. `cargo_test.sh -- some_test_name`) always falls back to
+  the serial path automatically, since a filter has to see every suite in one process to apply
+  consistently — `cargo_test.sh` detects `--` in its argument list and skips the parallel
+  build/dispatch entirely in that case.
+
+Each concurrently-running suite gets its own subdirectory under
+`PARANOID_TEST_DEVICE_STORE_DIR` (job-scoped, auto-created) rather than sharing one root, because
+the debug-only device-store test shim keys files by `hex(service + account)` and two suites
+racing the same account inside a shared root could otherwise clobber each other now that suites
+run concurrently instead of one-`cargo-test`-invocation-at-a-time. Callers that pre-set
+`PARANOID_TEST_DEVICE_STORE_DIR` explicitly keep the old shared-root behavior and own that
+isolation contract themselves.
+
 Run the full assurance gate with:
 
 ```bash
