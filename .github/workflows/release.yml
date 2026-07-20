@@ -515,35 +515,6 @@ jobs:
               --body "Auto-generated from paranoid-passwd release pipeline for v${VERSION}."
           gh pr merge --repo jbcom/pkgs --auto --squash "${branch}"
 
-      - name: Open PR against jbcom/homebrew-tap
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
-          VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/jbcom/homebrew-tap.git" tap
-          cd tap
-          branch="paranoid-passwd/bump-${VERSION}"
-          git checkout -b "${branch}"
-          mkdir -p Formula
-          cp ../out/paranoid-passwd.rb Formula/
-          git config user.name "jbcom-bot"
-          git config user.email "noreply@jonbogaty.com"
-          git add Formula/paranoid-passwd.rb
-          if git diff --cached --quiet; then
-            echo "No formula changes for ${VERSION} — skipping PR"
-            exit 0
-          fi
-          git commit -m "feat(paranoid-passwd): bump to ${VERSION}"
-          git push -u origin "${branch}"
-          gh pr create \
-              --repo jbcom/homebrew-tap \
-              --base main \
-              --head "${branch}" \
-              --title "feat(paranoid-passwd): bump to ${VERSION}" \
-              --body "Auto-generated Homebrew formula bump for paranoid-passwd v${VERSION}."
-          gh pr merge --repo jbcom/homebrew-tap --auto --squash "${branch}"
-
   release-download-verify:
     name: Release Download Verification (${{ matrix.label }})
     needs: release-surface-verify
