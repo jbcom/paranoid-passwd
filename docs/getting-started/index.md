@@ -51,7 +51,7 @@ curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --install-dir "$HOME
 
 ## Package Managers
 
-- `brew tap jbcom/tap && brew install paranoid-passwd`
+- `brew tap jbcom/pkgs https://github.com/jbcom/pkgs && brew install jbcom/pkgs/paranoid-passwd`
 - `scoop bucket add jbcom https://github.com/jbcom/pkgs && scoop install paranoid-passwd`
 - `choco install paranoid-passwd`
 
