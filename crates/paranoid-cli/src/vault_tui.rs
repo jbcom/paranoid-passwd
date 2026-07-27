@@ -760,6 +760,39 @@ mod tests {
         }
     }
 
+    /// `ratatui::Terminal::new()` calls `crossterm::terminal::size()` under
+    /// the hood, which does a real ioctl against stdout even though this
+    /// test's backend writes to an in-memory buffer — the ioctl is on the
+    /// process's terminal, not on the `Write` target. Under CI containers
+    /// running 130+ parallel test threads that transiently EAGAIN/ENOENT
+    /// under fd/process pressure (observed both ways in practice), so this
+    /// is the one test in the module serialized against a dedicated lock
+    /// rather than sharing the ambient thread pool's contention.
+    fn terminal_probe_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    /// Test-harness-only bounded retry around the `Terminal::new` ioctl
+    /// flake described on [`terminal_probe_lock`]. Deliberately NOT a
+    /// production helper — nothing under the non-test `run_app`/`tui.rs`
+    /// terminal setup path calls this; masking a real EAGAIN/ENOENT there
+    /// would hide an actual environment problem instead of surfacing it.
+    /// Here it only compensates for CI-container syscall noise around a
+    /// terminal-size probe this specific test cannot avoid making.
+    fn new_terminal_with_retry<B: ratatui::backend::Backend>(
+        backend_factory: impl Fn() -> B,
+    ) -> Terminal<B> {
+        let mut last_err = None;
+        for _ in 0..5 {
+            match Terminal::new(backend_factory()) {
+                Ok(terminal) => return terminal,
+                Err(err) => last_err = Some(err),
+            }
+        }
+        panic!("terminal: {}", last_err.expect("at least one attempt ran"));
+    }
+
     /// P8.5 (b): regression-pins the ⊘ glyph across a real incremental
     /// `CrosstermBackend` diff (Vault screen drawn first, then
     /// `UnlockBlocked` drawn on the SAME `Terminal`, exactly like the real
@@ -772,6 +805,11 @@ mod tests {
     /// cover the code path that false negative exercised.
     #[test]
     fn crossterm_backend_bytes_carry_locked_glyph_across_an_incremental_screen_transition() {
+        // Serialized: see `terminal_probe_lock` docs above.
+        let _terminal_probe_guard = terminal_probe_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
         let tempdir = tempdir().expect("tempdir");
         let path = tempdir.path().join("vault.sqlite");
         init_vault(&path, "correct horse battery staple").expect("init");
@@ -781,8 +819,7 @@ mod tests {
         assert!(matches!(app.screen, Screen::Vault));
 
         let shared = SharedWriteBuf::default();
-        let backend = CrosstermBackend::new(shared.clone());
-        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut terminal = new_terminal_with_retry(|| CrosstermBackend::new(shared.clone()));
         // Frame 1: Vault screen (no state token) — establishes the "prior
         // frame" the diff renderer compares frame 2 against.
         terminal.draw(|frame| render(frame, &app)).expect("draw1");
