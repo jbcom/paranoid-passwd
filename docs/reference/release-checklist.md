@@ -29,11 +29,15 @@ unrelated upstream bumps that don't belong in a version-bump-only PR.
 Push the fix directly onto the release-please branch (it exists to be
 amended pre-merge); do not open a competing PR against it.
 
-**Note:** release-please force-pushes/regenerates this branch from
-scratch on every subsequent push to `main` while the PR is open, which
-drops any manually-pushed fixup commits (including this exact fix and
-this exact note). Re-apply both immediately before merging — don't
-assume a fix applied earlier in the PR's life is still present.
+**Note:** release-please can force-push/regenerate this branch from
+scratch at any point while the PR stays open (observed: it did so once
+after another PR merged into `main`, then did not on a later `main`
+merge — the exact trigger isn't "every push," just "whenever it decides
+its release PR is out of date"), which drops any manually-pushed fixup
+commits (including this exact fix and this exact note). Re-verify both
+are still present immediately before merging — don't assume a fix
+applied earlier in the PR's life is still there just because it
+survived one prior push to `main`.
 
 ## Before Tagging
 
