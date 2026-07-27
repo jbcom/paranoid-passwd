@@ -48,3 +48,13 @@ melange.rsa.pub
 .ralph-tui/
 .remember/
 __pycache__/
+
+# .agent-state gitignored cache (re-derivable; directive.md and
+# decisions.ndjson are tracked, the rest is scratch)
+.agent-state/digest.md
+.agent-state/cursor.md
+.agent-state/.indexed-sha
+.agent-state/.last-stop-sha
+.agent-state/.last-stop-fingerprint
+.agent-state/.last-compaction
+.agent-state/batch.json
