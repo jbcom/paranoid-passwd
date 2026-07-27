@@ -6,6 +6,35 @@ title: Release Checklist
 
 Use this checklist before and after cutting a release from `main`.
 
+## Known recurring papercut: release-please's PR needs a manual `Cargo.lock` sync
+
+release-please's Rust workspace plugin bumps `Cargo.toml`'s
+`workspace.package.version` and `version.txt`, but it does **not** run
+`cargo update` — every workspace member's version entry in `Cargo.lock`
+still shows the old version, and CI's `--locked --frozen --offline` gates
+(`Rust Build + Tests`, `Dependency Scan`) correctly refuse to drift the
+lockfile silently and fail closed with `cannot update the lock file
+... because --frozen was passed`.
+
+Before merging a release-please PR, always run on that branch:
+
+```bash
+cargo update --workspace
+```
+
+Confirm the diff touches only the in-workspace package version entries
+(no external dependency version changes) before committing — a plain
+`cargo update` without `--workspace` scoping could otherwise pull in
+unrelated upstream bumps that don't belong in a version-bump-only PR.
+Push the fix directly onto the release-please branch (it exists to be
+amended pre-merge); do not open a competing PR against it.
+
+**Note:** release-please force-pushes/regenerates this branch from
+scratch on every subsequent push to `main` while the PR is open, which
+drops any manually-pushed fixup commits (including this exact fix and
+this exact note). Re-apply both immediately before merging — don't
+assume a fix applied earlier in the PR's life is still present.
+
 ## Before Tagging
 
 1. Confirm `main` branch protection matches the Rust-native required checks.
