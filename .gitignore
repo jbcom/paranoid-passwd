@@ -36,6 +36,8 @@ docs/api/crates/
 # Test screenshots
 *.png
 !vendor/**
+!docs/design/evidence/*.png
+!tests/baseline/gui/*.png
 
 # Claude Code project settings (local, not committed)
 .claude/

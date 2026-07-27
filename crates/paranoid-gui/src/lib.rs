@@ -16,6 +16,8 @@ use paranoid_ops::{
     FederalCryptoProviderEvidence, OpsPolicyContext, OpsProfile, VaultOperationAccess,
     evaluate_vault_operation,
 };
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+use paranoid_vault::set_clipboard_text_excluded;
 #[cfg(not(target_arch = "wasm32"))]
 use paranoid_vault::{
     GenerateStoreLoginRecord, NewLoginRecord, SecretString, VaultAuth, VaultHeader,
@@ -293,12 +295,12 @@ impl GuiState {
             audit_jsonl: config.audit_jsonl,
             require_audit_sink: config.require_audit_sink,
             audit_sink_health: config.audit_sink_health,
-            status: "Ready. Core owns RNG, rejection sampling, audit math, and vault crypto."
-                .to_string(),
+            // brand.md §4: `rejection sampling` is not surfaced on the
+            // primary flow; the launch status leads with what the persona
+            // can do, not implementation nouns.
+            status: "Ready.".to_string(),
             generated_passwords: "No passwords generated yet.".to_string(),
-            audit_details:
-                "Run an audit to produce entropy, compliance, and rejection-sampling evidence."
-                    .to_string(),
+            audit_details: "Run an audit to produce evidence.".to_string(),
             vault_items: "Vault is locked or not loaded.".to_string(),
             vault_posture: "Vault posture unavailable.".to_string(),
             keyslot_summary: "No keyslots loaded.".to_string(),
@@ -322,11 +324,22 @@ impl GuiState {
         window.set_keyslot_summary(self.keyslot_summary.clone().into());
         window.set_selected_item(self.selected_item.clone().into());
         window.set_automation_status(self.automation_status.clone().into());
+        #[cfg(not(target_arch = "wasm32"))]
+        window.set_vault_unlocked(self.unlocked_vault.is_some());
+        #[cfg(target_arch = "wasm32")]
+        window.set_vault_unlocked(false);
     }
 
+    /// brand.md §3 rule 2: "Errors are guidance, not crash dumps... never
+    /// surface a raw crypto error code, an enum name, or a stack detail in
+    /// the primary flow." `message` is the calm, plain-language sentence
+    /// that leads; the underlying error renders in parentheses afterward as
+    /// reachable detail — the same pattern the vault TUI's unlock-failure
+    /// status uses (`screen_state.rs::refresh`) — never as the whole
+    /// message on its own.
     #[cfg(not(target_arch = "wasm32"))]
-    fn set_error(&mut self, context: &str, error: impl ToString) {
-        self.status = format!("{context}: {}", error.to_string());
+    fn set_error(&mut self, message: &str, error: impl ToString) {
+        self.status = format!("{message} ({})", error.to_string());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -418,15 +431,37 @@ pub fn cli_main() -> Result<(), slint::PlatformError> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
+    // P9.3: disable core dumps and deny same-user debugger/crash-dump
+    // attachment before any secret material (master password, derived KEK,
+    // vault master key) is ever read into memory. Best-effort — see
+    // `paranoid_vault::harden_process_memory` for the per-platform outcome
+    // semantics; a sandboxed environment that can't apply this still runs.
+    paranoid_vault::harden_process_memory();
+
     let window = slint_shell::ParanoidPasswdShell::new()?;
     let runtime_config = GuiRuntimeConfig::from_launch_options(&options);
     let state = Rc::new(RefCell::new(GuiState::with_runtime_config(runtime_config)));
+
+    let mut screen_sequence: Option<ScreenSequence> = None;
 
     if let Ok(Some(automation)) = configured_gui_automation() {
         let result = run_operator_automation(&mut state.borrow_mut(), &automation);
         match result {
             Ok(message) => {
                 state.borrow_mut().automation_status = "Automation passed".to_string();
+                // The operator-automation scenario drives `GuiState` (unlock,
+                // add-login, rotate, enroll, export) directly, bypassing the
+                // screen-graph navigation callbacks (`verify-copy`,
+                // `continue`, `unlock-vault-clicked`, ...) that a real click
+                // path fires. Land the shell where that path would have left
+                // it — the vault-list home (ia.md §2 "H") with the trust
+                // gate already cleared — so the window a screenshot/operator
+                // sees after automation matches the state it actually holds,
+                // instead of a stale S1 trust-gate frame claiming
+                // unverified while the action bar already offers "Lock
+                // vault" for an unlocked session.
+                window.set_copy_code_verified(true);
+                window.set_screen("vault-list".into());
                 if let Err(error) = write_gui_automation_outcome(
                     &automation.output_path,
                     "pass",
@@ -440,6 +475,13 @@ fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
                         .borrow_mut()
                         .set_error("GUI automation outcome write failed", error);
                 }
+                // P8.5: the visual-regression harness needs one screenshot
+                // PER SCREEN (ia.md §6's screen graph), not the single
+                // end-of-run frame this scenario captured before — see
+                // docs/design/evidence.md's "GUI e2e harness only ever
+                // captures one end-of-run screenshot" finding. Configured
+                // only by the harness, never by a real launch.
+                screen_sequence = configured_screen_sequence();
             }
             Err(error) => {
                 state.borrow_mut().automation_status = "Automation failed".to_string();
@@ -464,7 +506,164 @@ fn run_gui(options: GuiLaunchOptions) -> Result<(), slint::PlatformError> {
 
     wire_callbacks(&window, Rc::clone(&state));
     state.borrow().apply_to(&window);
-    window.run()
+
+    // `ComponentHandle::run()` is `show()` + `run_event_loop()` + `hide()`
+    // collapsed into one call. The window's native platform surface is not
+    // created until `show()` maps it, so `apply_requested_window_size`
+    // (called on the still-unshown `window` above) has nothing to resize
+    // yet under most windowing backends — it silently no-ops rather than
+    // erroring, which made this look like a working test/dev affordance
+    // when it was not actually reaching the mapped window. Show explicitly,
+    // re-apply the requested size to the now-real native window, then drive
+    // the event loop directly instead of `run()` so both steps land in the
+    // correct order.
+    window.show()?;
+    apply_requested_window_size(&window);
+
+    // P8.5: keeps the timer alive for the duration of the event loop; a
+    // `Timer` dropped early stops firing.
+    let _screen_sequence_timer =
+        screen_sequence.map(|sequence| drive_screen_sequence(&window, sequence));
+
+    slint::run_event_loop()?;
+    window.hide()?;
+    Ok(())
+}
+
+/// P8.5 multi-screen capture sequence: an ordered walk of every named
+/// `screen` in `paranoid.slint`'s screen graph (ia.md §2/§6), each held
+/// stable long enough for an external screenshot tool (the Xvfb harness in
+/// `tests/test_gui_e2e.sh`) to capture it before advancing. Two full passes
+/// run back to back — one against the real unlocked vault the automation
+/// just populated, one against a synthetic "decoy" run with
+/// `PARANOID_GUI_AUTOMATION_DECOY_LABEL` overlaid on the vault path shown in
+/// the header — so the harness can diff the two frame-by-frame and assert
+/// the skeleton (title/content/action-bar regions) is byte-identical outside
+/// the label text itself (journeys.md invariant 5, ia.md §1 rule 4).
+#[cfg(not(target_arch = "wasm32"))]
+struct ScreenSequence {
+    marker_dir: PathBuf,
+    real_vault_label: String,
+    decoy_vault_label: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn configured_screen_sequence() -> Option<ScreenSequence> {
+    let marker_dir = env::var_os("PARANOID_GUI_AUTOMATION_SCREEN_SEQUENCE_DIR")?;
+    let real_vault_label =
+        env::var("PARANOID_GUI_AUTOMATION_REAL_LABEL").unwrap_or_else(|_| "vault".to_string());
+    let decoy_vault_label =
+        env::var("PARANOID_GUI_AUTOMATION_DECOY_LABEL").unwrap_or_else(|_| "decoy".to_string());
+    Some(ScreenSequence {
+        marker_dir: PathBuf::from(marker_dir),
+        real_vault_label,
+        decoy_vault_label,
+    })
+}
+
+/// The ordered screen graph P8.5 (a) requires every capture mode to walk:
+/// every named `screen` value `paranoid.slint`'s `if root.screen == "..."`
+/// chain recognizes (ia.md §2 "The screen graph" / §6 "GUI layout specs"),
+/// in traversal order (trust gate first, locked last).
+#[cfg(not(target_arch = "wasm32"))]
+const SCREEN_SEQUENCE: &[&str] = &[
+    "trust-gate",
+    "verified",
+    "vault-list",
+    "add-item",
+    "item-detail",
+    "generate",
+    "ways-in",
+    "locked",
+];
+
+/// Drives `window` through [`SCREEN_SEQUENCE`] twice — once labeled "real",
+/// once labeled "decoy" — writing a `<pass>-<NN>-<screen>.ready` marker file
+/// each time a frame is stable and waiting for the harness to remove it
+/// (rename to `.captured` observed via absence) before advancing, then
+/// writes a final `sequence.done` marker and quits the event loop. Runs
+/// entirely off `Timer` polling — never blocks the event loop thread, per
+/// ia.md §6 "non-blocking is a GUI contract too."
+#[cfg(not(target_arch = "wasm32"))]
+fn drive_screen_sequence(
+    window: &slint_shell::ParanoidPasswdShell,
+    sequence: ScreenSequence,
+) -> Rc<slint::Timer> {
+    let _ = fs::create_dir_all(&sequence.marker_dir);
+    let weak = window.as_weak();
+    let steps: Vec<(&'static str, &'static str, String)> = [
+        ("real", sequence.real_vault_label),
+        ("decoy", sequence.decoy_vault_label),
+    ]
+    .into_iter()
+    .flat_map(|(pass, label)| {
+        SCREEN_SEQUENCE
+            .iter()
+            .map(move |screen| (pass, *screen, label.clone()))
+    })
+    .collect();
+    let state = Rc::new(RefCell::new(ScreenSequenceState {
+        steps,
+        index: 0,
+        marker_dir: sequence.marker_dir,
+        awaiting_capture: false,
+    }));
+    let timer = Rc::new(slint::Timer::default());
+    let timer_handle = Rc::clone(&timer);
+    timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(50),
+        move || {
+            let Some(window) = weak.upgrade() else {
+                timer_handle.stop();
+                return;
+            };
+            let mut state = state.borrow_mut();
+            if state.awaiting_capture {
+                let ready_path = state.ready_marker_path();
+                if !ready_path.exists() {
+                    // Harness consumed (removed) the marker: advance.
+                    state.awaiting_capture = false;
+                    state.index += 1;
+                }
+                return;
+            }
+            if state.index >= state.steps.len() {
+                let _ = fs::write(state.marker_dir.join("sequence.done"), b"done\n");
+                timer_handle.stop();
+                let _ = slint::quit_event_loop();
+                return;
+            }
+            let (pass, screen, label) = state.steps[state.index].clone();
+            window.set_screen(screen.into());
+            window.set_vault_path(label.clone().into());
+            window.set_vault_unlocked(screen != "trust-gate" && screen != "verified");
+            let marker_path = state.ready_marker_path();
+            let _ = fs::write(
+                &marker_path,
+                format!("pass={pass}\nscreen={screen}\nindex={}\n", state.index),
+            );
+            state.awaiting_capture = true;
+        },
+    );
+    timer
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ScreenSequenceState {
+    steps: Vec<(&'static str, &'static str, String)>,
+    index: usize,
+    marker_dir: PathBuf,
+    awaiting_capture: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ScreenSequenceState {
+    fn ready_marker_path(&self) -> PathBuf {
+        let (pass, screen, _label) = &self.steps[self.index];
+        self.marker_dir
+            .join(format!("{:02}-{pass}-{screen}.ready", self.index))
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -487,7 +686,12 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_audit.borrow_mut();
         let result = run_generator_audit(&mut state, &length, &count, nist, pci, soc2);
         if let Err(error) = result {
-            state.set_error("Generator audit failed", error);
+            // brand.md §3 rule 2: calm sentence leads; the underlying cause
+            // is reachable in parentheses, never the whole message.
+            state.set_error(
+                "Couldn't generate a password with these settings. Adjust them and try again.",
+                error,
+            );
         }
         state.apply_to(&window);
     });
@@ -501,7 +705,10 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_init.borrow_mut();
         match init_vault_from_ui(&mut state, &path, &secret) {
             Ok(()) => {}
-            Err(error) => state.set_error("Vault initialization failed", error),
+            Err(error) => state.set_error(
+                "Couldn't create the vault. Check the path is writable and try again.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -515,7 +722,12 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_unlock.borrow_mut();
         match load_vault_from_ui(&mut state, &path, &secret) {
             Ok(()) => {}
-            Err(error) => state.set_error("Vault unlock failed", error),
+            // journeys.md J4 step 3b, verbatim opening clause: "That didn't
+            // open the vault. Check your passphrase and try again."
+            Err(error) => state.set_error(
+                "That didn't open the vault. Check your passphrase and try again.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -537,7 +749,10 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
             };
             match add_login_from_ui(&mut state, &path, &secret, input) {
                 Ok(()) => {}
-                Err(error) => state.set_error("Vault add login failed", error),
+                Err(error) => state.set_error(
+                    "Couldn't save this item. Nothing was added — check the fields and try again.",
+                    error,
+                ),
             }
             state.apply_to(&window);
         },
@@ -552,7 +767,10 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_rotate.borrow_mut();
         match rotate_selected_login_from_ui(&mut state, &path, &secret, &length) {
             Ok(()) => {}
-            Err(error) => state.set_error("Generate and rotate failed", error),
+            Err(error) => state.set_error(
+                "Couldn't generate a new password for this item. The old one is unchanged.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -566,7 +784,12 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_mnemonic.borrow_mut();
         match enroll_mnemonic_from_ui(&mut state, &path, &secret, &label) {
             Ok(()) => {}
-            Err(error) => state.set_error("Mnemonic enrollment failed", error),
+            // brand.md §4: `keyslot`/`mnemonic keyslot` → "way in" /
+            // "recovery phrase" on the primary flow.
+            Err(error) => state.set_error(
+                "Couldn't add a recovery phrase. This vault's ways in are unchanged.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -580,7 +803,10 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         let mut state = state_for_backup.borrow_mut();
         match export_backup_from_ui(&mut state, &path, &secret, &output) {
             Ok(()) => {}
-            Err(error) => state.set_error("Backup export failed", error),
+            Err(error) => state.set_error(
+                "Couldn't export the backup. Nothing was written — check the output path and try again.",
+                error,
+            ),
         }
         state.apply_to(&window);
     });
@@ -593,9 +819,38 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         };
         let mut state = state_for_copy.borrow_mut();
         match copy_primary_password(&state) {
-            Ok(()) => state.status = "Primary generated password copied to clipboard.".to_string(),
-            Err(error) => state.set_error("Clipboard copy failed", error),
+            // brand.md §3 rule 4 ("never overpromise"): this GUI path has
+            // no timed clipboard-clear yet (unlike the TUI's
+            // `NativeSessionHardening::arm_clipboard_clear`), so it must
+            // not claim the "clears in 30 seconds" guarantee it cannot
+            // keep — state only what actually happened.
+            Ok(()) => state.status = "Copied.".to_string(),
+            Err(error) => state.set_error(
+                "Couldn't reach the system clipboard. Copy the password by hand instead.",
+                error,
+            ),
         }
+        state.apply_to(&window);
+    });
+
+    // P9.6: panic / quick-lock. Wired to both the `Control+L` accelerator
+    // (`PanicLockShortcut` in paranoid.slint) and the explicit "Lock vault"
+    // button, so it fires identically from either trigger. Scrubs every
+    // secret-bearing `GuiState` field (recovery-secret entry, cached
+    // unlocked-vault handle, decrypted item/keyslot summaries), mirroring
+    // the TUI's `purge_secret_state_on_lock`. Unlike the TUI, the GUI copy
+    // path (`copy_primary_password`) has no arm-and-clear clipboard timer
+    // (`NativeSessionHardening`) to fire, so panic-lock here does NOT also
+    // clear the clipboard — a real gap tracked as a P9.6 follow-up, not
+    // silently claimed as covered.
+    let weak = window.as_weak();
+    let state_for_lock = Rc::clone(&state);
+    window.on_lock_vault(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let mut state = state_for_lock.borrow_mut();
+        lock_vault(&mut state);
         state.apply_to(&window);
     });
 }
@@ -695,6 +950,20 @@ fn wire_callbacks(window: &slint_shell::ParanoidPasswdShell, state: Rc<RefCell<G
         apply_wasm_gate(&mut state_for_copy.borrow_mut(), "Clipboard", gate_message);
         state_for_copy.borrow().apply_to(&window);
     });
+
+    // P9.6: the gated WASM surface never unlocks a vault or holds secret
+    // state (see `apply_wasm_gate`), so there is nothing for panic-lock to
+    // scrub here; still wire it so the accelerator/button are inert rather
+    // than dead callbacks.
+    let weak = window.as_weak();
+    let state_for_lock = Rc::clone(&state);
+    window.on_lock_vault(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        apply_wasm_gate(&mut state_for_lock.borrow_mut(), "Lock", gate_message);
+        state_for_lock.borrow().apply_to(&window);
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -706,6 +975,35 @@ fn apply_wasm_gate(state: &mut GuiState, operation: &str, message: &str) {
     state.keyslot_summary = "WASM vault keyslots are unavailable.".to_string();
     state.selected_item = "No secret material is loaded on this surface.".to_string();
     state.automation_status = "WASM gate enforced".to_string();
+}
+
+/// Resizes the window to `PARANOID_GUI_WINDOW_SIZE` (`WIDTHxHEIGHT`,
+/// logical pixels) when set. Bare `Xvfb` (as `tests/test_gui_e2e.sh` runs
+/// under) has no window manager to clamp a top-level window to the
+/// display's geometry, so the shell's own `preferred-width`/
+/// `preferred-height` would otherwise render past the edge of a narrower
+/// viewport (e.g. the visual-regression harness's `mobile=420x800` class)
+/// with no way to observe the responsive layout at that size. A malformed
+/// or absent value is a no-op — this is a test/dev affordance, never a
+/// user-facing option, so it fails open rather than erroring the launch.
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_requested_window_size(window: &slint_shell::ParanoidPasswdShell) {
+    let Ok(raw) = env::var("PARANOID_GUI_WINDOW_SIZE") else {
+        return;
+    };
+    let Some((width, height)) = raw.split_once('x') else {
+        return;
+    };
+    let (Ok(width), Ok(height)) = (width.trim().parse::<f32>(), height.trim().parse::<f32>())
+    else {
+        return;
+    };
+    if width <= 0.0 || height <= 0.0 {
+        return;
+    }
+    window
+        .window()
+        .set_size(slint::LogicalSize::new(width, height));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -881,6 +1179,19 @@ fn run_operator_automation(
     Ok(state.status.clone())
 }
 
+/// P8.3: the GUI's `operation-in-progress`/`progress-label` properties
+/// (`ia.md` §6 "Non-blocking is a GUI contract too") exist and are wired
+/// through to `GenerateScreen`'s `ProgressAffordance`, but this callback —
+/// like every other vault/generator callback in this module — still runs
+/// fully synchronously on the UI event-loop thread, exactly as the P8.2 TUI
+/// polish item found and deferred for `vault_tui`'s Argon2id derivation
+/// ("vault_tui is currently fully synchronous by design; this is an
+/// architecture change deserving its own item, not bundled into TUI
+/// copy/layout work"). Threading generation/derivation/backup work off
+/// this thread — and having callers actually set `operation-in-progress`
+/// true for the duration — is the matching follow-up item for the GUI;
+/// claiming it done here would be exactly the "pinning existence, not
+/// completeness" failure mode called out in the P0-META directive.
 #[cfg(not(target_arch = "wasm32"))]
 fn run_generator_audit(
     state: &mut GuiState,
@@ -910,7 +1221,10 @@ fn run_generator_audit(
         .collect::<Vec<_>>()
         .join("\n");
     state.audit_details = summarize_report(&report, stages.as_slice());
-    state.status = "Generator audit complete through paranoid-core.".to_string();
+    // brand.md §3 rule 6 ("one voice across every surface"): the status
+    // bar drops the internal crate name; the verdict itself renders as the
+    // `Randomness check: passed` label on the results panel (S11).
+    state.status = "Generated. Randomness check: passed.".to_string();
     state.last_report = Some(report);
     Ok(())
 }
@@ -992,6 +1306,34 @@ fn load_vault_from_ui(
     load_vault(state, Path::new(path.as_str()), secret.as_str())
 }
 
+/// P9.6 panic / quick-lock action: drops the cached unlocked-vault handle
+/// (scrubbing its `LockedSecretBuffer` master key via `Drop`) and scrubs
+/// every other decrypted/secret-derived field the GUI keeps in `GuiState`,
+/// mirroring the vault TUI's `purge_secret_state_on_lock` +
+/// `clear_decrypted_state_and_lock`. `vault_secret` is a plain `String`
+/// (not a zeroizing wrapper) here, so it is explicitly zeroized in place
+/// before being cleared rather than just dropped/reassigned, matching the
+/// P9.1 zeroize-on-drop guarantee given to vault item payload secrets.
+/// Idempotent: safe to invoke when nothing is unlocked (the Ctrl+L
+/// accelerator and the Lock button are both always enabled).
+#[cfg(not(target_arch = "wasm32"))]
+fn lock_vault(state: &mut GuiState) {
+    state.unlocked_vault = None;
+    zeroize::Zeroize::zeroize(&mut state.vault_secret);
+    state.vault_secret.clear();
+    state.selected_login_id = None;
+    state.last_report = None;
+    state.selected_item = "No vault item selected.".to_string();
+    state.vault_items = "Vault is locked or not loaded.".to_string();
+    state.vault_posture = "Vault posture unavailable".to_string();
+    state.keyslot_summary = "No keyslots loaded.".to_string();
+    state.generated_passwords = "No passwords generated yet.".to_string();
+    // brand.md §3 micro-example, verbatim: "Locked. Nothing is readable
+    // until you unlock again." (same wording as the vault TUI's
+    // panic-lock status; brand.md §3 rule 4, no "you're safe" overclaim.)
+    state.status = "Locked. Nothing is readable until you unlock again.".to_string();
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 struct LoginFormInput<'a> {
     title: &'a SharedString,
@@ -1050,8 +1392,10 @@ fn enroll_mnemonic_from_ui(
         .add_mnemonic_keyslot(normalize_optional_field(label.as_str()))
         .map_err(|error| error.to_string())?;
     state.keyslot_summary = summarize_keyslots(vault.header());
+    // brand.md §4: `keyslot` → "way in" on the primary flow; the id stays
+    // for the operator who needs it to find the row again.
     state.status = format!(
-        "Mnemonic recovery slot {} enrolled. Capture the phrase offline before closing this screen.",
+        "Recovery phrase added as way in {}. Write it down now — this vault won't show it again.",
         enrollment.keyslot.id
     );
     state.selected_item = format!(
@@ -1106,8 +1450,11 @@ fn load_vault(state: &mut GuiState, path: &Path, secret: &str) -> Result<(), Str
     state.keyslot_summary = keyslot_summary;
     state.selected_login_id = selected.0;
     state.selected_item = selected.1;
+    // journeys.md J4 step 3a, verbatim opening clause: "Vault open. 12
+    // items." — the path is real, reachable detail that follows rather
+    // than leads.
     state.status = format!(
-        "Vault unlocked. {} item(s) loaded from {}.",
+        "Vault open. {} item(s). Loaded from {}.",
         items.len(),
         path.display()
     );
@@ -1187,7 +1534,7 @@ fn add_login(
         .add_login(NewLoginRecord {
             title: input.title.trim().to_string(),
             username: input.username.trim().to_string(),
-            password: input.password,
+            password: input.password.into(),
             url: None,
             notes: None,
             folder: input.folder,
@@ -1250,10 +1597,9 @@ fn rotate_selected_login(
     state.selected_login_id = Some(item.id.clone());
     load_vault(state, path, secret)?;
     state.selected_login_id = Some(item.id.clone());
-    state.status = format!(
-        "Generated one password and rotated item {}. Generator verdict: PASS.",
-        item.id
-    );
+    // brand.md §4: chi-squared/p-value verdict → "randomness check:
+    // passed" on the primary flow (journeys.md J2 step 1).
+    state.status = format!("Rotated. ✓ Randomness check: passed. ({})", item.id);
     Ok(())
 }
 
@@ -1279,7 +1625,7 @@ fn copy_primary_password(state: &GuiState) -> Result<(), String> {
             return Err("no generated password is available to copy".to_string());
         };
         Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(password))
+            .and_then(|mut clipboard| set_clipboard_text_excluded(&mut clipboard, &password))
             .map_err(|error| error.to_string())
     }
 }
@@ -1410,6 +1756,9 @@ pub extern "C" fn paranoid_passwd_wasm_entrypoint() {
         eprintln!("paranoid-passwd-gui WASM launch failed: {error}");
     }
 }
+
+#[cfg(all(test, feature = "gui-widget-tests", not(target_arch = "wasm32")))]
+mod widget_event_tests;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -1550,6 +1899,64 @@ mod tests {
         let debug_output = format!("{state:?}");
         assert!(debug_output.contains("selected_item: \"<redacted>\""));
         assert!(!debug_output.contains(&mnemonic));
+    }
+
+    /// P9.6: `lock_vault` (the GUI panic / quick-lock action, wired to both
+    /// the `Control+L` accelerator and the "Lock vault" button) must drop
+    /// the cached unlocked-vault handle and scrub every other
+    /// secret/decrypted-derived field, leaving `GuiState` in the same
+    /// "nothing loaded" shape as a freshly constructed default.
+    #[test]
+    fn lock_vault_scrubs_secret_and_decrypted_state() {
+        let tmpdir = tempfile::tempdir().expect("temporary GUI lock-vault directory");
+        let vault_path = tmpdir.path().join("vault.sqlite");
+        init_vault(&vault_path, "correct horse battery staple").expect("test vault init");
+
+        let mut state = GuiState {
+            vault_secret: "correct horse battery staple".to_string(),
+            ..GuiState::default()
+        };
+        add_login(
+            &mut state,
+            &vault_path,
+            "correct horse battery staple",
+            LoginInput {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string(),
+                folder: None,
+                tags: vec![],
+            },
+        )
+        .expect("add login");
+        run_generator_audit(&mut state, "24", "1", true, false, false)
+            .expect("valid generator audit request");
+
+        // Preconditions: the state genuinely holds secret/decrypted material
+        // before locking, so the assertions below prove `lock_vault` did the
+        // scrubbing rather than there being nothing to scrub.
+        assert!(state.unlocked_vault.is_some());
+        assert!(!state.vault_secret.is_empty());
+        assert!(state.selected_login_id.is_some());
+        assert!(state.last_report.is_some());
+        assert!(state.vault_items.contains("GitHub"));
+
+        lock_vault(&mut state);
+
+        assert!(state.unlocked_vault.is_none());
+        assert!(state.vault_secret.is_empty());
+        assert!(state.selected_login_id.is_none());
+        assert!(state.last_report.is_none());
+        assert!(!state.vault_items.contains("GitHub"));
+        assert_eq!(state.vault_items, "Vault is locked or not loaded.");
+        assert_eq!(state.selected_item, "No vault item selected.");
+        assert_eq!(state.generated_passwords, "No passwords generated yet.");
+        assert!(state.status.to_lowercase().contains("locked"));
+
+        // The vault item persisted to disk survives the in-memory lock.
+        let unlocked = paranoid_vault::unlock_vault(&vault_path, "correct horse battery staple")
+            .expect("unlock");
+        assert_eq!(unlocked.list_items().expect("list items").len(), 1);
     }
 
     #[test]

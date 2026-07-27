@@ -32,6 +32,7 @@ getting-started/index
 guides/tui
 guides/recovery-operations
 reference/index
+design/index
 api/index
 contributing
 ```

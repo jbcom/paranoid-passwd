@@ -71,6 +71,15 @@ Do not claim:
 - FIPS-compliant product behavior without a validated module, approved mode, and configuration
   evidence
 - cloud sync, browser extension, autofill, or multi-user collaboration
+- "memory-safe against a root/Administrator attacker" or "immune to memory disclosure" for the
+  P9 memory-hardening path (`vault.memory-hardening`) — it stops same-user core dumps, ptrace
+  attach, and swap/hibernation of locked pages; it does not stop a root/Administrator-level
+  attacker or a kernel-level memory dump, and docs must say so
+- "guaranteed clipboard privacy" or "clipboard history cannot capture this" for the clipboard
+  exclusion hint (`vault.clipboard-history-exclusion`) — it is a hint only cooperating clipboard
+  history managers honor; the timed clear is the real backstop for everything else
+- "self-destructs" or "wipes the vault" after failed attempts — the lockout (P9.2) is a durable
+  backoff delay, not data destruction; self-destruct was explicitly rejected as a DoS footgun
 
 The strongest brand position is not hype. It is that the project exposes its trust boundaries
 clearly and keeps them small.

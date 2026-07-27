@@ -55,6 +55,7 @@ screenshot_for_viewport() {
   log_path="$5"
   vault_path="$6"
   audit_path="$7"
+  window_size="$8"
 
   cleanup_gui() {
     if [ -n "${gui_pid:-}" ]; then
@@ -78,6 +79,7 @@ screenshot_for_viewport() {
   PARANOID_GUI_AUTOMATION_VAULT_PATH="${vault_path}" \
   PARANOID_GUI_AUTOMATION_BACKUP_PATH="${backup_path}" \
   PARANOID_GUI_AUTOMATION_OUTPUT_PATH="${outcome_path}" \
+  PARANOID_GUI_WINDOW_SIZE="${window_size}" \
   "${gui_binary}" --audit-jsonl "${audit_path}" --require-audit-sink >"${log_path}" 2>&1 &
   gui_pid=$!
 
@@ -181,7 +183,7 @@ PY
     echo "GUI automation screenshot was blank or undersized" >&2
     exit 1
   fi
-' _ "${GUI_BINARY}" "${screenshot_path}" "${backup_path}" "${outcome_path}" "${log_path}" "${vault_path}" "${audit_path}" || rc=$?
+' _ "${GUI_BINARY}" "${screenshot_path}" "${backup_path}" "${outcome_path}" "${log_path}" "${vault_path}" "${audit_path}" "${viewport_geometry}" || rc=$?
   rm -rf "${tmpdir}"
   if [[ "$rc" -ne 0 ]]; then
     return "$rc"

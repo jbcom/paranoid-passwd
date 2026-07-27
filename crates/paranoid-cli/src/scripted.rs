@@ -28,6 +28,8 @@
 //!   matching `KeyCode` variant.
 //! - `<ctrl-u>` sends `KeyCode::Char('u')` with `KeyModifiers::CONTROL`
 //!   (matches the custom-charset / form "clear field" shortcut).
+//! - `<ctrl-l>` sends `KeyCode::Char('l')` with `KeyModifiers::CONTROL`
+//!   (the vault TUI's panic / quick-lock hotkey, P9.6).
 //! - `<wait-idle>` does not send a key event. It repeatedly polls the app
 //!   (worker + hardening polling, when the app exposes it) until any
 //!   background worker thread has drained, up to a bounded timeout. Use it
@@ -116,6 +118,7 @@ fn parse_token(token: &str) -> anyhow::Result<ScriptToken> {
             "up" => key(KeyCode::Up),
             "down" => key(KeyCode::Down),
             "ctrl-u" => KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            "ctrl-l" => KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
             "wait-idle" => return Ok(ScriptToken::WaitIdle),
             other => anyhow::bail!("unknown token <{other}>"),
         }));
@@ -248,7 +251,7 @@ mod tests {
 
     #[test]
     fn parses_literal_and_special_tokens() {
-        let script = "h\ne\nl\nl\no\n<enter>\n<esc>\n<tab>\n<backspace>\n<up>\n<down>\n<ctrl-u>\n<wait-idle>\n# a comment\n\n";
+        let script = "h\ne\nl\nl\no\n<enter>\n<esc>\n<tab>\n<backspace>\n<up>\n<down>\n<ctrl-u>\n<ctrl-l>\n<wait-idle>\n# a comment\n\n";
         let tokens = parse_script(script).expect("parse");
         assert_eq!(
             tokens,
@@ -265,6 +268,7 @@ mod tests {
                 ScriptToken::Key(key(KeyCode::Up)),
                 ScriptToken::Key(key(KeyCode::Down)),
                 ScriptToken::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)),
+                ScriptToken::Key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
                 ScriptToken::WaitIdle,
             ]
         );

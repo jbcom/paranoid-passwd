@@ -2,11 +2,14 @@ use crate::{
     UnlockedVault, VaultError, unlock_vault, unlock_vault_with_certificate,
     unlock_vault_with_device, unlock_vault_with_mnemonic,
 };
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     env, fmt, fs,
     path::PathBuf,
     time::{Duration, Instant},
 };
+#[cfg(test)]
+use zeroize::Zeroize;
 use zeroize::Zeroizing;
 
 #[derive(Clone, Default)]
@@ -85,6 +88,163 @@ impl Eq for SecretString {}
 impl fmt::Debug for SecretString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("<redacted>")
+    }
+}
+
+/// A zeroize-on-drop wrapper for decrypted vault-item payload secrets
+/// (login passwords, password-history entries, card numbers, and card
+/// security codes).
+///
+/// This exists separately from [`SecretString`] because payload secrets are
+/// stored in `#[derive(Clone, Serialize, Deserialize)]` record structs
+/// (`LoginRecord`, `CardRecord`, `PasswordHistoryEntry`, and their
+/// `New*`/`Update*` mirrors) that round-trip through `serde_json` as part of
+/// the encrypted vault item blob. `SecretString` intentionally has no serde
+/// impl (it only ever lives in ephemeral, never-persisted TUI form state), so
+/// `SecretBytes` adds a *transparent* `Serialize`/`Deserialize` — it
+/// serializes to exactly the JSON a plain `String` would produce, and
+/// deserializes from exactly that shape, so the on-disk/wire format of a
+/// vault item is byte-for-byte unchanged by this wrapper.
+///
+/// Every clone is an independent `Zeroizing<String>`: dropping any one of
+/// them scrubs that copy's bytes, so `.clone()` no longer forks an
+/// un-scrubbed heap copy of the secret the way a plain `String` did.
+///
+/// Drop is handled entirely by the inner `Zeroizing<String>` (its own `Drop`
+/// impl zeroizes the buffer in place before deallocating), so `SecretBytes`
+/// needs no `Drop`/`ZeroizeOnDrop` impl of its own — the workspace `zeroize`
+/// dependency does not enable the `derive` feature, so this deliberately
+/// leans on `Zeroizing`'s built-in guarantee rather than adding a new derive
+/// macro dependency.
+#[derive(Clone, Default)]
+pub struct SecretBytes(Zeroizing<String>);
+
+impl SecretBytes {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(Zeroizing::new(value.into()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn into_inner(self) -> String {
+        // `Zeroizing<T>` exposes no `into_inner` (extracting the value would
+        // let the caller drop it without the zeroizing wrapper, defeating
+        // the point), so the plaintext is cloned out and `self` is left to
+        // drop normally, zeroizing its own buffer immediately afterward.
+        // Callers that need to move the plaintext onward (e.g. handing it to
+        // another zeroizing wrapper, or a legacy call site not yet migrated)
+        // get the raw bytes; this instance's own backing buffer is still
+        // scrubbed at the end of the call.
+        self.0.to_string()
+    }
+
+    /// Zeroizes this instance's buffer in place without dropping it. Exposed
+    /// so tests can observe the same in-place scrub that `Drop` performs,
+    /// without resorting to memory-unsound pointer-after-free reads (which
+    /// this crate's `unsafe_code = "forbid"` lint disallows) to prove it.
+    /// `pub(crate)` (rather than private) so record-level tests elsewhere in
+    /// this crate (e.g. `lib.rs`'s `secure_note_content_zeroizes_on_drop`)
+    /// can prove a specific record field is really wired to `SecretBytes`
+    /// and not a plain, non-zeroizing `String`.
+    #[cfg(test)]
+    pub(crate) fn zeroize_in_place(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl From<String> for SecretBytes {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for SecretBytes {
+    fn from(value: &str) -> Self {
+        Self::new(value.to_string())
+    }
+}
+
+impl From<SecretBytes> for String {
+    fn from(value: SecretBytes) -> Self {
+        value.into_inner()
+    }
+}
+
+impl PartialEq for SecretBytes {
+    fn eq(&self, other: &Self) -> bool {
+        paranoid_core::constant_time_eq(self.0.as_bytes(), other.0.as_bytes())
+    }
+}
+
+impl Eq for SecretBytes {}
+
+impl PartialEq<str> for SecretBytes {
+    fn eq(&self, other: &str) -> bool {
+        paranoid_core::constant_time_eq(self.0.as_bytes(), other.as_bytes())
+    }
+}
+
+impl PartialEq<&str> for SecretBytes {
+    fn eq(&self, other: &&str) -> bool {
+        paranoid_core::constant_time_eq(self.0.as_bytes(), other.as_bytes())
+    }
+}
+
+impl PartialEq<String> for SecretBytes {
+    fn eq(&self, other: &String) -> bool {
+        paranoid_core::constant_time_eq(self.0.as_bytes(), other.as_bytes())
+    }
+}
+
+impl PartialEq<SecretBytes> for String {
+    fn eq(&self, other: &SecretBytes) -> bool {
+        paranoid_core::constant_time_eq(self.as_bytes(), other.0.as_bytes())
+    }
+}
+
+impl PartialEq<SecretBytes> for str {
+    fn eq(&self, other: &SecretBytes) -> bool {
+        paranoid_core::constant_time_eq(self.as_bytes(), other.0.as_bytes())
+    }
+}
+
+impl PartialEq<SecretBytes> for &str {
+    fn eq(&self, other: &SecretBytes) -> bool {
+        paranoid_core::constant_time_eq(self.as_bytes(), other.0.as_bytes())
+    }
+}
+
+impl fmt::Debug for SecretBytes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+impl Serialize for SecretBytes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Transparent: serializes to exactly the JSON string a plain
+        // `String` field would have produced, so the on-disk vault item
+        // format is unchanged by switching payload secret fields to this
+        // type.
+        serializer.serialize_str(self.0.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SecretBytes {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(SecretBytes::new)
     }
 }
 
@@ -375,7 +535,82 @@ fn read_optional_env(env_name: &str) -> Result<Option<String>, VaultError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{NativeSessionHardening, SecretString};
+    use super::{NativeSessionHardening, SecretBytes, SecretString};
+
+    #[test]
+    fn secret_bytes_debug_renders_redacted_not_the_secret() {
+        let secret = SecretBytes::new("hunter2".to_string());
+        assert_eq!(format!("{secret:?}"), "<redacted>");
+    }
+
+    #[test]
+    fn secret_bytes_equality_matches_and_differs_correctly() {
+        let a = SecretBytes::new("hunter2".to_string());
+        let b = SecretBytes::new("hunter2".to_string());
+        let c = SecretBytes::new("hunter3".to_string());
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_eq!(a, "hunter2");
+        assert_eq!("hunter2", a);
+        assert_ne!(a, "hunter3");
+        assert_eq!(SecretBytes::default(), SecretBytes::default());
+    }
+
+    #[test]
+    fn secret_bytes_serde_round_trips_to_the_same_json_a_plain_string_would() {
+        let secret = SecretBytes::new("Sup3r$ecret!".to_string());
+
+        let secret_json = serde_json::to_string(&secret).expect("serialize SecretBytes");
+        let plain_json =
+            serde_json::to_string(&"Sup3r$ecret!".to_string()).expect("serialize String");
+
+        // The whole point of a transparent wrapper: the wire bytes for a
+        // SecretBytes field are byte-identical to what a plain String field
+        // would have produced, so no vault-format migration is needed.
+        assert_eq!(secret_json, plain_json);
+
+        let round_tripped: SecretBytes =
+            serde_json::from_str(&secret_json).expect("deserialize SecretBytes");
+        assert_eq!(round_tripped, secret);
+        assert_eq!(round_tripped.as_str(), "Sup3r$ecret!");
+    }
+
+    #[test]
+    fn secret_bytes_zeroizes_its_buffer_in_place_on_scrub() {
+        let mut secret = SecretBytes::new("hunter2".to_string());
+        assert_eq!(secret.as_str(), "hunter2");
+
+        // Exercises the exact in-place scrub that `Drop` performs on the
+        // inner `Zeroizing<String>` (delegated to `zeroize::Zeroize`, not a
+        // re-allocate-and-abandon), without memory-unsound
+        // pointer-after-free reads.
+        secret.zeroize_in_place();
+
+        assert!(secret.as_str().is_empty());
+        assert!(secret.is_empty());
+    }
+
+    #[test]
+    fn secret_bytes_clone_is_an_independent_zeroizing_copy() {
+        let original = SecretBytes::new("hunter2".to_string());
+        let mut cloned = original.clone();
+
+        // Zeroizing the clone must not affect the original: each clone owns
+        // its own `Zeroizing<String>` buffer, so a `.clone()` no longer
+        // forks an un-scrubbed plain-String copy the way it did before this
+        // wrapper existed.
+        cloned.zeroize_in_place();
+
+        assert!(cloned.is_empty());
+        assert_eq!(original.as_str(), "hunter2");
+    }
+
+    #[test]
+    fn secret_bytes_into_inner_recovers_the_plaintext() {
+        let secret = SecretBytes::new("hunter2".to_string());
+        assert_eq!(secret.into_inner(), "hunter2");
+    }
 
     #[test]
     fn secret_string_equality_matches_and_differs_correctly() {

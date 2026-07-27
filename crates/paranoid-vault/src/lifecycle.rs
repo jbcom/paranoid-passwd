@@ -1,15 +1,16 @@
 use crate::{
-    AES_GCM_NONCE_LEN, AES_GCM_TAG_LEN, CERTIFICATE_MASTER_KEY_AAD, CardRecord,
-    CertificateKeyslotWrapMode, CertificateWrappedSecret, DEFAULT_ITERATIONS,
-    DEFAULT_MEMORY_COST_KIB, DEFAULT_PARALLELISM, DEVICE_AAD_PREFIX, DEVICE_CHECK_PLAINTEXT,
-    FORMAT_VERSION, GenerateStoreLoginRecord, ITEM_AAD_PREFIX, IdentityRecord, LoginRecord,
+    AES_GCM_NONCE_LEN, AES_GCM_TAG_LEN, CERTIFICATE_MASTER_KEY_AAD, CalibrationOutcome, CardRecord,
+    CertificateKeyslotWrapMode, CertificateWrappedSecret, DEFAULT_KDF_CALIBRATION_TARGET,
+    DEFAULT_MEMORY_COST_KIB, DEVICE_AAD_PREFIX, DEVICE_CHECK_PLAINTEXT, FORMAT_VERSION,
+    GenerateStoreLoginRecord, ITEM_AAD_PREFIX, IdentityRecord, LockedSecretBuffer, LoginRecord,
     MASTER_KEY_AAD, MASTER_KEY_LEN, MNEMONIC_AAD_PREFIX, NewCardRecord, NewIdentityRecord,
     NewLoginRecord, NewSecureNoteRecord, NormalizedVaultItemFilter, PASSWORD_WRAP_ALGORITHM,
     PasswordHistoryEntry, SQLITE_APPLICATION_ID, SecureNoteRecord, UpdateCardRecord,
     UpdateIdentityRecord, UpdateLoginRecord, UpdateSecureNoteRecord, VaultError, VaultHeader,
     VaultItem, VaultItemFilter, VaultItemKind, VaultItemPayload, VaultItemSummary, VaultKdfParams,
-    VaultKeyslot, VaultKeyslotKind, certificate_keyslot_metadata, decode_certificate_slot_hex,
-    load_certificate, load_private_key, mnemonic_entropy_from_phrase, select_device_keyslot,
+    VaultKeyslot, VaultKeyslotKind, calibrate_kdf_params, certificate_keyslot_metadata,
+    check_lockout, clear_lockout, decode_certificate_slot_hex, load_certificate, load_private_key,
+    mnemonic_entropy_from_phrase, record_failed_unlock, select_device_keyslot,
     select_mnemonic_keyslot, unwrap_legacy_secret_with_certificate, unwrap_secret_with_certificate,
     validate_certificate_keyslot_metadata, validate_mnemonic_keyslot_metadata,
 };
@@ -28,13 +29,12 @@ use std::{
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
-use zeroize::Zeroizing;
 
 pub struct UnlockedVault {
     pub(crate) path: PathBuf,
     pub(crate) conn: Connection,
     pub(crate) header: VaultHeader,
-    pub(crate) master_key: Zeroizing<Vec<u8>>,
+    pub(crate) master_key: LockedSecretBuffer,
 }
 
 impl std::fmt::Debug for UnlockedVault {
@@ -462,7 +462,7 @@ impl UnlockedVault {
                 UpdateLoginRecord {
                     title: Some(record.title.unwrap_or(login.title)),
                     username: Some(record.username.unwrap_or(login.username)),
-                    password: Some(password),
+                    password: Some(password.into()),
                     url: Some(record.url.or(login.url)),
                     notes: Some(record.notes.or(login.notes)),
                     folder: Some(record.folder.or(login.folder)),
@@ -484,7 +484,7 @@ impl UnlockedVault {
             self.add_login(NewLoginRecord {
                 title,
                 username,
-                password,
+                password: password.into(),
                 url: record.url,
                 notes: record.notes,
                 folder: record.folder,
@@ -616,13 +616,24 @@ pub fn init_vault_unlocked(
     let salt_bytes = random_bytes(16)?;
     let salt = SaltString::encode_b64(salt_bytes.as_slice())
         .map_err(|error| VaultError::Argon2(error.to_string()))?;
-    let params = VaultKdfParams {
-        algorithm: "argon2id".to_string(),
-        memory_cost_kib: DEFAULT_MEMORY_COST_KIB,
-        iterations: DEFAULT_ITERATIONS,
-        parallelism: DEFAULT_PARALLELISM,
-        derived_key_len: MASTER_KEY_LEN,
-    };
+    // P9.5: calibrate Argon2id params to this host's wall-clock cost rather
+    // than always writing the fixed DEFAULT_* constants. `calibrate_kdf_params`
+    // clamps memory_cost_kib to MEMORY_COST_FLOOR_KIB (== DEFAULT_MEMORY_COST_KIB)
+    // on every path, including its own fallback, so this can only ever
+    // strengthen the params relative to the old fixed default, never weaken
+    // them. On a constrained host where the floor-memory benchmark itself
+    // fails, calibration falls back to the fixed defaults and that fallback
+    // is surfaced here rather than silently swallowed.
+    let calibration = calibrate_kdf_params(DEFAULT_KDF_CALIBRATION_TARGET, MASTER_KEY_LEN);
+    if calibration.outcome == CalibrationOutcome::FallbackToDefaults {
+        eprintln!(
+            "warning: Argon2id runtime calibration failed on this host; falling back to \
+             the fixed default KDF parameters (memory_cost_kib={}, iterations={})",
+            calibration.params.memory_cost_kib, calibration.params.iterations
+        );
+    }
+    let params = calibration.params;
+    debug_assert!(params.memory_cost_kib >= DEFAULT_MEMORY_COST_KIB);
     let kek = derive_key(master_password, &salt, &params)?;
     let master_key = random_bytes(MASTER_KEY_LEN)?;
     let wrapped = encrypt_blob(kek.as_slice(), MASTER_KEY_AAD, master_key.as_slice())?;
@@ -664,7 +675,7 @@ pub fn init_vault_unlocked(
         path: path.to_path_buf(),
         conn,
         header,
-        master_key: Zeroizing::new(master_key),
+        master_key: LockedSecretBuffer::new(master_key),
     })
 }
 
@@ -683,6 +694,13 @@ pub fn unlock_vault(
     master_password: &str,
 ) -> Result<UnlockedVault, VaultError> {
     let path = path.as_ref();
+    check_lockout(path)?;
+    let result = unlock_vault_inner(path, master_password);
+    record_unlock_outcome(path, &result)?;
+    result
+}
+
+fn unlock_vault_inner(path: &Path, master_password: &str) -> Result<UnlockedVault, VaultError> {
     if !path.exists() {
         return Err(VaultError::VaultNotFound(path.display().to_string()));
     }
@@ -717,7 +735,7 @@ pub fn unlock_vault(
         path: path.to_path_buf(),
         conn,
         header,
-        master_key: Zeroizing::new(master_key),
+        master_key: LockedSecretBuffer::new(master_key),
     })
 }
 
@@ -728,6 +746,23 @@ pub fn unlock_vault_with_certificate(
     private_key_passphrase: Option<&str>,
 ) -> Result<UnlockedVault, VaultError> {
     let path = path.as_ref();
+    check_lockout(path)?;
+    let result = unlock_vault_with_certificate_inner(
+        path,
+        certificate_pem,
+        private_key_pem,
+        private_key_passphrase,
+    );
+    record_unlock_outcome(path, &result)?;
+    result
+}
+
+fn unlock_vault_with_certificate_inner(
+    path: &Path,
+    certificate_pem: &[u8],
+    private_key_pem: &[u8],
+    private_key_passphrase: Option<&str>,
+) -> Result<UnlockedVault, VaultError> {
     if !path.exists() {
         return Err(VaultError::VaultNotFound(path.display().to_string()));
     }
@@ -776,7 +811,7 @@ pub fn unlock_vault_with_certificate(
         path: path.to_path_buf(),
         conn,
         header,
-        master_key: Zeroizing::new(master_key),
+        master_key: LockedSecretBuffer::new(master_key),
     })
 }
 
@@ -786,6 +821,17 @@ pub fn unlock_vault_with_mnemonic(
     slot_id: Option<&str>,
 ) -> Result<UnlockedVault, VaultError> {
     let path = path.as_ref();
+    check_lockout(path)?;
+    let result = unlock_vault_with_mnemonic_inner(path, mnemonic_phrase, slot_id);
+    record_unlock_outcome(path, &result)?;
+    result
+}
+
+fn unlock_vault_with_mnemonic_inner(
+    path: &Path,
+    mnemonic_phrase: &str,
+    slot_id: Option<&str>,
+) -> Result<UnlockedVault, VaultError> {
     if !path.exists() {
         return Err(VaultError::VaultNotFound(path.display().to_string()));
     }
@@ -812,7 +858,7 @@ pub fn unlock_vault_with_mnemonic(
         path: path.to_path_buf(),
         conn,
         header,
-        master_key: Zeroizing::new(master_key),
+        master_key: LockedSecretBuffer::new(master_key),
     })
 }
 
@@ -821,6 +867,16 @@ pub fn unlock_vault_with_device(
     slot_id: Option<&str>,
 ) -> Result<UnlockedVault, VaultError> {
     let path = path.as_ref();
+    check_lockout(path)?;
+    let result = unlock_vault_with_device_inner(path, slot_id);
+    record_unlock_outcome(path, &result)?;
+    result
+}
+
+fn unlock_vault_with_device_inner(
+    path: &Path,
+    slot_id: Option<&str>,
+) -> Result<UnlockedVault, VaultError> {
     if !path.exists() {
         return Err(VaultError::VaultNotFound(path.display().to_string()));
     }
@@ -839,9 +895,26 @@ pub fn unlock_vault_with_device(
     })
 }
 
+/// Records the lockout outcome of one unlock attempt: a successful unlock
+/// clears any durable lockout record, and a failed one records a new failed
+/// attempt — EXCEPT `VaultNotFound` and a lockout error that was already
+/// surfaced by the caller's own `check_lockout` above, neither of which
+/// represents a wrong-credential guess against an existing vault and so
+/// must not itself feed the backoff counter.
+fn record_unlock_outcome(
+    path: &Path,
+    result: &Result<UnlockedVault, VaultError>,
+) -> Result<(), VaultError> {
+    match result {
+        Ok(_) => clear_lockout(path),
+        Err(VaultError::VaultNotFound(_) | VaultError::LockedOut { .. }) => Ok(()),
+        Err(_) => record_failed_unlock(path),
+    }
+}
+
 pub(crate) fn read_verified_device_keyslot_secret(
     keyslot: &VaultKeyslot,
-) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+) -> Result<LockedSecretBuffer, VaultError> {
     let service = keyslot.device_service.as_deref().ok_or_else(|| {
         VaultError::InvalidArguments(format!(
             "device keyslot {} has no service metadata",
@@ -854,7 +927,7 @@ pub(crate) fn read_verified_device_keyslot_secret(
             keyslot.id
         ))
     })?;
-    let master_key = Zeroizing::new(device_store_get_secret(service, account)?);
+    let master_key = LockedSecretBuffer::new(device_store_get_secret(service, account)?);
     if master_key.len() != MASTER_KEY_LEN {
         return Err(VaultError::UnlockFailed);
     }
@@ -951,7 +1024,7 @@ pub(crate) fn derive_key(
     master_password: &str,
     salt: &SaltString,
     params: &VaultKdfParams,
-) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+) -> Result<LockedSecretBuffer, VaultError> {
     let argon_params = Params::new(
         params.memory_cost_kib,
         params.iterations,
@@ -960,7 +1033,13 @@ pub(crate) fn derive_key(
     )
     .map_err(|error| VaultError::Argon2(error.to_string()))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, argon_params);
-    let mut derived = Zeroizing::new(vec![0_u8; params.derived_key_len]);
+    // Locked from the moment it exists: the Argon2id-derived KEK is, along
+    // with the master key itself, the highest-value secret buffer in the
+    // process (whoever holds it can unwrap the master key and every vault
+    // item). `mlock`ing it here (P9.3) means the kernel never swaps or
+    // hibernates it to disk for the entire time it's resident, not just
+    // after some later wrapping step.
+    let mut derived = LockedSecretBuffer::new(vec![0_u8; params.derived_key_len]);
     argon
         .hash_password_into(
             master_password.as_bytes(),
@@ -1052,7 +1131,7 @@ fn validate_secure_note_record(record: &NewSecureNoteRecord) -> Result<(), Vault
             "vault secure note title must not be empty".to_string(),
         ));
     }
-    if record.content.trim().is_empty() {
+    if record.content.as_str().trim().is_empty() {
         return Err(VaultError::InvalidArguments(
             "vault secure note content must not be empty".to_string(),
         ));
@@ -1071,7 +1150,7 @@ fn validate_card_record(record: &NewCardRecord) -> Result<(), VaultError> {
             "vault cardholder name must not be empty".to_string(),
         ));
     }
-    if record.number.trim().is_empty() {
+    if record.number.as_str().trim().is_empty() {
         return Err(VaultError::InvalidArguments(
             "vault card number must not be empty".to_string(),
         ));
@@ -1086,7 +1165,7 @@ fn validate_card_record(record: &NewCardRecord) -> Result<(), VaultError> {
             "vault expiry year must not be empty".to_string(),
         ));
     }
-    if record.security_code.trim().is_empty() {
+    if record.security_code.as_str().trim().is_empty() {
         return Err(VaultError::InvalidArguments(
             "vault security code must not be empty".to_string(),
         ));
@@ -1161,7 +1240,7 @@ pub(crate) fn item_summary(item: &VaultItem, duplicate_password_count: usize) ->
             id: item.id.clone(),
             kind: item.kind.clone(),
             title: note.title.clone(),
-            subtitle: secure_note_preview(&note.content),
+            subtitle: secure_note_preview(note.content.as_str()),
             location: None,
             folder: note.folder.clone(),
             updated_at_epoch: item.updated_at_epoch,
@@ -1174,7 +1253,7 @@ pub(crate) fn item_summary(item: &VaultItem, duplicate_password_count: usize) ->
             subtitle: format!(
                 "{} · {}",
                 card.cardholder_name,
-                card_number_preview(&card.number)
+                card_number_preview(card.number.as_str())
             ),
             location: Some(format!("{}/{}", card.expiry_month, card.expiry_year)),
             folder: card.folder.clone(),
@@ -1195,10 +1274,20 @@ pub(crate) fn item_summary(item: &VaultItem, duplicate_password_count: usize) ->
 }
 
 pub(crate) fn duplicate_password_counts(items: &[VaultItem]) -> HashMap<String, usize> {
+    // Duplicate-password detection is inherently a plaintext comparison
+    // across every login's password, so this local, function-scoped map
+    // necessarily holds plaintext `String` copies of each password for the
+    // duration of the count — there is no way to detect "these two secrets
+    // are equal" without comparing their bytes. The map (and its copies)
+    // are dropped at the end of this function; the `SecretBytes` wrapper on
+    // `LoginRecord.password` still ensures the copy resident in the vault
+    // item itself, and every other clone of it, zeroizes on drop.
     let mut password_totals = HashMap::<String, usize>::new();
     for item in items {
         if let VaultItemPayload::Login(login) = &item.payload {
-            *password_totals.entry(login.password.clone()).or_insert(0) += 1;
+            *password_totals
+                .entry(login.password.as_str().to_string())
+                .or_insert(0) += 1;
         }
     }
 
@@ -1387,7 +1476,7 @@ fn item_matches_query(item: &VaultItem, normalized_query: &str) -> bool {
             }
             VaultItemPayload::SecureNote(note) => {
                 field_matches(&note.title, normalized_query)
-                    || field_matches(&note.content, normalized_query)
+                    || field_matches(note.content.as_str(), normalized_query)
                     || note
                         .folder
                         .as_deref()
@@ -1401,10 +1490,10 @@ fn item_matches_query(item: &VaultItem, normalized_query: &str) -> bool {
             VaultItemPayload::Card(card) => {
                 field_matches(&card.title, normalized_query)
                     || field_matches(&card.cardholder_name, normalized_query)
-                    || field_matches(&card.number, normalized_query)
+                    || field_matches(card.number.as_str(), normalized_query)
                     || field_matches(&card.expiry_month, normalized_query)
                     || field_matches(&card.expiry_year, normalized_query)
-                    || field_matches(&card.security_code, normalized_query)
+                    || field_matches(card.security_code.as_str(), normalized_query)
                     || card
                         .billing_zip
                         .as_deref()

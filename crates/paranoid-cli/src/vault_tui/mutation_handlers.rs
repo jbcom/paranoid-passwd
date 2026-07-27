@@ -1,6 +1,9 @@
 use crate::vault_tui::*;
 use arboard::Clipboard;
-use paranoid_vault::{NewCardRecord, NewIdentityRecord, NewLoginRecord, NewSecureNoteRecord};
+use paranoid_vault::{
+    NewCardRecord, NewIdentityRecord, NewLoginRecord, NewSecureNoteRecord,
+    set_clipboard_text_excluded,
+};
 use std::fs;
 
 impl App {
@@ -8,7 +11,7 @@ impl App {
         let record = NewLoginRecord {
             title: self.add_login_form.title.trim().to_string(),
             username: self.add_login_form.username.trim().to_string(),
-            password: self.add_login_form.password.clone(),
+            password: self.add_login_form.password.clone().into(),
             url: normalize_optional_field(&self.add_login_form.url),
             notes: normalize_optional_field(&self.add_login_form.notes),
             folder: normalize_optional_field(&self.add_login_form.folder),
@@ -24,7 +27,7 @@ impl App {
     pub(crate) fn submit_note_form(&mut self) {
         let record = NewSecureNoteRecord {
             title: self.note_form.title.trim().to_string(),
-            content: self.note_form.content.trim().to_string(),
+            content: self.note_form.content.trim().to_string().into(),
             folder: normalize_optional_field(&self.note_form.folder),
             tags: parse_tags_csv(&self.note_form.tags),
         };
@@ -39,10 +42,10 @@ impl App {
         let record = NewCardRecord {
             title: self.card_form.title.trim().to_string(),
             cardholder_name: self.card_form.cardholder_name.trim().to_string(),
-            number: self.card_form.number.trim().to_string(),
+            number: self.card_form.number.trim().to_string().into(),
             expiry_month: self.card_form.expiry_month.trim().to_string(),
             expiry_year: self.card_form.expiry_year.trim().to_string(),
-            security_code: self.card_form.security_code.trim().to_string(),
+            security_code: self.card_form.security_code.trim().to_string().into(),
             billing_zip: normalize_optional_field(&self.card_form.billing_zip),
             notes: normalize_optional_field(&self.card_form.notes),
             folder: normalize_optional_field(&self.card_form.folder),
@@ -1003,6 +1006,9 @@ impl App {
     }
 
     pub(crate) fn reload_detail(&mut self) {
+        // Selection moved: any previous reveal no longer applies to the item
+        // now selected (ia.md §5 S7 "re-masks on leave"; P8.V.1).
+        self.secret_revealed = false;
         let Some(item_id) = self
             .items
             .get(self.selected_index)
@@ -1039,9 +1045,9 @@ impl App {
             return;
         };
         let content = match payload {
-            VaultItemPayload::Login(login) => login.password.clone(),
-            VaultItemPayload::SecureNote(note) => note.content.clone(),
-            VaultItemPayload::Card(card) => card.number.clone(),
+            VaultItemPayload::Login(login) => login.password.as_str().to_string(),
+            VaultItemPayload::SecureNote(note) => note.content.as_str().to_string(),
+            VaultItemPayload::Card(card) => card.number.as_str().to_string(),
             VaultItemPayload::Identity(identity) => identity
                 .email
                 .clone()
@@ -1054,11 +1060,16 @@ impl App {
             self.status = format!("Copy blocked: {error}");
             return;
         }
-        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(content.clone())) {
+        match Clipboard::new()
+            .and_then(|mut clipboard| set_clipboard_text_excluded(&mut clipboard, &content))
+        {
             Ok(()) => {
                 self.session.arm_clipboard_clear(content);
+                // brand.md §3 micro-example, verbatim: "Copied. It clears
+                // from the clipboard in 30 seconds." — states the real
+                // consequence plainly (§3 rule 1), not "Copied!".
                 self.status = format!(
-                    "Copied the selected vault secret to the clipboard. It will be cleared in {} seconds if unchanged.",
+                    "Copied. It clears from the clipboard in {} seconds.",
                     self.session.clipboard_clear_after().as_secs()
                 );
             }
@@ -1073,9 +1084,9 @@ impl App {
             self.status = "No mnemonic phrase is available to copy.".to_string();
             return;
         };
-        match Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(enrollment.mnemonic.as_str().to_string()))
-        {
+        match Clipboard::new().and_then(|mut clipboard| {
+            set_clipboard_text_excluded(&mut clipboard, enrollment.mnemonic.as_str())
+        }) {
             Ok(()) => {
                 self.session
                     .arm_clipboard_clear(enrollment.mnemonic.as_str().to_string());

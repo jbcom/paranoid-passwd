@@ -16,8 +16,8 @@ Required checks before merge:
 - `make verify-assurance`
 - `make ci` unless the change is strictly docs-only
 - For UI-sensitive changes, `make test-gui-visual-regression` on Linux or
-  `make test-gui-visual-regression-emulate` on macOS, plus inspection of the captured desktop,
-  tablet, and narrow/mobile-class screenshot artifacts.
+  `make test-gui-visual-regression-emulate` on macOS, plus inspection of the captured per-screen
+  screenshot artifacts (real and decoy passes) under `tests/baseline/gui/`.
 
 Never waive these invariants:
 

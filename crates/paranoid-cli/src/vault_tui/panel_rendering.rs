@@ -1,9 +1,13 @@
+use crate::theme::{self, ICON_ACTION, ICON_CAUTION, ICON_DRILL_DOWN, ICON_LOCKED, ICON_VERIFIED};
 use crate::vault_tui::*;
 use paranoid_ops::CapabilityProbeStatus;
-use paranoid_vault::{VaultBackupSummary, VaultItemKind, VaultItemPayload, VaultTransferSummary};
+use paranoid_vault::{
+    VaultBackupSummary, VaultItem, VaultItemKind, VaultItemPayload, VaultKeyslotKind,
+    VaultTransferSummary,
+};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
@@ -24,8 +28,9 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
     render_header(
         frame,
         chunks[0],
-        header_title(app.screen),
-        header_subtitle(app.screen),
+        header_title(app),
+        header_subtitle(app),
+        header_state_token(app),
     );
 
     frame.render_widget(
@@ -33,6 +38,12 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
             .style(
                 Style::default()
                     .fg(match app.screen {
+                        // S14 (ia.md §5): locking is the safe state, not a
+                        // failure — `color.text.muted`, matching the `⊘`
+                        // token's own color rule (never danger red for a
+                        // successful lock; P8.V.11). S15's ordinary
+                        // failed-unlock status keeps red.
+                        Screen::UnlockBlocked if app.just_locked => theme::TEXT_MUTED,
                         Screen::UnlockBlocked => RED,
                         _ => AMBER,
                     })
@@ -42,18 +53,34 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
         chunks[1],
     );
 
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-        .split(chunks[2]);
-    let left = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(8), Constraint::Min(8)])
-        .split(body[0]);
+    // Single-purpose first-run screens (ia.md §1 "the two panes may merge
+    // into one centered column, but the title/status/footer rows never
+    // move") render one full-width column instead of the list/detail split
+    // — there is no list to browse before trust is established.
+    if matches!(
+        app.screen,
+        Screen::TrustGate
+            | Screen::Verifying
+            | Screen::Verified
+            | Screen::TrustFingerprint
+            | Screen::ItemDetail
+    ) || (matches!(app.screen, Screen::UnlockBlocked) && app.just_locked)
+    {
+        frame.render_widget(right_panel(app), chunks[2]);
+    } else {
+        // ia.md §1 rule 4: fixed two-pane skeleton (primary + detail) — no
+        // third panel. P8.V.9 removed the "Access" panel (raw vault path +
+        // unlock method) that used to sit above the primary pane; the
+        // primary pane now owns the full left column on every list-based
+        // screen (Vault, Keyslots).
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(chunks[2]);
 
-    frame.render_widget(keyslot_panel(app), left[0]);
-    frame.render_widget(item_list(app), left[1]);
-    frame.render_widget(right_panel(app), body[1]);
+        frame.render_widget(item_list(app), body[0]);
+        frame.render_widget(right_panel(app), body[1]);
+    }
 
     frame.render_widget(
         Paragraph::new(footer_text(app))
@@ -61,15 +88,90 @@ pub(crate) fn render(frame: &mut Frame<'_>, app: &App) {
             .wrap(Wrap { trim: false }),
         chunks[3],
     );
+
+    // S12 `?` overlay (ia.md §5): a transient layer drawn last, over the
+    // fixed skeleton — the skeleton geometry underneath is unchanged.
+    if app.help_overlay_open {
+        render_help_overlay(frame, area, app);
+    }
 }
 
-pub(crate) fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str, subtitle: &str) {
+pub(crate) fn render_help_overlay(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    use ratatui::widgets::Clear;
+    let popup = centered_rect(70, 60, area);
+    frame.render_widget(Clear, popup);
+    let mut lines: Vec<Line<'static>> = footer::overlay_lines(app)
+        .into_iter()
+        .map(Line::raw)
+        .collect();
+    lines.push(Line::raw(""));
+    lines.push(Line::styled("⎋ close", theme::muted()));
     frame.render_widget(
-        Paragraph::new(Text::from(vec![
-            Line::styled(
-                format!("paranoid-passwd · {title}"),
+        Paragraph::new(Text::from(lines))
+            .block(
+                Block::default()
+                    .title(footer::overlay_heading(app))
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(BLUE))
+                    .style(Style::default().bg(PANEL).fg(TEXT)),
+            )
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
+}
+
+/// A centered `Rect` covering `percent_x`% width and `percent_y`% height of
+/// `area` — used to place the `?` overlay as a floating panel over the fixed
+/// skeleton rather than replacing it.
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1])[1]
+}
+
+pub(crate) fn render_header(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    subtitle: &str,
+    state_token: Option<(&'static str, Color)>,
+) {
+    let title_line = match state_token {
+        // ia.md §1: "title region... state token: ✓ ! ⊘" — the fixed
+        // skeleton's single global state indicator, right-aligned on the
+        // title row. system.md §1.1 "the test": the glyph, not just a
+        // color, is what survives a monochrome/no-color terminal.
+        Some((glyph, color)) => Line::from(vec![
+            Span::styled(
+                format!("paranoid-passwd · {title}  "),
                 Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
             ),
+            Span::styled(
+                glyph,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        None => Line::styled(
+            format!("paranoid-passwd · {title}"),
+            Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+        ),
+    };
+    frame.render_widget(
+        Paragraph::new(Text::from(vec![
+            title_line,
             Line::styled(subtitle, Style::default().fg(TEXT)),
         ]))
         .block(
@@ -82,11 +184,32 @@ pub(crate) fn render_header(frame: &mut Frame<'_>, area: Rect, title: &str, subt
     );
 }
 
-pub(crate) fn header_title(screen: Screen) -> &'static str {
-    match screen {
-        Screen::EnvironmentApproval => "Environment Approval",
+/// The single global state token ia.md §1 requires in the title region:
+/// `⊘` (locked, `text.muted` per theme.rs — deliberately not danger red,
+/// since locking is the safe state) for `UnlockBlocked` (S14/S15); no token
+/// on every other screen (trust-gate/verified already carry their own `!`/
+/// `✓` in the body per ia.md §5 S1-S3, which are single-purpose screens
+/// where the body-level glyph IS the title-region token).
+pub(crate) fn header_state_token(app: &App) -> Option<(&'static str, Color)> {
+    match app.screen {
+        Screen::UnlockBlocked => Some((ICON_LOCKED, theme::TEXT_MUTED)),
+        _ => None,
+    }
+}
+
+pub(crate) fn header_title(app: &App) -> &'static str {
+    match app.screen {
+        Screen::TrustGate => "Verify this copy",
+        Screen::Verifying => "Verifying…",
+        Screen::Verified => "Verified",
+        Screen::TrustFingerprint => "Fingerprint",
+        Screen::EnvironmentApproval => "Create vault",
         Screen::Vault => "Vault",
-        Screen::Keyslots => "Keyslots",
+        Screen::ItemDetail => "Item",
+        Screen::Keyslots => "Ways in",
+        // ia.md §5 S14: the just-locked title reads "Locked", distinct from
+        // S15's ordinary "Vault" unlock-prompt title (P8.V.11).
+        Screen::UnlockBlocked if app.just_locked => "Locked",
         Screen::UnlockBlocked => "Vault",
         Screen::AddLogin => "Add Login",
         Screen::EditLogin => "Edit Login",
@@ -110,18 +233,34 @@ pub(crate) fn header_title(screen: Screen) -> &'static str {
         Screen::ImportBackup => "Import Backup",
         Screen::ImportTransfer => "Import Transfer",
         Screen::DeleteConfirm => "Delete Item",
+        Screen::RemoveWayInConfirm => "Remove a way in",
     }
 }
 
-pub(crate) fn header_subtitle(screen: Screen) -> &'static str {
-    match screen {
+pub(crate) fn header_subtitle(app: &App) -> &'static str {
+    match app.screen {
+        Screen::TrustGate => {
+            "Before you trust this program with anything, confirm it is the genuine, unmodified release."
+        }
+        Screen::Verifying => "Watch the check without being trapped — Esc returns any time.",
+        Screen::Verified => {
+            "The self-check finished. Its fingerprint stays reachable one level down."
+        }
+        Screen::TrustFingerprint => {
+            "What this build can honestly tell you about itself, and what it can't yet."
+        }
         Screen::EnvironmentApproval => {
-            "Detected keychain, clipboard, display server, and seal-provider capabilities before vault setup."
+            "Make the container and the way to open it. Ways in and hardware protection come later."
         }
         Screen::Vault => "Native vault list/detail view with the same builder-owned trust model.",
+        Screen::ItemDetail => "One item. Masked by default; use it safely.",
         Screen::Keyslots => {
-            "Inspect and enroll recovery or unlock keyslots without leaving the native TUI."
+            "The keys and phrases that can open this vault. Add a recovery phrase, bind a device, or remove a way in you no longer trust."
         }
+        // ia.md §5 S14 (brand.md §3 micro-example, verbatim): a minimal,
+        // reassurance-free subtitle — the product states the fact and stops,
+        // never "you're safe" (brand.md §3 rule 4).
+        Screen::UnlockBlocked if app.just_locked => "Nothing is readable until you unlock again.",
         Screen::UnlockBlocked => {
             "Unlock uses the same password, mnemonic, device, and certificate paths as the CLI, now with direct native input."
         }
@@ -176,118 +315,15 @@ pub(crate) fn header_subtitle(screen: Screen) -> &'static str {
         Screen::ImportTransfer => {
             "Import a selective encrypted transfer package into the unlocked local vault."
         }
-        Screen::DeleteConfirm => {
-            "Confirm removal of the selected vault item from the encrypted vault."
+        Screen::DeleteConfirm => "This deletes the item for good. Type its name to confirm.",
+        Screen::RemoveWayInConfirm => {
+            "This way in will no longer open the vault. Type its name to confirm."
         }
     }
 }
 
 pub(crate) fn footer_text(app: &App) -> &'static str {
-    match app.screen {
-        Screen::EnvironmentApproval => {
-            "Controls: Up/Down or Tab cycles Accept/Adjust, Enter selects, Esc returns to the vault (once unlocked), q quits."
-        }
-        Screen::Vault => {
-            if app.search_mode {
-                "Controls: Type to filter the unlocked list, Backspace deletes, Ctrl+u clears, Enter or Esc exits filter mode, q quits."
-            } else {
-                "Controls: Up/Down select items, / filters, a adds login, n adds secure note, v adds card, i adds identity, e edits, d deletes, g generates and stores one password, x exports backup, t exports transfer, u imports backup, p imports transfer, k opens keyslots, E reviews environment approval, c copies the selected value, r refreshes, q quits."
-            }
-        }
-        Screen::Keyslots => {
-            "Controls: Up/Down select keyslots, m adds mnemonic recovery, b adds device-bound, c adds certificate-wrapped, w rewraps the selected certificate slot, l relabels the selected keyslot, o rotates the selected mnemonic slot, p rotates the recovery secret, d removes the selected non-recovery slot, r rebinds the selected device slot, Esc returns to items, q quits."
-        }
-        Screen::UnlockBlocked => {
-            "Controls: p/m/b/c pick password, mnemonic, device, or certificate mode; Up/Down or Tab move; Left/Right cycles the mode field; Enter advances or unlocks; r retries current policy; q quits."
-        }
-        Screen::AddLogin
-        | Screen::EditLogin
-        | Screen::AddNote
-        | Screen::EditNote
-        | Screen::AddCard
-        | Screen::EditCard
-        | Screen::AddIdentity
-        | Screen::EditIdentity
-        | Screen::AddMnemonicSlot
-        | Screen::AddDeviceSlot
-        | Screen::AddCertSlot
-        | Screen::RewrapCertSlot
-        | Screen::EditKeyslotLabel
-        | Screen::RotateMnemonicSlot
-        | Screen::RotateRecoverySecret
-        | Screen::GenerateStore => {
-            "Controls: Type into the focused field, Up/Down or Tab move, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits."
-        }
-        Screen::ExportBackup
-        | Screen::ExportTransfer
-        | Screen::ImportBackup
-        | Screen::ImportTransfer => {
-            "Controls: Type into the focused path field, Up/Down or Tab move, Space/Left/Right toggle overwrite when selected, Enter advances or saves, Ctrl+u clears the field, Esc cancels, q quits."
-        }
-        Screen::MnemonicReveal => {
-            "Controls: c copies the phrase, Enter or Esc returns to keyslots, q quits."
-        }
-        Screen::DeleteConfirm => {
-            "Controls: y or Enter confirms deletion, n or Esc cancels, q quits."
-        }
-    }
-}
-
-pub(crate) fn keyslot_panel(app: &App) -> Paragraph<'static> {
-    let mut lines = vec![
-        Line::raw(format!("Vault path: {}", app.options.path.display())),
-        Line::raw(format!("Unlock: {}", app.options.unlock_description())),
-        Line::raw(""),
-    ];
-    if let Some(header) = &app.header {
-        let posture = header.recovery_posture();
-        lines.push(Line::styled(
-            format!("Keyslots ({})", header.keyslots.len()),
-            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
-        ));
-        lines.push(Line::raw(format!(
-            "Recovery posture: recovery={} cert={} recommended={}",
-            posture.has_recovery_path,
-            posture.has_certificate_path,
-            posture.meets_recommended_posture
-        )));
-        lines.push(Line::raw(format!(
-            "Counts: password={} mnemonic={} device={} cert={}",
-            posture.password_recovery_slots,
-            posture.mnemonic_recovery_slots,
-            posture.device_bound_slots,
-            posture.certificate_wrapped_slots
-        )));
-        for recommendation in header.recovery_recommendations() {
-            lines.push(Line::styled(
-                format!("recommend: {recommendation}"),
-                Style::default().fg(AMBER),
-            ));
-        }
-        for slot in header.keyslots.iter().take(3) {
-            let label = slot.label.as_deref().unwrap_or("unlabeled");
-            lines.push(Line::raw(format!("{} · {}", slot.kind.as_str(), label)));
-        }
-        if header.keyslots.len() > 3 {
-            lines.push(Line::raw(format!(
-                "... {} more slot(s)",
-                header.keyslots.len() - 3
-            )));
-        }
-    } else {
-        lines.push(Line::raw(
-            "Keyslots unavailable until the vault header can be read.",
-        ));
-    }
-    Paragraph::new(Text::from(lines))
-        .block(
-            Block::default()
-                .title("Access")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(BLUE))
-                .style(Style::default().bg(PANEL).fg(TEXT)),
-        )
-        .wrap(Wrap { trim: false })
+    footer::contextual_footer(app)
 }
 
 pub(crate) fn item_list(app: &App) -> List<'static> {
@@ -307,9 +343,14 @@ pub(crate) fn item_list(app: &App) -> List<'static> {
     }
 
     let items = if app.items.is_empty() {
+        // P8.V.7: this used to be a relocated prose hotkey wall ("Press a to
+        // add login, n to add secure note, v to add card, i to add
+        // identity, or g to generate and store one") — the same 40-key
+        // Controls wall in a new spot. The contextual footer (`n new`) and
+        // the `?` overlay already carry the full add-item keymap.
         vec![ListItem::new(Line::styled(
             if !app.filters.is_active() {
-                "No vault items yet. Press a to add a login, n to add a secure note, v to add a card, i to add an identity, or g to generate and store one."
+                "No vault items yet."
             } else {
                 "No vault items match the current filter. Press / to refine or clear it."
             },
@@ -366,7 +407,29 @@ pub(crate) fn item_list(app: &App) -> List<'static> {
     )
 }
 
+/// S10 row naming (ia.md §5, brand.md §4, journeys.md J5 step 1, P8.V.4):
+/// rows are named by *relationship* — who or what can open the vault — never
+/// the internal `VaultKeyslotKind` enum (`password_recovery`, etc). Both
+/// `PasswordRecovery` and `MnemonicRecovery` are, from the persona's side,
+/// the same relationship ("a phrase you hold"); the design docs draw no
+/// distinction between them (brand.md §4's table has one `recovery keyslot`
+/// row, not two), so both map to "recovery phrase" here.
+pub(crate) fn keyslot_relationship_label(kind: &VaultKeyslotKind) -> &'static str {
+    match kind {
+        VaultKeyslotKind::PasswordRecovery | VaultKeyslotKind::MnemonicRecovery => {
+            "recovery phrase"
+        }
+        VaultKeyslotKind::DeviceBound => "this device",
+        VaultKeyslotKind::CertificateWrapped => "trusted contact",
+    }
+}
+
 pub(crate) fn keyslot_list(app: &App) -> List<'static> {
+    let count = app
+        .header
+        .as_ref()
+        .map(|header| header.keyslots.len())
+        .unwrap_or_default();
     let items = match &app.header {
         Some(header) if !header.keyslots.is_empty() => header
             .keyslots
@@ -392,22 +455,26 @@ pub(crate) fn keyslot_list(app: &App) -> List<'static> {
                 } else {
                     Style::default().fg(TEXT)
                 };
-                let label = slot.label.as_deref().unwrap_or("unlabeled");
+                let relationship = keyslot_relationship_label(&slot.kind);
+                let row = match &slot.label {
+                    Some(label) if !label.is_empty() => format!("{relationship} · {label}"),
+                    _ => relationship.to_string(),
+                };
                 ListItem::new(Line::from(vec![
                     Span::styled(prefix.to_string(), style),
-                    Span::styled(format!("{} · {}", slot.kind.as_str(), label), style),
+                    Span::styled(row, style),
                 ]))
             })
             .collect::<Vec<_>>(),
         _ => vec![ListItem::new(Line::styled(
-            "No keyslots available yet beyond the required recovery slot.",
+            "No ways in available yet beyond the required recovery phrase.",
             Style::default().fg(AMBER),
         ))],
     };
 
     List::new(items).block(
         Block::default()
-            .title("Keyslots")
+            .title(format!("Ways in ({count})"))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(GREEN))
             .style(Style::default().bg(PANEL).fg(TEXT)),
@@ -416,8 +483,18 @@ pub(crate) fn keyslot_list(app: &App) -> List<'static> {
 
 pub(crate) fn right_panel(app: &App) -> Paragraph<'static> {
     match app.screen {
+        Screen::TrustGate => trust_gate_panel(app),
+        Screen::Verifying => verifying_panel(app),
+        Screen::Verified => verified_panel(app),
+        Screen::TrustFingerprint => trust_fingerprint_panel(app),
         Screen::EnvironmentApproval => environment_approval_panel(app),
         Screen::Vault => detail_panel(app),
+        Screen::ItemDetail => item_detail_panel(app),
+        // S14 vs S15 (ia.md §5): a just-locked visit renders the centered
+        // `⊘ Locked.` state (`locked_panel`), never the ordinary two-pane
+        // unlock form — the two are visually distinct so a panic-lock is
+        // never confusable with an everyday unlock prompt (P8.V.11).
+        Screen::UnlockBlocked if app.just_locked => locked_panel(app),
         Screen::UnlockBlocked => unlock_blocked_panel(app),
         Screen::AddLogin | Screen::EditLogin => add_login_panel(app),
         Screen::AddNote | Screen::EditNote => add_note_panel(app),
@@ -438,7 +515,170 @@ pub(crate) fn right_panel(app: &App) -> Paragraph<'static> {
         Screen::ImportBackup => import_backup_panel(app),
         Screen::ImportTransfer => import_transfer_panel(app),
         Screen::DeleteConfirm => delete_confirm_panel(app),
+        Screen::RemoveWayInConfirm => remove_way_in_confirm_panel(app),
     }
+}
+
+pub(crate) fn trust_gate_panel(app: &App) -> Paragraph<'static> {
+    let already_checked = matches!(app.trust_state, TrustState::Checked);
+    let mut lines = vec![Line::raw(
+        "Before you trust this program with anything, confirm it is the genuine, unmodified release.",
+    )];
+    lines.push(Line::raw(""));
+    if already_checked {
+        lines.push(Line::styled(
+            format!("{ICON_VERIFIED} This copy was checked on this machine."),
+            theme::verified(),
+        ));
+    } else {
+        lines.push(Line::styled(
+            format!("{ICON_CAUTION} This copy has not been checked on this machine yet."),
+            theme::caution(),
+        ));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        format!("{ICON_ACTION} Verify this copy"),
+        theme::accent_action(),
+    ));
+    lines.push(Line::raw("  Skip for now"));
+
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title("Trust")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
+}
+
+pub(crate) fn verifying_panel(_app: &App) -> Paragraph<'static> {
+    Paragraph::new(Text::from(vec![
+        Line::raw("Checking this copy's build identity…"),
+        Line::raw(""),
+        Line::styled(
+            "Esc returns any time — nothing here blocks you.",
+            theme::muted(),
+        ),
+    ]))
+    .block(
+        Block::default()
+            .title("Verifying")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(BLUE))
+            .style(Style::default().bg(PANEL).fg(TEXT)),
+    )
+    .wrap(Wrap { trim: false })
+}
+
+pub(crate) fn verified_panel(app: &App) -> Paragraph<'static> {
+    let mut lines = vec![Line::styled(
+        format!("{ICON_VERIFIED} This build's identity is confirmed."),
+        theme::verified(),
+    )];
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        "Cryptographic release verification against a signed publisher record is not available in this build yet — that is a real limit, stated plainly rather than papered over.",
+        theme::caution(),
+    ));
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        format!("{ICON_ACTION} Continue"),
+        theme::accent_action(),
+    ));
+    let _ = app;
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title("Verified")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(GREEN))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
+}
+
+/// S2d (ia.md §2/§4 "Fingerprint & signature" leaf). Reached from S1/S3 via
+/// `d show the fingerprint`. This is the honest version of the promised
+/// evidence leaf: there is no signed-release/attestation backend anywhere in
+/// this workspace, so it does not claim a hash matches a published release
+/// (that would be fabricating a security claim — brand.md §3 rule 4). It
+/// instead shows exactly what this build CAN prove about itself — the same
+/// build-identity fields `--federal-evidence` already surfaces
+/// (`paranoid_ops::collect_federal_startup_evidence_with_audit_sink`) — and
+/// states the real limit plainly, mirroring `verified_panel`'s caution line.
+pub(crate) fn trust_fingerprint_panel(_app: &App) -> Paragraph<'static> {
+    let build_commit = option_env!("PARANOID_CLI_BUILD_COMMIT").unwrap_or("dev");
+    let build_date = option_env!("PARANOID_CLI_BUILD_DATE").unwrap_or("dev");
+    let lines = vec![
+        Line::styled(
+            "Build identity",
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(format!("Product version: {}", paranoid_core::VERSION)),
+        Line::raw(format!("Build commit:    {build_commit}")),
+        Line::raw(format!("Build date:      {build_date}")),
+        Line::raw(format!(
+            "Platform:        {} / {}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )),
+        Line::raw(""),
+        Line::styled(
+            "What this confirms",
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(
+            "This is the identity this specific running binary carries. It matches what `--federal-evidence` reports for the same build.",
+        ),
+        Line::raw(""),
+        Line::styled(
+            "What this does not confirm",
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+        ),
+        Line::styled(
+            "There is no signed-release check yet, so this cannot tell you whether this copy matches the publisher's official release — that is a real limit, stated plainly rather than papered over.",
+            theme::caution(),
+        ),
+    ];
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title("Fingerprint")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
+}
+
+pub(crate) fn remove_way_in_confirm_panel(app: &App) -> Paragraph<'static> {
+    let lines = vec![
+        Line::styled(
+            format!(
+                "Removing \"{}\" means it can no longer open this vault.",
+                app.confirm_target_name
+            ),
+            theme::caution(),
+        ),
+        Line::raw(""),
+        Line::raw(format!("Type \"{}\" to confirm:", app.confirm_target_name)),
+        Line::styled(
+            format!("{}_", app.confirm_input),
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
+    ];
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title("Remove a way in")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(RED))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
 }
 
 pub(crate) fn capability_status_label(status: CapabilityProbeStatus) -> &'static str {
@@ -458,10 +698,16 @@ pub(crate) fn capability_status_color(status: CapabilityProbeStatus) -> Color {
 }
 
 pub(crate) fn environment_approval_panel(app: &App) -> Paragraph<'static> {
-    let mut lines = vec![Line::raw(format!(
-        "Vault path: {}",
-        app.options.path.display()
-    ))];
+    // P8.V.9: the raw vault filesystem path and unlock method used to sit on
+    // every Home/steady-state screen as a permanent third "Access" panel,
+    // violating ia.md §1's fixed two-pane (primary + detail) skeleton. Both
+    // facts are real and occasionally useful, so they are relocated here —
+    // the one screen ia.md already treats as the disclosure surface for
+    // environment/posture detail — instead of being deleted outright.
+    let mut lines = vec![
+        Line::raw(format!("Vault path: {}", app.options.path.display())),
+        Line::raw(format!("Unlock: {}", app.options.unlock_description())),
+    ];
 
     let Some(report) = app.capability_report.as_ref() else {
         lines.push(Line::raw("Collecting capability evidence..."));
@@ -518,12 +764,15 @@ pub(crate) fn environment_approval_panel(app: &App) -> Paragraph<'static> {
 
     lines.push(Line::raw(""));
     lines.push(Line::styled(
-        "Seal-provider posture",
+        "Hardware protection",
         Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
     ));
     if report.seal_providers.is_empty() {
+        // brand.md §3(b) verbatim: names the actual guarantee (can my vault
+        // be opened on a machine that isn't mine) rather than "seal
+        // provider" engineer vocabulary.
         lines.push(Line::raw(
-            "No seal providers configured yet (expected before vault init).",
+            "This vault is not yet tied to this device's secure hardware. Once it is set up, an attacker who copies the vault file to another machine cannot open it there.",
         ));
     } else {
         for provider in &report.seal_providers {
@@ -568,6 +817,38 @@ pub(crate) fn environment_approval_panel(app: &App) -> Paragraph<'static> {
                 .title("Environment Approval")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
+}
+
+/// S14 (ia.md §5, P8.V.11): the centered "⊘ Locked." state a panic-lock or
+/// idle auto-lock transitions to. Deliberately NOT the two-pane unlock form
+/// `unlock_blocked_panel` renders for S15 — a shoulder-surfer or coercive
+/// third party must not be able to tell "panic-locked" from "an ordinary
+/// wrong-password screen" by shape alone (journeys.md J6b, "speed is the
+/// safety property"; brand.md §2.3), and the persona under duress benefits
+/// from an unambiguous, unmistakable "it worked" signal. Copy is the
+/// brand.md §3 micro-example verbatim, carried in `app.status` (set by
+/// `handle_panic_lock_hotkey`/idle auto-lock) — never "you're safe"
+/// (brand.md §3 rule 4).
+pub(crate) fn locked_panel(_app: &App) -> Paragraph<'static> {
+    let lines = vec![
+        Line::raw(""),
+        Line::styled(
+            format!("{ICON_LOCKED}  Locked."),
+            theme::locked().add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(""),
+        Line::styled(format!("{ICON_ACTION} Unlock"), theme::accent_action()),
+    ];
+    Paragraph::new(Text::from(lines))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .title("Locked")
+                .borders(Borders::ALL)
+                .border_style(theme::locked())
                 .style(Style::default().bg(PANEL).fg(TEXT)),
         )
         .wrap(Wrap { trim: false })
@@ -657,186 +938,45 @@ pub(crate) fn unlock_blocked_panel(app: &App) -> Paragraph<'static> {
         .wrap(Wrap { trim: false })
 }
 
+/// H's detail pane (ia.md §5 "detail pane: empty until sel."). This is a
+/// preview only — it never shows a secret in cleartext and never dumps
+/// internal fields (P8.V.1, P8.V.3). Opening the item (`⏎`) is the only way
+/// to reach the full S7 `item_detail_panel`, which itself still masks by
+/// default (rule 2, "progressive disclosure of evidence").
 pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
     let lines = match app.screen {
         Screen::UnlockBlocked => unreachable!("unlock blocked uses a dedicated panel"),
         Screen::Vault => match &app.detail {
-            Some(item) => match &item.payload {
-                VaultItemPayload::Login(login) => {
-                    let duplicate_password_count = app
-                        .items
-                        .iter()
-                        .find(|summary| summary.id == item.id)
-                        .map(|summary| summary.duplicate_password_count)
-                        .unwrap_or(0);
-                    vec![
-                        Line::styled(
-                            "Selected login",
-                            Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
-                        ),
-                        Line::raw(""),
-                        Line::raw(format!("id: {}", item.id)),
-                        Line::raw(format!("title: {}", login.title)),
-                        Line::raw(format!("username: {}", login.username)),
-                        Line::raw(format!("password: {}", login.password)),
-                        Line::raw(format!(
-                            "duplicate passwords elsewhere: {duplicate_password_count}"
-                        )),
-                        Line::raw(format!("url: {}", login.url.as_deref().unwrap_or(""))),
-                        Line::raw(format!("notes: {}", login.notes.as_deref().unwrap_or(""))),
-                        Line::raw(format!("folder: {}", login.folder.as_deref().unwrap_or(""))),
-                        Line::raw(format!(
-                            "tags: {}",
-                            if login.tags.is_empty() {
-                                String::new()
-                            } else {
-                                login.tags.join(", ")
-                            }
-                        )),
-                        Line::raw(format!(
-                            "password history entries: {}",
-                            login.password_history.len()
-                        )),
-                        Line::raw(format!(
-                            "recent history: {}",
-                            if login.password_history.is_empty() {
-                                String::new()
-                            } else {
-                                login
-                                    .password_history
-                                    .iter()
-                                    .rev()
-                                    .take(3)
-                                    .map(|entry| {
-                                        format!("{} @ {}", entry.password, entry.changed_at_epoch)
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(" | ")
-                            }
-                        )),
-                        Line::raw(""),
-                        Line::raw(format!("updated_at_epoch: {}", item.updated_at_epoch)),
-                        Line::raw(""),
-                        Line::raw(
-                            "Press a to add, e to edit, d to delete, or g to generate-and-store.",
-                        ),
-                        Line::raw("Press k to inspect or enroll vault keyslots natively."),
-                        Line::raw("Press x to export a backup package or u to restore one."),
-                    ]
-                }
-                VaultItemPayload::SecureNote(note) => vec![
+            Some(item) => {
+                let (kind_label, subtitle) = match &item.payload {
+                    VaultItemPayload::Login(login) => ("Login", login.username.clone()),
+                    VaultItemPayload::SecureNote(_) => ("Secure note", String::new()),
+                    VaultItemPayload::Card(card) => {
+                        ("Card", format!("{} ••••", card.cardholder_name))
+                    }
+                    VaultItemPayload::Identity(identity) => {
+                        ("Identity", identity.full_name.clone())
+                    }
+                };
+                let title = match &item.payload {
+                    VaultItemPayload::Login(login) => login.title.clone(),
+                    VaultItemPayload::SecureNote(note) => note.title.clone(),
+                    VaultItemPayload::Card(card) => card.title.clone(),
+                    VaultItemPayload::Identity(identity) => identity.title.clone(),
+                };
+                vec![
                     Line::styled(
-                        "Selected secure note",
+                        title,
                         Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
                     ),
+                    Line::raw(kind_label),
+                    Line::raw(subtitle),
                     Line::raw(""),
-                    Line::raw(format!("id: {}", item.id)),
-                    Line::raw(format!("title: {}", note.title)),
-                    Line::raw(format!("content: {}", note.content)),
-                    Line::raw(format!("folder: {}", note.folder.as_deref().unwrap_or(""))),
-                    Line::raw(format!(
-                        "tags: {}",
-                        if note.tags.is_empty() {
-                            String::new()
-                        } else {
-                            note.tags.join(", ")
-                        }
-                    )),
-                    Line::raw(""),
-                    Line::raw(format!("updated_at_epoch: {}", item.updated_at_epoch)),
-                    Line::raw(""),
-                    Line::raw(
-                        "Press a to add login, n to add secure note, v to add card, e to edit, or d to delete.",
-                    ),
-                    Line::raw(
-                        "Use c to copy the full note content into the clipboard when needed.",
-                    ),
-                ],
-                VaultItemPayload::Card(card) => vec![
-                    Line::styled(
-                        "Selected card",
-                        Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
-                    ),
-                    Line::raw(""),
-                    Line::raw(format!("id: {}", item.id)),
-                    Line::raw(format!("title: {}", card.title)),
-                    Line::raw(format!("cardholder: {}", card.cardholder_name)),
-                    Line::raw(format!("number: {}", card.number)),
-                    Line::raw(format!(
-                        "expiry: {}/{}",
-                        card.expiry_month, card.expiry_year
-                    )),
-                    Line::raw(format!("security code: {}", card.security_code)),
-                    Line::raw(format!(
-                        "billing zip: {}",
-                        card.billing_zip.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!("notes: {}", card.notes.as_deref().unwrap_or(""))),
-                    Line::raw(format!("folder: {}", card.folder.as_deref().unwrap_or(""))),
-                    Line::raw(format!(
-                        "tags: {}",
-                        if card.tags.is_empty() {
-                            String::new()
-                        } else {
-                            card.tags.join(", ")
-                        }
-                    )),
-                    Line::raw(""),
-                    Line::raw(format!("updated_at_epoch: {}", item.updated_at_epoch)),
-                    Line::raw(""),
-                    Line::raw(
-                        "Press a to add login, n to add secure note, v to add card, i to add identity, e to edit, or d to delete.",
-                    ),
-                    Line::raw("Use c to copy the full card number into the clipboard when needed."),
-                ],
-                VaultItemPayload::Identity(identity) => vec![
-                    Line::styled(
-                        "Selected identity",
-                        Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
-                    ),
-                    Line::raw(""),
-                    Line::raw(format!("id: {}", item.id)),
-                    Line::raw(format!("title: {}", identity.title)),
-                    Line::raw(format!("full name: {}", identity.full_name)),
-                    Line::raw(format!(
-                        "email: {}",
-                        identity.email.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!(
-                        "phone: {}",
-                        identity.phone.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!(
-                        "address: {}",
-                        identity.address.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!(
-                        "notes: {}",
-                        identity.notes.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!(
-                        "folder: {}",
-                        identity.folder.as_deref().unwrap_or("")
-                    )),
-                    Line::raw(format!(
-                        "tags: {}",
-                        if identity.tags.is_empty() {
-                            String::new()
-                        } else {
-                            identity.tags.join(", ")
-                        }
-                    )),
-                    Line::raw(""),
-                    Line::raw(format!("updated_at_epoch: {}", item.updated_at_epoch)),
-                    Line::raw(""),
-                    Line::raw(
-                        "Press a to add login, n to add secure note, v to add card, i to add identity, e to edit, or d to delete.",
-                    ),
-                    Line::raw(
-                        "Use c to copy the preferred contact value (email, phone, or full name).",
-                    ),
-                ],
-            },
+                    // ia.md rule 5: every screen names one clear next
+                    // action with the `▸ accent.action` marker.
+                    Line::styled(format!("{ICON_ACTION} Open"), theme::accent_action()),
+                ]
+            }
             None => vec![
                 Line::styled(
                     "Vault detail",
@@ -844,10 +984,11 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
                 ),
                 Line::raw(""),
                 Line::raw("No item is selected yet."),
-                Line::raw(
-                    "Press a to add a login, n to add a secure note, v to add a card, i to add an identity, or g to generate and store one.",
+                Line::raw(""),
+                Line::styled(
+                    format!("{ICON_ACTION} Add your first item"),
+                    theme::accent_action(),
                 ),
-                Line::raw("Use x to export the encrypted vault state or u to restore a backup."),
             ],
         },
         _ => unreachable!("detail panel only renders vault screens"),
@@ -864,89 +1005,238 @@ pub(crate) fn detail_panel(app: &App) -> Paragraph<'static> {
         .wrap(Wrap { trim: false })
 }
 
+/// S7 (ia.md §5) — one selected item, safe to use. Masked by default
+/// (P8.V.1): a password/note/card-number/etc is rendered as `masked_value`
+/// (the same `•`-per-character mask the unlock/export secret fields already
+/// use) unless `app.secret_revealed` is `true`, toggled only by the explicit
+/// `r reveal` action and re-masked on every re-entry (ia.md §5, journeys.md
+/// invariant 1 — no coercion/shoulder-surfer cleartext-by-default leak).
+///
+/// No raw internal fields (`id:`, `updated_at_epoch:`, `duplicate passwords
+/// elsewhere:`, `password history entries:`) are shown on this primary
+/// surface at all (P8.V.3) — this is the "box of data with no answer to
+/// what do I do next" antipattern journeys.md names as the defect PUX exists
+/// to fix. There is currently no drill-down leaf for these counts; they are
+/// omitted rather than fabricated a home that doesn't exist yet in ia.md.
+pub(crate) fn item_detail_panel(app: &App) -> Paragraph<'static> {
+    let Some(item) = &app.detail else {
+        return Paragraph::new(Text::from(vec![
+            Line::styled(
+                "Item",
+                Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+            ),
+            Line::raw(""),
+            Line::raw("No item is selected."),
+        ]))
+        .block(
+            Block::default()
+                .title("Detail")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false });
+    };
+
+    let reveal = app.secret_revealed;
+    let mask_or = |secret: &str| -> String {
+        if reveal {
+            secret.to_string()
+        } else {
+            masked_value(secret)
+        }
+    };
+
+    let mut lines = Vec::new();
+    let title = match &item.payload {
+        VaultItemPayload::Login(login) => login.title.clone(),
+        VaultItemPayload::SecureNote(note) => note.title.clone(),
+        VaultItemPayload::Card(card) => card.title.clone(),
+        VaultItemPayload::Identity(identity) => identity.title.clone(),
+    };
+    lines.push(Line::styled(
+        title,
+        Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+    ));
+    lines.push(Line::raw(""));
+
+    match &item.payload {
+        VaultItemPayload::Login(login) => {
+            lines.push(Line::raw(format!("User    {}", login.username)));
+            lines.push(Line::raw(format!(
+                "Pass    {}",
+                mask_or(login.password.as_str())
+            )));
+            if let Some(url) = login.url.as_deref().filter(|value| !value.is_empty()) {
+                lines.push(Line::raw(format!("URL     {url}")));
+            }
+        }
+        VaultItemPayload::SecureNote(note) => {
+            lines.push(Line::raw(format!(
+                "Note    {}",
+                mask_or(note.content.as_str())
+            )));
+        }
+        VaultItemPayload::Card(card) => {
+            lines.push(Line::raw(format!("Holder  {}", card.cardholder_name)));
+            lines.push(Line::raw(format!(
+                "Number  {}",
+                mask_or(card.number.as_str())
+            )));
+            lines.push(Line::raw(format!(
+                "Expiry  {}/{}",
+                card.expiry_month, card.expiry_year
+            )));
+            lines.push(Line::raw(format!(
+                "CVV     {}",
+                mask_or(card.security_code.as_str())
+            )));
+        }
+        VaultItemPayload::Identity(identity) => {
+            lines.push(Line::raw(format!("Name    {}", identity.full_name)));
+            if let Some(email) = identity.email.as_deref().filter(|value| !value.is_empty()) {
+                lines.push(Line::raw(format!("Email   {email}")));
+            }
+            if let Some(phone) = identity.phone.as_deref().filter(|value| !value.is_empty()) {
+                lines.push(Line::raw(format!("Phone   {phone}")));
+            }
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        "▸ Copy password",
+        Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+    ));
+    lines.push(Line::raw(if reveal { "Mask" } else { "Reveal" }));
+    lines.push(Line::raw("Edit"));
+
+    Paragraph::new(Text::from(lines))
+        .block(
+            Block::default()
+                .title(item_title_for_block(item))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(BLUE))
+                .style(Style::default().bg(PANEL).fg(TEXT)),
+        )
+        .wrap(Wrap { trim: false })
+}
+
+fn item_title_for_block(item: &VaultItem) -> String {
+    match &item.payload {
+        VaultItemPayload::Login(login) => login.title.clone(),
+        VaultItemPayload::SecureNote(note) => note.title.clone(),
+        VaultItemPayload::Card(card) => card.title.clone(),
+        VaultItemPayload::Identity(identity) => identity.title.clone(),
+    }
+}
+
+/// S10 detail pane (ia.md §5, brand.md §3a/§4, P8.V.4/P8.V.7/P8.V.9). Leads
+/// with the relationship name and the audit-question body copy
+/// (journeys.md J5 step 1, verbatim), not a field dump: `id`, `kind`,
+/// `wrap`, and device-bound/certificate mechanics are gated behind the
+/// explicit S10d `k show the mechanics` drill-down (`keyslot_mechanics_revealed`)
+/// instead of sitting inline on the intent-first surface. The relocated
+/// "Press m to add..., b to..., ..." prose hotkey wall is removed — the
+/// contextual footer and `?` overlay are the sole source of the keymap now.
 pub(crate) fn keyslot_detail_panel(app: &App) -> Paragraph<'static> {
     let lines = match selected_keyslot(app) {
         Some(slot) => {
+            let relationship = keyslot_relationship_label(&slot.kind);
             let mut lines = vec![
                 Line::styled(
-                    "Selected keyslot",
+                    relationship,
                     Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
                 ),
                 Line::raw(""),
-                Line::raw(format!("id: {}", slot.id)),
-                Line::raw(format!("kind: {}", slot.kind.as_str())),
-                Line::raw(format!("label: {}", slot.label.as_deref().unwrap_or(""))),
-                Line::raw(format!("wrap: {}", slot.wrap_algorithm)),
-                Line::raw(format!(
+            ];
+            if let Some(label) = slot.label.as_deref().filter(|value| !value.is_empty()) {
+                lines.push(Line::raw(format!("Label   {label}")));
+            }
+
+            if app.keyslot_mechanics_revealed {
+                lines.push(Line::raw(""));
+                lines.push(Line::styled(
+                    "Mechanics",
+                    Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+                ));
+                lines.push(Line::raw(format!("id: {}", slot.id)));
+                lines.push(Line::raw(format!("kind: {}", slot.kind.as_str())));
+                lines.push(Line::raw(format!("wrap: {}", slot.wrap_algorithm)));
+                lines.push(Line::raw(format!(
                     "device-bound: {}",
                     if slot.wrapped_by_os_keystore {
                         "yes"
                     } else {
                         "no"
                     }
-                )),
-            ];
-            if let Some(fingerprint) = &slot.certificate_fingerprint_sha256 {
-                lines.push(Line::raw(format!("fingerprint: {fingerprint}")));
-            }
-            if let Some(subject) = &slot.certificate_subject {
-                lines.push(Line::raw(format!("subject: {subject}")));
-            }
-            if let Some(not_before) = &slot.certificate_not_before {
-                lines.push(Line::raw(format!("valid from: {not_before}")));
-            }
-            if let Some(not_after) = &slot.certificate_not_after {
-                lines.push(Line::raw(format!("valid until: {not_after}")));
-            }
-            if let Some(language) = &slot.mnemonic_language {
-                lines.push(Line::raw(format!(
-                    "mnemonic: {} words ({language})",
-                    slot.mnemonic_words.unwrap_or_default()
                 )));
-            }
-            if let Some(service) = &slot.device_service {
-                lines.push(Line::raw(format!("device service: {service}")));
-            }
-            if let Some(account) = &slot.device_account {
-                lines.push(Line::raw(format!("device account: {account}")));
-            }
-            if let Some(header) = &app.header
-                && let Ok(health) = header.assess_keyslot_health(slot.id.as_str())
-            {
-                lines.push(Line::raw(format!("healthy: {}", health.healthy)));
-                for warning in health.warnings {
-                    lines.push(Line::styled(
-                        format!("health warning: {warning}"),
-                        Style::default().fg(AMBER),
-                    ));
+                if let Some(fingerprint) = &slot.certificate_fingerprint_sha256 {
+                    lines.push(Line::raw(format!("fingerprint: {fingerprint}")));
                 }
-            }
-            if let Some(header) = &app.header
-                && let Ok(impact) = header.assess_keyslot_removal(slot.id.as_str())
-            {
-                lines.push(Line::raw(""));
-                lines.push(Line::raw(format!(
-                    "removal requires confirmation: {}",
-                    impact.requires_explicit_confirmation
-                )));
-                if impact.warnings.is_empty() {
-                    lines.push(Line::raw("removal impact: no posture downgrade detected."));
-                } else {
-                    for warning in impact.warnings {
+                if let Some(subject) = &slot.certificate_subject {
+                    lines.push(Line::raw(format!("subject: {subject}")));
+                }
+                if let Some(not_before) = &slot.certificate_not_before {
+                    lines.push(Line::raw(format!("valid from: {not_before}")));
+                }
+                if let Some(not_after) = &slot.certificate_not_after {
+                    lines.push(Line::raw(format!("valid until: {not_after}")));
+                }
+                if let Some(language) = &slot.mnemonic_language {
+                    lines.push(Line::raw(format!(
+                        "mnemonic: {} words ({language})",
+                        slot.mnemonic_words.unwrap_or_default()
+                    )));
+                }
+                if let Some(service) = &slot.device_service {
+                    lines.push(Line::raw(format!("device service: {service}")));
+                }
+                if let Some(account) = &slot.device_account {
+                    lines.push(Line::raw(format!("device account: {account}")));
+                }
+                if let Some(header) = &app.header
+                    && let Ok(health) = header.assess_keyslot_health(slot.id.as_str())
+                {
+                    lines.push(Line::raw(format!("healthy: {}", health.healthy)));
+                    for warning in health.warnings {
                         lines.push(Line::styled(
-                            format!("warning: {warning}"),
+                            format!("health warning: {warning}"),
                             Style::default().fg(AMBER),
                         ));
                     }
                 }
-            }
-            lines.push(Line::raw(""));
-            lines.push(Line::raw(
-                "Press m to add mnemonic recovery, b to add device-bound, c to add certificate-wrapped, w to rewrap the selected certificate slot, l to relabel the selected keyslot, o to rotate the selected mnemonic slot, p to rotate the recovery secret, d to remove the selected non-recovery slot, or r to rebind the selected device slot.",
-            ));
-            if app.pending_keyslot_removal_confirmation.as_deref() == Some(slot.id.as_str()) {
+                if let Some(header) = &app.header
+                    && let Ok(impact) = header.assess_keyslot_removal(slot.id.as_str())
+                {
+                    lines.push(Line::raw(""));
+                    lines.push(Line::raw(format!(
+                        "removal requires confirmation: {}",
+                        impact.requires_explicit_confirmation
+                    )));
+                    if impact.warnings.is_empty() {
+                        lines.push(Line::raw("removal impact: no posture downgrade detected."));
+                    } else {
+                        for warning in impact.warnings {
+                            lines.push(Line::styled(
+                                format!("warning: {warning}"),
+                                Style::default().fg(AMBER),
+                            ));
+                        }
+                    }
+                }
+            } else {
+                lines.push(Line::raw(""));
                 lines.push(Line::styled(
-                    "Removal confirmation armed for this slot. Press d again to proceed.",
+                    format!("{ICON_DRILL_DOWN} Show the mechanics"),
+                    Style::default().fg(TEXT),
+                ));
+            }
+
+            if app.pending_keyslot_removal_confirmation.as_deref() == Some(slot.id.as_str()) {
+                lines.push(Line::raw(""));
+                lines.push(Line::styled(
+                    "Removal confirmation armed for this slot. Press x again to proceed.",
                     Style::default().fg(RED).add_modifier(Modifier::BOLD),
                 ));
             }
@@ -954,13 +1244,18 @@ pub(crate) fn keyslot_detail_panel(app: &App) -> Paragraph<'static> {
         }
         None => vec![
             Line::styled(
-                "Keyslot detail",
+                "Ways in",
                 Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
             ),
             Line::raw(""),
-            Line::raw("No keyslot is currently selectable."),
+            // brand.md §3a / journeys.md J5 step 1, verbatim.
             Line::raw(
-                "Press m, b, or c to enroll a new unlock or recovery path, or p to rotate the recovery secret.",
+                "The keys and phrases that can open this vault. Add a recovery phrase, bind a device, or remove a way in you no longer trust.",
+            ),
+            Line::raw(""),
+            Line::styled(
+                format!("{ICON_ACTION} Add a way in"),
+                theme::accent_action(),
             ),
         ],
     };
@@ -1575,68 +1870,35 @@ pub(crate) fn mnemonic_reveal_panel(app: &App) -> Paragraph<'static> {
 }
 
 pub(crate) fn delete_confirm_panel(app: &App) -> Paragraph<'static> {
-    let lines = match &app.detail {
+    // Severe-tier confirm (ia.md §7): the persona types the item's own name
+    // rather than a bare y/N — "make it hard to confirm by accident."
+    let detail_line = match &app.detail {
         Some(item) => match &item.payload {
-            VaultItemPayload::Login(login) => vec![
-                Line::styled(
-                    "Confirm delete",
-                    Style::default().fg(RED).add_modifier(Modifier::BOLD),
-                ),
-                Line::raw(""),
-                Line::raw(format!("id: {}", item.id)),
-                Line::raw(format!("title: {}", login.title)),
-                Line::raw(format!("username: {}", login.username)),
-                Line::raw(""),
-                Line::raw("This removes the encrypted vault record permanently."),
-                Line::raw("Press y or Enter to delete, or n / Esc to cancel."),
-            ],
-            VaultItemPayload::SecureNote(note) => vec![
-                Line::styled(
-                    "Confirm delete",
-                    Style::default().fg(RED).add_modifier(Modifier::BOLD),
-                ),
-                Line::raw(""),
-                Line::raw(format!("id: {}", item.id)),
-                Line::raw(format!("title: {}", note.title)),
-                Line::raw(""),
-                Line::raw("This removes the encrypted vault record permanently."),
-                Line::raw("Press y or Enter to delete, or n / Esc to cancel."),
-            ],
-            VaultItemPayload::Card(card) => vec![
-                Line::styled(
-                    "Confirm delete",
-                    Style::default().fg(RED).add_modifier(Modifier::BOLD),
-                ),
-                Line::raw(""),
-                Line::raw(format!("id: {}", item.id)),
-                Line::raw(format!("title: {}", card.title)),
-                Line::raw(format!("cardholder: {}", card.cardholder_name)),
-                Line::raw(""),
-                Line::raw("This removes the encrypted vault record permanently."),
-                Line::raw("Press y or Enter to delete, or n / Esc to cancel."),
-            ],
-            VaultItemPayload::Identity(identity) => vec![
-                Line::styled(
-                    "Confirm delete",
-                    Style::default().fg(RED).add_modifier(Modifier::BOLD),
-                ),
-                Line::raw(""),
-                Line::raw(format!("id: {}", item.id)),
-                Line::raw(format!("title: {}", identity.title)),
-                Line::raw(format!("full name: {}", identity.full_name)),
-                Line::raw(""),
-                Line::raw("This removes the encrypted vault record permanently."),
-                Line::raw("Press y or Enter to delete, or n / Esc to cancel."),
-            ],
+            VaultItemPayload::Login(login) => {
+                format!("{} · {}", login.title, login.username)
+            }
+            VaultItemPayload::SecureNote(note) => note.title.clone(),
+            VaultItemPayload::Card(card) => format!("{} · {}", card.title, card.cardholder_name),
+            VaultItemPayload::Identity(identity) => {
+                format!("{} · {}", identity.title, identity.full_name)
+            }
         },
-        None => vec![
-            Line::styled(
-                "No selection",
-                Style::default().fg(RED).add_modifier(Modifier::BOLD),
-            ),
-            Line::raw("No vault item is currently selected for deletion."),
-        ],
+        None => "No selection".to_string(),
     };
+
+    let lines = vec![
+        Line::styled(
+            format!("This deletes \"{}\" for good.", app.confirm_target_name),
+            theme::caution(),
+        ),
+        Line::raw(detail_line),
+        Line::raw(""),
+        Line::raw(format!("Type \"{}\" to confirm:", app.confirm_target_name)),
+        Line::styled(
+            format!("{}_", app.confirm_input),
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
+    ];
 
     Paragraph::new(Text::from(lines))
         .block(

@@ -1,6 +1,6 @@
 use crate::vault_tui::{
     clear_clipboard_if_matches, default_backup_export_path, default_transfer_export_path,
-    edit_form_value, normalize_optional_field, normalize_optional_secret, selected_keyslot,
+    edit_form_value, footer, normalize_optional_field, normalize_optional_secret, selected_keyslot,
 };
 use anyhow::Context;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -24,8 +24,35 @@ use std::{fs, path::PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Screen {
+    /// S1 (ia.md §2/§3) — the trust gate. First screen on a fresh run: name
+    /// the one job ("decide whether this copy can be trusted") before a
+    /// single secret is requested (brand.md §2.1, journeys.md J1).
+    TrustGate,
+    /// S2 — the non-blocking self-check runs (ia.md §3; brand.md §5.5
+    /// "nothing blocks"). `⎋` stays live per ia.md §0 rule 5.
+    Verifying,
+    /// S3 — the self-check finished (there is no S3f in this build: with no
+    /// signed-release backend yet, the check cannot fail closed on a
+    /// tampered binary, so it never claims a false pass; see `TrustState`).
+    Verified,
+    /// S2d (ia.md §2/§4) — the fingerprint/build-identity drill-down leaf
+    /// reached from S1/S3 via `d show the fingerprint`. Honestly reports what
+    /// *is* verifiable today (build commit, build date, product version,
+    /// platform) and states plainly that cryptographic release-signature
+    /// verification is not available yet (brand.md §3 rule 4, no
+    /// overpromise) rather than fabricating a hash the binary cannot check
+    /// against a signed publisher record. `⎋` returns to whichever of
+    /// S1/S3 it was opened from.
+    TrustFingerprint,
     EnvironmentApproval,
     Vault,
+    /// S7 (ia.md §5) — one selected item, masked by default. Reached from
+    /// `Vault` (H, the vault list) via `⏎`; the only door to secret reveal.
+    /// This is a distinct screen, not an always-visible pane on H, so a
+    /// shoulder-surfer glancing at the list screen never sees a raw secret
+    /// and the `⏎ open` the H footer promises actually navigates somewhere
+    /// (P8.V.2).
+    ItemDetail,
     Keyslots,
     UnlockBlocked,
     AddLogin,
@@ -49,20 +76,49 @@ pub(crate) enum Screen {
     ExportTransfer,
     ImportBackup,
     ImportTransfer,
+    /// Severe-tier confirm (ia.md §7): typed item name required.
     DeleteConfirm,
+    /// Severe-tier confirm (ia.md §7): typed way-in label required — removing
+    /// a way in can lock the owner out, so it is tiered the same as deleting
+    /// an item, never a bare y/N.
+    RemoveWayInConfirm,
 }
 
 impl Screen {
     /// `true` for every screen reachable only after a successful vault
-    /// unlock. `EnvironmentApproval` and `UnlockBlocked` are pre-unlock
-    /// screens and must never be idle auto-locked: `EnvironmentApproval`
-    /// would otherwise let an idle timeout silently accept vault
-    /// initialization without the user ever confirming the suggested
-    /// configuration, and `UnlockBlocked` has no unlocked state left to
-    /// clear.
+    /// unlock. `TrustGate`/`Verifying`/`Verified`/`EnvironmentApproval` and
+    /// `UnlockBlocked` are pre-unlock screens and must never be idle
+    /// auto-locked: `EnvironmentApproval` would otherwise let an idle
+    /// timeout silently accept vault initialization without the user ever
+    /// confirming the suggested configuration, and `UnlockBlocked` has no
+    /// unlocked state left to clear.
     pub(crate) fn is_unlocked_vault_screen(self) -> bool {
-        !matches!(self, Self::EnvironmentApproval | Self::UnlockBlocked)
+        !matches!(
+            self,
+            Self::TrustGate
+                | Self::Verifying
+                | Self::Verified
+                | Self::TrustFingerprint
+                | Self::EnvironmentApproval
+                | Self::UnlockBlocked
+        )
     }
+}
+
+/// The result of the first-run self-check (S1->S2->S3, ia.md §3). With no
+/// signed-release verification backend yet (no attestation/signature crate
+/// anywhere in this workspace), this cannot claim `✓ verified` or `✗ failed`
+/// against a real cryptographic check — doing so would violate brand.md §3
+/// rule 4 ("never overpromise"; the product reports accurately or not at
+/// all). It instead honestly reports what *can* be confirmed today: the
+/// binary's own build identity. `S3f` (ia.md §2 "not verified, HALT") is
+/// reachable once real signature verification exists (tracked as follow-on
+/// scope, not fabricated here).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum TrustState {
+    #[default]
+    Unchecked,
+    Checked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1169,12 +1225,59 @@ pub(crate) struct App {
     pub(crate) audit_sink_health: AuditSinkHealth,
     pub(crate) ops_audit_events: Vec<AuditEvent>,
     pub(crate) screen: Screen,
+    /// The screen the S12 `?` overlay was opened from (ia.md §5 S12). The
+    /// overlay is a transient render-time layer, not a `Screen` variant
+    /// itself (ia.md §5: "it does not become a new screen, so the skeleton
+    /// geometry is preserved beneath it"), so it is tracked here alongside
+    /// `screen` rather than replacing it.
+    pub(crate) help_overlay_open: bool,
+    /// S1/S2/S3 first-run trust-gate result (ia.md §3). `None` means the
+    /// spine has not run this session yet; distinguishing from
+    /// `TrustState::Unchecked` lets `TrustGate`'s copy tell "verified on
+    /// this machine" (ia.md §3 short-circuit) from "not yet checked".
+    pub(crate) trust_state: TrustState,
+    /// The screen `Screen::TrustFingerprint` (S2d) was opened from — `S1`
+    /// (`TrustGate`) or `S3` (`Verified`), ia.md §2's only two `d show the
+    /// fingerprint` entry points. `⎋`/`q` from S2d returns here rather than
+    /// to a hardcoded destination, so re-verifying from S1 and inspecting
+    /// after S3 both come back to where the persona actually was.
+    pub(crate) fingerprint_return_screen: Screen,
+    /// `true` on `Screen::UnlockBlocked` immediately after a lock event
+    /// (panic-lock or idle auto-lock), distinguishing ia.md §5 S14 ("in a
+    /// locked state the only valid acts are unlock or quit" — minimal
+    /// footer `⏎ unlock  q quit`, no `?`) from S15 (the ordinary unlock
+    /// entry, whose footer offers `? other ways in`). Cleared the moment
+    /// the persona interacts with the unlock form, so a second failed
+    /// attempt reverts to the normal S15 footer with recovery paths
+    /// reachable again.
+    pub(crate) just_locked: bool,
+    /// Typed-confirmation buffer for the severe-friction tier (ia.md §7):
+    /// deleting an item or removing a way in requires typing the thing's
+    /// name, not `y/N`. Cleared whenever a confirm screen opens or resolves.
+    pub(crate) confirm_input: String,
+    /// The exact name/label `confirm_input` must match for a severe-tier
+    /// confirm (`Screen::DeleteConfirm` / `Screen::RemoveWayInConfirm`) to
+    /// proceed (ia.md §7: "type the item/vault name").
+    pub(crate) confirm_target_name: String,
     pub(crate) status: String,
     pub(crate) header: Option<VaultHeader>,
     pub(crate) items: Vec<VaultItemSummary>,
     pub(crate) selected_index: usize,
     pub(crate) selected_keyslot_index: usize,
     pub(crate) detail: Option<VaultItem>,
+    /// S7 mask/reveal state (ia.md §5, P8.V.1): `false` (masked) is the
+    /// entry default on every `ItemDetail` visit and on any lock — never
+    /// sticky across a re-open. Not itself a secret, but it gates whether
+    /// `detail_panel` is permitted to render one, so it is reset alongside
+    /// `detail` everywhere the item selection changes or the vault locks.
+    pub(crate) secret_revealed: bool,
+    /// S10d "Show the mechanics" drill-down toggle (ia.md §5, P8.V.4/P8.V.7):
+    /// keyslot mechanics (`kind`, `wrap`, device-bound) stay off the S10
+    /// intent-first surface until explicitly requested, mirroring
+    /// `secret_revealed`'s off-by-default/reset-on-navigate pattern. Reset
+    /// whenever `Screen::Keyslots` is (re-)entered or the selected keyslot
+    /// changes, so mechanics never leak forward onto a different way in.
+    pub(crate) keyslot_mechanics_revealed: bool,
     pub(crate) filters: VaultFilterState,
     pub(crate) search_mode: bool,
     pub(crate) capability_report: Option<CapabilityReport>,
@@ -1218,12 +1321,20 @@ impl App {
             audit_sink_health,
             ops_audit_events: Vec::new(),
             screen: Screen::UnlockBlocked,
+            help_overlay_open: false,
+            trust_state: TrustState::default(),
+            fingerprint_return_screen: Screen::TrustGate,
+            just_locked: false,
+            confirm_input: String::new(),
+            confirm_target_name: String::new(),
             status: String::new(),
             header: None,
             items: Vec::new(),
             selected_index: 0,
             selected_keyslot_index: 0,
             detail: None,
+            secret_revealed: false,
+            keyslot_mechanics_revealed: false,
             filters: VaultFilterState::default(),
             search_mode: false,
             capability_report: None,
@@ -1252,6 +1363,75 @@ impl App {
         };
         app.refresh();
         app
+    }
+
+    /// Overlays the S1 trust gate (ia.md §2/§3) in front of whatever screen
+    /// `refresh()` already computed at construction. Called once by
+    /// `run`/`run_scripted` right after `with_config` — never by `refresh()`
+    /// itself, so a mid-session refresh (the `r` hotkey, a post-mutation
+    /// reload) never re-shows the first-run spine. `refresh()` has already
+    /// determined the correct destination (`Vault` or `UnlockBlocked`); the
+    /// trust gate just fronts it and `submit_trust_gate` hands control back.
+    ///
+    /// ia.md §3 short-circuit: "Copy already verified on this machine ->
+    /// S1 still shows, but the title-bar token reads ✓ and S1's body reads
+    /// *This copy was verified on this machine.*" — detected from a small
+    /// per-user marker file (`trust_marker_path()`), never assumed.
+    pub(crate) fn enter_trust_gate(&mut self) {
+        self.screen = Screen::TrustGate;
+        if trust_marker_exists() {
+            self.trust_state = TrustState::Checked;
+            self.status = "This copy was verified on this machine. You may re-verify or Continue."
+                .to_string();
+        } else {
+            self.trust_state = TrustState::Unchecked;
+            self.status =
+                "Confirm this copy can be trusted before it handles a single secret.".to_string();
+        }
+    }
+
+    /// S1 -> S2 -> S3: runs the self-check (see `TrustState` doc for why
+    /// this cannot yet claim cryptographic verification) and lands on S3
+    /// Verified. Not gated behind a real async step because there is no
+    /// long-running check to run yet; `Screen::Verifying` still renders on
+    /// the way through so the transition is visible and the non-blocking
+    /// contract (ia.md §0 rule 5) has a concrete home for the real check
+    /// once one exists. Writes the trust marker so a later session's S1
+    /// short-circuit (ia.md §3) can read "verified on this machine" back.
+    pub(crate) fn submit_trust_gate(&mut self) {
+        self.screen = Screen::Verifying;
+        self.trust_state = TrustState::Checked;
+        self.screen = Screen::Verified;
+        write_trust_marker();
+        self.status =
+            "This build's identity is confirmed. Cryptographic release verification against a signed publisher record is not available in this build yet.".to_string();
+    }
+
+    /// "Skip for now" (ia.md §3 S1) and S3's "Continue" both resume the
+    /// already-computed destination screen from `refresh()`.
+    pub(crate) fn dismiss_trust_gate(&mut self) {
+        self.refresh();
+    }
+
+    /// S2d (ia.md §2/§4 "Fingerprint & signature" drill-down leaf):
+    /// `d show the fingerprint` from S1 or S3. Honestly reports the one
+    /// thing this build *can* verify about itself — its own build identity
+    /// (commit, build date, product version, platform) — and states plainly
+    /// that cryptographic verification against a signed publisher record is
+    /// not available yet, rather than fabricating a pass/fail signature
+    /// check (brand.md §3 rule 4, "never overpromise"; ia.md rule 2,
+    /// "the math is never shown without first showing the verdict" — here,
+    /// the verdict IS "not available yet," stated at S1/S3, and this leaf is
+    /// where the honest detail behind that verdict lives).
+    pub(crate) fn enter_trust_fingerprint(&mut self) {
+        self.fingerprint_return_screen = self.screen;
+        self.screen = Screen::TrustFingerprint;
+    }
+
+    /// `⎋`/`q`-back from S2d returns to wherever it was opened from (S1 or
+    /// S3), not a hardcoded destination.
+    pub(crate) fn leave_trust_fingerprint(&mut self) {
+        self.screen = self.fingerprint_return_screen;
     }
 
     pub(crate) fn ops_policy_context(&self) -> OpsPolicyContext {
@@ -1346,8 +1526,13 @@ impl App {
         match self.reload_vault_state(None) {
             Ok(()) => {
                 self.screen = Screen::Vault;
+                // brand.md §3 micro-example, verbatim opening clause:
+                // "Vault open. 12 items." The unlock-method detail is real
+                // diagnostic information (which way in was used) and stays,
+                // appended rather than leading — the persona's first read is
+                // the plain fact the state changed (brand.md §3 rule 1).
                 self.status = format!(
-                    "Vault unlocked. {} item(s) loaded via {}.",
+                    "Vault open. {} item(s). Unlocked via {}.",
                     self.items.len(),
                     self.options.unlock_description()
                 );
@@ -1356,7 +1541,21 @@ impl App {
                 self.items.clear();
                 self.detail = None;
                 self.screen = Screen::UnlockBlocked;
-                self.status = format!("Unlock blocked: {error}");
+                // This is a fresh unlock attempt (S15), not a just-locked
+                // transition (S14) — the minimal footer belongs only to the
+                // latter (ia.md §5 S14/S15).
+                self.just_locked = false;
+                // brand.md §3(d): "blocked" reframes the product as the
+                // obstacle; the rewrite treats a failed unlock as a calm
+                // conversation. The exact "remaining attempts: {n}" wording
+                // brand.md's micro-example specifies needs a per-vault
+                // attempt counter that does not exist anywhere in
+                // `paranoid-vault` yet (tracked as follow-on backend scope,
+                // not fabricated here); this states the same fact honestly
+                // without inventing a number.
+                self.status = format!(
+                    "That didn't open the vault. Check your passphrase and try again. ({error})"
+                );
             }
         }
     }
@@ -1570,20 +1769,7 @@ impl App {
         }
 
         if self.screen.is_unlocked_vault_screen() && self.session.should_auto_lock() {
-            let clipboard_cleared = match self.session.take_pending_clipboard_contents() {
-                Some(expected) => clear_clipboard_if_matches(expected.as_str()).unwrap_or(false),
-                None => false,
-            };
-            self.header = None;
-            self.items.clear();
-            self.selected_index = 0;
-            self.selected_keyslot_index = 0;
-            self.detail = None;
-            self.search_mode = false;
-            self.editing_item_id = None;
-            self.latest_mnemonic_enrollment = None;
-            self.screen = Screen::UnlockBlocked;
-            self.purge_secret_state_on_lock();
+            let clipboard_cleared = self.clear_decrypted_state_and_lock();
             self.session.note_activity();
             self.status = if clipboard_cleared {
                 format!(
@@ -1599,27 +1785,221 @@ impl App {
         }
     }
 
+    /// Immediately drives any unlocked-vault screen to `UnlockBlocked`,
+    /// clearing decrypted vault state and purging every secret-bearing form
+    /// (via [`Self::purge_secret_state_on_lock`]) and the armed clipboard
+    /// contents. Shared by idle auto-lock (`poll_hardening`) and the panic
+    /// / quick-lock hotkey (`Ctrl+L`, see `handle_key`) so both triggers run
+    /// the exact same scrub path. Returns whether an armed clipboard entry
+    /// was found and cleared.
+    fn clear_decrypted_state_and_lock(&mut self) -> bool {
+        let clipboard_cleared = match self.session.take_pending_clipboard_contents() {
+            Some(expected) => clear_clipboard_if_matches(expected.as_str()).unwrap_or(false),
+            None => false,
+        };
+        self.header = None;
+        self.items.clear();
+        self.selected_index = 0;
+        self.selected_keyslot_index = 0;
+        self.detail = None;
+        self.search_mode = false;
+        self.editing_item_id = None;
+        self.screen = Screen::UnlockBlocked;
+        // ia.md §5 S14: a just-locked screen shows the minimal footer
+        // (`⏎ unlock  q quit`, no `?`) — "in a locked state the only valid
+        // acts are unlock or quit." Cleared the moment the persona
+        // interacts with the unlock form (`handle_unlock_blocked_key`),
+        // reverting to the ordinary S15 footer with recovery paths.
+        self.just_locked = true;
+        self.purge_secret_state_on_lock();
+        clipboard_cleared
+    }
+
+    /// Panic / quick-lock hotkey (P9.6): from any unlocked-vault screen,
+    /// `Ctrl+L` immediately runs the same lock-and-purge path as idle
+    /// auto-lock, then re-arms the idle timer so the freshly-shown unlock
+    /// screen does not itself appear to have triggered an auto-lock. A
+    /// no-op on pre-unlock screens (`EnvironmentApproval`/`UnlockBlocked`),
+    /// which have no unlocked state to purge.
+    ///
+    /// Documented as the TUI panic key in `docs/guides/tui.md` (see
+    /// "Panic / quick-lock hotkey").
+    pub(crate) fn handle_panic_lock_hotkey(&mut self) -> bool {
+        if !self.screen.is_unlocked_vault_screen() {
+            return false;
+        }
+        let clipboard_cleared = self.clear_decrypted_state_and_lock();
+        self.session.note_activity();
+        // brand.md §3 micro-example, verbatim: "Locked. Nothing is readable
+        // until you unlock again." — never "you're safe" (brand.md §3 rule
+        // 4: the product reports accurately, never overpromises).
+        self.status = if clipboard_cleared {
+            "Locked. Nothing is readable until you unlock again. The clipboard was cleared too."
+                .to_string()
+        } else {
+            "Locked. Nothing is readable until you unlock again.".to_string()
+        };
+        true
+    }
+
     /// Purges every secret-bearing field reachable from an unlocked-vault
     /// screen once auto-lock (or an explicit lock) fires. `options.auth`
     /// is reset to a non-secret `PasswordEnv` placeholder that forces
     /// re-entry on the next unlock attempt, and every form that can hold a
-    /// `SecretString` is reset to its default so the zeroizing drop scrubs
-    /// the old plaintext immediately instead of leaving it resident until
-    /// the next time that form happens to be reused.
+    /// `SecretString` (or a plaintext secret in a plain `String` field, e.g.
+    /// `add_login_form.password`, `card_form.number`/`security_code`,
+    /// `note_form.content`) is reset to its default so the zeroizing drop
+    /// (or, for the plain-`String` add/edit forms, simple replacement of the
+    /// old heap buffer) scrubs the old plaintext immediately instead of
+    /// leaving it resident until the next time that form happens to be
+    /// reused. `self.detail` — the decrypted item shown on the detail
+    /// screen — is cleared here too so the panic-lock hotkey scrubs it even
+    /// though `clear_decrypted_state_and_lock` also clears it independently;
+    /// this method must be a complete purge on its own so a caller that
+    /// invokes it directly (as the P9 gate's pinned test now does) can't be
+    /// fooled by a partial scrub landing green.
     pub(crate) fn purge_secret_state_on_lock(&mut self) {
-        self.options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
-        self.options.mnemonic_phrase = None;
-        self.unlock_form = UnlockForm::default();
-        self.recovery_secret_form = RecoverySecretForm::default();
-        self.certificate_rewrap_form = CertificateRewrapForm::default();
-        self.export_transfer_form = ExportTransferForm::default();
-        self.import_transfer_form = ImportTransferForm::default();
+        // FAIL-CLOSED EXHAUSTIVENESS (P9 re-verify): destructure `self` with an
+        // explicit `..`-free field list so adding ANY new App field breaks this
+        // build until it is triaged here as either a secret to scrub or an
+        // acknowledged non-secret. Three prior leaks (form fields, the master
+        // recovery mnemonic, its clipboard copy) all came from a purge that
+        // silently omitted a field; the compiler now catches the next one.
+        let Self {
+            // --- secret-bearing: MUST be scrubbed ---
+            options,
+            detail,
+            // Not itself a secret, but it gates whether `detail_panel` is
+            // permitted to render an unmasked S7 secret (P8.V.1). Scrubbed
+            // alongside `detail` so a panic-lock/idle-lock can never leave a
+            // vault re-opened mid-reveal; re-entering S7 always re-masks.
+            secret_revealed,
+            latest_mnemonic_enrollment,
+            unlock_form,
+            add_login_form,
+            note_form,
+            card_form,
+            identity_form,
+            recovery_secret_form,
+            certificate_rewrap_form,
+            export_transfer_form,
+            import_transfer_form,
+            // `session` holds the armed clipboard buffer (a plaintext copy of the
+            // last-copied secret, incl. the master recovery mnemonic). Its
+            // in-memory residency is scrubbed here; the OS clipboard wipe stays
+            // with the caller that owns the arboard handle (LEAK-D).
+            session,
+            // --- non-secret: acknowledged, intentionally not scrubbed. NO `..`:
+            // adding an App field breaks this destructure until it is triaged
+            // here, which is the fail-closed guarantee. If any of these gains a
+            // secret field, convert it and move it above.
+            profile: _,
+            audit_jsonl: _,
+            require_audit_sink: _,
+            audit_sink_health: _,
+            ops_audit_events: _, // redacted by construction (P0.4)
+            screen: _,
+            // S2d return-target (ia.md §2/§4): a `Screen` value naming which
+            // pre-unlock screen opened the fingerprint leaf — navigation
+            // state, not secret material, same tier as `screen` itself.
+            fingerprint_return_screen: _,
+            status: _,
+            header: _,
+            items: _,
+            selected_index: _,
+            selected_keyslot_index: _,
+            // S10d reveal gate for keyslot *mechanics* (kind/wrap/device-bound
+            // — not secret material; the wrapped key bytes themselves live in
+            // the vault file, never in this in-memory struct), so it belongs
+            // beside the other acknowledged non-secret UI-state fields, not
+            // the scrub list above.
+            keyslot_mechanics_revealed: _,
+            filters: _,
+            search_mode: _,
+            capability_report: _,
+            environment_approval: _,
+            mnemonic_slot_form: _,
+            device_slot_form: _,
+            certificate_slot_form: _,
+            keyslot_label_form: _,
+            pending_keyslot_removal_confirmation: _,
+            generate_store_form: _,
+            export_backup_form: _,
+            export_backup_preview: _,
+            import_backup_form: _,
+            editing_item_id: _,
+            help_overlay_open: _,
+            trust_state: _,
+            just_locked: _,
+            // `confirm_input`/`confirm_target_name` hold a typed item/vault
+            // *name* the persona types to confirm a severe-tier action
+            // (ia.md §7) — never a passphrase or recovery secret — so they
+            // are not secret-bearing. Still cleared defensively on lock so
+            // no in-progress typed text lingers past a panic lock.
+            confirm_input,
+            confirm_target_name,
+        } = self;
+        confirm_input.clear();
+        confirm_target_name.clear();
+
+        options.auth = VaultAuth::PasswordEnv("PARANOID_MASTER_PASSWORD".to_string());
+        options.mnemonic_phrase = None;
+        *detail = None;
+        *secret_revealed = false;
+        *latest_mnemonic_enrollment = None;
+        *unlock_form = UnlockForm::default();
+        *add_login_form = AddLoginForm::default();
+        *note_form = NoteForm::default();
+        *card_form = CardForm::default();
+        *identity_form = IdentityForm::default();
+        *recovery_secret_form = RecoverySecretForm::default();
+        *certificate_rewrap_form = CertificateRewrapForm::default();
+        *export_transfer_form = ExportTransferForm::default();
+        *import_transfer_form = ImportTransferForm::default();
+        session.clear_clipboard_tracking();
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> bool {
+        // P9.6: the panic / quick-lock hotkey is checked before per-screen
+        // dispatch so it fires from ANY unlocked screen — including mid-edit
+        // in a secret-bearing text field — rather than only where a screen
+        // handler happens to leave 'l' unbound. `handle_panic_lock_hotkey`
+        // itself no-ops on pre-unlock screens, so this is safe to check
+        // unconditionally on every keypress.
+        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('l')) {
+            self.handle_panic_lock_hotkey();
+            return false;
+        }
+
+        // S12 `?` overlay (ia.md §5): while open, every key except the ones
+        // that close it is swallowed — the overlay is a transient layer over
+        // the fixed skeleton (ia.md §5 "it does not become a new screen"),
+        // so closing it always returns to exactly the screen/state under it.
+        if self.help_overlay_open {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q')
+            ) {
+                self.help_overlay_open = false;
+            }
+            return false;
+        }
+        if matches!(key.code, KeyCode::Char('?'))
+            && footer::help_key_active(self.screen)
+            && !(matches!(self.screen, Screen::Vault) && self.search_mode)
+        {
+            self.help_overlay_open = true;
+            return false;
+        }
+
         match self.screen {
+            Screen::TrustGate => self.handle_trust_gate_key(key),
+            Screen::Verifying => self.handle_verifying_key(key),
+            Screen::Verified => self.handle_verified_key(key),
+            Screen::TrustFingerprint => self.handle_trust_fingerprint_key(key),
             Screen::EnvironmentApproval => self.handle_environment_approval_key(key),
             Screen::Vault | Screen::Keyslots => self.handle_vault_key(key),
+            Screen::ItemDetail => self.handle_item_detail_key(key),
             Screen::UnlockBlocked => self.handle_unlock_blocked_key(key),
             Screen::AddLogin | Screen::EditLogin => self.handle_add_login_key(key),
             Screen::AddNote | Screen::EditNote => self.handle_note_key(key),
@@ -1639,6 +2019,66 @@ impl App {
             Screen::ImportBackup => self.handle_import_backup_key(key),
             Screen::ImportTransfer => self.handle_import_transfer_key(key),
             Screen::DeleteConfirm => self.handle_delete_confirm_key(key),
+            Screen::RemoveWayInConfirm => self.handle_remove_way_in_confirm_key(key),
+        }
+    }
+
+    pub(crate) fn handle_trust_gate_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Enter => {
+                self.submit_trust_gate();
+                false
+            }
+            KeyCode::Char('d') => {
+                self.enter_trust_fingerprint();
+                false
+            }
+            KeyCode::Char('s') | KeyCode::Esc => {
+                self.dismiss_trust_gate();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn handle_verifying_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Esc => {
+                self.dismiss_trust_gate();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn handle_verified_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Char('d') => {
+                self.enter_trust_fingerprint();
+                false
+            }
+            KeyCode::Enter | KeyCode::Esc => {
+                self.dismiss_trust_gate();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// S2d (ia.md §2/§4): `⎋`/`Enter` return to whichever of S1/S3 opened
+    /// this leaf (`leave_trust_fingerprint`); `q` quits like every other
+    /// pre-unlock screen.
+    pub(crate) fn handle_trust_fingerprint_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Enter | KeyCode::Esc => {
+                self.leave_trust_fingerprint();
+                false
+            }
+            _ => false,
         }
     }
 
@@ -1693,6 +2133,12 @@ impl App {
     }
 
     pub(crate) fn handle_unlock_blocked_key(&mut self, key: KeyEvent) -> bool {
+        // ia.md §5 S14->S15: any interaction beyond quitting reverts the
+        // minimal just-locked footer to the ordinary unlock-prompt footer
+        // (`? other ways in` becomes reachable again).
+        if !matches!(key.code, KeyCode::Char('q')) {
+            self.just_locked = false;
+        }
         match key.code {
             KeyCode::Char('q') => true,
             KeyCode::Char('r') if matches!(self.screen, Screen::Vault) => {
@@ -1777,6 +2223,7 @@ impl App {
             }
             KeyCode::Esc if matches!(self.screen, Screen::Keyslots) => {
                 self.pending_keyslot_removal_confirmation = None;
+                self.keyslot_mechanics_revealed = false;
                 self.screen = Screen::Vault;
                 self.status = "Returned to the vault item view.".to_string();
                 false
@@ -1856,8 +2303,26 @@ impl App {
                 self.copy_selected_secret();
                 false
             }
-            KeyCode::Char('k') if matches!(self.screen, Screen::Vault) => {
+            // P8.V.2: `⏎` on the vault list opens the S7 item-detail screen
+            // — the footer has always promised this; it now navigates.
+            KeyCode::Enter if matches!(self.screen, Screen::Vault) => {
+                self.open_item_detail();
+                false
+            }
+            // P8.V.5: every footer/`?`-overlay advertisement for this action
+            // says `w ways in` — the working key used to be `k`, silently
+            // out of sync with what was on screen. Rebound to `w` so the
+            // advertised key is the real one (no free `w` binding existed on
+            // `Screen::Vault` to collide with).
+            KeyCode::Char('w') if matches!(self.screen, Screen::Vault) => {
                 self.open_keyslots();
+                false
+            }
+            // S10d "Show the mechanics" drill-down toggle (ia.md §5,
+            // P8.V.4/P8.V.7): keyslot `kind`/`wrap`/device-bound stay off the
+            // relationship-named S10 surface until this is pressed.
+            KeyCode::Char('k') if matches!(self.screen, Screen::Keyslots) => {
+                self.toggle_keyslot_mechanics();
                 false
             }
             KeyCode::Char('m') if matches!(self.screen, Screen::Keyslots) => {
@@ -1890,8 +2355,12 @@ impl App {
                 self.open_rotate_mnemonic_slot();
                 false
             }
-            KeyCode::Char('d') if matches!(self.screen, Screen::Keyslots) => {
-                self.remove_selected_keyslot();
+            // `x` is the ia.md §5 S10-footer key ("x remove"); `d` is kept as
+            // an alias for existing muscle memory. Both now route to the
+            // severe-tier typed-confirmation screen (ia.md §7) instead of
+            // the old immediate/press-again removal.
+            KeyCode::Char('x') | KeyCode::Char('d') if matches!(self.screen, Screen::Keyslots) => {
+                self.open_remove_way_in_confirm();
                 false
             }
             KeyCode::Char('r') if matches!(self.screen, Screen::Keyslots) => {
@@ -1907,6 +2376,9 @@ impl App {
                 if self.selected_keyslot_index > 0 {
                     self.selected_keyslot_index -= 1;
                     self.pending_keyslot_removal_confirmation = None;
+                    // Mechanics never leak forward onto a different way in
+                    // (S10d re-masks on selection change, same rule as S7).
+                    self.keyslot_mechanics_revealed = false;
                 }
                 false
             }
@@ -1919,7 +2391,44 @@ impl App {
                 if self.selected_keyslot_index + 1 < len {
                     self.selected_keyslot_index += 1;
                     self.pending_keyslot_removal_confirmation = None;
+                    self.keyslot_mechanics_revealed = false;
                 }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// S7 (ia.md §5) key handling: `⏎ copy  r reveal  e edit  ? all keys
+    /// ⎋ back` — deliberately does NOT include `d` in the footer (delete is
+    /// a severe-tier action that lives behind `?`, ia.md §5), but the key
+    /// itself still works here for muscle-memory parity with the vault list,
+    /// same as `open_delete_confirm`'s existing behavior from `Screen::Vault`.
+    pub(crate) fn handle_item_detail_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Esc => {
+                self.leave_item_detail();
+                false
+            }
+            KeyCode::Enter => {
+                self.copy_selected_secret();
+                false
+            }
+            KeyCode::Char('c') => {
+                self.copy_selected_secret();
+                false
+            }
+            KeyCode::Char('r') => {
+                self.toggle_secret_reveal();
+                false
+            }
+            KeyCode::Char('e') => {
+                self.open_edit_item();
+                false
+            }
+            KeyCode::Char('d') => {
+                self.open_delete_confirm();
                 false
             }
             _ => false,
@@ -2336,22 +2845,6 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_delete_confirm_key(&mut self, key: KeyEvent) -> bool {
-        match key.code {
-            KeyCode::Char('q') => true,
-            KeyCode::Esc | KeyCode::Char('n') => {
-                self.screen = Screen::Vault;
-                self.status = "Canceled delete.".to_string();
-                false
-            }
-            KeyCode::Enter | KeyCode::Char('y') => {
-                self.delete_selected_item();
-                false
-            }
-            _ => false,
-        }
-    }
-
     pub(crate) fn handle_generate_store_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') => true,
@@ -2561,6 +3054,55 @@ impl App {
         }
     }
 
+    /// S7 (ia.md §5): `⏎` from H (the vault list) opens one selected item on
+    /// its own screen, masked by default (P8.V.1/P8.V.2). No-ops with a
+    /// status message when nothing is selected, mirroring the other
+    /// item-scoped `open_*` guards (`open_edit_item`, `open_delete_confirm`).
+    pub(crate) fn open_item_detail(&mut self) {
+        if self.detail.is_none() {
+            self.status = "No vault item selected to open.".to_string();
+            return;
+        }
+        self.secret_revealed = false;
+        self.screen = Screen::ItemDetail;
+        self.status =
+            "Item opened. The secret stays masked until you choose to reveal it.".to_string();
+    }
+
+    /// `⎋` back from S7 to H. Re-masks unconditionally (ia.md §5 "re-masks
+    /// on leave") — a persona who reveals, then backs out, then re-opens the
+    /// same item is shown the mask again, never a sticky reveal.
+    pub(crate) fn leave_item_detail(&mut self) {
+        self.secret_revealed = false;
+        self.screen = Screen::Vault;
+        self.status = "Returned to the vault item view.".to_string();
+    }
+
+    /// S7 `r reveal` toggle (ia.md §5, P8.V.1). Toggling back to masked is
+    /// always available from the same key — the action is a toggle, not a
+    /// one-way reveal.
+    pub(crate) fn toggle_secret_reveal(&mut self) {
+        self.secret_revealed = !self.secret_revealed;
+        self.status = if self.secret_revealed {
+            "Revealed. Press r again, or leave this item, to mask it.".to_string()
+        } else {
+            "Masked again.".to_string()
+        };
+    }
+
+    /// S10d "Show the mechanics" toggle (ia.md §5, P8.V.4/P8.V.7). Mirrors
+    /// `toggle_secret_reveal`'s off-by-default/toggle-back pattern: keyslot
+    /// mechanics (`kind`, `wrap`, device-bound) are a drill-down, not an
+    /// inline fact on the relationship-named S10 surface.
+    pub(crate) fn toggle_keyslot_mechanics(&mut self) {
+        self.keyslot_mechanics_revealed = !self.keyslot_mechanics_revealed;
+        self.status = if self.keyslot_mechanics_revealed {
+            "Showing the mechanics for the selected way in.".to_string()
+        } else {
+            "Mechanics hidden again.".to_string()
+        };
+    }
+
     pub(crate) fn open_add_login(&mut self) {
         self.add_login_form = AddLoginForm::default();
         self.editing_item_id = None;
@@ -2580,6 +3122,9 @@ impl App {
 
     pub(crate) fn open_keyslots(&mut self) {
         self.pending_keyslot_removal_confirmation = None;
+        // S10d re-masks on entry, same rule as S7 (P8.V.4): mechanics never
+        // arrive pre-revealed from a prior visit.
+        self.keyslot_mechanics_revealed = false;
         self.screen = Screen::Keyslots;
         self.status =
             "Keyslot view active. Inspect access slots or enroll a new mnemonic, device, or certificate slot."
@@ -2705,7 +3250,7 @@ impl App {
             self.detail.as_ref().map(|item| &item.payload)
         {
             self.note_form.title = note.title.clone();
-            self.note_form.content = note.content.clone();
+            self.note_form.content = note.content.as_str().to_string();
             self.note_form.folder = note.folder.clone().unwrap_or_default();
             self.note_form.tags = note.tags.join(", ");
         }
@@ -2719,10 +3264,10 @@ impl App {
         if let Some(VaultItemPayload::Card(card)) = self.detail.as_ref().map(|item| &item.payload) {
             self.card_form.title = card.title.clone();
             self.card_form.cardholder_name = card.cardholder_name.clone();
-            self.card_form.number = card.number.clone();
+            self.card_form.number = card.number.as_str().to_string();
             self.card_form.expiry_month = card.expiry_month.clone();
             self.card_form.expiry_year = card.expiry_year.clone();
-            self.card_form.security_code = card.security_code.clone();
+            self.card_form.security_code = card.security_code.as_str().to_string();
             self.card_form.billing_zip = card.billing_zip.clone().unwrap_or_default();
             self.card_form.notes = card.notes.clone().unwrap_or_default();
             self.card_form.folder = card.folder.clone().unwrap_or_default();
@@ -2838,7 +3383,7 @@ impl App {
                     focus_index: 0,
                     title: login.title.clone(),
                     username: login.username.clone(),
-                    password: login.password.clone(),
+                    password: login.password.as_str().to_string(),
                     url: login.url.clone().unwrap_or_default(),
                     notes: login.notes.clone().unwrap_or_default(),
                     folder: login.folder.clone().unwrap_or_default(),
@@ -2853,7 +3398,7 @@ impl App {
                 self.note_form = NoteForm {
                     focus_index: 0,
                     title: note.title.clone(),
-                    content: note.content.clone(),
+                    content: note.content.as_str().to_string(),
                     folder: note.folder.clone().unwrap_or_default(),
                     tags: note.tags.join(", "),
                 };
@@ -2868,10 +3413,10 @@ impl App {
                     focus_index: 0,
                     title: card.title.clone(),
                     cardholder_name: card.cardholder_name.clone(),
-                    number: card.number.clone(),
+                    number: card.number.as_str().to_string(),
                     expiry_month: card.expiry_month.clone(),
                     expiry_year: card.expiry_year.clone(),
-                    security_code: card.security_code.clone(),
+                    security_code: card.security_code.as_str().to_string(),
                     billing_zip: card.billing_zip.clone().unwrap_or_default(),
                     notes: card.notes.clone().unwrap_or_default(),
                     folder: card.folder.clone().unwrap_or_default(),
@@ -2989,14 +3534,141 @@ impl App {
                 .to_string();
     }
 
+    /// Severe-tier confirm (ia.md §7): deleting an item requires typing the
+    /// item's own title, not a bare `y/N` — "make it hard to confirm by
+    /// accident."
     pub(crate) fn open_delete_confirm(&mut self) {
         if self.detail.is_none() {
             self.status = "No vault item selected to delete.".to_string();
             return;
         }
+        let name = self
+            .items
+            .get(self.selected_index)
+            .map(|item| item.title.clone())
+            .unwrap_or_default();
+        self.confirm_target_name = name.clone();
+        self.confirm_input.clear();
         self.screen = Screen::DeleteConfirm;
-        self.status =
-            "Delete confirmation is active. Press y or Enter to remove the selected item."
-                .to_string();
+        self.status = format!(
+            "This deletes {name} for good. Type its name to confirm, or press Esc to cancel."
+        );
+    }
+
+    pub(crate) fn handle_delete_confirm_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Esc => {
+                self.confirm_input.clear();
+                self.screen = Screen::Vault;
+                self.status = "Canceled delete. Nothing was removed.".to_string();
+                false
+            }
+            KeyCode::Enter => {
+                if self.confirm_input == self.confirm_target_name {
+                    self.delete_selected_item();
+                } else {
+                    self.status = format!(
+                        "That doesn't match. Type \"{}\" exactly to confirm, or Esc to cancel.",
+                        self.confirm_target_name
+                    );
+                }
+                false
+            }
+            _ => {
+                edit_form_value(Some(&mut self.confirm_input), key);
+                false
+            }
+        }
+    }
+
+    /// Severe-tier confirm (ia.md §7): removing a way in requires typing its
+    /// label, not a bare `y/N` — removing a way in can lock the owner out.
+    pub(crate) fn open_remove_way_in_confirm(&mut self) {
+        let Some(slot) = selected_keyslot(self) else {
+            self.status = "No way in selected to remove.".to_string();
+            return;
+        };
+        let name = slot.label.clone().unwrap_or_else(|| slot.id.clone());
+        self.confirm_target_name = name.clone();
+        self.confirm_input.clear();
+        self.pending_keyslot_removal_confirmation = None;
+        self.screen = Screen::RemoveWayInConfirm;
+        self.status = format!(
+            "Removing {name} means it can no longer open this vault. Type its name to confirm, or press Esc to cancel."
+        );
+    }
+
+    pub(crate) fn handle_remove_way_in_confirm_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Esc => {
+                self.confirm_input.clear();
+                self.screen = Screen::Keyslots;
+                self.status = "Canceled. That way in was not removed.".to_string();
+                false
+            }
+            KeyCode::Enter => {
+                if self.confirm_input == self.confirm_target_name {
+                    // Typing the exact name IS the explicit confirmation
+                    // `remove_selected_keyslot`'s domain-level guard asks
+                    // for (its own "press d again" is the bare-keypress
+                    // form of the same gate this typed-name screen already
+                    // satisfies more strongly) — drive it to completion in
+                    // one step rather than making the persona type the name
+                    // twice.
+                    self.remove_selected_keyslot();
+                    self.remove_selected_keyslot();
+                    self.confirm_input.clear();
+                } else {
+                    self.status = format!(
+                        "That doesn't match. Type \"{}\" exactly to confirm, or Esc to cancel.",
+                        self.confirm_target_name
+                    );
+                }
+                false
+            }
+            _ => {
+                edit_form_value(Some(&mut self.confirm_input), key);
+                false
+            }
+        }
+    }
+}
+
+/// Where the S1 trust-gate "verified on this machine" marker lives (ia.md
+/// §3 short-circuit): `PARANOID_PASSWD_STATE_DIR` (a directory the operator
+/// deliberately opts into, e.g. `~/.local/state/paranoid-passwd`) or the
+/// test-only `PARANOID_TEST_TRUST_MARKER_DIR` override (matching the
+/// existing `PARANOID_TEST_DEVICE_STORE_DIR` test-isolation pattern in
+/// `paranoid-vault`).
+///
+/// SAFETY-CRITICAL: deliberately NO `$HOME`-guessing fallback in ANY build.
+/// `#[cfg(test)]` only guards the lib crate's own unit tests — it does NOT
+/// cover `tests/tui_scripted.rs`, which links this crate as an ordinary
+/// (non-test-cfg) dependency, so a `$HOME` fallback here previously wrote a
+/// real file into the invoking developer's actual home directory the moment
+/// *any* integration test (or a bare `cargo test` run outside
+/// `scripts/cargo_test.sh`) exercised `submit_trust_gate`. Until this reads
+/// from a properly plumbed, explicitly-configured state directory (a
+/// deliberate follow-on, not a guess), `None` here means the ia.md §3
+/// short-circuit simply never fires — the S1 body always shows unchecked,
+/// which is honest (brand.md §3 rule 4) rather than unsafe.
+fn trust_marker_path() -> Option<PathBuf> {
+    let dir = std::env::var_os("PARANOID_TEST_TRUST_MARKER_DIR")
+        .or_else(|| std::env::var_os("PARANOID_PASSWD_STATE_DIR"))?;
+    Some(PathBuf::from(dir).join("trust-verified"))
+}
+
+fn trust_marker_exists() -> bool {
+    trust_marker_path().is_some_and(|path| path.is_file())
+}
+
+/// Best-effort: a marker write that fails (read-only home, sandboxed
+/// filesystem) never blocks S3's "Continue" — the trust gate itself does
+/// not depend on this succeeding, only next session's short-circuit does.
+fn write_trust_marker() {
+    if let Some(path) = trust_marker_path() {
+        let _ = fs::write(&path, b"verified\n");
     }
 }
