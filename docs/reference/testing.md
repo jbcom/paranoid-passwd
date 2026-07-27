@@ -329,6 +329,34 @@ Run directly with:
 SLINT_EMIT_DEBUG_INFO=1 cargo test -p paranoid-gui --locked --frozen --offline --features gui-widget-tests --lib widget_event_tests::
 ```
 
+### Avoid real terminal-size probes in tests — the CI builder has no `tput`
+
+`crossterm::terminal::size()` (called internally by `ratatui::Terminal::new()`
+for any real backend, including `CrosstermBackend`) opens `/dev/tty` — or
+falls back to `STDOUT_FILENO` — and ioctls it for the window dimensions. On
+ioctl failure it falls back a second time to shelling out to `tput`. The
+Wolfi CI builder image (`.github/actions/builder/Dockerfile`) installs no
+`tput`/ncurses, so on any CI run where the primary ioctl genuinely fails —
+containerized runners without a controlling terminal do this
+intermittently, not on every run — the `tput` fallback fails
+deterministically too and `Terminal::new()` returns `Err`. This is not
+something a retry can work around: retrying in the same process doesn't
+change whether the container has a controlling terminal or `tput`
+installed (traced by a real failure: `crossterm_backend_bytes_carry_locked_glyph_across_an_incremental_screen_transition`
+in `vault_tui.rs` failed 5/5 times through a bounded retry loop before this
+was understood and fixed).
+
+Any test that needs a real `CrosstermBackend` (to assert on actual ANSI
+byte output rather than the abstract `Buffer` cell grid `TestBackend`
+gives you) should construct its `Terminal` with
+`Terminal::with_options(backend, TerminalOptions { viewport: Viewport::Fixed(rect) })`
+instead of `Terminal::new(backend)`. `Viewport::Fixed`'s code path skips
+the `Backend::size()` call entirely (verified in
+`ratatui_core::terminal::Terminal::with_options`), so the test never
+depends on a terminal-size probe the CI environment cannot always
+satisfy — appropriate here since these tests already render into an
+in-memory buffer at a size they choose, not an inherited real terminal.
+
 ### GUI Automation Environment Variables
 
 The desktop GUI e2e and visual-regression gates drive the real `paranoid-passwd-gui` binary
