@@ -13,59 +13,77 @@ flow direct:
 
 ## Configure
 
-The left column exposes the generation inputs:
+The left column groups the generation inputs under named sections instead of
+one flat list:
 
-- password length
-- password count
-- audit batch size
-- lowercase / uppercase / digits / symbols toggles
-- extended printable ASCII toggle
-- ambiguous-character exclusion
-- compliance framework selection
-- minimum lowercase / uppercase / digit / symbol requirements
-- custom charset override
+- **Shape** — password length, password count, audit batch size
+- **Character set** — lowercase / uppercase / digits / symbols toggles,
+  extended printable ASCII toggle, ambiguous-character exclusion
+- **Compliance frameworks (optional)** — framework selection
+- **Manual minimums (optional)** — minimum lowercase / uppercase / digit /
+  symbol requirements, custom charset override
+- a single `▸ Generate` accent action at the bottom
 
-The right column shows the current validation state, effective charset size, and framework constraints.
+The right column ("What this produces") shows the current validation state, effective charset size, and framework constraints.
 
 ## Render Capture
 
 The TUI keeps the same branded three-step flow, but it now runs entirely on the native Rust core. A typical configure screen looks like this:
 
 ```text
-paranoid-passwd · Configure
-Configure the local generator and audit before any password is shown.
+paranoid-passwd · Generate a password
+Shape it, then generate — the randomness check runs automatically and its evidence is one screen away.
 
-Wizard                                  Audit Preview
-› Password length: 32                  Mission  local secrets, verifiable trust.
-  Number of passwords: 1
-  Audit batch size: 500                Effective charset: 72 characters
-  Lowercase [a-z]: ON                  Manual requirements: 4 total constrained characters
-  Uppercase [A-Z]: ON                  Frameworks: nist, pci_dss
+Configure                               What this produces
+Shape                                   Mission  local secrets, verifiable trust.
+› Password length: 32
+  Number of passwords: 1                Effective charset: 72 characters
+  Audit batch size: 500                 Manual requirements: 4 total constrained characters
+Character set                           Frameworks: nist, pci_dss
+  Lowercase [a-z]: ON
+  Uppercase [A-Z]: ON                   Ready: 72 chars, 1 passwords, 197.18 bits of entropy...
   Digits [0-9]: ON
-  Symbols: ON                          Ready: 72 chars, 1 passwords, 197.18 bits of entropy...
-  ...                                  Controls: Up/Down move, Left/Right adjust, Enter run
+  Symbols: ON
+  ...
+  ▸ Generate
+(footer) ↑↓ move  ←→ adjust  Space toggle  ⏎ edit/run  q quit
 ```
 
-The results screen keeps the generator-wide audit separate from per-password verdicts:
+The results screen leads with the password and its verdict, in the voice
+`docs/design/journeys.md` J2 specifies — the SHA-256 hash and framework
+detail live one drill-level down in the tabs below, not on the primary
+screen:
 
 ```text
-paranoid-passwd · Results
-Native generation complete. Review the verdict and derived details.
+paranoid-passwd · Your new password
+Review the verdict, then copy it. The full evidence is one tab away.
 
 Primary Password
+primary
 ••••••••••••••••••••••••q7$A
-SHA-256: <hex>
+✓ Randomness check: passed
+Selected frameworks: nist
 Additional passwords: 2
-Verdict: PASS
+
+▸ Copy
 ```
 
 ## Controls
 
+The footer shows only the keys valid on the current screen (no separate
+`Controls:` block).
+
+Configure screen:
+
 - `↑ / ↓`: move between fields
 - `← / →`: adjust values
 - `Space`: toggle the current boolean or framework
-- `Enter`: edit the custom charset or start the audit
+- `Enter`: edit the custom charset or start generation
 - `q`: quit
+
+Checking-the-result screen (in progress):
+
+- `q`: quit (there is no cancel-back-to-configure key on this screen)
 
 On the results screen:
 
@@ -75,6 +93,16 @@ On the results screen:
 - `q`: quit
 
 Clipboard copies from the generator and vault views are cleared automatically after 30 seconds if the clipboard contents have not changed.
+
+Every secret copy also sets the platform clipboard-history-exclusion hint alongside the timed clear, so a *cooperating* history manager never stores it in the first place:
+
+| Platform | Hint set | Honored by |
+|---|---|---|
+| macOS | `org.nspasteboard.ConcealedType` (the [nspasteboard.org](http://nspasteboard.org/) community convention) | Maccy, Alfred, Raycast, and other nspasteboard-aware clipboard managers |
+| Linux (X11 and Wayland) | `x-kde-passwordManagerHint` MIME type set to `secret` | KDE Klipper and other cooperating managers that check the same convention |
+| Windows | `ExcludeClipboardContentFromMonitorProcessing` clipboard format | Windows Clipboard History (Win+V) and cloud clipboard sync |
+
+This is a hint, not an OS-enforced control: a history manager that does not check for it — an older Klipper version, a non-cooperating third-party tool, or anything that polls the clipboard directly instead of reading the documented API — still records the secret. The 30-second timed clear above is the actual backstop for every clipboard consumer, cooperating or not; the exclusion hint only reduces exposure to tools that respect it.
 
 ## Audit Model
 
@@ -116,13 +144,13 @@ When no vault exists yet at the configured path, the vault TUI's first screen is
 - OS keychain status (backend name, available/unavailable, error detail when unavailable)
 - clipboard status (available/unavailable, error detail when unavailable)
 - display server kind (Quartz, Wayland, X11, Windows, or headless)
-- configured seal-provider posture (empty on a fresh path, since nothing is configured yet)
+- hardware protection status, shown on-screen as "Hardware protection" (brand.md §4; empty on a fresh path, since nothing is configured yet)
 - the suggested initial configuration this evidence implies — a password recovery keyslot always (the only vault-init path), plus a device-bound keyslot offered only when the OS keychain probe reports available
 
 Two choices are offered:
 
 - **Accept suggested configuration** — proceeds to the recovery-secret entry form with Password mode preselected. Submitting initializes the vault, and when the keychain was available and accepted, a device-bound keyslot is enrolled automatically right after init.
-- **Adjust manually** — proceeds to the same recovery-secret entry form, but skips the automatic device-bound keyslot enrollment; add keyslots afterward from the Keyslots view (`k`) instead.
+- **Adjust manually** — proceeds to the same recovery-secret entry form, but skips the automatic device-bound keyslot enrollment; add ways in afterward from the Ways in view (`w`) instead.
 
 Since the only way to create a vault is through this password-recovery init path, both choices end up entering a recovery secret; the difference is only whether the suggested device-bound keyslot gets enrolled automatically.
 
@@ -148,7 +176,7 @@ The current vault TUI supports the first native vault workflows:
 - login list/detail views now flag duplicate current passwords elsewhere in the unlocked vault
 - selected-card detail shows masked payment-card metadata and billing notes
 - selected-identity detail shows preferred contact metadata and profile notes
-- dedicated keyslot view via `k`
+- dedicated keyslot ("Ways in") view via `w`
 - first-run environment approval screen with capability evidence and a suggested initial configuration, reachable again anytime via `E`
 - mnemonic recovery-slot enrollment via `m`, with one-time phrase reveal
 - device-bound keyslot enrollment via `b`
@@ -187,5 +215,13 @@ The backup flows follow the same pattern as the rest of the vault TUI: `x` opens
 Selective transfer flows now live beside backup/restore in the same native vault surface: `t` opens an export form that writes only the currently filtered decrypted item payloads into a separate encrypted transfer package, and `p` opens an import form that brings one of those packages into the unlocked local vault using either the package recovery secret or a certificate keypair.
 
 When the vault is unlocked in either native interactive surface, inactivity now triggers an automatic lock after 5 minutes: it clears the cached decrypted list/detail state, resets vault auth to a non-secret placeholder that forces re-entry on the next unlock attempt, clears any loaded mnemonic phrase, and resets the unlock, recovery-secret rotation, certificate rewrap, export-transfer, and import-transfer forms to their zeroizing defaults, before returning to the unlock view.
+
+### Panic / quick-lock hotkey
+
+`Ctrl+L` locks the vault immediately, from any unlocked screen, without waiting for the 5-minute idle timeout. It runs the exact same clear-and-purge path as idle auto-lock above (decrypted list/detail state, mnemonic phrase, and every secret-bearing form reset to its zeroizing default, then the clipboard is cleared if it still holds the last thing this session copied) and returns to the unlock view. It is deliberately unconditional: the key is checked before per-screen input handling, so it fires even while a password or recovery-secret field is mid-entry — there is no confirmation step, because under the coercion / "someone is walking up" scenario this is meant for, speed is the safety property. Locking adds no new cryptographic protection beyond what auto-lock and P9.1's payload zeroization already provide; it only makes the existing lock reachable in one keystroke instead of waiting out the idle timer or navigating a menu.
+
+The GUI exposes the same action two ways: a "Lock vault (Ctrl+L)" button, and the identical `Ctrl+L` keyboard accelerator, which is wired at the window level so it fires even while a text field (e.g. the recovery-secret entry) has keyboard focus. Unlike the vault TUI, the GUI's copy path has no arm-and-clear clipboard timer to fire, so its panic-lock scrubs `GuiState` (recovery-secret entry, the cached unlocked-vault handle, decrypted item/keyslot summaries) but does not also clear the clipboard.
+
+Neither surface currently subscribes to an OS screen-lock or system-sleep signal (macOS distributed notifications, Linux `logind`'s `PrepareForSleep`/lock-session signal over D-Bus, Windows session-change notifications) to trigger panic-lock automatically. Locking today is manual (`Ctrl+L` or the button) or automatic only via the 5-minute idle timer above; walking away and having the OS itself lock the screen does not also lock the vault. Wiring that up would add a new per-platform dependency this repo does not currently vendor, so it is a documented gap rather than a silent one.
 
 The GUI now mirrors the same native keyslot inspection, recovery-posture reporting, shared keyslot recommendations, enrollment, mnemonic rotation, certificate rewrap, relabel, recovery-secret rotation, posture-aware removal confirmation, and rebind flows, direct unlock model, folder-plus-tag organization model, backup and transfer export/import flows, clipboard auto-clear, and idle auto-lock behavior, so mnemonic, device-bound, certificate-wrapped recovery, and encrypted vault exchange no longer depend on CLI-only administration.

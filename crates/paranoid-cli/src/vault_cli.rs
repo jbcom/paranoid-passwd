@@ -907,6 +907,21 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
                         .ok_or_else(|| anyhow::anyhow!("--profile requires a value"))?,
                 )?;
             }
+            // brand.md §3c: the user-facing spelling is `--assurance strict`
+            // ("apply the strictest audit and evidence rules"); `--federal-ready`
+            // keeps working unchanged for existing scripts.
+            "--assurance" if command.is_none() => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("--assurance requires a value"))?;
+                if value != "strict" {
+                    return Err(anyhow::anyhow!(
+                        "unknown assurance level: {value} (expected: strict)"
+                    ));
+                }
+                profile = OpsProfile::FederalReady;
+                require_audit_sink = true;
+            }
             "--federal-ready" if command.is_none() => {
                 profile = OpsProfile::FederalReady;
                 require_audit_sink = true;
@@ -950,7 +965,10 @@ fn parse_vault_args(args: &[OsString]) -> anyhow::Result<VaultInvocation> {
         Some("help") => Some(VaultCommand::Help),
         Some("init") => Some(VaultCommand::Init),
         Some("keyslots") => Some(VaultCommand::Keyslots),
-        Some("federal-evidence") => Some(VaultCommand::FederalEvidence),
+        // brand.md §3c/§4: user-facing name for `federal-evidence` is
+        // "Evidence bundle" — `evidence-bundle` is the documented spelling;
+        // `federal-evidence` keeps working unchanged for existing scripts.
+        Some("federal-evidence") | Some("evidence-bundle") => Some(VaultCommand::FederalEvidence),
         Some("seal-status") => Some(parse_seal_status(command_args.as_slice())?),
         Some("inspect-keyslot") => Some(parse_inspect_keyslot(command_args.as_slice())?),
         Some("list") => Some(parse_list(command_args.as_slice())?),
@@ -1618,7 +1636,8 @@ fn parse_update(args: &[String]) -> anyhow::Result<VaultCommand> {
                 update.password = Some(
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--password requires a value"))?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 );
             }
             "--url" => {
@@ -1703,7 +1722,8 @@ fn parse_update_note(args: &[String]) -> anyhow::Result<VaultCommand> {
                 update.content = Some(
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--content requires a value"))?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 );
             }
             "--folder" => {
@@ -1783,7 +1803,8 @@ fn parse_update_card(args: &[String]) -> anyhow::Result<VaultCommand> {
                 update.number = Some(
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--number requires a value"))?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 );
             }
             "--expiry-month" => {
@@ -1804,7 +1825,8 @@ fn parse_update_card(args: &[String]) -> anyhow::Result<VaultCommand> {
                 update.security_code = Some(
                     iter.next()
                         .ok_or_else(|| anyhow::anyhow!("--security-code requires a value"))?
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 );
             }
             "--billing-zip" => {
@@ -2500,7 +2522,9 @@ fn parse_login_record(args: &[String]) -> anyhow::Result<NewLoginRecord> {
     Ok(NewLoginRecord {
         title: title.ok_or_else(|| anyhow::anyhow!("vault add requires --title"))?,
         username: username.ok_or_else(|| anyhow::anyhow!("vault add requires --username"))?,
-        password: password.ok_or_else(|| anyhow::anyhow!("vault add requires --password"))?,
+        password: password
+            .ok_or_else(|| anyhow::anyhow!("vault add requires --password"))?
+            .into(),
         url,
         notes,
         folder,
@@ -2561,7 +2585,9 @@ fn parse_secure_note_record(args: &[String]) -> anyhow::Result<NewSecureNoteReco
 
     Ok(NewSecureNoteRecord {
         title: title.ok_or_else(|| anyhow::anyhow!("vault add-note requires --title"))?,
-        content: content.ok_or_else(|| anyhow::anyhow!("vault add-note requires --content"))?,
+        content: content
+            .ok_or_else(|| anyhow::anyhow!("vault add-note requires --content"))?
+            .into(),
         folder,
         tags,
     })
@@ -2665,13 +2691,16 @@ fn parse_card_record(args: &[String]) -> anyhow::Result<NewCardRecord> {
         title: title.ok_or_else(|| anyhow::anyhow!("vault add-card requires --title"))?,
         cardholder_name: cardholder_name
             .ok_or_else(|| anyhow::anyhow!("vault add-card requires --cardholder"))?,
-        number: number.ok_or_else(|| anyhow::anyhow!("vault add-card requires --number"))?,
+        number: number
+            .ok_or_else(|| anyhow::anyhow!("vault add-card requires --number"))?
+            .into(),
         expiry_month: expiry_month
             .ok_or_else(|| anyhow::anyhow!("vault add-card requires --expiry-month"))?,
         expiry_year: expiry_year
             .ok_or_else(|| anyhow::anyhow!("vault add-card requires --expiry-year"))?,
         security_code: security_code
-            .ok_or_else(|| anyhow::anyhow!("vault add-card requires --security-code"))?,
+            .ok_or_else(|| anyhow::anyhow!("vault add-card requires --security-code"))?
+            .into(),
         billing_zip,
         notes,
         folder,
@@ -2790,13 +2819,15 @@ fn print_usage(mut out: impl Write) -> io::Result<()> {
 paranoid-passwd {VERSION}
 
 Usage:
-  paranoid-passwd vault [--tui|--cli] [--path FILE] [--audit-jsonl FILE] [--require-audit-sink] [--profile default|federal-ready] [--password-env VAR] [--recovery-phrase-env VAR [--mnemonic-slot ID]] [--device-slot ID] [--cert CERT.pem --key KEY.pem [--key-passphrase-env VAR]] [subcommand] [OPTIONS]
+  paranoid-passwd vault [--tui|--cli] [--path FILE] [--audit-jsonl FILE] [--require-audit-sink] [--assurance strict | --profile default|federal-ready] [--password-env VAR] [--recovery-phrase-env VAR [--mnemonic-slot ID]] [--device-slot ID] [--cert CERT.pem --key KEY.pem [--key-passphrase-env VAR]] [subcommand] [OPTIONS]
 
 Subcommands:
   init
   keyslots
   seal-status [--probe-providers]
-  federal-evidence
+  evidence-bundle           (alias: federal-evidence) — produce a signed,
+                            timestamped evidence bundle you can hand to a
+                            lawyer, auditor, or court
   inspect-keyslot --id ID
   list [--query TEXT] [--kind login|secure_note|card|identity] [--folder NAME] [--tag TAG]
   show --id ID
@@ -2863,7 +2894,7 @@ fn print_item(
         paranoid_vault::VaultItemPayload::Login(login) => {
             println!("title: {}", login.title);
             println!("username: {}", login.username);
-            println!("password: {}", login.password);
+            println!("password: {}", login.password.as_str());
             println!("url: {}", login.url.as_deref().unwrap_or(""));
             println!("notes: {}", login.notes.as_deref().unwrap_or(""));
             println!("folder: {}", login.folder.as_deref().unwrap_or(""));
@@ -2873,23 +2904,24 @@ fn print_item(
             for (index, entry) in login.password_history.iter().enumerate() {
                 println!(
                     "password_history[{index}]: {} @ {}",
-                    entry.password, entry.changed_at_epoch
+                    entry.password.as_str(),
+                    entry.changed_at_epoch
                 );
             }
         }
         paranoid_vault::VaultItemPayload::SecureNote(note) => {
             println!("title: {}", note.title);
-            println!("content: {}", note.content);
+            println!("content: {}", note.content.as_str());
             println!("folder: {}", note.folder.as_deref().unwrap_or(""));
             println!("tags: {}", note.tags.join(","));
         }
         paranoid_vault::VaultItemPayload::Card(card) => {
             println!("title: {}", card.title);
             println!("cardholder_name: {}", card.cardholder_name);
-            println!("number: {}", card.number);
+            println!("number: {}", card.number.as_str());
             println!("expiry_month: {}", card.expiry_month);
             println!("expiry_year: {}", card.expiry_year);
-            println!("security_code: {}", card.security_code);
+            println!("security_code: {}", card.security_code.as_str());
             println!("billing_zip: {}", card.billing_zip.as_deref().unwrap_or(""));
             println!("notes: {}", card.notes.as_deref().unwrap_or(""));
             println!("folder: {}", card.folder.as_deref().unwrap_or(""));
@@ -3024,6 +3056,15 @@ mod tests {
             Some(VaultCommand::FederalEvidence)
         ));
 
+        // brand.md §3c/§4: `evidence-bundle` is the documented user-facing
+        // spelling and must behave identically to `federal-evidence`.
+        let evidence_bundle =
+            parse_vault_args(&[OsString::from("evidence-bundle")]).expect("parse");
+        assert!(matches!(
+            evidence_bundle.command,
+            Some(VaultCommand::FederalEvidence)
+        ));
+
         let seal = parse_vault_args(&[OsString::from("seal-status")]).expect("parse");
         assert!(matches!(
             seal.command,
@@ -3114,6 +3155,35 @@ mod tests {
             Some(PathBuf::from("vault-audit.jsonl").as_path())
         );
         assert!(matches!(invocation.command, Some(VaultCommand::Keyslots)));
+    }
+
+    #[test]
+    fn parse_vault_assurance_strict_is_the_documented_federal_ready_alias() {
+        // brand.md §3c: `--assurance strict` is the user-facing spelling
+        // for the `federal-ready` profile on the vault subcommand too.
+        let invocation = parse_vault_args(&[
+            OsString::from("--assurance"),
+            OsString::from("strict"),
+            OsString::from("keyslots"),
+        ])
+        .expect("parse vault assurance flag");
+
+        assert_eq!(invocation.profile, OpsProfile::FederalReady);
+        assert!(invocation.require_audit_sink);
+    }
+
+    #[test]
+    fn parse_vault_assurance_rejects_unknown_levels() {
+        let result = parse_vault_args(&[
+            OsString::from("--assurance"),
+            OsString::from("loose"),
+            OsString::from("keyslots"),
+        ]);
+
+        match result {
+            Ok(_) => panic!("unknown assurance level must be rejected"),
+            Err(error) => assert!(error.to_string().contains("strict")),
+        }
     }
 
     #[test]

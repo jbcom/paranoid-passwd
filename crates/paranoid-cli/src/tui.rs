@@ -11,14 +11,14 @@ use paranoid_core::{
     AuditStage, CharsetOptions, CharsetSpec, GenerationReport, ParanoidRequest,
     combined_framework_requirements, execute_request, secure_preview,
 };
-use paranoid_vault::NativeSessionHardening;
+use paranoid_vault::{NativeSessionHardening, set_clipboard_text_excluded};
 #[cfg(test)]
 use ratatui::backend::TestBackend;
 use ratatui::{
     Frame, Terminal,
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Tabs, Wrap},
 };
@@ -29,14 +29,7 @@ use std::{
     time::Duration,
 };
 
-const BG: Color = Color::Rgb(8, 12, 20);
-const PANEL: Color = Color::Rgb(13, 17, 25);
-const TEXT: Color = Color::Rgb(228, 231, 242);
-const GREEN: Color = Color::Rgb(52, 211, 153);
-const BLUE: Color = Color::Rgb(96, 165, 250);
-const AMBER: Color = Color::Rgb(251, 191, 36);
-const RED: Color = Color::Rgb(248, 113, 113);
-const PURPLE: Color = Color::Rgb(167, 139, 250);
+use crate::theme::{self, AMBER, BG, BLUE, GREEN, ICON_ACTION, PANEL, RED, TEXT};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Screen {
@@ -246,7 +239,13 @@ impl App {
 
     fn start_audit(&mut self) {
         if let Err(error) = self.request.resolve() {
-            self.status = format!("Blocked: {error}");
+            // brand.md §3 rule 2: rewrite the failure as one calm sentence
+            // that tells the person what to do next, with the exact cause
+            // as reachable detail rather than the leading clause (same
+            // pattern as vault_tui.rs's unlock-failure status).
+            self.status = format!(
+                "These settings can't produce a password yet. Adjust them and try again. ({error})"
+            );
             self.screen = Screen::Configure;
             return;
         }
@@ -275,18 +274,22 @@ impl App {
             .as_ref()
             .and_then(|report| report.passwords.first())
         {
-            match Clipboard::new()
-                .and_then(|mut clipboard| clipboard.set_text(password.value.clone()))
-            {
+            match Clipboard::new().and_then(|mut clipboard| {
+                set_clipboard_text_excluded(&mut clipboard, &password.value)
+            }) {
                 Ok(()) => {
                     self.session.arm_clipboard_clear(password.value.clone());
+                    // brand.md §3 micro-example, verbatim: "Copied. It
+                    // clears from the clipboard in 30 seconds."
                     self.status = format!(
-                        "Copied password to the system clipboard. It will be cleared in {} seconds if unchanged.",
+                        "Copied. It clears from the clipboard in {} seconds.",
                         self.session.clipboard_clear_after().as_secs()
                     );
                 }
                 Err(error) => {
-                    self.status = format!("Clipboard unavailable: {error}");
+                    self.status = format!(
+                        "Couldn't reach the system clipboard. Copy the password by hand instead. ({error})"
+                    );
                 }
             }
         }
@@ -297,13 +300,15 @@ impl App {
             match clear_clipboard_if_matches(expected.as_str()) {
                 Ok(true) => {
                     self.status = format!(
-                        "Clipboard auto-cleared after {} seconds.",
+                        "Clipboard cleared after {} seconds.",
                         self.session.clipboard_clear_after().as_secs()
                     );
                 }
                 Ok(false) => {}
                 Err(error) => {
-                    self.status = format!("Clipboard auto-clear failed: {error}");
+                    self.status = format!(
+                        "Couldn't clear the clipboard automatically. Clear it by hand. ({error})"
+                    );
                 }
             }
         }
@@ -338,7 +343,9 @@ impl App {
                             self.screen = Screen::Results;
                         }
                         Err(error) => {
-                            self.status = format!("Audit failed: {error}");
+                            self.status = format!(
+                                "Generation didn't complete. Nothing was produced — adjust the settings and try again. ({error})"
+                            );
                             self.current_stage = None;
                             self.completed_stages.clear();
                             self.screen = Screen::Configure;
@@ -554,6 +561,18 @@ fn render(frame: &mut Frame<'_>, app: &App) {
     }
 }
 
+/// A non-selectable group heading inside the configure list — mirrors
+/// `vault_tui`'s section-header convention (e.g. Ways-in's relationship
+/// groups) so a 20+ field surface reads as named groups the persona can scan,
+/// not one undifferentiated list (ia.md rule 1, "one job per screen" applied
+/// within a screen as "one job per group").
+fn section_header(label: &str) -> ListItem<'static> {
+    ListItem::new(Line::styled(
+        label.to_string(),
+        Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+    ))
+}
+
 fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -566,8 +585,8 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
     render_header(
         frame,
         chunks[0],
-        "Configure",
-        "Configure the local generator and audit before any password is shown.",
+        "Generate a password",
+        "Shape it, then generate — the randomness check runs automatically and its evidence is one screen away.",
     );
 
     let body = Layout::default()
@@ -575,9 +594,9 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
         .split(chunks[1]);
 
-    let order = app.focus_order();
     let options = app.charset_options();
     let mut items = vec![
+        section_header("Shape"),
         field_item(
             &FocusField::Length,
             app,
@@ -593,6 +612,7 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
             app,
             format!("Audit batch size: {}", app.request.batch_size),
         ),
+        section_header("Character set"),
         field_item(
             &FocusField::Lowercase,
             app,
@@ -630,6 +650,7 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
             ),
         ),
     ];
+    items.push(section_header("Compliance frameworks (optional)"));
     for (index, framework) in paranoid_core::frameworks().iter().enumerate() {
         items.push(field_item(
             &FocusField::Framework(index),
@@ -641,6 +662,7 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
             ),
         ));
     }
+    items.push(section_header("Manual minimums (optional)"));
     items.extend([
         field_item(
             &FocusField::MinLowercase,
@@ -675,17 +697,19 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
                     .unwrap_or_else(|| "off".to_string())
             ),
         ),
-        field_item(
-            &FocusField::Launch,
-            app,
-            "Generate + Run 7-Layer Audit".to_string(),
-        ),
     ]);
+    items.push(section_header(" "));
+    items.push(field_item_styled(
+        &FocusField::Launch,
+        app,
+        format!("{ICON_ACTION} Generate"),
+        theme::accent_action(),
+    ));
 
     let list = List::new(items)
         .block(
             Block::default()
-                .title("Wizard")
+                .title("Configure")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(BLUE))
                 .style(Style::default().bg(PANEL).fg(TEXT)),
@@ -735,19 +759,12 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Line::raw(""),
         Line::styled(validation, validation_style),
         Line::raw(""),
-        Line::from("Controls"),
-        Line::from("  Up/Down: move"),
-        Line::from("  Left/Right: adjust"),
-        Line::from("  Space: toggle"),
-        Line::from("  Enter: edit/run"),
-        Line::from("  q: quit"),
-        Line::raw(""),
         Line::styled(app.status.as_str(), Style::default().fg(AMBER)),
     ]);
     let detail = Paragraph::new(detail_text)
         .block(
             Block::default()
-                .title("Audit Preview")
+                .title("What this produces")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(GREEN))
                 .style(Style::default().bg(PANEL).fg(TEXT)),
@@ -755,20 +772,41 @@ fn render_configure(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .wrap(Wrap { trim: false });
     frame.render_widget(detail, body[1]);
 
-    let footer = format!(
-        "Selected field: {} of {}{}",
-        app.focus_index + 1,
-        order.len(),
-        if app.editing_custom_charset {
-            "  — editing custom charset"
-        } else {
-            ""
-        }
-    );
+    // ia.md §1 rule 3: the contextual footer names the 3-5 keys valid here,
+    // not a raw "Selected field: N of M" position readout (P8.V.8).
+    let footer = if app.editing_custom_charset {
+        "type the charset  ⏎/⎋ done  Ctrl-u clear".to_string()
+    } else {
+        "↑↓ move  ←→ adjust  Space toggle  ⏎ edit/run  q quit".to_string()
+    };
     frame.render_widget(
         Paragraph::new(footer).style(Style::default().fg(TEXT).bg(BG)),
         chunks[2],
     );
+}
+
+/// Like `field_item`, but with an explicit override style for the row when
+/// selected AND unselected — used for the single `▸ Generate` accent action
+/// so it reads as `color.accent.action` regardless of focus, distinguishing
+/// it from the ordinary field rows above it (system.md §4.2: exactly one
+/// element per screen may carry the accent-action style).
+fn field_item_styled(
+    field: &FocusField,
+    app: &App,
+    text: String,
+    style: Style,
+) -> ListItem<'static> {
+    let selected = &app.selected_field() == field;
+    let prefix = if selected { "› " } else { "  " };
+    let style = if selected {
+        style.add_modifier(Modifier::BOLD)
+    } else {
+        style
+    };
+    ListItem::new(Line::from(vec![
+        Span::styled(prefix.to_string(), style),
+        Span::styled(text, style),
+    ]))
 }
 
 fn render_audit(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -784,8 +822,8 @@ fn render_audit(frame: &mut Frame<'_>, area: Rect, app: &App) {
     render_header(
         frame,
         chunks[0],
-        "Generate & Audit",
-        "Running the seven-layer audit on a native Rust core.",
+        "Checking the result",
+        "Confirming this password came from a verified-uniform source before it's shown.",
     );
 
     let progress = stage_progress(app.current_stage);
@@ -847,7 +885,7 @@ fn render_audit(frame: &mut Frame<'_>, area: Rect, app: &App) {
     );
 
     frame.render_widget(
-        Paragraph::new(app.status.clone())
+        Paragraph::new(format!("{}  q quit", app.status))
             .style(Style::default().fg(TEXT).bg(BG))
             .wrap(Wrap { trim: false }),
         chunks[3],
@@ -868,7 +906,7 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Length(5),
+            Constraint::Length(9),
             Constraint::Length(3),
             Constraint::Min(10),
             Constraint::Length(3),
@@ -877,10 +915,14 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
     render_header(
         frame,
         chunks[0],
-        "Results",
-        "Native generation complete. Review the verdict and derived details.",
+        "Your new password",
+        "Review the verdict, then copy it. The full evidence is one tab away.",
     );
 
+    // journeys.md J2 step 1: the password and the verdict render together,
+    // leading — SHA-256/frameworks/per-password detail moves to the
+    // Summary/Compliance detail tabs below (§4 "Depth is reachable, never
+    // deleted"; brand.md §4 chi-squared/p-value → "randomness check: passed").
     let password_block = Paragraph::new(Text::from(vec![
         Line::styled(
             "primary",
@@ -890,7 +932,16 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
             primary.value.as_str(),
             Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
         ),
-        Line::raw(format!("SHA-256: {}", primary.sha256_hex)),
+        Line::styled(
+            if audit.overall_pass {
+                "✓ Randomness check: passed"
+            } else {
+                "! Randomness check: review the evidence tab"
+            },
+            Style::default()
+                .fg(if audit.overall_pass { GREEN } else { AMBER })
+                .add_modifier(Modifier::BOLD),
+        ),
         Line::raw(format!(
             "Selected frameworks: {}",
             selected_framework_summary(primary)
@@ -899,10 +950,8 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
             "Additional passwords: {}",
             report.passwords.len().saturating_sub(1)
         )),
-        Line::raw(format!(
-            "Verdict: {}",
-            if audit.overall_pass { "PASS" } else { "REVIEW" }
-        )),
+        Line::raw(""),
+        Line::styled(format!("{ICON_ACTION} Copy"), theme::accent_action()),
     ]))
     .block(
         Block::default()
@@ -949,9 +998,11 @@ fn render_results(frame: &mut Frame<'_>, area: Rect, app: &App) {
         chunks[3],
     );
 
+    // brand.md §3e: the footer shows only the keys valid on this screen, in
+    // the `key label` glyph format (not a flattened "Controls:" sentence).
     frame.render_widget(
         Paragraph::new(format!(
-            "{}  Controls: Left/Right switch detail tabs, c copies the password, r returns to configuration, q quits.",
+            "{}  ←→ tabs   c copy   r reconfigure   q quit",
             app.status
         ))
         .style(Style::default().fg(TEXT).bg(BG))
@@ -1165,7 +1216,7 @@ fn result_tab_text(tab: usize, report: &GenerationReport) -> Text<'static> {
         4 => Text::from(vec![
             Line::styled(
                 "Threat Model",
-                Style::default().fg(PURPLE).add_modifier(Modifier::BOLD),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ),
             Line::raw("T1 Training-data leakage — mitigated by OpenSSL-backed OS entropy."),
             Line::raw("T2 Token-distribution bias — mitigated by rejection sampling."),
@@ -1263,7 +1314,65 @@ mod tests {
         let app = App::default();
         let rendered = render_to_string(&app);
         assert!(rendered.contains("Configure"));
-        assert!(rendered.contains("Generate + Run 7-Layer Audit"));
+        // P8.V.8: the launch action reads as a plain product verb with the
+        // single accent-action glyph, not the old "Generate + Run 7-Layer
+        // Audit" engineer-speak thrust onto the primary surface.
+        assert!(rendered.contains("Generate"));
+        assert!(!rendered.contains("7-Layer Audit"));
+        // The old flat "Selected field: N of M" footer is gone in favor of
+        // the contextual footer naming only the keys valid here (ia.md §1
+        // rule 3) — this screen has no hidden capability wall behind it, so
+        // there is no `?` overlay to advertise.
+        assert!(!rendered.contains("Selected field:"));
+        assert!(rendered.contains("q quit"));
+    }
+
+    /// P8.V.8: the configure list groups fields under named sections
+    /// (Shape / Character set / Compliance frameworks / Manual minimums)
+    /// instead of one flat 21-field list — ia.md rule 1 applied within a
+    /// screen.
+    #[test]
+    fn configure_screen_groups_fields_under_named_sections() {
+        let app = App::default();
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("Shape"));
+        assert!(rendered.contains("Character set"));
+        assert!(rendered.contains("Compliance frameworks"));
+        assert!(rendered.contains("Manual minimums"));
+    }
+
+    /// P8.V.8: the results screen shows an explicit "▸ Copy" accent action
+    /// on the primary-password panel, matching journeys.md J2's designed-
+    /// state wireframe verbatim (not just a footer key hint).
+    #[test]
+    fn results_screen_shows_the_copy_accent_action() {
+        let app = App {
+            report: Some(
+                execute_request(&ParanoidRequest::default(), true, |_| {}).expect("report"),
+            ),
+            screen: Screen::Results,
+            detail_tab: 0,
+            ..App::default()
+        };
+
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("Copy"));
+    }
+
+    /// P8.V.8: the audit-in-progress screen must never claim a key works
+    /// that the handler doesn't actually bind — `handle_audit_key` only
+    /// recognizes `q`, so the footer/subtitle must not promise an Esc
+    /// cancel that silently does nothing (brand.md §3 rule 4).
+    #[test]
+    fn audit_screen_only_advertises_keys_the_handler_actually_binds() {
+        let app = App {
+            screen: Screen::Audit,
+            current_stage: Some(AuditStage::ChiSquared),
+            ..App::default()
+        };
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("q quit"));
+        assert!(!rendered.contains("Esc"));
     }
 
     #[test]
@@ -1312,7 +1421,12 @@ mod tests {
         app.start_audit();
 
         assert_eq!(app.screen, Screen::Configure);
-        assert!(app.status.contains("Blocked:"));
+        // brand.md §3 rule 2: the calm sentence leads; the raw cause is
+        // reachable in parentheses, not the primary message.
+        assert!(
+            app.status
+                .contains("These settings can't produce a password yet")
+        );
         assert!(app.worker.is_none());
     }
 

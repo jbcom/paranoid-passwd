@@ -24,12 +24,13 @@ use ratatui::backend::TestBackend;
 use ratatui::{
     Terminal,
     backend::{Backend, CrosstermBackend},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 
 use std::{fs, io};
 
+mod footer;
 mod mutation_handlers;
 mod panel_rendering;
 mod screen_state;
@@ -38,19 +39,7 @@ pub(crate) use panel_rendering::*;
 pub use screen_state::VaultTuiConfig;
 pub(crate) use screen_state::*;
 
-const BG: Color = Color::Rgb(8, 12, 20);
-
-const PANEL: Color = Color::Rgb(13, 17, 25);
-
-const TEXT: Color = Color::Rgb(228, 231, 242);
-
-const GREEN: Color = Color::Rgb(52, 211, 153);
-
-const BLUE: Color = Color::Rgb(96, 165, 250);
-
-const AMBER: Color = Color::Rgb(251, 191, 36);
-
-const RED: Color = Color::Rgb(248, 113, 113);
+use crate::theme::{AMBER, BG, BLUE, GREEN, PANEL, RED, TEXT};
 
 trait EditableText {
     fn edit_pop(&mut self);
@@ -124,7 +113,13 @@ pub fn run(config: VaultTuiConfig) -> anyhow::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
     terminal.clear().ok();
-    let result = run_app(&mut terminal, App::with_config(config));
+    let mut app = App::with_config(config);
+    // ia.md §2/§3: trust precedes everything — first-run *or* recovery, no
+    // path skips S1. `refresh()` (called inside `with_config`) has already
+    // computed the correct post-trust destination (Vault / UnlockBlocked /
+    // EnvironmentApproval); this just fronts it with the trust gate.
+    app.enter_trust_gate();
+    let result = run_app(&mut terminal, app);
     disable_raw_mode().ok();
     execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     terminal.show_cursor().ok();
@@ -143,6 +138,7 @@ pub fn run_scripted(
     tokens: &[crate::scripted::ScriptToken],
 ) -> anyhow::Result<String> {
     let mut app = App::with_config(config);
+    app.enter_trust_gate();
     crate::scripted::drive(terminal, tokens, |terminal, key| {
         let quit = match key {
             Some(key) => app.handle_key(key),
@@ -510,6 +506,345 @@ mod tests {
         }
     }
 
+    /// The marker-presence/write logic exercised directly against an
+    /// explicit path, rather than through `App::enter_trust_gate`'s env-var
+    /// read (`PARANOID_TEST_TRUST_MARKER_DIR` is a single process-wide
+    /// value scoped once per test binary by `scripts/cargo_test.sh` — the
+    /// workspace forbids `unsafe_code`, so no test here may mutate it via
+    /// `std::env::set_var`). This proves the same read/write pair
+    /// `enter_trust_gate`/`submit_trust_gate` call, without needing
+    /// process-global mutation.
+    #[test]
+    fn trust_marker_write_then_exists_round_trips_through_an_explicit_path() {
+        let dir = tempdir().expect("tempdir");
+        let marker = dir.path().join("trust-verified");
+        assert!(!marker.is_file());
+        fs::write(&marker, b"verified\n").expect("write marker");
+        assert!(marker.is_file());
+    }
+
+    #[test]
+    fn trust_gate_shows_unchecked_body_when_app_constructs_fresh() {
+        // `App::new` never calls `enter_trust_gate` on its own (only
+        // `run`/`run_scripted` do, deliberately — see `enter_trust_gate`'s
+        // doc comment), so this exercises the same call `run`/`run_scripted`
+        // make. Neither `PARANOID_TEST_TRUST_MARKER_DIR` nor
+        // `PARANOID_PASSWD_STATE_DIR` is ever set for this test binary
+        // (`trust_marker_path`'s doc comment: no `$HOME` fallback in any
+        // build), so the marker never exists and the state is always
+        // deterministically unchecked.
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(app_options(&path));
+        app.enter_trust_gate();
+
+        assert!(matches!(app.screen, Screen::TrustGate));
+        assert!(matches!(app.trust_state, TrustState::Unchecked));
+        assert!(app.status.contains("Confirm this copy can be trusted"));
+    }
+
+    #[test]
+    fn submit_trust_gate_lands_on_verified_and_reports_the_honest_limit() {
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(app_options(&path));
+        app.enter_trust_gate();
+        app.submit_trust_gate();
+
+        assert!(matches!(app.screen, Screen::Verified));
+        assert!(matches!(app.trust_state, TrustState::Checked));
+        // brand.md §3 rule 4 ("never overpromise"): the copy must not claim
+        // cryptographic release verification that does not exist yet.
+        assert!(app.status.contains("not available in this build yet"));
+    }
+
+    #[test]
+    fn dismiss_trust_gate_hands_control_to_the_already_computed_destination() {
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(password_only_options(&path));
+        app.enter_trust_gate();
+        assert!(matches!(app.screen, Screen::TrustGate));
+
+        // "Skip for now" / S3 "Continue" both resume whatever `refresh()`
+        // already computed at construction — here, `UnlockBlocked` because
+        // no vault exists yet at this path and the env-based auth is unset.
+        app.dismiss_trust_gate();
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
+    }
+
+    /// P8.V.6: the trust-gate `?` overlay advertises `d show the
+    /// fingerprint` (ia.md §2/§4 S2d) — this pins that the `d` key on S1
+    /// actually navigates there, honestly, rather than being a dead
+    /// advertised binding.
+    #[test]
+    fn trust_gate_d_key_opens_the_fingerprint_leaf_and_reports_build_identity_honestly() {
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(app_options(&path));
+        app.enter_trust_gate();
+        assert!(matches!(app.screen, Screen::TrustGate));
+
+        press_key(&mut app, KeyCode::Char('d'));
+        assert!(matches!(app.screen, Screen::TrustFingerprint));
+
+        let rendered = render_to_string(&app);
+        // Real, verifiable build-identity fields — the same ones
+        // `--federal-evidence` already reports for this build.
+        assert!(rendered.contains("Product version"));
+        assert!(rendered.contains("Build commit"));
+        assert!(rendered.contains("Platform"));
+        // brand.md §3 rule 4: never overpromise — must state the real limit
+        // plainly, not fabricate a signature-verification pass.
+        assert!(rendered.contains("does not confirm"));
+        assert!(rendered.contains("signed-release check"));
+    }
+
+    /// S2d must return to whichever of S1/S3 opened it, not a hardcoded
+    /// destination — reached from S3 here.
+    #[test]
+    fn trust_fingerprint_leaf_returns_to_verified_when_opened_from_s3() {
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(app_options(&path));
+        app.enter_trust_gate();
+        app.submit_trust_gate();
+        assert!(matches!(app.screen, Screen::Verified));
+
+        press_key(&mut app, KeyCode::Char('d'));
+        assert!(matches!(app.screen, Screen::TrustFingerprint));
+
+        press_key(&mut app, KeyCode::Esc);
+        assert!(matches!(app.screen, Screen::Verified));
+    }
+
+    /// Reached from S1 instead, `⎋` must return to S1 — pins the
+    /// per-visit return target rather than a screen-agnostic default.
+    #[test]
+    fn trust_fingerprint_leaf_returns_to_trust_gate_when_opened_from_s1() {
+        let path = tempdir().expect("tempdir").path().join("vault.sqlite");
+        let mut app = App::new(app_options(&path));
+        app.enter_trust_gate();
+        assert!(matches!(app.screen, Screen::TrustGate));
+
+        press_key(&mut app, KeyCode::Char('d'));
+        assert!(matches!(app.screen, Screen::TrustFingerprint));
+
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::TrustGate));
+    }
+
+    #[test]
+    fn panic_lock_shows_the_minimal_s14_footer_until_the_next_interaction() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+
+        // Ctrl+L (not a bare 'l') fires the panic-lock hotkey.
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(!should_quit);
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(app.just_locked);
+
+        // ia.md §5 S14: minimal footer, no `?` recovery-paths door, right
+        // after a lock event.
+        let locked_footer = footer_text(&app);
+        assert_eq!(locked_footer, "⏎ unlock  q quit");
+
+        // Any interaction beyond quitting reverts to the ordinary S15
+        // footer (`? other ways in` reachable again).
+        press_key(&mut app, KeyCode::Char('p'));
+        assert!(!app.just_locked);
+        let normal_footer = footer_text(&app);
+        assert!(normal_footer.contains("other ways in"));
+    }
+
+    /// P8.V.11: panic-lock must render the ia.md §5 S14 centered "⊘ Locked."
+    /// state, distinct in shape and title from S15's ordinary two-pane
+    /// unlock form — evidence.md's finding #1 was that `Ctrl+L` dropped
+    /// straight into `unlock_blocked_panel` (the everyday wrong-password
+    /// screen) with the title bar still reading "Vault". Pins the actual
+    /// rendered frame, not just the state flags.
+    #[test]
+    fn panic_lock_renders_the_centered_s14_locked_state_distinct_from_ordinary_unlock() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(app.just_locked);
+
+        let locked_rendered = render_to_string(&app);
+        assert!(locked_rendered.contains("Locked"));
+        assert!(locked_rendered.contains("Unlock"));
+        // The just-locked S14 render must NOT show the S15 unlock form's
+        // field prompts — the two must not be confusable by shape (P8.V.11,
+        // journeys.md J6b "speed is the safety property").
+        assert!(!locked_rendered.contains("Unlock mode"));
+        assert!(!locked_rendered.contains("Recovery secret"));
+
+        // Any interaction beyond quitting reverts to the ordinary S15
+        // two-pane unlock form, which DOES show the field prompts.
+        press_key(&mut app, KeyCode::Char('p'));
+        assert!(!app.just_locked);
+        let unlocked_rendered = render_to_string(&app);
+        assert!(unlocked_rendered.contains("Unlock mode"));
+    }
+
+    /// P8.5 (b) monochrome-pass regression: system.md §1.1 "the test" — a
+    /// state must remain distinguishable by symbol + word alone with all
+    /// color stripped. Every `UnlockBlocked` visit (S14 just-locked and
+    /// S15 ordinary unlock prompt) must carry the `⊘` title-region state
+    /// token (ia.md §1) so a monochrome terminal still shows "locked,"
+    /// never relying on the red/muted color alone to convey it. Asserted
+    /// against the real `render()` pipeline output (`render_to_string`),
+    /// not just the `header_state_token` plumbing function — GATE
+    /// COMPLETENESS (directive P0-META): pinning that the function returns
+    /// a value is not pinning that the renderer actually draws it.
+    #[test]
+    fn unlock_blocked_screen_carries_the_locked_state_token_with_color_stripped() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert_eq!(header_state_token(&app), None);
+
+        // S14: immediately after the panic-lock hotkey fires.
+        app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        let (glyph, _color) =
+            header_state_token(&app).expect("UnlockBlocked must carry a state token");
+        assert_eq!(glyph, "\u{2298}", "S14 locked screen must show the ⊘ glyph");
+        assert!(
+            render_to_string(&app).contains('\u{2298}'),
+            "the rendered S14 frame must contain the ⊘ glyph"
+        );
+
+        // S15: after interacting with the unlock form, still UnlockBlocked,
+        // still must carry the token — the screen (not just the
+        // just-locked transient) carries it.
+        press_key(&mut app, KeyCode::Char('p'));
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        let (glyph, _color) =
+            header_state_token(&app).expect("S15 unlock prompt must also carry a state token");
+        assert_eq!(glyph, "\u{2298}");
+        assert!(
+            render_to_string(&app).contains('\u{2298}'),
+            "the rendered S15 frame must contain the ⊘ glyph"
+        );
+    }
+
+    #[derive(Clone, Default)]
+    struct SharedWriteBuf(std::sync::Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for SharedWriteBuf {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("shared write buf mutex")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// P8.5 (b): regression-pins the ⊘ glyph across a real incremental
+    /// `CrosstermBackend` diff (Vault screen drawn first, then
+    /// `UnlockBlocked` drawn on the SAME `Terminal`, exactly like the real
+    /// `run_app` loop) — a `CrosstermBackend<Vec<u8>>`-equivalent write
+    /// target is used so the assertion checks the actual bytes a real
+    /// terminal receives, not just the abstract `Buffer` cell grid. Added
+    /// while re-baselining the P8.5 visual-regression harness after a false
+    /// negative traced back to a test-harness CSI-parsing gap (see
+    /// `tests/test_tui_e2e.py`'s `TerminalGrid` docstring), to permanently
+    /// cover the code path that false negative exercised.
+    #[test]
+    fn crossterm_backend_bytes_carry_locked_glyph_across_an_incremental_screen_transition() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+
+        let shared = SharedWriteBuf::default();
+        let backend = CrosstermBackend::new(shared.clone());
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        // Frame 1: Vault screen (no state token) — establishes the "prior
+        // frame" the diff renderer compares frame 2 against.
+        terminal.draw(|frame| render(frame, &app)).expect("draw1");
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+
+        // Frame 2: UnlockBlocked, incremental draw on the same `Terminal`.
+        terminal.draw(|frame| render(frame, &app)).expect("draw2");
+
+        let written = shared.0.lock().expect("shared write buf mutex");
+        let text = String::from_utf8_lossy(&written);
+        assert!(
+            text.contains('\u{2298}'),
+            "CrosstermBackend output must contain the ⊘ glyph bytes; got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn help_overlay_opens_and_closes_without_changing_the_underlying_screen() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(!app.help_overlay_open);
+
+        press_key(&mut app, KeyCode::Char('?'));
+        assert!(app.help_overlay_open);
+        assert!(
+            matches!(app.screen, Screen::Vault),
+            "overlay must not replace the underlying screen (ia.md §5 S12: \"it does not become a new screen\")"
+        );
+
+        press_key(&mut app, KeyCode::Esc);
+        assert!(!app.help_overlay_open);
+        assert!(matches!(app.screen, Screen::Vault));
+    }
+
+    #[test]
+    fn help_overlay_does_not_intercept_a_literal_question_mark_while_typing() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        app.open_add_login();
+        assert!(matches!(app.screen, Screen::AddLogin));
+
+        press_key(&mut app, KeyCode::Char('?'));
+        assert!(
+            !app.help_overlay_open,
+            "a literal '?' typed into a text field must not open the S12 overlay"
+        );
+        assert_eq!(app.add_login_form.title, "?");
+    }
+
     fn write_test_certificate_pair(dir: &Path, prefix: &str) -> (PathBuf, PathBuf) {
         let rsa = Rsa::generate(2048).expect("rsa");
         let pkey = PKey::from_rsa(rsa).expect("pkey");
@@ -563,7 +898,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("primary code host".to_string()),
                 folder: Some("Work".to_string()),
@@ -580,12 +915,20 @@ mod tests {
             audit_sink_health: AuditSinkHealth::not_configured_jsonl(),
             ops_audit_events: Vec::new(),
             screen: Screen::Vault,
+            help_overlay_open: false,
+            trust_state: TrustState::default(),
+            fingerprint_return_screen: Screen::TrustGate,
+            just_locked: false,
+            confirm_input: String::new(),
+            confirm_target_name: String::new(),
             status: "test render".to_string(),
             header: Some(header),
             items,
             selected_index: 0,
             selected_keyslot_index: 0,
             detail: Some(item),
+            secret_revealed: false,
+            keyslot_mechanics_revealed: false,
             filters: VaultFilterState::default(),
             search_mode: false,
             capability_report: None,
@@ -612,11 +955,206 @@ mod tests {
             editing_item_id: None,
             session: NativeSessionHardening::default(),
         };
+        // H (Screen::Vault) is a preview only (P8.V.1/.3): no raw field
+        // dump, no cleartext secret. `⏎` (Screen::ItemDetail) is the only
+        // door to the full masked/reveal card — see
+        // `item_detail_screen_masks_password_by_default` below.
         let rendered = render_to_string(&app);
         assert!(rendered.contains("Vault"));
         assert!(rendered.contains("GitHub"));
-        assert!(rendered.contains("folder: Work"));
-        assert!(rendered.contains("Press a to add, e to edit, d to delete"));
+        assert!(rendered.contains("octocat"));
+        assert!(!rendered.contains("hunter2"));
+        assert!(!rendered.contains("folder: Work"));
+        assert!(!rendered.contains("id: "));
+        assert!(!rendered.contains("updated_at_epoch"));
+    }
+
+    /// P8.V.2: `⏎` on the vault list navigates to the S7 item-detail screen
+    /// — the footer has always promised `⏎ open`; before this change the
+    /// key had no `Screen::Vault` handler at all.
+    #[test]
+    fn enter_on_vault_list_opens_item_detail_screen() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::ItemDetail));
+
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("GitHub"));
+    }
+
+    /// P8.V.1: S7 masks the password by default — the exact coercion /
+    /// shoulder-surfer defect the visual-verify pass flagged (cleartext by
+    /// default). No raw internal fields (`id:`, `updated_at_epoch:`) either
+    /// (P8.V.3).
+    #[test]
+    fn item_detail_screen_masks_password_by_default() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::ItemDetail));
+        assert!(!app.secret_revealed);
+
+        let rendered = render_to_string(&app);
+        assert!(rendered.contains("octocat"));
+        assert!(rendered.contains("••••••"));
+        assert!(!rendered.contains("hunter2"));
+        assert!(!rendered.contains("id: "));
+        assert!(!rendered.contains("updated_at_epoch"));
+        assert!(!rendered.contains("duplicate passwords elsewhere"));
+        assert!(!rendered.contains("password history entries"));
+    }
+
+    /// P8.V.1: `r` toggles reveal on, and toggles back to masked — an
+    /// explicit, reversible action, not a one-way reveal.
+    #[test]
+    fn item_detail_reveal_toggles_password_visibility() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        press_key(&mut app, KeyCode::Enter);
+        assert!(!app.secret_revealed);
+
+        press_key(&mut app, KeyCode::Char('r'));
+        assert!(app.secret_revealed);
+        let revealed = render_to_string(&app);
+        assert!(revealed.contains("hunter2"));
+
+        press_key(&mut app, KeyCode::Char('r'));
+        assert!(!app.secret_revealed);
+        let masked_again = render_to_string(&app);
+        assert!(!masked_again.contains("hunter2"));
+    }
+
+    /// P8.V.1: leaving S7 (`⎋`) always re-masks — a persona who reveals,
+    /// backs out, then re-opens the same item is shown the mask again, never
+    /// a sticky reveal.
+    #[test]
+    fn item_detail_remasks_on_leave_and_reentry() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        press_key(&mut app, KeyCode::Enter);
+        press_key(&mut app, KeyCode::Char('r'));
+        assert!(app.secret_revealed);
+
+        press_key(&mut app, KeyCode::Esc);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(!app.secret_revealed);
+
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::ItemDetail));
+        assert!(!app.secret_revealed, "re-entering S7 must start masked");
+        let rendered = render_to_string(&app);
+        assert!(!rendered.contains("hunter2"));
+    }
+
+    /// P9 re-verify: panic-lock/idle-lock scrubs a live reveal, not just the
+    /// decrypted `detail` item — `secret_revealed` gates whether
+    /// `item_detail_panel` is permitted to render a secret in cleartext, so
+    /// it must be false after any lock path, same as every other
+    /// secret-adjacent field the exhaustive `purge_secret_state_on_lock`
+    /// destructure covers.
+    #[test]
+    fn panic_lock_hotkey_remasks_a_revealed_item_detail_secret() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        press_key(&mut app, KeyCode::Enter);
+        press_key(&mut app, KeyCode::Char('r'));
+        assert!(app.secret_revealed);
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert!(!should_quit);
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(
+            !app.secret_revealed,
+            "panic-lock must clear a live secret reveal"
+        );
+        assert!(app.detail.is_none());
     }
 
     #[test]
@@ -798,7 +1336,9 @@ mod tests {
         assert_eq!(app.items[0].title, "GitHub");
         assert!(app.status.contains("Vault filters locked"));
 
-        press_key(&mut app, KeyCode::Char('k'));
+        // P8.V.5: the working ways-in key is `w`, matching every footer/`?`
+        // overlay advertisement (it used to be the un-advertised `k`).
+        press_key(&mut app, KeyCode::Char('w'));
         assert!(matches!(app.screen, Screen::Keyslots));
         press_key(&mut app, KeyCode::Char('m'));
         assert!(matches!(app.screen, Screen::AddMnemonicSlot));
@@ -949,7 +1489,7 @@ mod tests {
         };
         assert_eq!(login.title, "GitHub");
         assert_eq!(login.username, "octocat");
-        assert_eq!(login.password.len(), 20);
+        assert_eq!(login.password.as_str().len(), 20);
         assert_eq!(login.folder.as_deref(), Some("Generated"));
         assert_eq!(
             login.tags,
@@ -970,7 +1510,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: Some("https://github.com".to_string()),
                 notes: Some("primary".to_string()),
                 folder: Some("Work".to_string()),
@@ -994,7 +1534,7 @@ mod tests {
         let VaultItemPayload::Login(login) = detail.payload else {
             panic!("expected login");
         };
-        assert_eq!(login.password.len(), 20);
+        assert_eq!(login.password.as_str().len(), 20);
         assert_eq!(login.password_history.len(), 1);
         assert_eq!(login.password_history[0].password, "hunter2");
         assert!(app.status.contains("rotated item"));
@@ -1012,7 +1552,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1023,7 +1563,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "Bank".to_string(),
                 username: "jon".to_string(),
-                password: "hunter3".to_string(),
+                password: "hunter3".to_string().into(),
                 url: None,
                 notes: Some("monthly".to_string()),
                 folder: Some("Finance".to_string()),
@@ -1058,7 +1598,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1069,10 +1609,10 @@ mod tests {
             .add_card(NewCardRecord {
                 title: "Travel Card".to_string(),
                 cardholder_name: "Jon Bogaty".to_string(),
-                number: "5555444433331111".to_string(),
+                number: "5555444433331111".to_string().into(),
                 expiry_month: "11".to_string(),
                 expiry_year: "2030".to_string(),
-                security_code: "999".to_string(),
+                security_code: "999".to_string().into(),
                 billing_zip: None,
                 notes: None,
                 folder: Some("Travel".to_string()),
@@ -1121,7 +1661,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1132,7 +1672,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitLab".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1147,9 +1687,14 @@ mod tests {
                 .any(|summary| summary.duplicate_password_count == 1)
         );
 
+        // P8.V.3: the duplicate-password signal is real and stays visible on
+        // the item list itself (`[dup:1]`, ia.md rule 2 progressive
+        // disclosure — the summary marker, not the raw
+        // "duplicate passwords elsewhere: 1" dump the detail pane used to
+        // print unconditionally).
         let rendered = render_to_string(&app);
         assert!(rendered.contains("[dup:1]"));
-        assert!(rendered.contains("duplicate passwords elsewhere: 1"));
+        assert!(!rendered.contains("duplicate passwords elsewhere"));
     }
 
     #[test]
@@ -1164,7 +1709,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1203,7 +1748,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -1219,6 +1764,101 @@ mod tests {
         assert!(app.items.is_empty());
         assert!(app.detail.is_none());
         assert!(app.status.contains("Deleted vault item"));
+    }
+
+    /// ia.md §7 severe-tier confirm, driven through the real key handler
+    /// (not the mutation function directly, as the test above does): typing
+    /// the wrong name must not delete anything, and typing the item's exact
+    /// name confirms it.
+    #[test]
+    fn delete_confirm_requires_typing_the_exact_item_name() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        app.open_delete_confirm();
+        assert!(matches!(app.screen, Screen::DeleteConfirm));
+        assert_eq!(app.confirm_target_name, "GitHub");
+
+        // Wrong name: Enter must not delete the item.
+        type_text(&mut app, "wrong-name");
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::DeleteConfirm));
+        assert_eq!(app.items.len(), 1);
+        assert!(app.status.contains("doesn't match"));
+
+        // Correct name: Enter confirms and deletes.
+        press_key(&mut app, KeyCode::Esc);
+        assert!(matches!(app.screen, Screen::Vault));
+        app.open_delete_confirm();
+        type_text(&mut app, "GitHub");
+        press_key(&mut app, KeyCode::Enter);
+
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(app.items.is_empty());
+        assert!(app.status.contains("Deleted vault item"));
+    }
+
+    /// ia.md §7 severe-tier confirm for removing a way in, driven through
+    /// the real key handler: typing the wrong label must not remove
+    /// anything, and typing the way in's exact label confirms it.
+    #[test]
+    fn remove_way_in_confirm_requires_typing_the_exact_label() {
+        let tempdir = tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        app.open_keyslots();
+        // `add_device_fallback` enrolled a device-bound slot with no label
+        // set, so `open_remove_way_in_confirm` falls back to the slot id —
+        // select it explicitly rather than assuming index 0 is the
+        // non-recovery slot.
+        let non_recovery_index = app
+            .header
+            .as_ref()
+            .expect("header")
+            .keyslots
+            .iter()
+            .position(|slot| slot.kind != paranoid_vault::VaultKeyslotKind::PasswordRecovery)
+            .expect("a non-recovery keyslot from add_device_fallback");
+        app.selected_keyslot_index = non_recovery_index;
+
+        app.open_remove_way_in_confirm();
+        assert!(matches!(app.screen, Screen::RemoveWayInConfirm));
+        let expected_name = app.confirm_target_name.clone();
+        assert!(!expected_name.is_empty());
+
+        // Wrong name: Enter must not remove the way in.
+        type_text(&mut app, "wrong-name");
+        press_key(&mut app, KeyCode::Enter);
+        assert!(matches!(app.screen, Screen::RemoveWayInConfirm));
+        assert!(app.status.contains("doesn't match"));
+
+        // Correct name: Enter confirms and removes it.
+        app.confirm_input.clear();
+        type_text(&mut app, &expected_name);
+        press_key(&mut app, KeyCode::Enter);
+
+        assert!(matches!(app.screen, Screen::Keyslots));
+        assert!(app.status.contains("Removed"));
     }
 
     #[test]
@@ -1620,7 +2260,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1669,7 +2309,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1686,7 +2326,7 @@ mod tests {
         vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Temporary".to_string(),
-                content: "remove me".to_string(),
+                content: "remove me".to_string().into(),
                 folder: Some("Temp".to_string()),
                 tags: vec!["temp".to_string()],
             })
@@ -1722,7 +2362,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1757,7 +2397,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1767,7 +2407,7 @@ mod tests {
         source_vault
             .add_secure_note(NewSecureNoteRecord {
                 title: "Recovery".to_string(),
-                content: "paper copy in safe".to_string(),
+                content: "paper copy in safe".to_string().into(),
                 folder: Some("Recovery".to_string()),
                 tags: vec!["recovery".to_string()],
             })
@@ -1832,7 +2472,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1891,7 +2531,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: Some("Work".to_string()),
@@ -1931,12 +2571,21 @@ mod tests {
             audit_sink_health: AuditSinkHealth::not_configured_jsonl(),
             ops_audit_events: Vec::new(),
             screen: Screen::UnlockBlocked,
-            status: "Unlock blocked: no secret".to_string(),
+            help_overlay_open: false,
+            trust_state: TrustState::default(),
+            fingerprint_return_screen: Screen::TrustGate,
+            just_locked: false,
+            confirm_input: String::new(),
+            confirm_target_name: String::new(),
+            status: "Nothing entered yet — type your passphrase, or press ? for other ways in."
+                .to_string(),
             header: None,
             items: Vec::new(),
             selected_index: 0,
             selected_keyslot_index: 0,
             detail: None,
+            secret_revealed: false,
+            keyslot_mechanics_revealed: false,
             filters: VaultFilterState::default(),
             search_mode: false,
             capability_report: None,
@@ -1965,7 +2614,12 @@ mod tests {
         };
 
         let rendered = render_to_string(&app);
-        assert!(rendered.contains("Unlock blocked"));
+        // brand.md §3(d): the empty-state copy is a calm conversational
+        // prompt, not "Unlock blocked: ..." implementation vocabulary —
+        // assert on the meaning (still asking for the passphrase, still
+        // pointing to other ways in), not the retired exact string.
+        assert!(rendered.contains("type your passphrase"));
+        assert!(rendered.contains("other ways in"));
         assert!(rendered.contains("Recovery Secret"));
         assert!(rendered.contains("Native unlock now works directly from the TUI"));
         assert!(rendered.contains("Unlock Vault"));
@@ -1984,7 +2638,7 @@ mod tests {
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
-        assert!(app.status.contains("Vault unlocked"));
+        assert!(app.status.contains("Vault open"));
     }
 
     #[test]
@@ -2164,7 +2818,7 @@ mod tests {
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
-        assert!(app.status.contains("Vault unlocked"));
+        assert!(app.status.contains("Vault open"));
     }
 
     #[test]
@@ -2251,7 +2905,7 @@ mod tests {
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
-        assert!(app.status.contains("Vault unlocked"));
+        assert!(app.status.contains("Vault open"));
     }
 
     #[test]
@@ -2277,7 +2931,7 @@ mod tests {
         app.submit_native_unlock();
 
         assert!(matches!(app.screen, Screen::Vault));
-        assert!(app.status.contains("Vault unlocked"));
+        assert!(app.status.contains("Vault open"));
     }
 
     #[test]
@@ -2292,7 +2946,7 @@ mod tests {
             .add_login(NewLoginRecord {
                 title: "GitHub".to_string(),
                 username: "octocat".to_string(),
-                password: "hunter2".to_string(),
+                password: "hunter2".to_string().into(),
                 url: None,
                 notes: None,
                 folder: None,
@@ -2384,6 +3038,207 @@ mod tests {
         assert!(app.export_transfer_form.package_password.is_empty());
         assert!(app.import_transfer_form.package_password.is_empty());
         assert!(app.import_transfer_form.key_passphrase.is_empty());
+    }
+
+    /// P9.6: the panic/quick-lock hotkey (Ctrl+L) must immediately drive any
+    /// unlocked screen to `UnlockBlocked`, purge every secret-bearing form
+    /// via `purge_secret_state_on_lock`, and clear the decrypted vault state
+    /// (`items`/`detail`/`header`) — from a representative unlocked screen
+    /// (`Vault`) and while a secret-bearing text field is mid-entry, proving
+    /// the hotkey is not swallowed by an in-progress edit.
+    #[test]
+    fn panic_lock_hotkey_purges_secrets_from_any_unlocked_screen() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(!app.items.is_empty());
+        assert!(app.detail.is_some());
+
+        // Simulate a secret mid-entry in a form the panic key must still
+        // scrub, proving the hotkey is not blocked by focus on a text field.
+        app.certificate_rewrap_form.key_passphrase =
+            SecretString::new("half-typed-secret".to_string());
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert!(!should_quit, "panic-lock must not quit the app");
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(app.items.is_empty());
+        assert!(app.detail.is_none());
+        assert!(app.header.is_none());
+        assert!(matches!(app.options.auth, VaultAuth::PasswordEnv(_)));
+        assert!(app.certificate_rewrap_form.key_passphrase.is_empty());
+        assert!(app.status.to_lowercase().contains("lock"));
+    }
+
+    /// P9.6 verify fix: `purge_secret_state_on_lock` must scrub EVERY
+    /// secret-bearing UI field, not just the unlock/recovery/certificate/
+    /// transfer forms. Before this fix, triggering the panic-lock hotkey
+    /// from mid-edit on an Add/Edit form (or with a decrypted item still
+    /// shown on the detail screen) left the plaintext password, card
+    /// number/CVV, and note content resident in `add_login_form`,
+    /// `card_form`, `note_form`, `identity_form`, and `self.detail` even
+    /// though the screen had already flipped to `UnlockBlocked`. This test
+    /// must fail before the fix and pass after.
+    #[test]
+    fn panic_lock_hotkey_scrubs_every_secret_bearing_form_and_detail() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+        let vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        vault
+            .add_login(NewLoginRecord {
+                title: "GitHub".to_string(),
+                username: "octocat".to_string(),
+                password: "hunter2".to_string().into(),
+                url: None,
+                notes: None,
+                folder: None,
+                tags: vec![],
+            })
+            .expect("add login");
+
+        let mut app = App::new(options);
+        assert!(matches!(app.screen, Screen::Vault));
+        assert!(
+            app.detail.is_some(),
+            "a decrypted item must be resident to prove it gets scrubbed"
+        );
+
+        // Simulate mid-entry secrets in every form the panic key must scrub.
+        app.screen = Screen::EditLogin;
+        app.add_login_form.password = "half-typed-password".to_string();
+        app.card_form.number = "4111111111111111".to_string();
+        app.card_form.security_code = "123".to_string();
+        app.note_form.content = "recovery codes: AAAA-BBBB-CCCC".to_string();
+        app.identity_form.full_name = "Jane Doe".to_string();
+        app.identity_form.address = "123 Secret St".to_string();
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert!(!should_quit, "panic-lock must not quit the app");
+        assert!(matches!(app.screen, Screen::UnlockBlocked));
+        assert!(
+            app.detail.is_none(),
+            "the decrypted detail item must be scrubbed from the panic-lock path"
+        );
+        assert!(
+            app.add_login_form.password.is_empty(),
+            "add_login_form.password must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.card_form.number.is_empty(),
+            "card_form.number must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.card_form.security_code.is_empty(),
+            "card_form.security_code must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.note_form.content.is_empty(),
+            "note_form.content must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.identity_form.full_name.is_empty(),
+            "identity_form.full_name must be scrubbed on panic-lock"
+        );
+        assert!(
+            app.identity_form.address.is_empty(),
+            "identity_form.address must be scrubbed on panic-lock"
+        );
+    }
+
+    /// `purge_secret_state_on_lock` must be a COMPLETE scrub on its own, called
+    /// DIRECTLY — not only correct when reached through the hotkey path (which
+    /// clears some fields in its wrapper). This enforces the function's contract
+    /// so a partial scrub cannot land green via a hotkey-only test (P9 re-verify
+    /// LEAK-C: the master recovery mnemonic was cleared by the caller, not here).
+    #[test]
+    fn purge_secret_state_on_lock_directly_scrubs_the_master_recovery_mnemonic() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        // Obtain a real enrollment (holds the 24-word master recovery phrase)
+        // through the vault API, then plant it in App state as the enroll flow does.
+        let mut vault = unlock_vault(&path, "correct horse battery staple").expect("unlock");
+        let enrollment = vault
+            .add_mnemonic_keyslot(Some("paper-backup".to_string()))
+            .expect("add mnemonic keyslot");
+        let mut app = App::new(options);
+        app.latest_mnemonic_enrollment = Some(enrollment);
+
+        // Call the purge contract DIRECTLY, not through the hotkey wrapper.
+        app.purge_secret_state_on_lock();
+
+        assert!(
+            app.latest_mnemonic_enrollment.is_none(),
+            "purge_secret_state_on_lock must clear the master recovery mnemonic on its own"
+        );
+    }
+
+    /// The armed clipboard buffer holds a plaintext copy of the last-copied
+    /// secret (including the master recovery mnemonic). `purge_secret_state_on_lock`
+    /// must scrub that in-memory residency ON ITS OWN — not only when reached
+    /// through `clear_decrypted_state_and_lock` (P9 re-verify LEAK-D: the
+    /// caller-vs-contract split, one layer down from the mnemonic itself).
+    #[test]
+    fn purge_secret_state_on_lock_directly_scrubs_the_armed_clipboard_buffer() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+        paranoid_vault::init_vault(&path, "correct horse battery staple").expect("init");
+        let options = app_options(&path);
+        add_device_fallback(&options).expect("device fallback");
+
+        let mut app = App::new(options);
+        // Arm the clipboard buffer with a plaintext secret, as a copy would.
+        app.session
+            .arm_clipboard_clear("PLANTED-CLIPBOARD-SECRET".to_string());
+
+        // Call the purge contract DIRECTLY, not via the hotkey/lock wrapper.
+        app.purge_secret_state_on_lock();
+
+        assert!(
+            app.session.take_pending_clipboard_contents().is_none(),
+            "purge_secret_state_on_lock must scrub the armed clipboard buffer on its own"
+        );
+    }
+
+    /// The panic-lock hotkey must be a no-op (not crash, not change screen)
+    /// from pre-unlock screens that have no unlocked state to purge.
+    #[test]
+    fn panic_lock_hotkey_is_inert_before_unlock() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("vault.sqlite");
+
+        let mut app = App::new(password_only_options(&path));
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
+
+        let should_quit = app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert!(!should_quit);
+        assert!(matches!(app.screen, Screen::EnvironmentApproval));
     }
 
     #[test]

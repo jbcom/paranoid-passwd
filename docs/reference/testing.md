@@ -13,6 +13,42 @@ The closed AI review disposition surface is tracked separately in
 The repository enforces that inventory with `scripts/verify_ai_review_inventory.sh` and the
 claim-led gate in `scripts/security_assurance_gate.py`.
 
+## Test-Execution Parallelism
+
+`scripts/cargo_test.sh` — the entry point behind `make test` and `make ci` — builds every
+workspace test binary once with `cargo test --no-run --message-format=json` (a single
+lockfile-honoring compile, `--locked --frozen --offline` preserved), then runs the resulting
+per-crate/per-suite test binaries **concurrently** as separate OS processes, bounded to the
+host's CPU count (`getconf _NPROCESSORS_ONLN` / `sysctl -n hw.ncpu`, override with
+`PARANOID_TEST_MAX_PARALLEL`). Doc-tests (`cargo test --doc`) run as one more suite in the same
+batch, since `--no-run` cannot pre-build them. Each suite's stdout/stderr is buffered to a
+per-job log file and printed as one atomic block, sorted by suite name, only after that suite
+finishes — no interleaved output. The aggregate exit code is nonzero if any suite fails, and
+each failing suite is called out with `=== suite FAILED: <name> (exit <code>) ===` on stderr.
+
+This is dependency-free by design — no `cargo-nextest`, `mold`, or `lld` — because the pinned
+Wolfi builder image ships none of them and the workspace has no vendored path to add them
+without a meaningful `vendor/` size increase (see the P6.7 section of
+[CI Design](./ci-design.md#p6-7-concurrent-per-suite-test-execution-no-new-dependencies) for the
+measured numbers and the rejected `cargo-nextest` vendoring alternative).
+
+Two escape hatches:
+
+- `PARANOID_TEST_SERIAL=1` restores the previous behavior: a single `cargo test` invocation
+  running every suite serially in-process, exactly as before P6.7.
+- A `--` test-name-filter argument (e.g. `cargo_test.sh -- some_test_name`) always falls back to
+  the serial path automatically, since a filter has to see every suite in one process to apply
+  consistently — `cargo_test.sh` detects `--` in its argument list and skips the parallel
+  build/dispatch entirely in that case.
+
+Each concurrently-running suite gets its own subdirectory under
+`PARANOID_TEST_DEVICE_STORE_DIR` (job-scoped, auto-created) rather than sharing one root, because
+the debug-only device-store test shim keys files by `hex(service + account)` and two suites
+racing the same account inside a shared root could otherwise clobber each other now that suites
+run concurrently instead of one-`cargo-test`-invocation-at-a-time. Callers that pre-set
+`PARANOID_TEST_DEVICE_STORE_DIR` explicitly keep the old shared-root behavior and own that
+isolation contract themselves.
+
 Run the full assurance gate with:
 
 ```bash
@@ -20,7 +56,14 @@ make verify-assurance
 ```
 
 That command verifies the hallucination checks, supply-chain checks, AI review inventory, and
-security assurance protocol wiring.
+security assurance protocol wiring. It also runs
+[`tests/test_security_assurance_gate.py`](../../../tests/test_security_assurance_gate.py), a
+negative-proof test that mirrors the small file set a P9 hardening claim's requirements touch
+into an isolated temp directory, strips a load-bearing string (the zeroize wrapper's redacting
+`Debug` impl for `vault.zeroized-payload-secrets`, the pre-Argon2id `check_lockout` call for
+`vault.failed-unlock-lockout`), and asserts the gate actually flips that claim to `fail` —
+proving the gate would catch someone deleting the hardening later, not just that its
+`Requirement` strings currently happen to match.
 
 ## Local Release-Candidate Quality Gate
 
@@ -39,7 +82,7 @@ make quality-emulate
   syntax for the existing docs/test harness scripts without writing bytecode, tracked-file secret
   scanning, and local visibility of security scanners.
 - `make quality` runs `verify-deep`, the full `ci` target, GUI target compile checks, and the
-  supported multi-viewport GUI visual-regression target for the host. On macOS it drives the Linux
+  supported per-screen GUI visual-regression target for the host. On macOS it drives the Linux
   GUI harness through the local builder image; on Linux it uses the native `xvfb-run` harness. This
   target requires the local security scanner stack and runs the enforced local scanner subset.
 - `make quality-emulate` runs the release-candidate posture through the custom Wolfi builder image:
@@ -112,14 +155,179 @@ non-secret Slint WASM surface. The native vault and generator crates are not lin
 `wasm32-unknown-unknown`; target-appropriate vault storage, crypto, packaging, and runtime
 validation remain product work before WASM can become a supported secret-handling surface.
 
+## e2e Test Tiers: `make e2e-ci` and `make e2e-local`
+
+The end-to-end suites split into two Make targets by what environment they need, not by what they
+cover:
+
+- **`make e2e-ci`** — the headless-deterministic tier. Runs on any machine with no display, no
+  Accessibility permission, and no human present: `test-cli-contract`, `test-vault-e2e`,
+  `test-tui-e2e` (PTY-driven, no real terminal window needed), `test-gui-e2e` when the host is
+  Linux (under `xvfb-run`; empty on macOS/Windows, matching `CI_GUI_E2E_TARGET`'s existing
+  Linux-only gating), and `test-gui-widgets` (the in-process real-widget-event suite from
+  [Real Widget-Event Tests](#real-widget-event-tests), itself already headless with no display
+  server). `make ci` calls `make e2e-ci` in place of the individual targets it used to invoke
+  directly — this is a pure aggregation: the exact same commands run in the exact same order, just
+  grouped under one name. Verified by diffing `make ci -n`'s full command list before and after the
+  regrouping.
+- **`make e2e-local`** — `make e2e-ci` plus [`tests/test_gui_e2e_local.sh`](../../../tests/test_gui_e2e_local.sh),
+  which drives the real `paranoid-passwd-gui` window with real OS-level mouse clicks and keyboard
+  input on a real display, gated to macOS with a real (Aqua) desktop session and Accessibility
+  permission granted to the calling terminal. This is the only tier that proves the compiled GUI
+  is actually operable by a human pointing a mouse and typing — every other GUI gate either drives
+  the widget tree in-process (`test-gui-widgets`) or drives the binary through the
+  `PARANOID_GUI_AUTOMATION_*` side-channel (`test-gui-e2e`), neither of which touches the OS input
+  path at all.
+
+### Real-Input Local GUI e2e (`make e2e-local`)
+
+`tests/test_gui_e2e_local.sh` launches the real `paranoid-passwd-gui` binary and drives it through
+the full operator workflow — generate passwords, init vault, add a login, lock, unlock, export
+backup — using genuine synthetic mouse/keyboard events, then asserts every outcome through the
+vault CLI (`paranoid-passwd vault --cli --path <vault> list`) against the real on-disk vault file,
+not through screen text. It captures a screenshot of each stage to `dist/e2e-local/` for review.
+
+**Why not AppleScript's `System Events` GUI scripting.** `paranoid-passwd-gui` is a winit-backed
+Slint window. Probing it live shows its NSAccessibility tree exposes only titlebar chrome (close
+/zoom/minimize buttons and the title text) — every `LineEdit`, `Button`, and `CheckBox` inside the
+compiled `.slint` tree is invisible to the AX tree Apple's UI-scripting APIs walk. `tell
+application "System Events" to click at {x,y}` and `keystroke` are silently dropped by the window
+in this state: no error, no effect, the field never gets focus. This was confirmed empirically
+(clicking a checkbox and a `LineEdit` at their exact on-screen coordinates through `System Events`
+changed nothing; the same coordinates through a raw CGEvent post worked immediately).
+
+**The real driver: raw CGEvents at the HID tap.** [`scripts/gui_real_input_macos.swift`](../../../scripts/gui_real_input_macos.swift)
+is a small Swift CLI, compiled on demand with `swiftc` (part of the Xcode Command Line Tools this
+repository's macOS builds already require — no new package install), that posts `CGEvent`s
+directly at `.cghidEventTap` — the same event path a physical mouse or keyboard produces. This
+bypasses the AX tree entirely and is delivered to the window exactly as real hardware input would
+be, which paranoid-gui's winit event loop does receive and process. It has three subcommands:
+
+- `click <x> <y>` — moves the cursor and posts a real left mouse down/up at an absolute screen
+  point.
+- `type <string>` — posts one keyDown/keyUp pair per character via CGEvent's Unicode-string path,
+  so any printable character works without a virtual-keycode table.
+- `keyrepeat <keycode> <count> [cmd]` — posts a virtual-keycode key event `count` times in a row,
+  optionally with the Command modifier held throughout. Used to clear a `LineEdit`'s existing text
+  deterministically: Right-arrow (keycode 124) ×100 to reach the true end of the field regardless
+  of where the cursor started, then Backspace (keycode 51) ×150 to clear it regardless of prior
+  content length. `Cmd+A` (select-all) and `Cmd+Right` (end-of-line) were tried first and are not
+  reliably honored by this Slint `LineEdit` build; plain repeated navigation keys were verified to
+  work deterministically instead.
+
+**Coordinates are measured, not guessed.** Every field/button coordinate the driver clicks is a
+window-relative point measured once against a real running instance of the exact compiled
+`paranoid.slint` tree (screenshot the window, locate each control's pixel center, convert through
+the retina scale factor). This is sound because `paranoid.slint`'s three-column operator layout is
+fully static — every panel, field, and button carries a literal pixel width/height with no
+data-dependent reflow — so the same relative offsets are stable across runs. The driver still reads
+the window's actual position and size fresh at the start of each stage (via `System Events`, which
+*can* see window-chrome-level geometry even though it cannot see or click the inner widget tree)
+and rescales every reference coordinate against the window's actual granted size, so it keeps
+working if a future toolchain change shifts the window's default size slightly.
+
+**"Lock" is a real process quit, not an idle-timeout wait.** The GUI has no manual lock button —
+session lock/unlock in `paranoid_vault::native_access::NativeSessionHardening` is purely
+idle-timeout-driven, and waiting out that timeout in an e2e run is impractical. `test_gui_e2e_local.sh`
+quits the running GUI process (via the real, AX-visible titlebar close button) and relaunches it
+against the same vault path, which exercises the same on-disk persistence and Argon2id
+re-derivation path a real lock/unlock cycle would — the same technique
+[`tests/test_tui_e2e.py`](../../../tests/test_tui_e2e.py) already uses for its own fresh-process
+restart/unlock coverage.
+
+**Real KDF timing.** Vault init and unlock both derive against the real
+`DEFAULT_MEMORY_COST_KIB` (256 MiB) Argon2id parameters on a `--profile dev` / `CARGO_PROFILE_DEV_DEBUG=0`
+build — measured at roughly 9-10 seconds per derivation on Apple Silicon. The script polls the
+vault CLI (not a fixed sleep) for each stage's outcome, bounded generously and scaled by
+`PARANOID_E2E_TIMEOUT_SCALE` like the other e2e harnesses, so it neither races the real KDF cost
+nor stalls longer than necessary on a fast machine.
+
+**Display-feasibility gate.** The script fails fast with an actionable message, instead of hanging
+or silently no-op-ing, when either precondition is missing:
+
+- `launchctl managername` must report `Aqua` (a real logged-in WindowServer session). A headless
+  SSH session or CI runner reports something else and the script exits `64` immediately.
+- `System Events`'s "UI elements enabled" must be `true` — the calling terminal (Terminal.app,
+  iTerm2, etc.) needs Accessibility permission in System Settings > Privacy & Security >
+  Accessibility for its synthetic `CGEvent`s to be delivered to another application, and on current
+  macOS may also need Input Monitoring if clicks/keystrokes still do not land after granting
+  Accessibility. Without this grant, every synthetic event is silently dropped by the OS rather
+  than erroring, so this check is the only way to fail loud instead of hanging on a GUI that never
+  receives any input.
+
+Run it directly (after granting the permissions above) with:
+
+```bash
+CARGO_PROFILE_DEV_DEBUG=0 cargo build -p paranoid-cli -p paranoid-gui --locked --frozen --offline
+bash tests/test_gui_e2e_local.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui dist/e2e-local
+```
+
+or through the aggregate target:
+
+```bash
+make e2e-local
+```
+
 Current GUI platform coverage is explicit:
 
 | GUI surface | Current gate | What it proves |
 | --- | --- | --- |
+| Widget-event unit coverage | `make test-gui-widgets` | Drives the real compiled `paranoid.slint` widget tree in-process through synthetic pointer/accessible-value events (see below) and asserts on window property state. No display server, no `SLINT_BACKEND`, no `xvfb-run`. |
 | Desktop Slint | `make test-gui-e2e` or `make test-gui-e2e-emulate` | Runs the real GUI binary through the operator workflow (see below), validates durable audit evidence, and captures a rendered screenshot. |
-| Desktop viewport classes | `make test-gui-visual-regression` or `make test-gui-visual-regression-emulate` | Replays the real GUI workflow at desktop, tablet, and narrow/mobile-class viewport sizes and rejects blank or low-information screenshots. |
+| Per-screen visual regression | `make test-gui-visual-regression` or `make test-gui-visual-regression-emulate` | Drives every named screen in `paranoid.slint`'s screen graph (ia.md §2/§6) through a real vault pass and a decoy vault pass, capturing one screenshot per screen into `tests/baseline/gui/`, and asserts the real/decoy action-bar region is pixel-identical (journeys.md invariant 5). |
+| Real-input local e2e | `make e2e-local` (macOS, real display + Accessibility permission) | Drives the real GUI binary with genuine OS-level mouse clicks and keyboard input (see [Real-Input Local GUI e2e](#real-input-local-gui-e2e-make-e2e-local) above), the only GUI gate that exercises the actual OS input path end to end. |
 | Android Slint | `make test-gui-android-check` | Compile-checks the Rust-native Slint library against the configured Android NDK while preserving native core/vault linkage. Runtime emulator/Maestro coverage remains the next Android gate. |
 | WASM Slint | `make test-gui-wasm-check` | Compile-checks the gated non-secret Slint WASM surface. Secret-handling WASM is not supported until target storage, crypto, and runtime validation are threat-modeled. |
+
+### Real Widget-Event Tests
+
+`make test-gui-widgets` is the in-process counterpart to the `test-gui-e2e` process harness below:
+instead of launching the compiled `paranoid-passwd-gui` binary and driving it through the
+`PARANOID_GUI_AUTOMATION_*` side-channel under `xvfb-run`, it links the `slint_shell` module
+directly into a `paranoid-gui` test binary and drives the real generated
+`ParanoidPasswdShell` widget tree with `i-slint-backend-testing`'s synthetic pointer and
+accessible-value events — the same code paths a real mouse click or keystroke exercises. A
+`LineEdit`'s compiled `accessible-action-set-value` handler assigns `text-input.text` and fires
+`edited`, exactly as a real keystroke would; a `Button`'s synthetic pointer press/release exercises
+the same `TouchArea` a real mouse click would.
+
+`i_slint_backend_testing::init_no_event_loop()` installs a null-rendering testing platform with
+real Slint layout math but no actual pixel rendering, so element positions used by
+`single_click`/`mock_single_click` are geometrically accurate against the compiled `.slint` tree
+without any display server. This is why the target needs no `SLINT_BACKEND` and no `xvfb-run`,
+unlike `test-gui-e2e`.
+
+The vendored `slint` crate (`1.16.1`) does not carry its own testing module; the synthetic-event
+API lives in the separate `i-slint-backend-testing` crate (same pinned `=1.16.1` version,
+default features only — no `mcp`/`system-testing`/`internal`), added as a `paranoid-gui`
+dev-dependency and vendored under `vendor/i-slint-backend-testing`. `ElementHandle::find_by_element_id`
+requires the Slint compiler to have emitted element debug info, so `paranoid-gui`'s test tree only
+compiles the `widget_event_tests` module behind the `gui-widget-tests` Cargo feature, and `make
+test-gui-widgets` builds with `SLINT_EMIT_DEBUG_INFO=1 --features gui-widget-tests`; plain `make
+test` / `cargo test --workspace` never sets either, so the ordinary test build stays unaffected.
+
+Coverage, asserting on window property state (status text, item/keyslot counts, vault-items and
+selected-item summaries) rather than the automation side-channel:
+
+- init-vault: types a vault path and recovery secret into the real `vault-path-input`/
+  `vault-secret` inputs and clicks the real "Init" button; asserts the vault file exists and the
+  status/vault-items properties reflect an unlocked, empty vault
+- add-login: types a title/username/password/folder/tags into the real Operations panel inputs
+  and clicks the real "Add login" button; asserts the vault-items property gains exactly one entry
+  and never echoes the typed password
+- generate-and-rotate: types a rotate length into the real input and clicks the real "Rotate"
+  button; asserts the status confirms rotation and the selected item's password-history grew
+- enroll-mnemonic: types a mnemonic label into the real input and clicks the real "Enroll
+  mnemonic" button; asserts the keyslot-summary property gains a mnemonic entry and the
+  selected-item pane surfaces the recovery phrase
+- export-backup: types a backup output path into the real input and clicks the real "Export
+  backup" button; asserts the backup file was written and the status reflects the export
+
+Run directly with:
+
+```bash
+SLINT_EMIT_DEBUG_INFO=1 cargo test -p paranoid-gui --locked --frozen --offline --features gui-widget-tests --lib widget_event_tests::
+```
 
 ### GUI Automation Environment Variables
 
@@ -262,8 +470,12 @@ cargo test -p paranoid-core --locked --frozen --offline
   [`tests/test_gui_e2e.sh`](../../../tests/test_gui_e2e.sh), proving the native
   Slint desktop app can run an operator workflow end to end under `xvfb-run`
   and leave a screenshot artifact for review
-- a multi-viewport GUI visual-regression mode that replays the same workflow at desktop, tablet,
-  and narrow/mobile-class viewport sizes and rejects blank or low-information captures
+- a per-screen GUI visual-regression harness
+  ([`tests/test_gui_visual_regression.sh`](../../../tests/test_gui_visual_regression.sh)) that
+  drives every named screen in `paranoid.slint`'s screen graph through a real vault pass and a
+  decoy vault pass, capturing one screenshot per screen into `tests/baseline/gui/` (the committed
+  baseline), and asserts the real/decoy action-bar region is pixel-identical between passes so the
+  two vaults stay visually indistinguishable outside the content the owner's passphrase unlocked
 - vault TUI rendering and launch-policy smoke tests
 - headless CLI end-to-end coverage for the documented vault workflows in
   [`tests/test_vault_cli.sh`](../../../tests/test_vault_cli.sh), including
@@ -292,7 +504,7 @@ cargo build -p paranoid-cli --locked --frozen --offline
 tests/test_cli.sh target/debug/paranoid-passwd
 tests/test_tui_e2e.py target/debug/paranoid-passwd
 tests/test_gui_e2e.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui dist/gui-e2e.png
-tests/test_gui_e2e.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui dist/gui-e2e.png "desktop=1280x1024 tablet=900x700 mobile=420x800"
+tests/test_gui_visual_regression.sh target/debug/paranoid-passwd target/debug/paranoid-passwd-gui tests/baseline/gui
 tests/test_vault_cli.sh target/debug/paranoid-passwd
 bash scripts/hallucination_check.sh
 bash scripts/supply_chain_verify.sh
@@ -385,6 +597,7 @@ cargo test -p paranoid-cli --locked --frozen --offline --test tui_scripted
 - encrypted transfer-package inspection and import coverage, including selective filters, certificate unwrap, and id remapping on conflict
 - invalid-backup and tampered-ciphertext fail-closed coverage
 - shared session-hardening coverage for clipboard auto-clear timing and idle-lock timing
+- clipboard-history-exclusion hint coverage (`clipboard_hardening` module): proves the hardened copy path writes plain-text readable back, overwrites prior clipboard contents, and (macOS/Linux/Windows-specific) exercises each platform's `arboard` exclusion-hint builder; gated behind a real, addressable system clipboard and serialized against a process-local mutex since concurrent OS-clipboard access from multiple threads is unsafe on some platforms
 
 `paranoid-gui` includes:
 
@@ -395,11 +608,18 @@ cargo test -p paranoid-cli --locked --frozen --offline --test tui_scripted
 - a comprehensive operator workflow test that crosses the generator and vault
   surfaces in one run, covering audit completion, vault CRUD, generate-and-rotate,
   keyslot navigation, mnemonic enrollment, backup export, and transfer export/import
+- real widget-event tests (`make test-gui-widgets`, gated behind the `gui-widget-tests`
+  Cargo feature) that drive the compiled `ParanoidPasswdShell` widget tree in-process
+  through `i-slint-backend-testing` synthetic pointer/accessible-value events — typing
+  into the real `LineEdit`s and clicking the real `Button`s — covering init-vault,
+  add-login, generate-and-rotate, enroll-mnemonic, and export-backup against window
+  property state, headless with no display server
 - a real GUI-binary operator harness that launches the desktop app under Xvfb,
   drives the same native update path used by interactive controls, attests the
   workflow result to disk, and captures a rendered screenshot artifact
-- a real GUI-binary visual-regression harness that captures desktop, tablet, and
-  narrow/mobile-class screenshots from the same operator workflow
+- a real GUI-binary per-screen visual-regression harness that captures one screenshot per named
+  screen in the screen graph, for both a real vault pass and a decoy vault pass, and asserts the
+  two passes' action-bar regions are pixel-identical
 - vault refresh, CRUD, `SecureNote`, `Card`, `Identity`, folder, tag, password-history, duplicate-password visibility, structured filtering, generate-and-rotate, encrypted backup export/import, invalid backup restore fail-closed coverage, encrypted transfer export/import, invalid transfer import fail-closed coverage, and backup/transfer summary preview coverage
 - native GUI keyslot inspection, mnemonic-slot rotation, certificate-slot rewrap, relabel, recovery-secret rotation, enrollment, posture-aware removal, device-slot rebind coverage, and active-session continuity after device rebind
 - native GUI direct unlock coverage for recovery-secret, mnemonic, device-bound, and certificate-backed flows
@@ -438,9 +658,9 @@ make release-emulate
   `--help`.
 - `make test-gui-e2e` runs the actionable GUI workflow harness on Linux hosts, while
   `make test-gui-e2e-emulate` drives the same path through the custom builder image on macOS.
-- `make test-gui-visual-regression` captures desktop, tablet, and narrow/mobile-class screenshots
-  on Linux hosts; `make test-gui-visual-regression-emulate` runs the same visual matrix through the
-  builder image on macOS.
+- `make test-gui-visual-regression` re-baselines the per-screen GUI screenshots (real + decoy
+  passes) into `tests/baseline/gui/` on Linux hosts; `make test-gui-visual-regression-emulate` runs
+  the same capture through the builder image on macOS.
 - `scripts/release_validate.sh` is used in CI after the full matrix build to verify all CLI and GUI artifacts, Linux `.deb` packages, the Windows GUI `.msi`, package-manager manifests, and `install.sh`. Linux aggregation explicitly defers MSI payload extraction to the paired Windows published-release verifier.
 - The release download verification matrix also includes the Windows GUI `.msi` as its own
   Windows-host asset so checksum, attestation, platform-signing, and administrative-extraction smoke

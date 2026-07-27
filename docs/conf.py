@@ -100,4 +100,9 @@ linkcheck_retries = 2
 linkcheck_ignore = [
     r"https://paranoid-passwd\.com/.*",
     r"https://genai\.owasp\.org/2025/12/09/owasp-genai-security-project-releases-top-10-risks-and-mitigations-for-agentic-ai-security/",
+    # Intra-design-doc cross-references. MyST renders these sibling-file links
+    # verbatim; linkcheck's URL heuristic then misreads a bare "name.md" as an
+    # external "http://name.md". The files are in the design toctree and the
+    # links resolve in the built site — this only silences the false positive.
+    r"https?://(brand|journeys|ia|system)\.md/?",
 ]

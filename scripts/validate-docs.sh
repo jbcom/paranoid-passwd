@@ -175,3 +175,23 @@ if [ "${#missing_gui_callbacks[@]}" -gt 0 ]; then
   echo "docs/ is missing coverage for GUI callback(s): ${missing_gui_callbacks[*]}" >&2
   exit 1
 fi
+
+# P9.7 claims-integrity: docs must never assert P9 hardening stronger than what actually
+# shipped (docs/reference/messaging.md "Claims To Avoid" is the inventory of these phrases;
+# it is excluded from this scan since it must name the phrases to ban them). Every other
+# markdown page is scanned so the overclaim cannot resurface anywhere.
+p9_overclaim_corpus="$(find "$REPO_ROOT/docs" -type f -name '*.md' -not -path '*/_build/*' -not -name 'messaging.md' -exec cat {} +)"
+p9_overclaim_phrases=(
+  "memory-safe against a root"
+  "immune to memory disclosure"
+  "guaranteed clipboard privacy"
+  "clipboard history cannot capture"
+  "self-destructs after"
+  "wipes the vault after"
+)
+for phrase in "${p9_overclaim_phrases[@]}"; do
+  if grep -qiF -- "$phrase" <<<"$p9_overclaim_corpus"; then
+    echo "docs/ must not claim: '$phrase' (see docs/reference/messaging.md Claims To Avoid, P9 hardening honesty)" >&2
+    exit 1
+  fi
+done
