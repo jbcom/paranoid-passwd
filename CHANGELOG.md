@@ -12,6 +12,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.7.0...paranoid-passwd-v3.8.0) (2026-07-27)
+
+
+### Features
+
+* directive integration — P0 security, P2 e2e/detection, P3-carried docs, P4/P5 docs and extensibility ([#146](https://github.com/jbcom/paranoid-passwd/issues/146)) ([5e600ab](https://github.com/jbcom/paranoid-passwd/commit/5e600abf79de867b077ed19ba8dfea670d5c041a))
+
+
+### Bug Fixes
+
+* **supply-chain:** sync scanner-toolchain manifest with codeql-action v4.37.1 (supersedes [#148](https://github.com/jbcom/paranoid-passwd/issues/148)) ([#153](https://github.com/jbcom/paranoid-passwd/issues/153)) ([92bf7ae](https://github.com/jbcom/paranoid-passwd/commit/92bf7aef2ec11b2a2b1e46e792c4cd1b1a062523))
+* **supply-chain:** sync scanner-toolchain manifest with codeql-action v4.37.3 (supersedes [#154](https://github.com/jbcom/paranoid-passwd/issues/154)) ([#156](https://github.com/jbcom/paranoid-passwd/issues/156)) ([3531e26](https://github.com/jbcom/paranoid-passwd/commit/3531e26524cb2ed515079a1f4270a20f2f730c7a))
+
 ## [3.7.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.6.5...paranoid-passwd-v3.7.0) (2026-05-08)
 
 
