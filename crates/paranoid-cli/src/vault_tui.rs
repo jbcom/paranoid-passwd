@@ -760,39 +760,6 @@ mod tests {
         }
     }
 
-    /// `ratatui::Terminal::new()` calls `crossterm::terminal::size()` under
-    /// the hood, which does a real ioctl against stdout even though this
-    /// test's backend writes to an in-memory buffer — the ioctl is on the
-    /// process's terminal, not on the `Write` target. Under CI containers
-    /// running 130+ parallel test threads that transiently EAGAIN/ENOENT
-    /// under fd/process pressure (observed both ways in practice), so this
-    /// is the one test in the module serialized against a dedicated lock
-    /// rather than sharing the ambient thread pool's contention.
-    fn terminal_probe_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    /// Test-harness-only bounded retry around the `Terminal::new` ioctl
-    /// flake described on [`terminal_probe_lock`]. Deliberately NOT a
-    /// production helper — nothing under the non-test `run_app`/`tui.rs`
-    /// terminal setup path calls this; masking a real EAGAIN/ENOENT there
-    /// would hide an actual environment problem instead of surfacing it.
-    /// Here it only compensates for CI-container syscall noise around a
-    /// terminal-size probe this specific test cannot avoid making.
-    fn new_terminal_with_retry<B: ratatui::backend::Backend>(
-        backend_factory: impl Fn() -> B,
-    ) -> Terminal<B> {
-        let mut last_err = None;
-        for _ in 0..5 {
-            match Terminal::new(backend_factory()) {
-                Ok(terminal) => return terminal,
-                Err(err) => last_err = Some(err),
-            }
-        }
-        panic!("terminal: {}", last_err.expect("at least one attempt ran"));
-    }
-
     /// P8.5 (b): regression-pins the ⊘ glyph across a real incremental
     /// `CrosstermBackend` diff (Vault screen drawn first, then
     /// `UnlockBlocked` drawn on the SAME `Terminal`, exactly like the real
@@ -803,13 +770,23 @@ mod tests {
     /// negative traced back to a test-harness CSI-parsing gap (see
     /// `tests/test_tui_e2e.py`'s `TerminalGrid` docstring), to permanently
     /// cover the code path that false negative exercised.
+    ///
+    /// Uses `Terminal::with_options` with a `Viewport::Fixed` area instead
+    /// of `Terminal::new`: `Terminal::new` calls `Backend::size()`, which
+    /// for `CrosstermBackend` means `crossterm::terminal::size()` — an
+    /// ioctl against `/dev/tty` (or `STDOUT_FILENO`) that, on failure,
+    /// falls back to shelling out to `tput`. The Wolfi CI builder image
+    /// has no `tput`/ncurses installed, so on any run where that ioctl
+    /// genuinely fails (containerized runners without a controlling
+    /// terminal do this intermittently, not on every run) the fallback
+    /// itself fails deterministically and `Terminal::new` returns `Err`.
+    /// `Viewport::Fixed` skips the `Backend::size()` call entirely, so
+    /// this test never depends on a terminal-size probe the CI
+    /// environment cannot always satisfy — it doesn't need a real
+    /// terminal size in the first place, since it renders into an
+    /// in-memory buffer at a caller-chosen size.
     #[test]
     fn crossterm_backend_bytes_carry_locked_glyph_across_an_incremental_screen_transition() {
-        // Serialized: see `terminal_probe_lock` docs above.
-        let _terminal_probe_guard = terminal_probe_lock()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-
         let tempdir = tempdir().expect("tempdir");
         let path = tempdir.path().join("vault.sqlite");
         init_vault(&path, "correct horse battery staple").expect("init");
@@ -819,7 +796,14 @@ mod tests {
         assert!(matches!(app.screen, Screen::Vault));
 
         let shared = SharedWriteBuf::default();
-        let mut terminal = new_terminal_with_retry(|| CrosstermBackend::new(shared.clone()));
+        let backend = CrosstermBackend::new(shared.clone());
+        let mut terminal = Terminal::with_options(
+            backend,
+            ratatui::TerminalOptions {
+                viewport: ratatui::Viewport::Fixed(ratatui::layout::Rect::new(0, 0, 120, 42)),
+            },
+        )
+        .expect("terminal");
         // Frame 1: Vault screen (no state token) — establishes the "prior
         // frame" the diff renderer compares frame 2 against.
         terminal.draw(|frame| render(frame, &app)).expect("draw1");
