@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.8.0...paranoid-passwd-v3.9.0) (2026-07-27)
+
+
+### Features
+
+* reconcile P0-P9 security hardening + product redesign onto main (supersedes [#149](https://github.com/jbcom/paranoid-passwd/issues/149)) ([#152](https://github.com/jbcom/paranoid-passwd/issues/152)) ([0d332e3](https://github.com/jbcom/paranoid-passwd/commit/0d332e3c9f81db716ecf7d4b99ca80213c3e4aac))
+
 ## [3.8.0](https://github.com/jbcom/paranoid-passwd/compare/paranoid-passwd-v3.7.0...paranoid-passwd-v3.8.0) (2026-07-27)
 
 
