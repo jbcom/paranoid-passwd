@@ -40,6 +40,13 @@ concurrency:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+    if: >-
+      !startsWith(github.ref_name, 'release-please--') &&
+      !(startsWith(github.ref_name, 'dependabot/') && contains(github.ref_name, '-non-major')) &&
+      (github.event_name != 'pull_request' ||
+      (!startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      !(startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      contains(github.event.pull_request.head.ref, '-non-major'))))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -61,7 +68,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -70,6 +77,6 @@ jobs:
           queries: security-and-quality
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        uses: github/codeql-action/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           category: '/language:${{ matrix.language }}'

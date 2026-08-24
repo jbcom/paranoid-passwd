@@ -12,7 +12,7 @@ domain: technical
 - `paranoid-core` for generation, audit math, compliance, and OpenSSL-backed crypto delegation
 - `paranoid-cli` for the scriptable CLI and default TUI
 - `paranoid-gui` for the desktop GUI scaffold
-- a Sphinx docs/download site instead of an interactive web app
+- a Sourcey docs/download site instead of an interactive web app
 
 ## Quick Commands
 
@@ -29,8 +29,8 @@ cargo run -p paranoid-cli
 # Force scriptable CLI mode
 cargo run -p paranoid-cli -- --cli --length 24 --count 3
 
-# Build docs
-python3 -m tox -e docs
+# Build and validate docs
+make docs-check
 ```
 
 ## Zero-Exception Rules

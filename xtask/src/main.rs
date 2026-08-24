@@ -9,16 +9,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use regex::Regex;
 use serde_json::Value;
 
-const EXCLUDED_PREFIXES: &[&str] = &[
-    ".git/",
-    ".tox/",
-    "dist/",
-    "docs/_build/",
-    "docs/api/crates/",
-    "node_modules/",
-    "target/",
-    "vendor/",
-];
+const EXCLUDED_PREFIXES: &[&str] = &[".git/", "dist/", "node_modules/", "target/", "vendor/"];
 
 const RECOMMENDED_EXTERNAL_TOOLS: &[&str] = &[
     "shellcheck",
@@ -201,8 +192,12 @@ fn dependency_scan() -> Result<()> {
     let mut findings = Vec::new();
 
     print_step("Running cargo-audit");
+    // The builder supplies a pinned RustSec advisory database but deliberately
+    // has no crates.io index: Cargo resolves exclusively from vendor/.  cargo-audit
+    // 0.22.2's --no-yanked keeps the advisory scan offline without weakening its
+    // vulnerability checks; yanked status cannot be verified without that index.
     let status = Command::new("cargo")
-        .args(["audit", "--no-fetch", "--stale"])
+        .args(["audit", "--no-fetch", "--stale", "--no-yanked"])
         .current_dir(&repo_root)
         .status()
         .context("failed to run cargo-audit")?;
@@ -738,11 +733,8 @@ fn check_local_security_scanners(repo_root: &Path) -> Result<Vec<Finding>> {
                 "--exclude",
                 "target",
                 "--exclude",
-                ".tox",
                 "--exclude",
-                "docs/_build",
                 "--exclude",
-                "docs/api/crates",
                 "--exclude",
                 "dist",
                 ".",

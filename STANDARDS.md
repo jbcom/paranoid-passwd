@@ -57,4 +57,4 @@ Files: `crates/**/*.rs`
   - `bash tests/test_cli.sh target/debug/paranoid-passwd`
   - `bash scripts/hallucination_check.sh`
   - `bash scripts/supply_chain_verify.sh`
-  - `python3 -m tox -e docs`
+  - `make docs-check`

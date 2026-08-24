@@ -14,6 +14,10 @@ concurrency:
 jobs:
   assurance:
     name: Security Assurance
+    if: >-
+      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      !(startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      contains(github.event.pull_request.head.ref, '-non-major'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read

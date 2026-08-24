@@ -243,4 +243,3 @@ paranoid-passwd vault --cli --path "$VAULT" federal-evidence
 The project can support customers operating inside FedRAMP High, GovCloud, or DoD IL5-oriented
 boundaries, but the local tool is not itself FedRAMP authorized, DoD IL5 authorized, or a FIPS
 validated product.
-

@@ -11,6 +11,28 @@
 
 version: 2
 updates:
+  - package-ecosystem: npm
+    directory: /docs
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Etc/UTC"
+    groups:
+      sourcey-major:
+        patterns: ["sourcey"]
+        update-types: [major]
+      sourcey-non-major:
+        patterns: ["sourcey"]
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: "docs"
+    labels:
+      - "dependencies"
+      - "documentation"
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -19,8 +41,14 @@ updates:
       time: "06:00"
       timezone: "Etc/UTC"
     groups:
-      actions:
+      actions-major:
         patterns: ["*"]
+        update-types: [major]
+      actions-non-major:
+        patterns: ["*"]
+        update-types:
+          - minor
+          - patch
     commit-message:
       prefix: "ci"
     labels:

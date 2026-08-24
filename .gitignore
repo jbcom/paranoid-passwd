@@ -29,14 +29,12 @@ playwright-report/
 playwright/.cache/
 .playwright-mcp/
 node_modules/
-.tox/
-docs/_build/
-docs/api/crates/
 
 # Test screenshots
 *.png
 !vendor/**
 !docs/design/evidence/*.png
+!docs/assets/local-vault-hero.png
 !tests/baseline/gui/*.png
 
 # Claude Code project settings (local, not committed)

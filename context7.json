@@ -1,0 +1,30 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Paranoid Password",
+  "description": "Rust-native password generation, audit evidence, and encrypted local-vault tooling.",
+  "branch": "main",
+  "folders": [
+    "docs",
+    "crates"
+  ],
+  "excludeFolders": [
+    "vendor",
+    "target",
+    "dist",
+    "docs/dist"
+  ],
+  "excludeFiles": [
+    "CHANGELOG.md"
+  ],
+  "rules": [
+    "Use the audited paranoid-core path for password generation, entropy, hashing, and statistical audit decisions.",
+    "Keep Cargo builds locked, frozen, offline, and resolved through the checked-in vendor tree.",
+    "Do not add custom cryptography, ad hoc randomness, modulo sampling, browser secret handling, or handwritten unsafe Rust.",
+    "Treat the CLI, TUI, GUI, documentation, and automation layers as adapters; keep security-sensitive logic in the Rust core crates."
+  ],
+  "previousVersions": [
+    {
+      "tag": "paranoid-passwd-v3.8.0"
+    }
+  ]
+}

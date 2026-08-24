@@ -17,4 +17,3 @@ zeroize.workspace = true
 
 [lints]
 workspace = true
-

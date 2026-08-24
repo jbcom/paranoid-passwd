@@ -8,7 +8,7 @@
 #       with:
 #         run: |
 #           cargo test --workspace --locked --frozen --offline
-#           python3 -m tox -e docs
+#           make docs-check
 #
 # GitHub Actions builds the Dockerfile per-job from this directory,
 # bind-mounts $GITHUB_WORKSPACE into the container at /github/workspace

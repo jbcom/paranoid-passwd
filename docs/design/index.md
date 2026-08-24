@@ -9,11 +9,5 @@ persona: the targeted individual (activist, journalist, or person under
 coercion or surveillance risk). These documents bind every surface — TUI, GUI,
 docs, and site — to one product.
 
-```{toctree}
-:maxdepth: 1
-
-brand
-journeys
-ia
-system
-```
+The design system is organized as [brand](./brand.md), [user journeys](./journeys.md),
+[information architecture](./ia.md), and [system tokens](./system.md).

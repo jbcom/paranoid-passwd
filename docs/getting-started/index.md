@@ -4,12 +4,8 @@ title: Getting Started
 
 # Getting Started
 
-```{toctree}
-:maxdepth: 1
-
-downloads
-install-and-verify
-```
+Use [Downloads](./downloads.md) to choose an artifact, then follow
+[Install and Verify](./install-and-verify.md) before handling a vault.
 
 ## Download
 
@@ -45,7 +41,7 @@ curl -sSL https://paranoid-passwd.com/install.sh | sh
 You can pin a version or install into a custom directory:
 
 ```bash
-curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.7.0
+curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --version paranoid-passwd-v3.8.0
 curl -sSL https://paranoid-passwd.com/install.sh | sh -s -- --install-dir "$HOME/.local/bin"
 ```
 
@@ -162,7 +158,7 @@ make test
 cargo build -p paranoid-cli --locked --frozen --offline
 bash tests/test_cli.sh target/debug/paranoid-passwd
 make verify-assurance
-python3 -m tox -e docs
+pnpm --dir docs run build
 ```
 
 If you want to reproduce the CI environment from the repository root:

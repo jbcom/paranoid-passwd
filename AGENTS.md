@@ -1,6 +1,6 @@
 ---
 title: AGENTS.md — Rust-Native Agent Protocols
-updated: 2026-04-15
+updated: 2026-08-24
 status: current
 domain: technical
 ---
@@ -85,8 +85,8 @@ Before committing:
 - [ ] `bash tests/test_cli.sh target/debug/paranoid-passwd`
 
 ### Docs
-- [ ] `python3 -m tox -e docs`
-- [ ] The generated Rust API docs build under `docs/api/crates/`
+- [ ] `make docs-check`
+- [ ] Sourcey output contains `llms.txt`, `llms-full.txt`, `sitemap.xml`, the README hero, and `install.sh`
 - [ ] `README.md` reflects user-facing changes
 
 ## Architecture Patterns
@@ -118,7 +118,7 @@ only exact `#[unsafe(no_mangle)]` ABI attributes are allowed there, and `paranoi
 ### Product Surface
 
 - The retired HTML/CSS/JavaScript browser app is gone.
-- GitHub Pages now serves a Sphinx docs/download site only unless a future Slint WASM artifact is explicitly threat-modeled as a separate Rust/WASM target.
+- GitHub Pages serves the Sourcey docs/download site only unless a future Slint WASM artifact is explicitly threat-modeled as a separate Rust/WASM target.
 - The TUI is the default interactive experience.
 - The CLI remains the scriptable automation surface.
 - The GUI direction is Slint-first native desktop/mobile, not a webview wrapper.
@@ -160,7 +160,7 @@ Focus review on:
 
 ## Documentation Map
 
-The current public documentation lives in the Sphinx docs tree:
+The current public documentation is rendered by Sourcey from the Markdown docs tree:
 
 | Document | Content |
 |----------|---------|
@@ -172,3 +172,10 @@ The current public documentation lives in the Sphinx docs tree:
 | `docs/reference/testing.md` | Rust/TUI/docs test strategy |
 | `docs/reference/supply-chain.md` | builder-first supply-chain model |
 | `docs/reference/release-verification.md` | attestation and checksum verification |
+
+Sourcey configuration lives at `docs/sourcey.config.ts`; its locked Node dependency is in
+`docs/package.json` and `pnpm-lock.yaml`. Run `make docs-check` to build `docs/dist/`, validate
+its assets, and verify Sourcey's generated context exports. Do not restore Sphinx, tox, or a
+second production documentation renderer. The Sourcey Rustdoc adapter is currently incompatible
+with this workspace's Rustdoc JSON format, so `docs/api/index.md` is the maintained source-boundary
+reference until the upstream format contract catches up.

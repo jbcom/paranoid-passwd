@@ -15,6 +15,7 @@ from typing import Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SAFE_GIT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 
 
 @dataclass(frozen=True)
@@ -1535,14 +1536,14 @@ CLAIMS: tuple[Claim, ...] = (
                 "README names the seal lifecycle boundary",
             ),
             Requirement(
-                "docs/conf.py",
-                '"paranoid_seal": str(repo_root / "crates" / "paranoid-seal")',
-                "docs build includes generated Rust API docs for paranoid-seal",
+                "docs/sourcey.config.ts",
+                '"api/index"',
+                "Sourcey navigation includes the paranoid-seal API boundary",
             ),
             Requirement(
                 "docs/api/index.md",
-                "crates/paranoid_seal/lib",
-                "Rust API index links the paranoid-seal crate docs",
+                "paranoid-seal/src/lib.rs",
+                "Rust API index links the paranoid-seal crate source boundary",
             ),
             Requirement(
                 "Cargo.toml",
@@ -1777,9 +1778,9 @@ CLAIMS: tuple[Claim, ...] = (
                 "federal readiness docs link to the control mapping artifact",
             ),
             Requirement(
-                "docs/reference/index.md",
-                "control-mapping",
-                "reference toctree includes the control mapping artifact",
+                "docs/sourcey.config.ts",
+                '"reference/control-mapping"',
+                "Sourcey navigation includes the control mapping artifact",
             ),
             Requirement(
                 "docs/reference/assurance-claims.md",
@@ -2220,9 +2221,9 @@ CLAIMS: tuple[Claim, ...] = (
                 "public docs use attestation language instead of signing overclaim language",
             ),
             Requirement(
-                "docs/reference/index.md",
-                "platform-installers",
-                "reference toctree includes platform installer decision record",
+                "docs/sourcey.config.ts",
+                '"reference/platform-installers"',
+                "Sourcey navigation includes the platform installer decision record",
             ),
             Requirement(
                 "docs/reference/remaining-work-prd.md",
@@ -2402,19 +2403,19 @@ GLOBAL_REQUIREMENTS: tuple[Requirement, ...] = (
         "assurance claim inventory exists",
     ),
     Requirement(
-        "docs/reference/index.md",
-        "security-assurance",
-        "security assurance docs are in the reference toctree",
+        "docs/sourcey.config.ts",
+        '"reference/security-assurance"',
+        "security assurance docs are in Sourcey navigation",
     ),
     Requirement(
-        "docs/reference/index.md",
-        "assurance-claims",
-        "assurance claims docs are in the reference toctree",
+        "docs/sourcey.config.ts",
+        '"reference/assurance-claims"',
+        "assurance claims docs are in Sourcey navigation",
     ),
     Requirement(
-        "docs/reference/index.md",
-        "ai-review",
-        "AI review docs are in the reference toctree",
+        "docs/sourcey.config.ts",
+        '"reference/ai-review"',
+        "AI review docs are in Sourcey navigation",
     ),
     Requirement(
         "Makefile",
@@ -2434,8 +2435,16 @@ SURFACE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+def repo_path(path: Path | str) -> Path:
+    repository_root = REPO_ROOT.resolve()
+    full_path = (repository_root / path).resolve()
+    if not full_path.is_relative_to(repository_root):
+        raise ValueError(f"path escapes repository: {path}")
+    return full_path
+
+
 def read_text(path: str) -> str:
-    full_path = REPO_ROOT / path
+    full_path = repo_path(path)
     if not full_path.exists():
         raise FileNotFoundError(path)
     return full_path.read_text(encoding="utf-8")
@@ -2472,6 +2481,14 @@ def run_git(args: Iterable[str]) -> list[str]:
     if result.returncode != 0:
         return []
     return [line for line in result.stdout.splitlines() if line]
+
+
+def validate_base_ref(base_ref: str | None) -> str | None:
+    if base_ref is None:
+        return None
+    if not SAFE_GIT_REF.fullmatch(base_ref) or ".." in base_ref or base_ref.endswith("/"):
+        raise ValueError("base ref must be a simple repository ref")
+    return base_ref
 
 
 def collect_changed_files(base_ref: str | None) -> list[str]:
@@ -2570,12 +2587,14 @@ def build_report(base_ref: str | None) -> dict[str, object]:
 
 
 def write_json(path: Path, report: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output_path = repo_path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def write_markdown(path: Path, report: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    output_path = repo_path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "# Security Assurance Report",
         "",
@@ -2603,7 +2622,7 @@ def write_markdown(path: Path, report: dict[str, object]) -> None:
         lines.extend(["", "## Failures", ""])
         lines.extend(f"- {failure}" for failure in failures)
 
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -2613,7 +2632,15 @@ def main() -> int:
     parser.add_argument("--markdown-out", type=Path, help="Write the assurance report as Markdown")
     args = parser.parse_args()
 
-    report = build_report(args.base_ref)
+    try:
+        base_ref = validate_base_ref(args.base_ref)
+        if args.json_out:
+            repo_path(args.json_out)
+        if args.markdown_out:
+            repo_path(args.markdown_out)
+    except ValueError as error:
+        parser.error(str(error))
+    report = build_report(base_ref)
 
     if args.json_out:
         write_json(args.json_out, report)

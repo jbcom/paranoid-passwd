@@ -3968,7 +3968,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-audit"
-version = "3.8.0"
+version = "3.9.0"
 dependencies = [
  "openssl",
  "paranoid-core",
@@ -3980,7 +3980,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-cli"
-version = "3.8.0"
+version = "3.9.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4000,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-core"
-version = "3.8.0"
+version = "3.9.0"
 dependencies = [
  "openssl",
  "serde",
@@ -4011,7 +4011,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-gui"
-version = "3.8.0"
+version = "3.9.0"
 dependencies = [
  "arboard",
  "getrandom 0.2.17",
@@ -4029,7 +4029,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-ops"
-version = "3.8.0"
+version = "3.9.0"
 dependencies = [
  "openssl",
  "paranoid-audit",
@@ -4043,7 +4043,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-seal"
-version = "3.8.0"
+version = "3.9.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4052,7 +4052,7 @@ dependencies = [
 
 [[package]]
 name = "paranoid-vault"
-version = "3.8.0"
+version = "3.9.0"
 dependencies = [
  "arboard",
  "argon2",
@@ -7419,7 +7419,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "3.8.0"
+version = "3.9.0"
 dependencies = [
  "anyhow",
  "regex",

@@ -35,9 +35,11 @@ not by a permissions review that has to be re-verified every change.
 2. `cargo`'s `target/` directory and test-binary archive, via
    `Swatinem/rust-cache`, with `save-if` gated to `main` so fork PRs
    restore-only and can never write.
-3. tox/Sphinx virtualenvs, via `actions/cache` keyed on content hashes.
+3. No documentation toolchain cache. Sourcey is installed from the committed
+   `pnpm-lock.yaml` on an isolated, read-only PR runner; the trusted Pages job
+   repeats that cold build before deployment.
 
-All three are correctness-transparent: a poisoned or stale entry can only
+The two cached surfaces are correctness-transparent: a poisoned or stale entry can only
 make a Tier A gate compile or test wrong code, which that gate's own suite
 then rejects. It cannot reach a published artifact because Tier B never
 reads any of them.
@@ -58,12 +60,12 @@ once and pinned instead of rebuilt N times per PR.
 ## Why the Builder Image Is the Dominant Waste
 
 `.github/actions/builder` is a `runs: using: docker, image: Dockerfile`
-container action. GitHub rebuilds the entire Wolfi image — `apk` installs,
-`pip install tox`, `cargo install sphinx-rustdocgen`, the advisory-db clone,
-smoke checks, roughly 2.5–3.2 minutes — from scratch on every job
-invocation, with zero layer cache. That happens roughly five times per PR
-across `ci.yml` (rust, docs, dependency-scan), `security-assurance.yml`, and
-every push to `cd.yml`. Prebuilding once to GHCR and consuming by digest is
+container action. GitHub rebuilds the entire Wolfi image — pinned `apk`
+installs, the advisory-db clone, and smoke checks — from scratch on every job
+invocation, with zero layer cache. It serves the Rust, dependency, and
+assurance gates. Sourcey documentation runs separately on a Node runner, so
+documentation dependencies never enter this security-oriented image.
+Prebuilding once to GHCR and consuming by digest is
 the single highest-ROI change here, and it is a strict security improvement:
 a digest pin beats a per-job rebuild-from-Dockerfile that can silently drift
 between runs if the Dockerfile's own inputs (e.g. upstream mirrors) hiccup.
@@ -174,18 +176,18 @@ the fact that a poisoned `target/` can only miscompile a Tier A gate that
 its own suite then rejects — Tier B never restores it. **Rollback:** delete
 the cache step and the target-dir override.
 
-### P6.4 — Cache the docs/tox toolchain, remove the double docs build
+### P6.4 — Sourcey docs: locked PR validation and cold trusted deployment
 
-`ci.yml`'s docs job consumes the GHCR image (so `sphinx-rustdocgen`'s
-`cargo install` cost disappears) and adds `actions/cache`, SHA-pinned, keyed
-on `tox.ini` plus docs-requirement content hashes. The redundant docs build
-between `ci.yml` and `cd.yml`'s `deploy-pages` on push-to-main is reduced —
-but `deploy-pages` carries `id-token:write` and is Tier-B-adjacent, so it
-must never restore a PR-writable cache. It keeps building fresh from the
-digest-pinned image; only the `ci.yml` PR-side docs venv is cached.
+`ci.yml` validates Sourcey only for pull requests, using Node 24, Corepack,
+and `pnpm install --frozen-lockfile` on a GitHub-hosted runner with
+`contents: read` only. `cd.yml` rebuilds the same `docs/dist` output from
+trusted `main` before the Pages upload. Neither job restores an Actions
+cache or a PR-produced artifact; the deployment job alone has Pages OIDC.
 
-**Expected saving:** docs job ~6–7 min → ~1–1.5 min; `deploy-pages` ~3.5–4
-min → ~1.5 min. **Risk:** LOW. **Rollback:** remove the cache step.
+**Expected saving:** Sourcey avoids a Python virtual environment and Rustdoc
+adapter build. **Risk:** LOW. **Rollback:** revert the renderer migration as
+a single versioned documentation change; do not introduce a parallel docs
+site.
 
 ### P6.5 — Split fmt into a fastest-first Tier-A job
 
@@ -309,16 +311,11 @@ right shape.
 rejected in favor of dependency-free make-level concurrency (option (b),
 [P6.7](#p6-7-concurrent-per-suite-test-execution-no-new-dependencies)) because
 (b) already clears the 26% measured speedup bar without adding anything to
-`vendor/`. `cargo install`-at-build-time has precedent
-(`sphinx-rustdocgen` in `.github/actions/builder/Dockerfile`), but that tool
-is a single small binary with a shallow dependency tree; `cargo-nextest`
-pulls in a materially larger transitive set (its own config/filtering DSL,
-signal handling, and archive machinery) that would need to land in
-`vendor/` to keep the `--offline --frozen` posture, growing the vendored
-tree for a speedup (b) already delivers without it. Revisit only if (b)'s
-approach stops clearing a meaningful bar as the suite grows — nextest's
-per-test (not per-binary) scheduling would help once a single suite, not the
-overall binary count, becomes the bottleneck.
+`vendor/`. Adding a build-time `cargo install` would require a new audited,
+vendored dependency surface merely for a speedup that option (b) already
+delivers. Revisit only if (b)'s approach stops clearing a meaningful bar as
+the suite grows — nextest's per-test (not per-binary) scheduling would help
+once a single suite, not the overall binary count, becomes the bottleneck.
 
 **Registry cache exporter (`type=registry`) instead of `type=gha` for the
 image build.** The registry exporter earns its keep when cache needs to
@@ -450,23 +447,15 @@ pinning style. No fix needed.
 |---|---|---|---|---|
 | Docker layer cache (`type=gha`) for the builder image build | `builder-image.yml` → `publish` | push(main)/schedule/dispatch only | same job, same run | No — Tier B consumes the *published, digest-pinned image*, never this build-time layer cache |
 | `target/` via `Swatinem/rust-cache` | `ci.yml` → `rust` | `save-if: github.ref == 'refs/heads/main'` | `ci.yml` → `rust` (any ref, restore-only off main) | No |
-| `.tox` via `actions/cache` | `ci.yml` → `docs` | split into `actions/cache/restore` (every run) + `actions/cache/save` gated `github.ref == 'refs/heads/main'` (fixed by this item — previously a single ungated `actions/cache@v6` step) | `ci.yml` → `docs` (any ref, restore-only off main) | No |
 
-**Fix applied:** the `docs` job's `.tox` cache previously used the combined
-`actions/cache` action, which has no `save-if` equivalent — every run,
-including a same-repo PR branch, would attempt to write the cache key.
-Split into `actions/cache/restore` (unconditional) and `actions/cache/save`
-(gated to `github.ref == 'refs/heads/main'`, mirroring the `rust` job's
-`save-if`), so only a main-branch run can populate or refresh the entry.
-GitHub's own cache-scoping already prevented a *fork* PR from writing into
-the base repository's cache namespace; this closes the same-repo-branch gap
-explicitly rather than relying only on that platform backstop.
+Sourcey documentation is intentionally absent from this inventory: its PR
+job has no cache and its trusted deployment rebuilds from the lockfile rather
+than accepting an artifact from a less-trusted trigger.
 
 `grep -rn "actions/cache\|rust-cache" .github/workflows/*.yml` confirms
-`release.yml` (Tier B) has zero cache references of any kind — it never
-restores `target/`, `.tox`, or any GHA cache. `cd.yml`'s `deploy-pages` job
-also has no `actions/cache` step (see its inline comment) and always builds
-docs fresh from the digest-pinned image.
+`release.yml` (Tier B) has zero cache references of any kind. `cd.yml`'s
+`deploy-pages` job also has no `actions/cache` step and always builds docs
+fresh from the committed Sourcey configuration and lockfile.
 
 ### Scope confirmations left untouched
 

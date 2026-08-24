@@ -24,25 +24,19 @@ jobs:
     steps:
       - name: Run release-please
         id: release-please
-        continue-on-error: true
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
+          # This installation token is synchronized by Doppler at the
+          # organization level. Do not define a repository-level shadow copy;
+          # the token is deliberately limited to release-please's
+          # contents/pull-request write lane.
           token: ${{ secrets.CI_GITHUB_TOKEN }}
-
-      - name: Report release-please branch protection block
-        if: steps.release-please.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "::warning::release-please could not update its generated branch under the current repository rules. The verified release workflow remains the release authority."
 
   deploy-pages:
     name: Deploy Docs to GitHub Pages
-    # Tier B-adjacent (id-token:write, publishes to GitHub Pages). Per
-    # docs/reference/ci-design.md's P6.4 boundary: this job MUST NOT
-    # restore any PR-writable cache. It intentionally has no actions/cache
-    # step and always builds the docs venv fresh from the digest-pinned
-    # builder image — only ci.yml's PR-side docs job (contents:read, no
-    # OIDC token) caches the tox/Sphinx virtualenvs.
+    # This privileged job is reachable only from a trusted main push. It does
+    # not restore PR-created artifacts or caches; it rebuilds Sourcey from the
+    # checked-out trusted source immediately before Pages publication.
     runs-on: ubuntu-24.04
     if: github.event_name == 'push'
     needs: release-please
@@ -59,11 +53,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build docs site from the repository root (fresh, no cache)
-        uses: ./.github/actions/builder
+      - name: Set up the locked Node toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          run: |
-            python3 -m tox -e docs
+          node-version: 24
+
+      - name: Build and validate Sourcey documentation from trusted source
+        shell: bash
+        run: |
+          corepack enable
+          pnpm --dir docs install --frozen-lockfile
+          make docs-check
 
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
@@ -71,7 +71,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: docs/_build/html
+          path: docs/dist
 
       - name: Deploy
         id: deployment
@@ -93,13 +93,13 @@ jobs:
         with:
           persist-credentials: false
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           languages: ${{ matrix.language }}
           config-file: ./.github/codeql/codeql-config.yml
       - name: Autobuild
-        uses: github/codeql-action/autobuild@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        uses: github/codeql-action/autobuild@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
       - name: Analyze
-        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        uses: github/codeql-action/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           category: "/language:${{ matrix.language }}"
