@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "description": "Sourcey documentation toolchain for paranoid-passwd.",
   "scripts": {
-    "build": "sourcey build && mkdir -p dist/assets && cp -R assets/. dist/assets/ && cp public/install.sh dist/install.sh",
+    "build": "sourcey build && mkdir -p dist/assets && cp -R assets/. dist/assets/ && cp public/install.sh dist/install.sh && cp public/CNAME dist/CNAME",
     "dev": "sourcey dev",
     "validate": "pnpm run build && bash ../scripts/validate_sourcey_output.sh"
   },

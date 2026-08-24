@@ -9,6 +9,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 output="$repo_root/docs/dist"
 
 required=(
+  "$output/CNAME"
   "$output/index.html"
   "$output/sourcey.css"
   "$output/sourcey.js"
