@@ -121,7 +121,7 @@ jobs:
         shell: bash
         run: |
           corepack enable
-          pnpm install --frozen-lockfile
+          pnpm --dir docs install --frozen-lockfile
           make docs-check
 
   dependency-scan:
