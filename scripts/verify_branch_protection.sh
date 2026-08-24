@@ -57,6 +57,27 @@ if [ "$(jq -r '.allow_merge_commit' <<<"$repo_settings")" != "true" ] \
   exit 1
 fi
 
+ruleset_id="$(gh api "repos/${REPO}/rulesets" --jq '.[] | select(.name == "agentic-main") | .id')"
+if [ -z "$ruleset_id" ]; then
+  echo "agentic-main ruleset is missing" >&2
+  exit 1
+fi
+ruleset="$(gh api "repos/${REPO}/rulesets/${ruleset_id}")"
+if [ "$(jq -r '.name' <<<"$ruleset")" != "agentic-main" ] \
+  || [ "$(jq -r '.enforcement' <<<"$ruleset")" != "active" ] \
+  || [ "$(jq -r '.bypass_actors | length' <<<"$ruleset")" != "0" ]; then
+  echo "agentic-main ruleset must be active with no bypass actors" >&2
+  exit 1
+fi
+pull_request_rule="$(jq -c '.rules[] | select(.type == "pull_request")' <<<"$ruleset")"
+if [ "$(jq -r '.parameters.required_approving_review_count' <<<"$pull_request_rule")" != "0" ] \
+  || [ "$(jq -r '.parameters.require_code_owner_review' <<<"$pull_request_rule")" != "false" ] \
+  || [ "$(jq -r '.parameters.require_last_push_approval' <<<"$pull_request_rule")" != "false" ] \
+  || [ "$(jq -r '.parameters.allowed_merge_methods | join(",")' <<<"$pull_request_rule")" != "merge" ]; then
+  echo "agentic-main ruleset must require PRs without human approvals and allow merge commits only" >&2
+  exit 1
+fi
+
 mapfile -t expected_sorted < <(printf '%s\n' "${expected_checks[@]}" | LC_ALL=C sort)
 
 if [ "${#actual_checks[@]}" -ne "${#expected_sorted[@]}" ]; then
