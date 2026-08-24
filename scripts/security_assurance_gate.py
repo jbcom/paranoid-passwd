@@ -15,7 +15,7 @@ from typing import Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SAFE_GIT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*\\Z")
+SAFE_GIT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 
 
 @dataclass(frozen=True)
