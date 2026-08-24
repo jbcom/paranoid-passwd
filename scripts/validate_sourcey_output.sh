@@ -24,19 +24,19 @@ for file in "${required[@]}"; do
   test -s "$file"
 done
 
-if rg -n '\{toctree\}|\{rust:' "$output" --glob '*.html'; then
+if grep -R -n -E '\{toctree\}|\{rust:' --include='*.html' "$output"; then
   echo "Sourcey output contains unrendered legacy Sphinx directives." >&2
   exit 1
 fi
 
-if ! rg -q 'paranoid-passwd' "$output/llms.txt" \
-  || ! rg -q 'Rust-native password manager' "$output/llms-full.txt"; then
+if ! grep -q 'paranoid-passwd' "$output/llms.txt" \
+  || ! grep -q 'Rust-native password manager' "$output/llms-full.txt"; then
   echo "Sourcey context exports are missing the project identity." >&2
   exit 1
 fi
 
 # The README hero must be reachable from the emitted home page and copied to
 # the static artifact instead of remaining only in the source tree.
-rg -q 'assets/local-vault-hero.png' "$output/index.html"
+grep -q 'assets/local-vault-hero.png' "$output/index.html"
 
 echo "Sourcey output validation passed."
