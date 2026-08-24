@@ -1,0 +1,17 @@
+{
+  "name": "paranoid-passwd-docs",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Sourcey documentation toolchain for paranoid-passwd.",
+  "scripts": {
+    "build": "sourcey build",
+    "dev": "sourcey dev",
+    "validate": "sourcey build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "sourcey": "3.6.5"
+  }
+}

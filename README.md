@@ -7,6 +7,8 @@ domain: product
 
 # paranoid-passwd
 
+![A physical key on a closed local vault, lit in restrained green and blue.](docs/assets/local-vault-hero.png)
+
 ## Local Secrets. Verifiable Trust.
 
 `paranoid-passwd` is a **Rust-native password manager and generator** for people who want

@@ -4,24 +4,6 @@ title: Reference
 
 # Reference
 
-```{toctree}
-:maxdepth: 2
-
-architecture
-ci-design
-compliance-frameworks
-messaging
-license
-federal-readiness
-control-mapping
-security-assurance
-assurance-claims
-ai-review
-remaining-work-prd
-vault-format
-platform-installers
-release-checklist
-testing
-supply-chain
-release-verification
-```
+Use the sidebar to browse the reference set. Start with [Architecture](./architecture.md),
+[Testing](./testing.md), [Security Assurance](./security-assurance.md), and
+[Release Verification](./release-verification.md) for the primary engineering paths.

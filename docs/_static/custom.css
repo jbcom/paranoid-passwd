@@ -1,5 +1,4 @@
 :root {
-  /* Color tokens (docs/design/system.md §1) */
   --pp-bg: #080c14;
   --pp-panel: #0d1119;
   --pp-border: #17304b;
@@ -7,93 +6,60 @@
   --pp-muted: #95a0b8;
   --pp-green: #34d399;
   --pp-blue: #60a5fa;
-  --pp-red: #f87171;
   --pp-amber: #fbbf24;
-
-  /* Spacing scale (docs/design/system.md §2) — rem, docs column */
-  --pp-space-tight: 0.375rem;
-  --pp-space-snug: 0.5rem;
-  --pp-space-base: 0.875rem;
-  --pp-space-loose: 1.375rem;
-
-  /* Type scale (docs/design/system.md §3) */
-  --pp-type-title: 1.25rem;
-  --pp-type-title-weight: 600;
-  --pp-type-body: 1rem;
-  --pp-type-body-weight: 400;
-  --pp-type-label: 0.85rem;
-  --pp-type-label-weight: 500;
-  --pp-type-mono: 1rem;
-  --pp-type-mono-family:
-    "IBM Plex Mono", "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
-
-  /* Component specs (docs/design/system.md §4.1) */
-  --pp-panel-radius: 0.5rem;
-  --pp-panel-border-width: 1px;
+  --pp-mono: "IBM Plex Mono", "SFMono-Regular", "JetBrains Mono", ui-monospace, monospace;
 }
 
 body {
   background:
-    radial-gradient(circle at top right, rgba(96, 165, 250, 0.15), transparent 24rem),
-    radial-gradient(circle at bottom left, rgba(52, 211, 153, 0.12), transparent 24rem),
+    radial-gradient(circle at 84% -8%, rgb(96 165 250 / 14%), transparent 28rem),
+    radial-gradient(circle at 5% 85%, rgb(52 211 153 / 10%), transparent 30rem),
     var(--pp-bg);
   color: var(--pp-text);
 }
 
 body,
-.md-typeset,
-.md-sidebar,
-.shibuya-content,
-.shibuya-main {
-  font-family: var(--pp-type-mono-family);
-}
-
-.shibuya-main,
-.shibuya-sidebar,
-.shibuya-header,
-.shibuya-article {
-  background: transparent;
-}
-
-.shibuya-content__inner,
-.shibuya-page-nav,
-.shibuya-sidebar__inner {
-  background: rgba(13, 17, 25, 0.88);
-  border: var(--pp-panel-border-width) solid var(--pp-border);
-  border-radius: 18px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+button,
+input {
+  font-family: var(--pp-mono);
 }
 
 a {
   color: var(--pp-green);
 }
 
-h1,
-h2,
-h3,
-.shibuya-site-title {
-  color: var(--pp-text);
-  letter-spacing: 0.03em;
+a:hover {
+  color: #a7f3d0;
 }
 
-code,
+h1,
+h2,
+h3 {
+  color: var(--pp-text);
+  letter-spacing: 0.02em;
+}
+
 pre,
-.highlight {
-  background: #09101a;
+code {
   border-color: var(--pp-border);
 }
 
-.shibuya-announcement {
-  background: linear-gradient(90deg, rgba(52, 211, 153, 0.18), rgba(96, 165, 250, 0.18));
-  border-bottom: 1px solid rgba(52, 211, 153, 0.25);
+pre {
+  box-shadow: inset 0 0 0 1px rgb(23 48 75 / 70%);
 }
 
-.shibuya-nav-link {
-  color: var(--pp-muted);
+table {
+  border: 1px solid var(--pp-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
 }
 
-.shibuya-nav-link:hover,
-.shibuya-nav-link--active {
-  color: var(--pp-green);
+th {
+  background: rgb(52 211 153 / 9%);
 }
 
+img[src*="local-vault-hero"] {
+  border: 1px solid var(--pp-border);
+  border-radius: 0.75rem;
+  box-shadow: 0 1.25rem 3.5rem rgb(0 0 0 / 35%);
+}

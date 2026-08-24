@@ -9,6 +9,8 @@ title: paranoid-passwd
 `paranoid-passwd` is a **Rust-native password manager and generator** built around one
 promise: secrets stay local, and trust is verified instead of assumed.
 
+![A physical key on a closed local vault, lit in restrained green and blue.](./assets/local-vault-hero.png)
+
 It ships native tools for daily use, scripting, and recovery operations:
 
 - `paranoid-core` owns password generation, rejection sampling, OpenSSL-backed hashing and RNG, compliance policy, and the 7-layer audit.
@@ -24,18 +26,10 @@ It ships native tools for daily use, scripting, and recovery operations:
 - future Slint WASM or mobile targets must be explicit Rust/Slint surfaces with their own
   threat models and release gates.
 
-```{toctree}
-:maxdepth: 2
-:caption: Docs
-
-getting-started/index
-guides/tui
-guides/recovery-operations
-reference/index
-design/index
-api/index
-contributing
-```
+Start with [installation and verification](./getting-started/install-and-verify.md), then use the
+[TUI guide](./guides/tui.md), [recovery operations](./guides/recovery-operations.md), and the
+[reference](./reference/index.md) as needed. The complete site navigation is available in the
+sidebar and search.
 
 ## Download Channels
 
