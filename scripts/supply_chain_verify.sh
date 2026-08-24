@@ -291,7 +291,7 @@ else
 fi
 
 if contains_fixed 'make docs-check' "$REPO_ROOT/.github/workflows/ci.yml" \
-  && contains_fixed 'pnpm install --frozen-lockfile' "$REPO_ROOT/.github/workflows/ci.yml" \
+  && contains_fixed 'pnpm --dir docs install --frozen-lockfile' "$REPO_ROOT/.github/workflows/ci.yml" \
   && contains_fixed 'validate_sourcey_output.sh' "$REPO_ROOT/docs/package.json"; then
   pass "Sourcey output validation is wired into locked PR CI"
 else

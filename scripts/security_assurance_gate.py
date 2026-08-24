@@ -1535,14 +1535,14 @@ CLAIMS: tuple[Claim, ...] = (
                 "README names the seal lifecycle boundary",
             ),
             Requirement(
-                "docs/conf.py",
-                '"paranoid_seal": str(repo_root / "crates" / "paranoid-seal")',
-                "docs build includes generated Rust API docs for paranoid-seal",
+                "docs/sourcey.config.ts",
+                '"api/index"',
+                "Sourcey navigation includes the paranoid-seal API boundary",
             ),
             Requirement(
                 "docs/api/index.md",
-                "crates/paranoid_seal/lib",
-                "Rust API index links the paranoid-seal crate docs",
+                "paranoid-seal/src/lib.rs",
+                "Rust API index links the paranoid-seal crate source boundary",
             ),
             Requirement(
                 "Cargo.toml",
@@ -1777,9 +1777,9 @@ CLAIMS: tuple[Claim, ...] = (
                 "federal readiness docs link to the control mapping artifact",
             ),
             Requirement(
-                "docs/reference/index.md",
-                "control-mapping",
-                "reference toctree includes the control mapping artifact",
+                "docs/sourcey.config.ts",
+                '"reference/control-mapping"',
+                "Sourcey navigation includes the control mapping artifact",
             ),
             Requirement(
                 "docs/reference/assurance-claims.md",
@@ -2220,9 +2220,9 @@ CLAIMS: tuple[Claim, ...] = (
                 "public docs use attestation language instead of signing overclaim language",
             ),
             Requirement(
-                "docs/reference/index.md",
-                "platform-installers",
-                "reference toctree includes platform installer decision record",
+                "docs/sourcey.config.ts",
+                '"reference/platform-installers"',
+                "Sourcey navigation includes the platform installer decision record",
             ),
             Requirement(
                 "docs/reference/remaining-work-prd.md",
@@ -2402,19 +2402,19 @@ GLOBAL_REQUIREMENTS: tuple[Requirement, ...] = (
         "assurance claim inventory exists",
     ),
     Requirement(
-        "docs/reference/index.md",
-        "security-assurance",
-        "security assurance docs are in the reference toctree",
+        "docs/sourcey.config.ts",
+        '"reference/security-assurance"',
+        "security assurance docs are in Sourcey navigation",
     ),
     Requirement(
-        "docs/reference/index.md",
-        "assurance-claims",
-        "assurance claims docs are in the reference toctree",
+        "docs/sourcey.config.ts",
+        '"reference/assurance-claims"',
+        "assurance claims docs are in Sourcey navigation",
     ),
     Requirement(
-        "docs/reference/index.md",
-        "ai-review",
-        "AI review docs are in the reference toctree",
+        "docs/sourcey.config.ts",
+        '"reference/ai-review"',
+        "AI review docs are in Sourcey navigation",
     ),
     Requirement(
         "Makefile",
