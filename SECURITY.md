@@ -4,8 +4,8 @@
 
 | Version | Supported | Notes |
 | ------- | --------- | ----- |
-| 3.5.x   | Yes       | Rust-native CLI/TUI/docs distribution line |
-| < 3.5   | No        | Legacy browser/C/WASM architecture |
+| 3.8.x   | Yes       | Rust-native CLI/TUI/Sourcey docs distribution line |
+| < 3.8   | No        | Legacy browser/C/WASM architecture |
 
 ## Reporting
 
@@ -22,7 +22,7 @@ The active product is:
 - Rust-native local application code in `crates/`
 - OpenSSL-backed RNG and SHA-256 in `paranoid-core`
 - vendored Cargo dependency tree
-- Sphinx docs/download site
+- Sourcey docs/download site
 
 The retired browser/WASM surface is no longer part of the supported product.
 
@@ -52,3 +52,4 @@ That includes:
 - `scripts/supply_chain_verify.sh`
 - `scripts/verify_ai_review_inventory.sh`
 - `scripts/security_assurance_gate.py`
+- `make docs-check`

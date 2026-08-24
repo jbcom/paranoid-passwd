@@ -185,14 +185,17 @@ verify-published-release: ## Verify a published GitHub release asset set, attest
 	@if [ -z "$(TAG)" ]; then echo "TAG is required, for example: make verify-published-release TAG=paranoid-passwd-v3.7.0"; exit 2; fi
 	bash scripts/verify_published_release.sh "$(TAG)"
 
-docs-build: ## Build the Sphinx docs site
-	python3 -m tox -e docs
+docs-build: ## Build the Sourcey docs site
+	pnpm --dir docs install --frozen-lockfile
+	pnpm --dir docs run build
 
-docs-linkcheck: ## Validate outbound documentation links
-	python3 -m tox -e docs-linkcheck
+docs-linkcheck: ## Validate the rendered Sourcey documentation artifact
+	pnpm --dir docs install --frozen-lockfile
+	pnpm --dir docs run validate
 
-docs-check: ## Validate the docs site, generated API docs, and external links
-	python3 -m tox -e docs,docs-linkcheck
+docs-check: ## Validate Sourcey inputs, output, assets, and context exports
+	bash scripts/validate-docs.sh
+	$(MAKE) docs-linkcheck
 
 e2e-ci: ## Run the headless-deterministic e2e tier: CLI/vault/TUI contracts, xvfb GUI e2e where DISPLAY-feasible, real widget-event GUI tests
 	$(MAKE) test-cli-contract
@@ -215,7 +218,6 @@ ci: ## Run the local equivalent of the repository CI gates
 	$(MAKE) test-gui-host-check
 	$(MAKE) test-platform-signing-boundary
 	$(MAKE) verify-assurance
-	python3 -m tox -e docs,docs-linkcheck
 
 quality: ## Run local release-candidate quality gates, including GUI e2e when supported
 	PARANOID_STRICT_EXTERNAL_TOOLS=1 PARANOID_RUN_LOCAL_SCANNERS=1 $(MAKE) verify-deep
@@ -317,5 +319,5 @@ _release-emulate: _builder-image
 		-lc "chown -R builder:builder /cargo-target && su builder -s /bin/bash -c 'export CARGO_TARGET_DIR=/cargo-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0; bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"\" tar.gz \"$(DIST_DIR)\" && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"$(DIST_DIR)/paranoid-passwd-$(RELEASE_VERSION)-linux-$(RELEASE_EMULATE_ARCH).tar.gz\" && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"\" deb \"$(DIST_DIR)\" && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"$(DIST_DIR)/paranoid-passwd_$(RELEASE_VERSION)_$(RELEASE_EMULATE_ARCH).deb\" && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"\" tar.gz \"$(DIST_DIR)\" paranoid-passwd-gui paranoid-gui && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"$(DIST_DIR)/paranoid-passwd-gui-$(RELEASE_VERSION)-linux-$(RELEASE_EMULATE_ARCH).tar.gz\" paranoid-passwd-gui && bash scripts/build_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"\" deb \"$(DIST_DIR)\" paranoid-passwd-gui paranoid-gui && bash scripts/smoke_test_release_artifact.sh \"$(RELEASE_VERSION)\" linux \"$(RELEASE_EMULATE_ARCH)\" \"$(DIST_DIR)/paranoid-passwd-gui_$(RELEASE_VERSION)_$(RELEASE_EMULATE_ARCH).deb\" paranoid-passwd-gui'"
 	PATH="$(DOCKER_BIN_DIR):$$PATH" "$(DOCKER)" volume rm -f "$(RELEASE_EMULATE_TARGET_VOLUME)" >/dev/null 2>&1 || true
 
-clean: ## Remove Rust and docs build artifacts
-	rm -rf target docs/_build .tox dist
+clean: ## Remove Rust, Sourcey, and release build artifacts
+	rm -rf target docs/dist dist

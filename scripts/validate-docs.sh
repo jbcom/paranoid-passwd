@@ -5,7 +5,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 required=(
-  "$REPO_ROOT/docs/conf.py"
+  "$REPO_ROOT/docs/sourcey.config.ts"
+  "$REPO_ROOT/docs/package.json"
+  "$REPO_ROOT/pnpm-lock.yaml"
   "$REPO_ROOT/docs/index.md"
   "$REPO_ROOT/docs/getting-started/index.md"
   "$REPO_ROOT/docs/getting-started/downloads.md"
@@ -36,10 +38,13 @@ for file in "${required[@]}"; do
   test -f "$file"
 done
 
+cmp -s "$REPO_ROOT/CONTRIBUTING.md" "$REPO_ROOT/docs/contributing.md"
+
 grep -q "paranoid-passwd-<version>-linux-amd64.tar.gz" "$REPO_ROOT/docs/getting-started/index.md"
 grep -q "downloads" "$REPO_ROOT/docs/getting-started/index.md"
 grep -q "install-and-verify" "$REPO_ROOT/docs/getting-started/index.md"
-grep -q "crates/paranoid_core/lib" "$REPO_ROOT/docs/api/index.md"
+grep -q "Rust API and crate boundaries" "$REPO_ROOT/docs/api/index.md"
+grep -q "paranoid-core/src/lib.rs" "$REPO_ROOT/docs/api/index.md"
 grep -q "install.sh" "$REPO_ROOT/docs/index.md"
 grep -q "guides/recovery-operations" "$REPO_ROOT/docs/index.md"
 grep -q "verify-assurance" "$REPO_ROOT/docs/reference/release-checklist.md"
@@ -49,8 +54,8 @@ grep -q "quality-emulate" "$REPO_ROOT/docs/reference/testing.md"
 grep -q "quality-emulate" "$REPO_ROOT/docs/reference/supply-chain.md"
 grep -q "cargo-audit" "$REPO_ROOT/docs/reference/supply-chain.md"
 grep -q "RustSec advisory DB" "$REPO_ROOT/docs/reference/supply-chain.md"
-grep -q "platform-installers" "$REPO_ROOT/docs/reference/index.md"
-grep -q "compliance-frameworks" "$REPO_ROOT/docs/reference/index.md"
+grep -q '"reference/platform-installers"' "$REPO_ROOT/docs/sourcey.config.ts"
+grep -q '"reference/compliance-frameworks"' "$REPO_ROOT/docs/sourcey.config.ts"
 grep -q "reference/compliance-frameworks" "$REPO_ROOT/docs/getting-started/index.md"
 grep -q "checksummed and attested native archives" "$REPO_ROOT/docs/index.md"
 if grep -q "signed native archives" "$REPO_ROOT/docs/index.md"; then
@@ -102,7 +107,7 @@ workspace_version="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^\s*version\s*=\s
 # purpose (e.g. "v3.7.0 did not include an MSI") and must not be flagged just
 # because the workspace version has since moved on. Exclude those lines before
 # checking for stale pins.
-stale_pins="$(grep -rnIE --exclude-dir=_build --exclude-dir=api "paranoid-passwd-v[0-9]+\.[0-9]+\.[0-9]+" "$REPO_ROOT/docs" | grep -v -F "docs-version-history" | grep -vE "paranoid-passwd-v${workspace_version}([^0-9.]|\$)" || true)"
+stale_pins="$(grep -rnIE --exclude-dir=_build --exclude-dir=api --exclude-dir=dist --exclude-dir=public "paranoid-passwd-v[0-9]+\.[0-9]+\.[0-9]+" "$REPO_ROOT/docs" | grep -v -F "docs-version-history" | grep -vE "paranoid-passwd-v${workspace_version}([^0-9.]|\$)" || true)"
 if [ -n "$stale_pins" ]; then
   echo "docs/ contains version pins that do not match workspace version $workspace_version:" >&2
   echo "$stale_pins" >&2

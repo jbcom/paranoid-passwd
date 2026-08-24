@@ -4,10 +4,11 @@
   "version": "0.0.0",
   "description": "Sourcey documentation toolchain for paranoid-passwd.",
   "scripts": {
-    "build": "sourcey build",
+    "build": "sourcey build && mkdir -p dist/assets && cp -R assets/. dist/assets/ && cp public/install.sh dist/install.sh",
     "dev": "sourcey dev",
-    "validate": "sourcey build"
+    "validate": "pnpm run build && bash ../scripts/validate_sourcey_output.sh"
   },
+  "packageManager": "pnpm@11.21.0",
   "engines": {
     "node": ">=20"
   },

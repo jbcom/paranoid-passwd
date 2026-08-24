@@ -13,16 +13,13 @@ The custom GitHub Action builder image is the repository trust root for:
 
 - a digest-pinned Chainguard Wolfi base image
 - Wolfi `rust-1.95=1.95.0-r0`
-- pinned `tox` and `sphinx-rustdocgen`
 - Rust toolchain installation, including `rustfmt` and Clippy from Wolfi packages
 - OpenSSL development headers from Wolfi packages
 - Xvfb and the Xlib runtime libraries required for GUI screenshot smoke tests
-- Sphinx and Python docs tooling
 - local scanner CLIs used by the deeper release-candidate gates, including `cargo-audit`,
   `semgrep`, `osv-scanner`, `syft`, and `trivy`
 - a pinned RustSec advisory DB checkout used by builder-emulated `cargo audit --no-fetch`
 - `cargo` build / test / clippy / fmt runs
-- docs-site builds from the repository root
 - vendored Cargo dependency resolution
 
 Remote Rust CI invokes the same `make ci` target used locally, inside this builder.
@@ -112,7 +109,9 @@ Before attestation, the release workflow now validates:
 - the docs-hosted `install.sh` flow against a local artifact server
 - the checked-in release-validation scripts instead of workflow-only inline shell
 
-GitHub Pages is rebuilt directly from `main` using the Sphinx docs tree instead of downloading a site zip from a release artifact.
+Sourcey is installed from the committed `pnpm-lock.yaml` on the GitHub-hosted docs runner. GitHub
+Pages is rebuilt directly from trusted `main` into `docs/dist/` instead of downloading a site zip
+or an artifact built by a pull request.
 
 ## Branch Protection Discipline
 

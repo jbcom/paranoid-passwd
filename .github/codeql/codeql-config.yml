@@ -4,4 +4,4 @@ paths-ignore:
   - vendor/**
   - target/**
   - dist/**
-  - docs/_build/**
+  - docs/dist/**

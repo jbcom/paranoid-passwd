@@ -254,7 +254,7 @@ This is a complete rewrite from v1, treating `paranoid-passwd` as what it is: a 
 - **WASM compilation** via CMake + Zig toolchain
   - Compiled to `wasm32-wasi` target
   - <100KB binary size (no OpenSSL in WASM)
-  
+
 - **Proper file structure**
   - `include/paranoid.h` — Public C API (249 lines)
   - `src/paranoid.c` — All computation (400 lines)

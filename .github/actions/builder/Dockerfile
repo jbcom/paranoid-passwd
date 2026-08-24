@@ -19,8 +19,6 @@ ARG OSV_SCANNER_APK_VERSION=2.4.0-r0
 ARG SYFT_APK_VERSION=1.45.1-r1
 ARG TRIVY_APK_VERSION=0.70.0-r5
 ARG RUSTSEC_ADVISORY_DB_REV=20377f44edabca7c4a765ccdcd05935331b6191f
-ARG SPHINX_RUSTDOCGEN_VERSION=1.1.0
-ARG TOX_VERSION=4.53.0
 
 ENV PATH="/usr/local/bin:${PATH}" \
     CARGO_HOME=/tmp/cargo \
@@ -89,21 +87,6 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    for attempt in 1 2 3; do \
-        python3 -m pip install --break-system-packages "tox==${TOX_VERSION}" && break; \
-        if [ "${attempt}" = "3" ]; then exit 1; fi; \
-        echo "pip install failed (attempt ${attempt}/3), retrying in 5s..." >&2; \
-        sleep 5; \
-    done
-
-RUN --mount=type=cache,target=/tmp/cargo/registry \
-    --mount=type=cache,target=/tmp/cargo/git \
-    CARGO_HOME=/tmp/cargo \
-    CARGO_TARGET_DIR=/tmp/cargo-target \
-    cargo install --locked --root /usr/local "sphinx-rustdocgen@${SPHINX_RUSTDOCGEN_VERSION}" \
- && rm -rf /tmp/cargo-target /tmp/cargo/bin /tmp/cargo/.crates.toml /tmp/cargo/.crates2.json
-
 RUN git clone https://github.com/RustSec/advisory-db.git /tmp/cargo/advisory-db \
  && git -C /tmp/cargo/advisory-db checkout --detach "${RUSTSEC_ADVISORY_DB_REV}" \
  && git -C /tmp/cargo/advisory-db rev-parse HEAD | grep -F "${RUSTSEC_ADVISORY_DB_REV}" >/dev/null
@@ -123,7 +106,6 @@ RUN bash --version >/dev/null \
  && command -v openssl >/dev/null \
  && command -v osv-scanner >/dev/null \
  && command -v semgrep >/dev/null \
- && command -v sphinx-rustdocgen >/dev/null \
  && command -v syft >/dev/null \
  && command -v trivy >/dev/null \
  && command -v xvfb-run >/dev/null \
@@ -134,7 +116,6 @@ RUN bash --version >/dev/null \
  && rg --version >/dev/null \
  && rustc --version >/dev/null \
  && rustc --version | grep -F "1.95.0" >/dev/null \
- && tox --version | grep -F "${TOX_VERSION}" >/dev/null \
  && echo "Wolfi builder image OK"
 
 RUN groupadd --gid 1001 builder \

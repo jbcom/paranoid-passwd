@@ -6,7 +6,7 @@ surfaces consume so they read as one product:
 
 - the **ratatui** theme module (CLI/TUI — `crates/paranoid-cli`),
 - the **Slint** styles (GUI — `crates/paranoid-gui/ui/paranoid.slint`),
-- the **Sphinx** theme (docs/download site — `docs/_static/custom.css`).
+- the **Sourcey** theme (docs/download site — `docs/_static/custom.css`).
 
 It is the single source of truth for *values*. [`brand.md`](./brand.md) owns the
 *meaning* of each value; [`ia.md`](./ia.md) owns *where* each component appears.
@@ -117,7 +117,7 @@ Font families:
 
 - **CLI/TUI:** monospace everywhere (the terminal's cell font).
 - **GUI/docs:** a neutral sans for prose (`type.title/body/label`) paired with a
-  monospace for values (`type.mono`). The docs Sphinx theme and the Slint GUI must
+  monospace for values (`type.mono`). The docs Sourcey theme and the Slint GUI must
   pick the *same* monospace so a hash reads identically across surfaces.
 
 `type.mono` is not merely a font choice — it is a safety property. A generated
@@ -137,7 +137,7 @@ requirement made explicit.
 A raised, bordered region. The fixed layout skeleton (ia.md §1) is built from
 panels.
 
-| Property | Token | ratatui primitive | Slint primitive | Sphinx primitive |
+| Property | Token | ratatui primitive | Slint primitive | Sourcey primitive |
 |---|---|---|---|---|
 | background | `color.bg.panel` | `Block.style(bg)` | `Rectangle.background` | `.pp-panel { background }` |
 | border | `color.border`, 1 | `Borders::ALL` + `border_style` | `border-color` + `border-width:1px` | `border: 1px solid` |
@@ -153,7 +153,7 @@ moving (ia.md §1, rule 4).
 Exactly one per screen (ia.md §0 rule 5). It is the only element that may use
 `color.accent.action`.
 
-| Property | Token | ratatui | Slint | Sphinx |
+| Property | Token | ratatui | Slint | Sourcey |
 |---|---|---|---|---|
 | marker | `▸` glyph | prefix `▸ ` on the line | leading `▸` Text | `::before { content:"▸" }` |
 | color | `color.accent.action` | `fg(BLUE)` | button accent color | `.pp-action { color }` |
@@ -168,7 +168,7 @@ nothing is").
 
 For passphrase entry and item fields.
 
-| Property | Token | ratatui | Slint | Sphinx (docs demos only) |
+| Property | Token | ratatui | Slint | Sourcey (docs demos only) |
 |---|---|---|---|---|
 | text | `type.mono`, `color.text.primary` | mono line, `fg(TEXT)` | `TextInput` mono | `input[type=password]` mono |
 | label | `type.label`, `color.text.muted` | `DIM` line above | `FieldLabel` | `<label class=pp-label>` |
@@ -211,7 +211,7 @@ always live (brand.md §5.5; research lens 0 "never freeze the UI").
 |---|---|
 | ratatui | `Gauge` with `gauge_style(fg(BLUE), bg(PANEL))` |
 | Slint | a progress `Rectangle` / spinner off the UI thread |
-| Sphinx | *(n/a — docs are static)* |
+| Sourcey | *(n/a — docs are static)* |
 
 ---
 
@@ -250,7 +250,7 @@ The tokens above are authored **once** and consumed three ways. The mechanism:
 - **Slint styles** — a `paranoid-tokens.slint` `global` block exporting `brush` and
   `length` properties named by token (`Tokens.accent-action`, `Tokens.space-base`).
   `paranoid.slint` components reference `Tokens.*`, never literal hexes.
-- **Sphinx theme** — the `:root` custom properties in `docs/_static/custom.css`
+- **Sourcey theme** — the `:root` custom properties in `docs/_static/custom.css`
   (`--pp-*`), already the canonical source, extended to cover spacing/type tokens
   (`--pp-space-base`, `--pp-type-title`) so docs components read tokens too.
 
@@ -260,7 +260,7 @@ product** (directive PUX.4; brand.md §6).
 
 ### 6.1 Token → primitive quick map
 
-| Token | ratatui | Slint | Sphinx |
+| Token | ratatui | Slint | Sourcey |
 |---|---|---|---|
 | `color.*` | `Color::Rgb` const in `theme.rs` | `Tokens.<name>: brush` | `--pp-<name>` |
 | `space.*` | cells in `Layout`/`Margin` | `Tokens.<name>: length` | `--pp-space-<name>` |
@@ -301,7 +301,7 @@ lands, no surface carries its own literal values and this drift cannot recur.
   per-file color constants (§7).
 - **Slint styles** (`paranoid-tokens.slint`) consume §1–§5 and retune off the
   drifted values (§7) onto the canonical tokens.
-- **Sphinx theme** (`custom.css`) is the already-canonical color source, extended
+- **Sourcey theme** (`custom.css`) is the already-canonical color source, extended
   to carry space/type tokens.
 - **ia.md** components (panels, primary action, footer, status, drill-down `⋯`) are
   rendered from §4's specs on every surface, so a screen in the TUI, the GUI, and a

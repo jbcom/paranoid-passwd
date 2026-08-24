@@ -7,7 +7,7 @@
 #
 #   - crates/paranoid-cli/src/theme.rs   (ratatui CLI/TUI)
 #   - crates/paranoid-gui/ui/paranoid-tokens.slint  (Slint GUI)
-#   - docs/_static/custom.css            (Sphinx docs/download site)
+#   - docs/_static/custom.css            (Sourcey docs/download site)
 #
 # system.md §7 documents the drift this rule exists to prevent: three
 # surfaces slowly diverging to three different palettes. This script fails
@@ -70,7 +70,7 @@ for file in "${candidate_files[@]}"; do
   fi
 done
 
-# docs/_static/custom.css is the third canonical module (Sphinx docs site);
+# docs/_static/custom.css is the third canonical module (Sourcey docs site);
 # it is intentionally exempt above by not being under crates/. Nothing else
 # in docs/_static may define its own raw hex colors outside the :root
 # custom-property block, since every rule in the file should consume

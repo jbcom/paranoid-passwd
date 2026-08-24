@@ -100,7 +100,7 @@ No exclamation points, no reassurance the product cannot honestly give.
    not hide depth they may want. Lead with intent; keep the technical evidence
    real and reachable one level down (progressive disclosure), never deleted and
    never thrust forward.
-6. **One voice across every surface.** A string in the TUI footer, a Sphinx page
+6. **One voice across every surface.** A string in the TUI footer, a Sourcey page
    heading, and a GUI dialog are the same product speaking. No surface gets a
    lighter or breezier register.
 
@@ -354,7 +354,7 @@ invariants now:
 - **PUX.3 (IA)** builds the drill-down screen graph on §5.5's invariants and
   §4's progressive-disclosure rule.
 - **PUX.4 (tokens)** turns §5's palette, type scale, and icon set into shared
-  tokens consumed by the ratatui theme, the `.slint` styles, and the Sphinx
+  tokens consumed by the ratatui theme, the `.slint` styles, and the Sourcey
   theme, so all three surfaces are visibly one product.
 - **P8 (build)** implements the above rather than re-deciding it. Any P8 string,
   color, or key that contradicts this document is a defect against the brand.

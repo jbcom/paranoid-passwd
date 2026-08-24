@@ -107,8 +107,9 @@ make quality-emulate
   host-visible or builder-visible but need pinned policies or evidence-output handling before they
   become universal blocking `make quality` steps.
 
-Python remains in the repo only where it already owns a specific workflow: Sphinx/tox docs and the
-PTY-driven TUI harness. It is not the project automation layer.
+Python remains in the repo only where it already owns a specific workflow: the PTY-driven TUI
+harness and repository validation scripts. Sourcey documentation is a locked, isolated Node
+toolchain under `docs/`; neither ecosystem owns product logic.
 
 ## Remote Dependency Scan
 
@@ -664,11 +665,12 @@ lower the unsafe-code lint, but handwritten unsafe blocks, functions, and impls 
 The docs site is part of the build:
 
 ```bash
-python3 -m tox -e docs
-python3 -m tox -e docs-linkcheck
+make docs-check
 ```
 
-That validates the docs tree, builds the Sphinx output under `docs/_build/html`, and checks outbound documentation links without coupling CI to the live Pages deployment.
+That validates the Markdown contract, builds the locked Sourcey artifact under `docs/dist/`, and
+checks emitted assets, sitemap, search index, and generated `llms.txt` / `llms-full.txt` without
+coupling PR CI to the live Pages deployment.
 
 ## Release Validation
 

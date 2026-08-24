@@ -87,9 +87,11 @@ make ci
 9. `make test-vault-e2e` (builds the CLI, runs `tests/test_vault_cli.sh`)
 10. `make test-platform-signing-boundary` (`tests/test_platform_signing_verify.sh`)
 11. `make verify-assurance` (hallucination checks, supply-chain checks, AI review inventory, security assurance gate — see below)
-12. `python3 -m tox -e docs,docs-linkcheck` (build the Sphinx docs site and check outbound links)
 
-Run this before opening a PR. It is what CI itself runs.
+Run this before opening a PR. It is the Rust/security CI gate. Run
+`make docs-check` alongside it when a documentation file, documentation asset,
+or Sourcey configuration changes; the dedicated unprivileged PR docs job runs
+that command.
 
 ### Narrower per-crate commands
 

@@ -273,13 +273,14 @@ See [Vault Format](./vault-format.md) for the storage-engine decision and on-dis
 
 ## Public Website
 
-The public website is documentation only. GitHub Pages publishes the repository `docs/` tree, including:
+The public website is documentation only. GitHub Pages publishes the Sourcey artifact from
+`docs/dist/`, including:
 
 - installation instructions
 - TUI walkthrough
 - architecture and testing notes
 - release verification guidance
-- generated Rust API docs via `sphinx-rust`
+- Sourcey search, sitemap, and generated `llms.txt` / `llms-full.txt` context exports
 
 ## Release Path
 

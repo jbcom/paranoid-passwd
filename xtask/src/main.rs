@@ -11,10 +11,7 @@ use serde_json::Value;
 
 const EXCLUDED_PREFIXES: &[&str] = &[
     ".git/",
-    ".tox/",
     "dist/",
-    "docs/_build/",
-    "docs/api/crates/",
     "node_modules/",
     "target/",
     "vendor/",
@@ -738,11 +735,8 @@ fn check_local_security_scanners(repo_root: &Path) -> Result<Vec<Finding>> {
                 "--exclude",
                 "target",
                 "--exclude",
-                ".tox",
                 "--exclude",
-                "docs/_build",
                 "--exclude",
-                "docs/api/crates",
                 "--exclude",
                 "dist",
                 ".",

@@ -192,12 +192,8 @@ if [ -f "$builder" ] \
   && contains_fixed 'cargo fmt --version' "$builder" \
   && contains_fixed 'cargo clippy --version' "$builder" \
   && contains_fixed 'rustc --version | grep -F "1.95.0"' "$builder" \
-  && contains_fixed 'SPHINX_RUSTDOCGEN_VERSION=1.1.0' "$builder" \
-  && contains_fixed 'cargo install --locked --root /usr/local' "$builder" \
-  && contains_fixed 'sphinx-rustdocgen@' "$builder" \
-  && contains_fixed 'tox==' "$builder" \
   && ! contains_regex 'apt-get|DEBIAN_FRONTEND|rust:1\.95\.0-slim-bookworm' "$builder"; then
-  pass "builder image is Wolfi-based, digest-pinned, and contains the expected Rust/OpenSSL/docs/scanner toolchain"
+  pass "builder image is Wolfi-based, digest-pinned, and contains the expected Rust/OpenSSL/scanner toolchain"
 else
   fail "builder image is not Wolfi-pinned or is missing required Rust/OpenSSL/docs/scanner packages"
 fi
@@ -278,8 +274,11 @@ else
   fail "Makefile is missing local quality/release emulation or validation targets"
 fi
 
-if [ -f "$REPO_ROOT/docs/public/install.sh" ] && [ -f "$REPO_ROOT/tox.ini" ]; then
-  pass "docs/download surface and docs build config exist"
+if [ -f "$REPO_ROOT/docs/public/install.sh" ] \
+  && [ -f "$REPO_ROOT/docs/sourcey.config.ts" ] \
+  && [ -f "$REPO_ROOT/docs/package.json" ] \
+  && [ -f "$REPO_ROOT/pnpm-lock.yaml" ]; then
+  pass "Sourcey docs/download surface and locked build configuration exist"
 else
   fail "docs/download surface is incomplete"
 fi
@@ -291,11 +290,12 @@ else
   fail "published release verification is missing"
 fi
 
-if contains_fixed 'docs-linkcheck' "$REPO_ROOT/tox.ini" \
-  && contains_fixed 'docs-linkcheck' "$REPO_ROOT/.github/workflows/ci.yml"; then
-  pass "docs link validation is wired into tox and CI"
+if contains_fixed 'make docs-check' "$REPO_ROOT/.github/workflows/ci.yml" \
+  && contains_fixed 'pnpm install --frozen-lockfile' "$REPO_ROOT/.github/workflows/ci.yml" \
+  && contains_fixed 'validate_sourcey_output.sh' "$REPO_ROOT/docs/package.json"; then
+  pass "Sourcey output validation is wired into locked PR CI"
 else
-  fail "docs link validation is missing from tox or CI"
+  fail "Sourcey output validation is missing from CI"
 fi
 
 if [ -f "$REPO_ROOT/scripts/verify_branch_protection.sh" ] \

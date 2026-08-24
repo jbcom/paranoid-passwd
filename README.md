@@ -130,8 +130,8 @@ cargo run -p paranoid-cli -- vault --cert recipient-cert.pem --key recipient-key
 Docs site:
 
 ```bash
-python3 -m tox -e docs
-open docs/_build/html/index.html
+make docs-check
+open docs/dist/index.html
 ```
 
 ## Build and Test
@@ -176,7 +176,7 @@ To exercise the release packaging path:
 ```bash
 make smoke-release
 make release-emulate
-make verify-published-release TAG=paranoid-passwd-v3.7.0
+make verify-published-release TAG=paranoid-passwd-v3.8.0
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for environment setup, the full verification flow,
@@ -189,7 +189,7 @@ Release archives are published on [GitHub Releases](https://github.com/jbcom/par
 
 - [`https://paranoid-passwd.com/install.sh`](https://paranoid-passwd.com/install.sh)
 - install and verification guides
-- generated Rust API docs via `sphinxcontrib-rust`
+- Sourcey-generated search, sitemap, and `llms.txt` / `llms-full.txt` context exports
 
 The shipped release surface now has two native binaries, each published through direct archives, with Linux also shipping `.deb` packages for both and Windows shipping a GUI `.msi` installer:
 

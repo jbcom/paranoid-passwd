@@ -9,7 +9,7 @@ This repository's authoritative agent instructions live in [`AGENTS.md`](../AGEN
 - `crates/paranoid-core` for generation, audit math, compliance, and OpenSSL-backed RNG/SHA-256
 - `crates/paranoid-cli` for the scriptable CLI and default TUI
 - `crates/paranoid-gui` for the Slint-native GUI surface and target-gated desktop, mobile, and WASM build checks
-- a Sphinx docs/download site instead of an interactive browser app
+- a Sourcey docs/download site instead of an interactive browser app
 
 Security assurance is claim-led. Use `docs/reference/security-assurance.md`,
 `docs/reference/assurance-claims.md`, and `.github/agents/paranoid-security-auditor.md`
