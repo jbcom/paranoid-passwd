@@ -26,7 +26,10 @@ jobs:
         id: release-please
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
-          token: ${{ github.token }}
+          # This installation token is provisioned from Doppler into the
+          # repository secret and is deliberately limited to release-please's
+          # contents/pull-request write lane.
+          token: ${{ secrets.CI_GITHUB_TOKEN }}
 
   deploy-pages:
     name: Deploy Docs to GitHub Pages
