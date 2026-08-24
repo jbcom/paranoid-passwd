@@ -19,8 +19,14 @@ updates:
       time: "06:00"
       timezone: "Etc/UTC"
     groups:
-      sourcey:
+      sourcey-major:
         patterns: ["sourcey"]
+        update-types: ["version-update:semver-major"]
+      sourcey-non-major:
+        patterns: ["sourcey"]
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
     commit-message:
       prefix: "docs"
     labels:
@@ -35,8 +41,14 @@ updates:
       time: "06:00"
       timezone: "Etc/UTC"
     groups:
-      actions:
+      actions-major:
         patterns: ["*"]
+        update-types: ["version-update:semver-major"]
+      actions-non-major:
+        patterns: ["*"]
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
     commit-message:
       prefix: "ci"
     labels:

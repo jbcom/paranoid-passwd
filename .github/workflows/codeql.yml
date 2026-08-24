@@ -40,6 +40,13 @@ concurrency:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+    if: >-
+      !startsWith(github.ref_name, 'release-please--') &&
+      !(startsWith(github.ref_name, 'dependabot/') && contains(github.ref_name, '-non-major')) &&
+      (github.event_name != 'pull_request' ||
+      (!startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      !(startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      contains(github.event.pull_request.head.ref, '-non-major'))))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

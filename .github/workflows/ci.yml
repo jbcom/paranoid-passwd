@@ -41,6 +41,11 @@ jobs:
     # not precede P6.1 landing (it would otherwise add a second full
     # image rebuild) — P6.1 is already merged, so the builder image here is
     # a cheap digest pull, not a rebuild.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (!startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      !(startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      contains(github.event.pull_request.head.ref, '-non-major')))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -58,6 +63,11 @@ jobs:
 
   rust:
     name: Rust Build + Tests
+    if: >-
+      github.event_name != 'pull_request' ||
+      (!startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      !(startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      contains(github.event.pull_request.head.ref, '-non-major')))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -102,7 +112,11 @@ jobs:
     # cd.yml builds and deploys from trusted main. This unprivileged PR gate
     # verifies the locked Sourcey toolchain, rendered output, static assets,
     # and generated context exports without credentials or deployment access.
-    if: github.event_name != 'push'
+    if: >-
+      github.event_name != 'push' &&
+      (!startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      !(startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      contains(github.event.pull_request.head.ref, '-non-major')))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -126,7 +140,11 @@ jobs:
 
   dependency-scan:
     name: Dependency Scan
-    if: github.event_name != 'push'
+    if: >-
+      github.event_name != 'push' &&
+      (!startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      !(startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      contains(github.event.pull_request.head.ref, '-non-major')))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -145,7 +163,11 @@ jobs:
   sonar:
     name: SonarQube Cloud
     # The organization-managed SONAR_TOKEN is unavailable to fork PRs.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      !(startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      contains(github.event.pull_request.head.ref, '-non-major'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -165,7 +187,11 @@ jobs:
 
   codeql:
     name: CodeQL (${{ matrix.language }})
-    if: github.event_name != 'push'
+    if: >-
+      github.event_name != 'push' &&
+      (!startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      !(startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      contains(github.event.pull_request.head.ref, '-non-major')))
     runs-on: ubuntu-24.04
     permissions:
       contents: read

@@ -1,0 +1,32 @@
+name: Automerge Trusted Release Metadata
+
+on:
+  # Dependabot pull requests do not receive ordinary pull_request secrets.
+  # This target workflow never checks out, executes, or interpolates PR code;
+  # it only enables GitHub's native merge queue for tightly identified metadata
+  # PRs using the organization-synchronized CI_GITHUB_TOKEN.
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+jobs:
+  enable-automerge:
+    name: Enable native automerge
+    if: >-
+      (startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      github.event.pull_request.user.login == 'jbdevprimary') ||
+      (startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      contains(github.event.pull_request.head.ref, '-non-major') &&
+      github.event.pull_request.user.login == 'app/dependabot')
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Enable GitHub native automerge without running PR code
+        uses: peter-evans/enable-pull-request-automerge@a660677d5469627102a1c1e11409dd063606628d # v3.0.0
+        with:
+          token: ${{ secrets.CI_GITHUB_TOKEN }}
+          pull-request-number: ${{ github.event.pull_request.number }}
+          merge-method: merge
