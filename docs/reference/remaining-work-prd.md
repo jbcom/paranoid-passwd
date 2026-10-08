@@ -77,7 +77,7 @@ The current release and CI posture is intentionally builder-first:
   Wolfi builder.
 - `make verify-branch-protection` checks that required GitHub checks match the
   active Rust-native CI policy.
-- `make verify-published-release TAG=paranoid-passwd-v3.7.0` verifies the
+- `make verify-published-release TAG=paranoid-passwd-v3.8.0` verifies the
   currently published baseline artifact set and host smoke path.
 
 PR #134 closed the last release-download verification mismatch by adding the

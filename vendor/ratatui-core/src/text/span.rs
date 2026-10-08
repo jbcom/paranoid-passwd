@@ -5,7 +5,7 @@ use core::fmt;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, CellWidth};
 use crate::layout::Rect;
 use crate::style::{Style, Styled};
 use crate::text::{Line, StyledGrapheme};
@@ -429,8 +429,8 @@ impl Widget for &Span<'_> {
         }
         let Rect { mut x, y, .. } = area;
         for (i, grapheme) in self.styled_graphemes(Style::default()).enumerate() {
-            let symbol_width = grapheme.symbol.width();
-            let next_x = x.saturating_add(symbol_width as u16);
+            let symbol_width = grapheme.symbol.cell_width();
+            let next_x = x.saturating_add(symbol_width);
             if next_x > area.right() {
                 break;
             }
@@ -474,7 +474,7 @@ impl Widget for &Span<'_> {
 /// A trait for converting a value to a [`Span`].
 ///
 /// This trait is automatically implemented for any type that implements the [`Display`] trait. As
-/// such, `ToSpan` shouln't be implemented directly: [`Display`] should be implemented instead, and
+/// such, `ToSpan` shouldn't be implemented directly: [`Display`] should be implemented instead, and
 /// you get the `ToSpan` implementation for free.
 ///
 /// [`Display`]: std::fmt::Display

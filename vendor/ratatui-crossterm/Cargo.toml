@@ -11,20 +11,20 @@
 
 [package]
 edition = "2024"
-rust-version = "1.86.0"
+rust-version = "1.88.0"
 name = "ratatui-crossterm"
-version = "0.1.0"
+version = "0.1.2"
 authors = [
     "Florian Dehau <work@fdehau.com>",
     "The Ratatui Developers",
 ]
 build = false
 exclude = [
-    "assets/*",
-    ".github",
-    "Makefile.toml",
-    "CONTRIBUTING.md",
     "*.log",
+    ".github",
+    "CONTRIBUTING.md",
+    "Makefile.toml",
+    "assets/*",
     "tags",
 ]
 autolib = false
@@ -37,9 +37,9 @@ homepage = "https://ratatui.rs"
 documentation = "https://docs.rs/ratatui-crossterm"
 readme = "README.md"
 keywords = [
-    "tui",
-    "terminal",
     "dashboard",
+    "terminal",
+    "tui",
 ]
 categories = ["command-line-interface"]
 license = "MIT"
@@ -53,12 +53,15 @@ rustdoc-args = [
     "docsrs",
 ]
 
+[package.metadata.cargo-udeps.ignore]
+normal = ["crossterm_0_28"]
+
 [features]
 crossterm_0_28 = ["dep:crossterm_0_28"]
 crossterm_0_29 = ["dep:crossterm_0_29"]
 default = [
-    "underline-color",
     "crossterm_0_29",
+    "underline-color",
 ]
 scrolling-regions = ["ratatui-core/scrolling-regions"]
 serde = [
@@ -94,7 +97,7 @@ optional = true
 version = "0.3"
 
 [dependencies.ratatui-core]
-version = "0.1.0"
+version = "0.1.2"
 
 [dev-dependencies.rstest]
 version = "0.26"

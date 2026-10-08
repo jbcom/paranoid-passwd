@@ -9,7 +9,7 @@
 # pinned so the builder cannot drift silently back to a general-purpose distro.
 # =================================================================
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:1af610c4a70668dad46159ee178b20378c79a49b554f76405670fc442d30183a
+FROM cgr.dev/chainguard/wolfi-base@sha256:238642d42c5613936474d00b900c4e65fb6f637d8991c913403ff09a09cf43a3
 
 ARG RUST_APK_PACKAGE=rust-1.95
 ARG RUST_APK_VERSION=1.95.0-r0
@@ -27,6 +27,10 @@ ENV PATH="/usr/local/bin:${PATH}" \
     CARGO_TARGET_DIR=/tmp/cargo-target \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# TODO: AI_REVIEW - Verify coherent Wolfi ABI providers in native CI.
+# New Python packages require glibc 2.44; the base already carries
+# OpenSSL 4 libraries. Select matching runtime and development providers
+# explicitly instead of mixing the generic aliases with those families.
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     for attempt in 1 2 3; do \
         apk add \
@@ -44,6 +48,10 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
             fontconfig-dev \
             gh \
             git \
+            glibc-2.44 \
+            glibc-2.44-dev \
+            "glibc-dev>=2.44" \
+            grep \
             imagemagick-7 \
             libx11 \
             libx11-dev \
@@ -62,8 +70,8 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
             libxss \
             libxss-dev \
             make \
-            openssl \
-            openssl-dev \
+            openssl-4.0 \
+            openssl-4.0-dev \
             osv-scanner="${OSV_SCANNER_APK_VERSION}" \
             perl \
             pkgconf \

@@ -11,20 +11,20 @@
 
 [package]
 edition = "2024"
-rust-version = "1.86.0"
+rust-version = "1.88.0"
 name = "ratatui-widgets"
-version = "0.3.0"
+version = "0.3.2"
 authors = [
     "Florian Dehau <work@fdehau.com>",
     "The Ratatui Developers",
 ]
 build = false
 exclude = [
-    "assets/*",
-    ".github",
-    "Makefile.toml",
-    "CONTRIBUTING.md",
     "*.log",
+    ".github",
+    "CONTRIBUTING.md",
+    "Makefile.toml",
+    "assets/*",
     "tags",
 ]
 autolib = false
@@ -37,9 +37,9 @@ homepage = "https://ratatui.rs"
 documentation = "https://docs.rs/ratatui-widgets"
 readme = "README.md"
 keywords = [
-    "tui",
-    "terminal",
     "dashboard",
+    "terminal",
+    "tui",
 ]
 categories = ["command-line-interface"]
 license = "MIT"
@@ -61,7 +61,10 @@ serde = [
     "dep:serde",
     "ratatui-core/serde",
 ]
-std = ["time/local-offset"]
+std = [
+    "serde?/std",
+    "time?/local-offset",
+]
 unstable = ["unstable-rendered-line-info"]
 unstable-rendered-line-info = []
 
@@ -122,6 +125,10 @@ name = "scrollbar"
 path = "examples/scrollbar.rs"
 
 [[example]]
+name = "shadow"
+path = "examples/shadow.rs"
+
+[[example]]
 name = "sparkline"
 path = "examples/sparkline.rs"
 
@@ -133,15 +140,19 @@ path = "examples/table.rs"
 name = "tabs"
 path = "examples/tabs.rs"
 
+[[test]]
+name = "auto_traits"
+path = "tests/auto_traits.rs"
+
 [dependencies.bitflags]
-version = "2.10"
+version = "2.12"
 
 [dependencies.document-features]
 version = "0.2"
 optional = true
 
 [dependencies.hashbrown]
-version = "0.16"
+version = "0.17"
 
 [dependencies.indoc]
 version = "2"
@@ -158,20 +169,21 @@ default-features = false
 version = "0.3"
 
 [dependencies.ratatui-core]
-version = "0.1.0"
+version = "0.1.2"
 
 [dependencies.serde]
 version = "1"
 features = ["derive"]
 optional = true
+default-features = false
 
 [dependencies.strum]
-version = "0.27"
+version = "0.28"
 features = ["derive"]
 default-features = false
 
 [dependencies.time]
-version = "0.3"
+version = "0.3.47"
 optional = true
 default-features = false
 
@@ -179,7 +191,7 @@ default-features = false
 version = "1"
 
 [dependencies.unicode-width]
-version = ">=0.2.0, <=0.2.2"
+version = ">=0.2.0"
 
 [dev-dependencies.color-eyre]
 version = "0.6"

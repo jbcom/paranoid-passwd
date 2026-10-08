@@ -51,12 +51,9 @@ melange.rsa.pub
 .remember/
 __pycache__/
 
-# .agent-state gitignored cache (re-derivable; directive.md and
-# decisions.ndjson are tracked, the rest is scratch)
-.agent-state/digest.md
-.agent-state/cursor.md
-.agent-state/.indexed-sha
-.agent-state/.last-stop-sha
-.agent-state/.last-stop-fingerprint
-.agent-state/.last-compaction
-.agent-state/batch.json
+# Local agent runtime state and configuration (at any depth)
+.agent-state/
+.mcp.json
+opencode.json
+.augment/
+.agents/

@@ -68,6 +68,32 @@ of its security posture, not an implementation detail. Keep this invariant: do n
 commands that omit `--locked --frozen --offline`, and do not add dependencies without vendoring
 them (`cargo vendor`) and updating `vendor/`.
 
+### Updating older checkouts with tracked agent state
+
+Local agent state and configuration are ignored. This cleanup used
+`git rm --cached` to retain the files in the working checkout where it was
+performed. Updating another checkout can remove its clean tracked baseline
+files, while locally modified files can interrupt the update or cause a
+modify/delete conflict. Back up local state before updating, then restore it
+to the ignored directory:
+
+```bash
+mkdir -p ../paranoid-passwd-agent-state-backup
+cp -R .agent-state/. ../paranoid-passwd-agent-state-backup/
+git restore --source=HEAD --staged --worktree -- .agent-state/
+git pull --ff-only
+mkdir -p .agent-state
+cp -R ../paranoid-passwd-agent-state-backup/. .agent-state/
+```
+
+Run the copy steps only if the old checkout has `.agent-state/`, and the restore
+step only if it is tracked. Restore resets tracked state after the backup; it
+does not change unrelated paths. If the update
+reports a conflict, resolve it using the backup before restoring the files.
+Previously committed baseline contents also remain recoverable from Git
+history. Back up any other locally tracked agent configuration before updating
+as well; the ignore rules do not themselves preserve files removed by a commit.
+
 ## 2. Verification
 
 ```bash

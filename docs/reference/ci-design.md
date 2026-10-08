@@ -342,10 +342,10 @@ This *is* the mitigation the vendored posture exists to provide; adding a
 cache here would manufacture a poisoning surface the vendored posture was
 specifically built to eliminate.
 
-**Moving CodeQL / OpenSSF Scorecard / the fleet-managed JS-TS CodeQL into
+**Moving CodeQL / OpenSSF Scorecard / the managed JS-TS CodeQL into
 the builder, or consolidating them.** Out of scope and structurally
-constrained. The JS-TS CodeQL workflow is fleet-managed
-(`jbdevprimary/gh-fleet-sync`), do-not-edit-in-place, and exists to satisfy
+constrained. The JS-TS CodeQL workflow is managed externally,
+must not be edited in place, and exists to satisfy
 an Enterprise branch-protection rule. Scorecard is deliberately isolated
 because its webapp refuses results if any co-workflow job carries
 `id-token:write` (conflicts with `cd.yml`'s Pages OIDC). `ci.yml` vs
@@ -398,7 +398,7 @@ table; everything else already matched the design.
 | `release.yml` | `{}` | `attest-and-publish`: `contents: write`, `id-token: write`, `attestations: write`; `release-surface-verify`/`release-download-verify`: `id-token: write` | Tier B; `release`/`workflow_dispatch` only |
 | `builder-image.yml` | `{}` | `publish`: `packages: write` | push(main, paths-scoped)/schedule/dispatch only — unreachable from `pull_request` |
 | `security-assurance.yml` | `{}` | none beyond `contents: read` | Tier A |
-| `codeql.yml` | none set (fleet-managed, do-not-edit-in-place — see file header) | `security-events: write`, `actions: read` | out of scope per design's Rejected Options |
+| `codeql.yml` | none set (managed externally, do-not-edit-in-place — see file header) | `security-events: write`, `actions: read` | out of scope per design's Rejected Options |
 | `scorecard.yml` | **was `read-all`, fixed to `{}`** | `security-events: write`, `id-token: write` | isolated on purpose (Scorecard webapp rejects results if a co-workflow job holds `id-token:write`); left untouched otherwise per design |
 
 **Fix applied:** `scorecard.yml`'s top-level `permissions: read-all` was
@@ -470,8 +470,8 @@ docs fresh from the digest-pinned image.
 
 ### Scope confirmations left untouched
 
-Per the design's Rejected Options, `codeql.yml` (fleet-managed, synced from
-`jbdevprimary/gh-fleet-sync`, do-not-edit-in-place) and `scorecard.yml`'s
+Per the design's Rejected Options, `codeql.yml` (managed externally,
+do-not-edit-in-place) and `scorecard.yml`'s
 `id-token` isolation (required by `ossf/scorecard-action`'s own
 workflow-restriction: the Scorecard webapp refuses results if any
 co-workflow job holds `id-token:write`) are intentionally out of scope for

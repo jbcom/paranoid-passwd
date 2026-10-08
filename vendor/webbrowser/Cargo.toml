@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.85"
 name = "webbrowser"
-version = "1.2.1"
+version = "1.2.2"
 authors = ["Amod Malviya @amodm"]
 build = false
 autolib = false
@@ -130,5 +130,26 @@ version = "0.1"
 version = "0.6"
 features = ["native-activity"]
 
-[target.'cfg(target_os = "macos")'.dependencies.core-foundation]
-version = "0.10"
+[target.'cfg(target_os = "macos")'.dependencies.objc2]
+version = "0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
+version = "0.3"
+features = [
+    "std",
+    "NSWorkspace",
+    "NSRunningApplication",
+]
+default-features = false
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-foundation]
+version = "0.3"
+features = [
+    "std",
+    "NSArray",
+    "NSDictionary",
+    "NSError",
+    "NSString",
+    "NSURL",
+]
+default-features = false

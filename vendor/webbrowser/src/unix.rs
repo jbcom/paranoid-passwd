@@ -91,25 +91,19 @@ fn open_browser_default(target: &TargetType, options: &BrowserOptions) -> Result
 
 fn try_with_browser_env(url: &str, options: &BrowserOptions) -> Result<()> {
     // $BROWSER can contain ':' delimited options, each representing a potential browser command line
-    for browser in std::env::var("BROWSER")
+    for browser_env in std::env::var("BROWSER")
         .unwrap_or_else(|_| String::from(""))
         .split(':')
     {
-        if !browser.is_empty() {
-            // each browser command can have %s to represent URL, while %c needs to be replaced
-            // with ':' and %% with '%'
-            let cmdline = browser
-                .replace("%s", url)
-                .replace("%c", ":")
-                .replace("%%", "%");
-            let cmdarr: Vec<&str> = cmdline.split_ascii_whitespace().collect();
-            let browser_cmd = cmdarr[0];
+        if !browser_env.is_empty() {
+            let cmdarr = browser_env_cmd_arr(browser_env, url);
+            let browser_cmd = &cmdarr[0];
             let env_exit = for_matching_path(browser_cmd, |pb| {
                 let mut cmd = Command::new(pb);
                 for arg in cmdarr.iter().skip(1) {
                     cmd.arg(arg);
                 }
-                if !browser.contains("%s") {
+                if !browser_env.contains("%s") {
                     // append the url as an argument only if it was not already set via %s
                     cmd.arg(url);
                 }
@@ -124,6 +118,36 @@ fn try_with_browser_env(url: &str, options: &BrowserOptions) -> Result<()> {
         ErrorKind::NotFound,
         "No valid browser configured in BROWSER environment variable",
     ))
+}
+
+/// Given a part in BROWSER env variable, return a Vec of parsed strings, such
+/// that:
+/// - `%s` is replaced with the provided `url`.
+/// - `%c` is replaced with `:`.
+/// - `%%` is replaced with `%`.
+fn browser_env_cmd_arr(browser_env: &str, url: &str) -> Vec<String> {
+    let mut url_set = false;
+    let mut arr: Vec<String> = browser_env
+        .split_ascii_whitespace()
+        .map(|opt| {
+            let mut val = opt.to_string();
+            if opt.contains("%s") {
+                url_set = true;
+                val = opt.replace("%s", url);
+            }
+            if opt.contains("%c") {
+                val = opt.replace("%c", ":");
+            }
+            if opt.contains("%%") {
+                val = opt.replace("%%", "%");
+            }
+            val
+        })
+        .collect();
+    if !url_set {
+        arr.push(url.to_string());
+    }
+    arr
 }
 
 /// Check if we are inside WSL on Windows, and interoperability with Windows tools is
@@ -280,7 +304,7 @@ fn try_xdg(options: &BrowserOptions, url: &str) -> Result<()> {
     if browser_name.is_empty() {
         return Err(Error::new(ErrorKind::NotFound, "no default xdg browser"));
     }
-    trace!("found xdg browser: {:?}", &browser_name);
+    trace!("found xdg browser: {browser_name:?}");
 
     // search for the config file corresponding to this browser name
     let mut config_found = false;
@@ -492,17 +516,16 @@ mod tests_xdg {
                 if [ "$1" != "p1" ]; then
                     echo "1st parameter should've been p1" >&2
                     exit 1
-                elif [ "$2" != "{}" ]; then
-                    echo "2nd parameter should've been {}" >&2
+                elif [ "$2" != "{txt_path}" ]; then
+                    echo "2nd parameter should've been {txt_path}" >&2
                     exit 1
                 elif [ "$3" != "p3" ]; then
                     echo "3rd parameter should've been p3" >&2
                     exit 1
                 fi
 
-                echo "$2" > "{}"
-            "#,
-                &txt_path, &txt_path, &flag_path
+                echo "$2" > "{flag_path}"
+            "#
             ));
             let mut perms = browser_file
                 .metadata()
@@ -520,12 +543,11 @@ mod tests_xdg {
             let _ = xdg_file.write_fmt(format_args!(
                 r#"# this line should be ignored
 [Desktop Entry]
-Exec={} p1 %u p3
+Exec={browser_path} p1 %u p3
 [Another Entry]
 Exec=/bin/ls
 # the above Exec line should be getting ignored
-            "#,
-                &browser_path
+            "#
             ));
         }
 
@@ -645,7 +667,7 @@ mod wsl {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        log::debug!("running command: ${:?}", &cmd);
+        log::debug!("running command: ${cmd:?}");
         let mut child = cmd.spawn()?;
 
         let mut stdin = child.stdin.take().ok_or_else(err_fn)?;
@@ -674,7 +696,7 @@ mod wsl {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        log::debug!("running command: ${:?}", &cmd);
+        log::debug!("running command: ${cmd:?}");
         let output_u8 = cmd.output()?;
 
         let output = String::from_utf8_lossy(&output_u8.stdout);
@@ -754,8 +776,7 @@ mod wsl {
             // windows needs to access it via network
             let wsl_hostname = get_wsl_distro_name(wc)?;
             Ok(format!(
-                "\\\\wsl$\\{}{}",
-                &wsl_hostname,
+                "\\\\wsl$\\{wsl_hostname}{}",
                 path.as_os_str().to_string_lossy()
             )
             .replace('/', "\\"))
@@ -782,7 +803,7 @@ mod wsl {
                 .current_dir("/")
                 .stdin(Stdio::null())
                 .stderr(Stdio::null());
-            log::debug!("running command: ${:?}", &cmd);
+            log::debug!("running command: ${cmd:?}");
             let output_u8 = cmd.output()?.stdout;
             let output = String::from_utf8_lossy(&output_u8);
             let output = output.trim_end_matches('\\');
@@ -859,4 +880,40 @@ Write-Output $([Win32Api]::GetDefaultBrowser())
             assert!(open("/mnt/c/T/abc.html").is_ok());
         }
     }*/
+}
+
+#[cfg(test)]
+mod tests_browser_env {
+    use super::*;
+
+    #[test]
+    fn test_basic_substitution() {
+        let url = "https://github.com/amodm/webbrowser-rs";
+        let cmdarr = browser_env_cmd_arr("firefox --url=%s", url);
+        assert_eq!(cmdarr.len(), 2);
+        assert_eq!(cmdarr[0], "firefox");
+        assert_eq!(cmdarr[1], format!("--url={url}"));
+    }
+
+    #[test]
+    fn test_all_substitution() {
+        let url = "https://github.com/amodm/webbrowser-rs";
+        let cmdarr = browser_env_cmd_arr("firefox --url=%s --some=%% --other=%c", url);
+        assert_eq!(cmdarr.len(), 4);
+        assert_eq!(cmdarr[0], "firefox");
+        assert_eq!(cmdarr[1], format!("--url={url}"));
+        assert_eq!(cmdarr[2], "--some=%");
+        assert_eq!(cmdarr[3], "--other=:");
+    }
+
+    #[test]
+    fn test_no_substitution() {
+        let url = "https://github.com/amodm/webbrowser-rs";
+        let cmdarr = browser_env_cmd_arr("firefox --option1 --option2", url);
+        assert_eq!(cmdarr.len(), 4);
+        assert_eq!(cmdarr[0], "firefox");
+        assert_eq!(cmdarr[1], "--option1");
+        assert_eq!(cmdarr[2], "--option2");
+        assert_eq!(cmdarr[3], url);
+    }
 }
