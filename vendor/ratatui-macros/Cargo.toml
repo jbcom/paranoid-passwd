@@ -12,7 +12,7 @@
 [package]
 edition = "2024"
 name = "ratatui-macros"
-version = "0.7.0"
+version = "0.7.2"
 authors = ["The Ratatui Developers"]
 build = false
 autolib = false
@@ -24,8 +24,8 @@ description = "Macros for Ratatui"
 documentation = "https://docs.rs/ratatui-macros"
 readme = "README.md"
 keywords = [
-    "ratatui",
     "macros",
+    "ratatui",
     "tui",
     "ui",
 ]
@@ -43,10 +43,11 @@ name = "macros"
 path = "tests/macros.rs"
 
 [dependencies.ratatui-core]
-version = "0.1.0"
+version = "0.1.2"
 
 [dependencies.ratatui-widgets]
-version = "0.3.0"
+version = "0.3.2"
+default-features = false
 
 [dev-dependencies.trybuild]
 version = "1"

@@ -35,7 +35,7 @@ paranoid-core = { path = "crates/paranoid-core" }
 paranoid-ops = { path = "crates/paranoid-ops" }
 paranoid-seal = { path = "crates/paranoid-seal" }
 paranoid-vault = { path = "crates/paranoid-vault" }
-ratatui = "0.30.0"
+ratatui = "0.30.2"
 regex = "1.12.3"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
