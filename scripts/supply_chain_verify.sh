@@ -174,7 +174,10 @@ if [ -f "$builder" ] \
   && contains_fixed 'test -d /tmp/cargo/advisory-db/crates' "$builder" \
   && contains_fixed 'fontconfig-dev' "$builder" \
   && contains_fixed 'gh' "$builder" \
-  && contains_fixed 'openssl-dev' "$builder" \
+  && contains_regex '^[[:space:]]+glibc-2\.44[[:space:]]+\\$' "$builder" \
+  && contains_regex '^[[:space:]]+glibc-2\.44-dev[[:space:]]+\\$' "$builder" \
+  && contains_regex '^[[:space:]]+openssl-4\.0[[:space:]]+\\$' "$builder" \
+  && contains_regex '^[[:space:]]+openssl-4\.0-dev[[:space:]]+\\$' "$builder" \
   && contains_fixed 'dbus-dev' "$builder" \
   && contains_fixed 'libxcursor-dev' "$builder" \
   && contains_fixed 'libxi-dev' "$builder" \
