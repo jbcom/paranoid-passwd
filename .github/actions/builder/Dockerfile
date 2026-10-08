@@ -9,7 +9,7 @@
 # pinned so the builder cannot drift silently back to a general-purpose distro.
 # =================================================================
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:1af610c4a70668dad46159ee178b20378c79a49b554f76405670fc442d30183a
+FROM cgr.dev/chainguard/wolfi-base@sha256:238642d42c5613936474d00b900c4e65fb6f637d8991c913403ff09a09cf43a3
 
 ARG RUST_APK_PACKAGE=rust-1.95
 ARG RUST_APK_VERSION=1.95.0-r0
@@ -50,6 +50,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
             git \
             glibc-2.44 \
             glibc-2.44-dev \
+            "glibc-dev>=2.44" \
             imagemagick-7 \
             libx11 \
             libx11-dev \
