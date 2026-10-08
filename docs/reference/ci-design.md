@@ -342,10 +342,10 @@ This *is* the mitigation the vendored posture exists to provide; adding a
 cache here would manufacture a poisoning surface the vendored posture was
 specifically built to eliminate.
 
-**Moving CodeQL / OpenSSF Scorecard / the fleet-managed JS-TS CodeQL into
+**Moving CodeQL / OpenSSF Scorecard / the managed JS-TS CodeQL into
 the builder, or consolidating them.** Out of scope and structurally
-constrained. The JS-TS CodeQL workflow is fleet-managed
-(`jbdevprimary/gh-fleet-sync`), do-not-edit-in-place, and exists to satisfy
+constrained. The JS-TS CodeQL workflow is managed externally,
+must not be edited in place, and exists to satisfy
 an Enterprise branch-protection rule. Scorecard is deliberately isolated
 because its webapp refuses results if any co-workflow job carries
 `id-token:write` (conflicts with `cd.yml`'s Pages OIDC). `ci.yml` vs
