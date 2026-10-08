@@ -19,7 +19,8 @@ Primary references:
 - [FedRAMP Rev5 documents and templates](https://www.fedramp.gov/rev5/documents-templates/)
 - [FedRAMP Rev5 agency authorization resources](https://www.fedramp.gov/rev5/agency-authorization/)
 - [FedRAMP SSP template](https://www.fedramp.gov/resources/templates/FedRAMP-High-Moderate-Low-LI-SaaS-Baseline-System-Security-Plan-%28SSP%29.docx)
-- [GSA Cloud Security overview for DoD CC SRG and FedRAMP+](https://cic.gsa.gov/basics/cloud-security/)
+- [DoD Cloud Computing Security requirements and authorization resources](https://www.cyber.mil/dccs/)
+- [GSA FedRAMP program overview](https://www.gsa.gov/technology/government-it-initiatives/fedramp)
 - [NIST CMVP certificate 4985 for the OpenSSL FIPS Provider](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4985)
 
 ## Claim Boundary

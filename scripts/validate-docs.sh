@@ -102,7 +102,13 @@ workspace_version="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^\s*version\s*=\s
 # purpose (e.g. "v3.7.0 did not include an MSI") and must not be flagged just
 # because the workspace version has since moved on. Exclude those lines before
 # checking for stale pins.
-stale_pins="$(grep -rnIE --exclude-dir=_build --exclude-dir=api "paranoid-passwd-v[0-9]+\.[0-9]+\.[0-9]+" "$REPO_ROOT/docs" | grep -v -F "docs-version-history" | grep -vE "paranoid-passwd-v${workspace_version}([^0-9.]|\$)" || true)"
+pin_scan_status=0
+pin_matches="$(grep -rnIE --exclude-dir=_build --exclude-dir=api "paranoid-passwd-v[0-9]+\.[0-9]+\.[0-9]+" "$REPO_ROOT/docs")" || pin_scan_status=$?
+if [ "$pin_scan_status" -gt 1 ]; then
+  echo "docs version-pin scan failed (grep exit $pin_scan_status)" >&2
+  exit "$pin_scan_status"
+fi
+stale_pins="$(printf '%s\n' "$pin_matches" | grep -v -F "docs-version-history" | grep -vE "paranoid-passwd-v${workspace_version}([^0-9.]|\$)" || true)"
 if [ -n "$stale_pins" ]; then
   echo "docs/ contains version pins that do not match workspace version $workspace_version:" >&2
   echo "$stale_pins" >&2

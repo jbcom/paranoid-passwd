@@ -51,6 +51,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
             glibc-2.44 \
             glibc-2.44-dev \
             "glibc-dev>=2.44" \
+            grep \
             imagemagick-7 \
             libx11 \
             libx11-dev \
