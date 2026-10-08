@@ -386,10 +386,32 @@ test_gui_visual_regression.sh` now captures one screenshot per named GUI
 screen (trust-gate, verified, vault-list, add-item, item-detail, generate,
 ways-in, locked), for both a real vault pass and a decoy vault pass, into
 `tests/baseline/gui/` — the new committed baseline, superseding the
-single end-of-run frame this doc's finding 10/G0 was working around. See
-`.agent-state/directive.md`'s P8.5 entry for the full acceptance-criteria
-breakdown, including a real pre-P8.5 defect it caught and fixed (S14/S15's
+single end-of-run frame this doc's finding 10/G0 was working around. The
+acceptance criteria below preserve the public verification record,
+including a real pre-P8.5 defect it caught and fixed (S14/S15's
 missing `⊘` state token in the TUI) and a real spec/implementation gap it
 surfaced but did not silently resolve (ia.md §5's S7 distinct detail-pane
 footer has no counterpart in the single-screen `Screen::Vault` architecture
 P8.2 actually built).
+
+The re-baseline acceptance criteria are:
+
+- Capture all eight named GUI screens for both real and decoy vaults. Crop
+  and compare each real/decoy action-bar pair, failing on any pixel difference.
+- Replay the TUI's incremental VT100 output with `TerminalGrid` in
+  `tests/test_tui_e2e.py`. Assert that `⊘` survives ANSI stripping on both
+  the just-locked and ordinary unlock screens. The missing unlock-state token
+  was fixed in `panel_rendering.rs` and covered by unit, PTY, and incremental
+  `CrosstermBackend` regression tests.
+- Assert the exact Vault list and Ways in footer strings from `ia.md` §5
+  against the rendered PTY grid, including the panic-lock flow.
+- Reject raw color tokens outside the canonical token modules through
+  `scripts/check_token_drift.sh`, which is part of `make verify-assurance`.
+
+The item-detail footer remains an unresolved architecture follow-up:
+`ia.md` §5 specifies independently focusable list/detail panes and a distinct
+detail footer (`⏎ copy   r reveal   e edit   ? all keys   ⎋ back`), while
+`Screen::Vault` implements both panes with one shared keymap. Either introduce
+explicit pane focus and matching footers, or revise the specification to
+describe that unified screen. The chosen design must receive a matching PTY
+e2e assertion; the re-baseline did not claim this gap was closed.
