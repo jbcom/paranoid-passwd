@@ -80,12 +80,15 @@ to the ignored directory:
 ```bash
 mkdir -p ../paranoid-passwd-agent-state-backup
 cp -R .agent-state/. ../paranoid-passwd-agent-state-backup/
+git restore --source=HEAD --staged --worktree -- .agent-state/
 git pull --ff-only
 mkdir -p .agent-state
 cp -R ../paranoid-passwd-agent-state-backup/. .agent-state/
 ```
 
-Run the copy steps only if the old checkout has `.agent-state/`. If the update
+Run the copy steps only if the old checkout has `.agent-state/`, and the restore
+step only if it is tracked. Restore resets tracked state after the backup; it
+does not change unrelated paths. If the update
 reports a conflict, resolve it using the backup before restoring the files.
 Previously committed baseline contents also remain recoverable from Git
 history. Back up any other locally tracked agent configuration before updating

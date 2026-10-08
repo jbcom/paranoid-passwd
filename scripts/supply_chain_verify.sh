@@ -176,7 +176,7 @@ if [ -f "$builder" ] \
   && contains_fixed 'gh' "$builder" \
   && contains_regex '^[[:space:]]+glibc-2\.44[[:space:]]+\\$' "$builder" \
   && contains_regex '^[[:space:]]+glibc-2\.44-dev[[:space:]]+\\$' "$builder" \
-  && contains_fixed '"glibc-dev>=2.44"' "$builder" \
+  && contains_regex '^[[:space:]]+"glibc-dev>=2\.44"[[:space:]]+\\$' "$builder" \
   && contains_regex '^[[:space:]]+grep[[:space:]]+\\$' "$builder" \
   && contains_regex '^[[:space:]]+openssl-4\.0[[:space:]]+\\$' "$builder" \
   && contains_regex '^[[:space:]]+openssl-4\.0-dev[[:space:]]+\\$' "$builder" \
