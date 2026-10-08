@@ -291,7 +291,7 @@ home; all fan-out returns here.
 ├─────────────────────────────────────────────────────────────────────┤
 │ Copied. It clears from the clipboard in 30 seconds.      (status)   │
 ├─────────────────────────────────────────────────────────────────────┤
-│ ⏎ copy   r reveal   e edit   ? all keys   ⎋ back                    │  ← detail-pane footer
+│ ⏎ copy  r reveal  e edit  ? all keys  ⎋ back                        │  ← detail-pane footer
 └─────────────────────────────────────────────────────────────────────┘
 ```
 

@@ -380,21 +380,16 @@ every string surfaced in every screenshot above) implement.
 
 ## P8.5 addendum — re-baseline against the redesigned output
 
-The GUI harness gap this doc originally flagged ("the GUI e2e harness only
-ever captures one end-of-run screenshot") is fixed: `tests/
-test_gui_visual_regression.sh` now captures one screenshot per named GUI
-screen (trust-gate, verified, vault-list, add-item, item-detail, generate,
-ways-in, locked), for both a real vault pass and a decoy vault pass, into
-`tests/baseline/gui/` — the new committed baseline, superseding the
-single end-of-run frame this doc's finding 10/G0 was working around. The
-acceptance criteria below preserve the public verification record,
-including a real pre-P8.5 defect it caught and fixed (S14/S15's
-missing `⊘` state token in the TUI) and a real spec/implementation gap it
-surfaced but did not silently resolve (ia.md §5's S7 distinct detail-pane
-footer has no counterpart in the single-screen `Screen::Vault` architecture
-P8.2 actually built).
+The GUI capture sequence now covers named screens (trust-gate, verified,
+vault-list, add-item, item-detail, generate, ways-in, locked) for real and
+decoy vaults, with baselines under `tests/baseline/gui/`. This replaces the
+single end-of-run frame used by finding 10/G0. However, the current harness
+only requires a nonempty baseline directory, skips missing decoy pairs, and
+skips crop comparison when `convert` is unavailable. Old baselines are not
+cleared automatically. A passing harness run therefore does not prove that
+all 16 screenshots were freshly captured or all eight pairs compared.
 
-The re-baseline acceptance criteria are:
+The intended re-baseline acceptance criteria are:
 
 - Capture all eight named GUI screens for both real and decoy vaults. Crop
   and compare each real/decoy action-bar pair, failing on any pixel difference.
@@ -408,10 +403,13 @@ The re-baseline acceptance criteria are:
 - Reject raw color tokens outside the canonical token modules through
   `scripts/check_token_drift.sh`, which is part of `make verify-assurance`.
 
-The item-detail footer remains an unresolved architecture follow-up:
-`ia.md` §5 specifies independently focusable list/detail panes and a distinct
-detail footer (`⏎ copy   r reveal   e edit   ? all keys   ⎋ back`), while
-`Screen::Vault` implements both panes with one shared keymap. Either introduce
-explicit pane focus and matching footers, or revise the specification to
-describe that unified screen. The chosen design must receive a matching PTY
-e2e assertion; the re-baseline did not claim this gap was closed.
+The earlier re-baseline recorded an item-detail footer gap. The current TUI
+has a separate `Screen::ItemDetail`, opened with Enter from `Screen::Vault`,
+and its own footer: `⏎ copy  r reveal  e edit  ? all keys  ⎋ back` (two spaces
+between actions, matching `footer.rs` and `ia.md` §5). The remaining design
+question concerns independently focusable list/detail panes, rather than a
+missing detail footer. Either introduce explicit pane focus, or revise the
+specification to describe the separate-screen model. The chosen design must
+receive a matching PTY e2e assertion; the earlier re-baseline did not claim
+that architecture question was resolved. Complete fresh GUI capture and
+comparison enforcement also remain outside this historical evidence record.
